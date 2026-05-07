@@ -1,0 +1,379 @@
+import json
+import os
+import urllib.parse
+import urllib.request
+from datetime import datetime
+from urllib.error import HTTPError, URLError
+
+import requests
+from django.contrib.auth.decorators import login_required
+from django.db.models import Q
+from django.http import (
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseForbidden,
+    HttpResponseRedirect,
+    HttpResponseServerError,
+    JsonResponse,
+)
+
+from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem
+from .sync_helpers import (
+    sync_products_for_installation,
+    sync_shenzhen_orders_for_installation,
+    update_shenzhen_tracking_for_installation,
+)
+
+
+def _shopify_configured():
+    return bool(
+        os.getenv("SHOPIFY_CLIENT_ID")
+        and os.getenv("SHOPIFY_CLIENT_SECRET")
+        and os.getenv("SHOPIFY_SCOPES")
+        and os.getenv("SHOPIFY_REDIRECT_URI")
+    )
+
+
+@login_required
+def install(request):
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Only superusers can install Shopify apps.")
+
+    shop = request.GET.get("shop")
+    if not shop:
+        return HttpResponseBadRequest("Missing shop parameter.")
+
+    client_id = os.getenv("SHOPIFY_CLIENT_ID", "")
+    scopes = os.getenv("SHOPIFY_SCOPES", "")
+    redirect_uri = os.getenv("SHOPIFY_REDIRECT_URI", "")
+    if not (client_id and scopes and redirect_uri):
+        return HttpResponseServerError("Shopify OAuth is not configured.")
+
+    params = {
+        "client_id": client_id,
+        "scope": scopes,
+        "redirect_uri": redirect_uri,
+        "state": "shopify_sync_install",
+    }
+    install_url = f"https://{shop}/admin/oauth/authorize?{urllib.parse.urlencode(params)}"
+    return HttpResponseRedirect(install_url)
+
+
+def callback(request):
+    shop = request.GET.get("shop")
+    code = request.GET.get("code")
+    if not shop or not code:
+        return HttpResponseBadRequest("Missing shop or code.")
+
+    if not _shopify_configured():
+        return HttpResponseServerError("Shopify OAuth is not configured.")
+
+    token_url = f"https://{shop}/admin/oauth/access_token"
+    payload = urllib.parse.urlencode(
+        {
+            "client_id": os.getenv("SHOPIFY_CLIENT_ID", ""),
+            "client_secret": os.getenv("SHOPIFY_CLIENT_SECRET", ""),
+            "code": code,
+        }
+    ).encode("utf-8")
+
+    request_obj = urllib.request.Request(
+        token_url,
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+    try:
+        response = urllib.request.urlopen(request_obj, timeout=10)
+        output = response.read().decode("utf-8")
+        token_data = json.loads(output)
+    except (HTTPError, URLError, ValueError) as exc:
+        return HttpResponseServerError(f"Shopify token exchange failed: {exc}")
+
+    access_token = token_data.get("access_token")
+    scope = token_data.get("scope", "")
+    if not access_token:
+        return HttpResponseServerError("Failed to obtain Shopify access token.")
+
+    # Debug: Print token info
+    token_preview = f"{access_token[:5]}...{access_token[-5:]}"
+    print(f"[CALLBACK] OAuth callback received for shop: {shop}")
+    print(f"[CALLBACK] New access_token (preview): {token_preview}")
+
+    # Update or create
+    obj, created = ShopifyInstallation.objects.update_or_create(
+        shop=shop,
+        defaults={
+            "access_token": access_token,
+            "scope": scope,
+        },
+    )
+    print(f"[CALLBACK] Database update result - Created: {created}, Shop: {obj.shop}")
+    
+    # Verify saved data
+    verification = ShopifyInstallation.objects.get(shop=shop)
+    saved_token_preview = f"{verification.access_token[:5]}...{verification.access_token[-5:]}"
+    print(f"[CALLBACK] Verification - Saved token (preview): {saved_token_preview}")
+    print(f"[CALLBACK] Token match after save: {verification.access_token == access_token}")
+
+    return HttpResponse(f"Shopify installation completed for {shop}.")
+
+
+@login_required
+def test_orders(request):
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Only superusers can access this page.")
+
+    shop_domain = "kidstoylover.myshopify.com"
+    try:
+        installation = ShopifyInstallation.objects.get(shop=shop_domain)
+    except ShopifyInstallation.DoesNotExist:
+        return HttpResponseServerError(
+            f"Shopify installation not found for {shop_domain}"
+        )
+
+    access_token = installation.access_token
+    api_url = f"https://{shop_domain}/admin/api/2024-01/orders.json?limit=5&status=any"
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.get(api_url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException as exc:
+        return HttpResponseServerError(
+            f"API request failed: {exc.__class__.__name__}"
+        )
+
+    orders = data.get("orders", [])
+    html_content = "<html><head><meta charset='utf-8'><title>Shopify Orders Test</title></head><body>"
+    html_content += f"<h1>Shopify Orders (Last 5) - {shop_domain}</h1>"
+    html_content += f"<p>Total orders returned: {len(orders)}</p>"
+    html_content += "<table border='1' cellpadding='5' cellspacing='0'>"
+    html_content += "<tr><th>Order ID</th><th>Order Name</th><th>Created At</th><th>Financial Status</th><th>Fulfillment Status</th><th>Total Price</th><th>Currency</th></tr>"
+
+    for order in orders:
+        order_id = order.get("id", "N/A")
+        order_name = order.get("name", "N/A")
+        created_at = order.get("created_at", "N/A")
+        financial_status = order.get("financial_status", "N/A")
+        fulfillment_status = order.get("fulfillment_status", "N/A")
+        total_price = order.get("total_price", "N/A")
+        currency = order.get("currency", "N/A")
+
+        html_content += f"<tr><td>{order_id}</td><td>{order_name}</td><td>{created_at}</td><td>{financial_status}</td><td>{fulfillment_status}</td><td>{total_price}</td><td>{currency}</td></tr>"
+
+    html_content += "</table>"
+    html_content += "</body></html>"
+
+    return HttpResponse(html_content, content_type="text/html; charset=utf-8")
+
+
+@login_required
+def sync_orders(request):
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Only superusers can sync orders.")
+
+    shop_domain = "kidstoylover.myshopify.com"
+    try:
+        installation = ShopifyInstallation.objects.get(shop=shop_domain)
+    except ShopifyInstallation.DoesNotExist:
+        return JsonResponse(
+            {"error": f"Shopify installation not found for {shop_domain}"},
+            status=400,
+        )
+
+    access_token = installation.access_token
+    api_url = f"https://{shop_domain}/admin/api/2024-01/orders.json?limit=250&status=any"
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.get(api_url, headers=headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.RequestException as exc:
+        return JsonResponse(
+            {"error": f"API request failed: {exc.__class__.__name__}"}, status=500
+        )
+
+    orders = data.get("orders", [])
+    created_count = 0
+    updated_count = 0
+
+    for order in orders:
+        shopify_order_id = order.get("id")
+        if not shopify_order_id:
+            continue
+
+        order_name = order.get("name", "")
+        created_at = order.get("created_at", "")
+        financial_status = order.get("financial_status", "")
+        fulfillment_status = order.get("fulfillment_status", "")
+        total_price = order.get("total_price", 0)
+        currency = order.get("currency", "USD")
+
+        if created_at:
+            created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+
+        obj, created = ShopifyOrder.objects.update_or_create(
+            installation=installation,
+            shopify_order_id=shopify_order_id,
+            defaults={
+                "order_name": order_name,
+                "created_at": created_at,
+                "financial_status": financial_status,
+                "fulfillment_status": fulfillment_status,
+                "total_price": total_price,
+                "currency": currency,
+            },
+        )
+
+        if created:
+            created_count += 1
+        else:
+            updated_count += 1
+
+    return JsonResponse(
+        {
+            "success": True,
+            "created": created_count,
+            "updated": updated_count,
+            "total": len(orders),
+        }
+    )
+
+
+@login_required
+def orders_search(request):
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Only superusers can search orders.")
+
+    search_query = request.GET.get("q", "").strip()
+    shop_domain = "kidstoylover.myshopify.com"
+
+    try:
+        installation = ShopifyInstallation.objects.get(shop=shop_domain)
+    except ShopifyInstallation.DoesNotExist:
+        html_content = "<html><head><meta charset='utf-8'><title>Order Search</title></head><body>"
+        html_content += f"<p>Shopify installation not found for {shop_domain}</p>"
+        html_content += "</body></html>"
+        return HttpResponse(html_content, content_type="text/html; charset=utf-8")
+
+    if search_query:
+        orders = ShopifyOrder.objects.filter(
+            installation=installation
+        ).filter(
+            Q(order_name__icontains=search_query)
+            | Q(shopify_order_id__icontains=search_query)
+        )
+    else:
+        orders = ShopifyOrder.objects.filter(installation=installation)[:50]
+
+    html_content = "<html><head><meta charset='utf-8'><title>Order Search</title><style>body { font-family: Arial; } form { margin-bottom: 20px; } table { border-collapse: collapse; } th, td { border: 1px solid #ccc; padding: 8px; text-align: left; } th { background-color: #f2f2f2; }</style></head><body>"
+    html_content += "<h1>Order Search</h1>"
+    html_content += '<form method="get"><input type="text" name="q" value="%s" placeholder="Search by order name or ID"><button type="submit">Search</button></form>' % (
+        search_query or ""
+    )
+    html_content += f"<p><a href='/auth/shopify/sync-orders'>Sync Orders from Shopify</a></p>"
+    html_content += f"<p>Total orders: {orders.count()}</p>"
+    html_content += "<table>"
+    html_content += "<tr><th>Order Name</th><th>Order ID</th><th>Total Price</th><th>Financial Status</th><th>Fulfillment Status</th><th>Created At</th></tr>"
+
+    for order in orders:
+        html_content += f"<tr><td>{order.order_name}</td><td>{order.shopify_order_id}</td><td>{order.total_price} {order.currency}</td><td>{order.financial_status}</td><td>{order.fulfillment_status or 'N/A'}</td><td>{order.created_at.strftime('%Y-%m-%d %H:%M:%S')}</td></tr>"
+
+    html_content += "</table>"
+    html_content += "</body></html>"
+
+    return HttpResponse(html_content, content_type="text/html; charset=utf-8")
+
+
+def _user_has_shopify_sync_access(request):
+    if not request.user.is_authenticated:
+        return False
+    if request.user.is_superuser:
+        return True
+    allowed_groups = {"Finance", "Admin", "Shenzhen Warehouse"}
+    return bool(set(request.user.groups.values_list("name", flat=True)) & allowed_groups)
+
+
+@login_required
+def sync_products(request):
+    if not _user_has_shopify_sync_access(request):
+        return HttpResponseForbidden("Only authorized Shopify sync users can sync products.")
+
+    shop_domain = "kidstoylover.myshopify.com"
+    try:
+        installation = ShopifyInstallation.objects.get(shop=shop_domain)
+    except ShopifyInstallation.DoesNotExist:
+        return JsonResponse(
+            {"error": f"Shopify installation not found for {shop_domain}"},
+            status=400,
+        )
+
+    result = sync_products_for_installation(installation)
+    return JsonResponse(result)
+
+
+@login_required
+def sync_shenzhen_orders(request):
+    if not _user_has_shopify_sync_access(request):
+        return HttpResponseForbidden("Only authorized Shopify sync users can sync Shenzhen orders.")
+
+    shop_domain = "kidstoylover.myshopify.com"
+    try:
+        installation = ShopifyInstallation.objects.get(shop=shop_domain)
+    except ShopifyInstallation.DoesNotExist:
+        return JsonResponse(
+            {"error": f"Shopify installation not found for {shop_domain}"},
+            status=400,
+        )
+
+    result = sync_shenzhen_orders_for_installation(installation)
+    return JsonResponse(result)
+
+
+@login_required
+def update_shenzhen_tracking(request):
+    if not _user_has_shopify_sync_access(request):
+        return HttpResponseForbidden("Only authorized Shopify sync users can update Shenzhen tracking.")
+
+    shop_domain = "kidstoylover.myshopify.com"
+    try:
+        installation = ShopifyInstallation.objects.get(shop=shop_domain)
+    except ShopifyInstallation.DoesNotExist:
+        return JsonResponse(
+            {"error": f"Shopify installation not found for {shop_domain}"},
+            status=400,
+        )
+
+    result = update_shenzhen_tracking_for_installation(installation)
+    return JsonResponse(result)
+
+
+@login_required
+def sync_dashboard(request):
+    if not _user_has_shopify_sync_access(request):
+        return HttpResponseForbidden("Only authorized Shopify sync users can view the Shopify sync dashboard.")
+
+    return HttpResponse(
+        "<html><head><meta charset='utf-8'><title>Shopify Sync Dashboard</title></head>"
+        "<body style='font-family: Arial, sans-serif; padding: 24px;'>"
+        "<h1>Shopify 同步仪表盘</h1>"
+        "<p>以下按钮将直接调用 Shopify 同步接口，并显示 JSON 结果。</p>"
+        "<div style='display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px;'>"
+        "<a style='display:inline-block;padding:10px 16px;background:#0b5ed7;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/sync-products/'>同步 Shopify 产品</a>"
+        "<a style='display:inline-block;padding:10px 16px;background:#198754;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/sync-shenzhen-orders/'>同步深圳仓订单</a>"
+        "<a style='display:inline-block;padding:10px 16px;background:#fd7e14;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/update-shenzhen-tracking/'>更新深圳仓物流</a>"
+        "</div>"
+        "</body></html>",
+        content_type="text/html; charset=utf-8",
+    )
+
+

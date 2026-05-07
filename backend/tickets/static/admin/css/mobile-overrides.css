@@ -1,0 +1,109 @@
+/* Mobile-friendly Django admin overrides */
+@media (max-width: 768px) {
+  body {
+    font-size: 14px;
+  }
+
+  /* Top header and breadcrumbs */
+  #header {
+    padding: 8px 10px;
+  }
+
+  #branding h1, #branding h1 a {
+    font-size: 16px;
+  }
+
+  /* Forms: stack labels and inputs */
+  .form-row {
+    display: block;
+    padding: 6px 0;
+  }
+
+  .form-row .field-box {
+    display: block;
+    width: 100%;
+  }
+
+  .form-row label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+
+  .form-row input[type="text"],
+  .form-row input[type="email"],
+  .form-row input[type="number"],
+  .form-row input[type="url"],
+  .form-row input[type="date"],
+  .form-row input[type="datetime-local"],
+  .form-row select,
+  .form-row textarea {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Change list table: allow horizontal scroll */
+  #changelist-form {
+    overflow-x: auto;
+  }
+
+  #changelist table {
+    min-width: 900px;
+  }
+
+  /* Inline formsets: stack fields */
+  .inline-group .tabular {
+    overflow-x: auto;
+  }
+
+  .inline-group .tabular table {
+    min-width: 900px;
+  }
+
+  /* Buttons */
+  .submit-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .submit-row input, .submit-row a {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Sidebar filters */
+  #changelist-filter {
+    position: static;
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  #content {
+    margin-left: 0;
+  }
+
+  /* Ticket list: compact mobile view */
+  .model-ticket #changelist table {
+    min-width: 0;
+  }
+
+  .model-ticket #result_list .column-order_no,
+  .model-ticket #result_list .field-order_no,
+  .model-ticket #result_list .column-product_name,
+  .model-ticket #result_list .field-product_name,
+  .model-ticket #result_list .column-created_by,
+  .model-ticket #result_list .field-created_by,
+  .model-ticket #result_list .column-created_at,
+  .model-ticket #result_list .field-created_at {
+    display: none;
+  }
+
+  .model-ticket #result_list td.field-title,
+  .model-ticket #result_list td.field-customer_name {
+    max-width: 200px;
+    white-space: normal;
+    word-break: break-word;
+  }
+}

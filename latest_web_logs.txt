@@ -1,0 +1,300 @@
+﻿web-1  | [05/May/2026 11:06:36] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:06:37] "GET /admin/tickets/ticket/358/change/?_changelist_filters=followup_by%3Dadmin HTTP/1.1" 200 40287
+web-1  | [05/May/2026 11:06:37] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:07:42] "POST /admin/tickets/ticket/358/change/?_changelist_filters=followup_by%3Dadmin HTTP/1.1" 302 0
+web-1  | [05/May/2026 11:07:42] "GET /admin/tickets/ticket/?followup_by=admin HTTP/1.1" 200 26138
+web-1  | [05/May/2026 11:07:42] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:23:29] "GET /admin/tickets/ticket/?q=%2321996 HTTP/1.1" 200 14951
+web-1  | [05/May/2026 11:23:29] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:23:31] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:23:53] "GET /admin/tickets/ticket/369/change/?_changelist_filters=q%3D%252321996 HTTP/1.1" 200 34376
+web-1  | [05/May/2026 11:23:53] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:23:54] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:27:33] "GET /media/ticket_uploads/2026/05/01/21996_II.png HTTP/1.1" 200 110909
+web-1  | [05/May/2026 11:27:37] "GET /media/ticket_uploads/2026/05/01/21996.jpg HTTP/1.1" 200 41630
+web-1  | [05/May/2026 11:31:18] "GET /admin/tickets/ticket/?q=%2321996 HTTP/1.1" 200 14898
+web-1  | [05/May/2026 11:31:20] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:32:58] "GET /admin/tickets/ticket/?q=21746 HTTP/1.1" 200 10890
+web-1  | [05/May/2026 11:32:58] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:00] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:08] "GET /admin/tickets/ticket/?_facets HTTP/1.1" 200 42020
+web-1  | [05/May/2026 11:33:08] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:10] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:11] "GET /admin/tickets/ticket/?q=21746&_facets= HTTP/1.1" 200 11175
+web-1  | [05/May/2026 11:33:11] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:13] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:22] "GET /admin/tickets/ticket/?q=21475&_facets= HTTP/1.1" 200 15365
+web-1  | [05/May/2026 11:33:23] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:24] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:24] "GET /admin/tickets/ticket/307/change/?_changelist_filters=q%3D21475%26_facets%3D HTTP/1.1" 200 46281
+web-1  | [05/May/2026 11:33:25] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:33:26] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:34:37] "GET /media/ticket_uploads/2026/04/30/8.png HTTP/1.1" 200 373634
+web-1  | [05/May/2026 11:41:13] "POST /admin/tickets/ticket/307/change/?_changelist_filters=q%3D21475%26_facets%3D HTTP/1.1" 302 0
+web-1  | [05/May/2026 11:41:13] "GET /admin/tickets/ticket/?q=21475 HTTP/1.1" 200 15074
+web-1  | [05/May/2026 11:41:13] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:41:15] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:44:12] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 200 179598
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/jquery.init.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/css/base.css HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/css/nav_sidebar.css HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/css/responsive.css HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/admin/RelatedObjectLookups.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/img/icon-no.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/vendor/xregexp/xregexp.min.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/vendor/jquery/jquery.min.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/theme.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/urlify.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/img/search.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/core.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/css/dark_mode.css HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/prepopulate.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/actions.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/css/changelists.css HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/css/forms.css HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/css/widgets.css HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/nav_sidebar.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/js/filters.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/img/icon-yes.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/img/sorting-icons.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/img/icon-addlink.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/img/tooltag-add.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:12] "GET /static/admin/img/icon-viewlink.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:42] "GET /admin/shopify_sync/shopifyorder/339/change/ HTTP/1.1" 200 142317
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/js/prepopulate_init.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/js/admin/DateTimeShortcuts.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/js/calendar.js HTTP/1.1" 200 9141
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/js/inlines.js HTTP/1.1" 200 15628
+web-1  | [05/May/2026 11:44:42] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/img/icon-changelink.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/js/change_form.js HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/img/icon-deletelink.svg HTTP/1.1" 200 392
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/img/icon-calendar.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:42] "GET /static/admin/img/icon-clock.svg HTTP/1.1" 304 0
+web-1  | [05/May/2026 11:44:42] "GET /favicon.ico HTTP/1.1" 404 179
+web-1  | [05/May/2026 11:44:46] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 200 179598
+web-1  | [05/May/2026 11:44:52] "GET /admin/shopify_sync/shopifyorder/334/change/ HTTP/1.1" 200 142066
+web-1  | [05/May/2026 11:44:52] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:45:03] "GET /admin/shopify_sync/shopifyproduct/73/change/ HTTP/1.1" 200 30165
+web-1  | [05/May/2026 11:45:04] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:45:16] "GET /admin/shopify_sync/shopifyproduct/73/change/ HTTP/1.1" 200 30165
+web-1  | [05/May/2026 11:46:46] "GET /admin/shopify_sync/settlementbatch/ HTTP/1.1" 200 14237
+web-1  | [05/May/2026 11:46:46] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:46:47] "GET /admin/shopify_sync/shippingcostrule/ HTTP/1.1" 200 17891
+web-1  | [05/May/2026 11:46:47] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:46:48] "GET /admin/shopify_sync/shopifyinstallation/ HTTP/1.1" 200 14737
+web-1  | [05/May/2026 11:46:48] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:47:22] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 200 179598
+web-1  | [05/May/2026 11:47:22] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 11:51:10] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 200 179598
+web-1  | [05/May/2026 11:51:16] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 200 179598
+web-1  | [05/May/2026 11:51:16] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:08:54] "GET /admin/tickets/ticket/ HTTP/1.1" 200 40216
+web-1  | [05/May/2026 12:08:55] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:08:57] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:09:31] "GET /admin/tickets/ticketcomment/ HTTP/1.1" 200 71587
+web-1  | [05/May/2026 12:10:40] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 200 179574
+web-1  | [05/May/2026 12:10:40] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:10:54] "GET /admin/tickets/ticketcomment/2592/change/ HTTP/1.1" 200 42359
+web-1  | [05/May/2026 12:10:55] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:10:55] "GET /static/admin/img/icon-changelink.svg HTTP/1.1" 200 380
+web-1  | [05/May/2026 12:10:57] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:10:57] "GET /admin/tickets/ticket/370/change/?_to_field=id HTTP/1.1" 200 35161
+web-1  | [05/May/2026 12:10:57] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:10:58] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:13:53] "POST /admin/tickets/ticket/370/change/?_to_field=id HTTP/1.1" 302 0
+web-1  | [05/May/2026 12:13:54] "GET /admin/tickets/ticket/ HTTP/1.1" 200 40378
+web-1  | [05/May/2026 12:13:54] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:13:57] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 12:14:05] "GET /admin/tickets/ticketcomment/ HTTP/1.1" 200 71486
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:02:45
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:03:04
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:03:15
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:03:33
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:03:50
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:04:01
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:04:07
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:04:12
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:11:25
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | [05/May/2026 13:17:31] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:17:35] "GET /admin/shopify_sync/shopifyinstallation/ HTTP/1.1" 200 14737
+web-1  | [05/May/2026 13:17:37] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:17:39] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:17:43] "GET /admin/shopify_sync/shopifyinstallation/ HTTP/1.1" 200 14737
+web-1  | [05/May/2026 13:17:43] "GET /admin/shopify_sync/shopifyinstallation/ HTTP/1.1" 200 14737
+web-1  | [05/May/2026 13:17:44] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:17:47] "GET /admin/tickets/ticket/ HTTP/1.1" 200 49555
+web-1  | [05/May/2026 13:17:47] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:17:49] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:17:49] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:18:15] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:18:16] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:18:41] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:19:00] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:19:31] "GET /admin/shopify_sync/settlementbatch/ HTTP/1.1" 200 14237
+web-1  | [05/May/2026 13:19:31] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:19:32] "GET /admin/shopify_sync/shippingcostrule/ HTTP/1.1" 200 17891
+web-1  | [05/May/2026 13:19:33] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:19:36] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:19:37] "GET /admin/shopify_sync/shippingcostrule/ HTTP/1.1" 200 17891
+web-1  | [05/May/2026 13:19:39] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:19:39] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:23:49
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Operations to perform:
+web-1  |   Apply all migrations: admin, auth, contenttypes, sessions, shopify_sync, tickets
+web-1  | Running migrations:
+web-1  |   No migrations to apply.
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:26:00
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:29:40
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | Operations to perform:
+web-1  |   Apply all migrations: admin, auth, contenttypes, sessions, shopify_sync, tickets
+web-1  | Running migrations:
+web-1  |   No migrations to apply.
+web-1  | Performing system checks...
+web-1  | 
+web-1  | System check identified no issues (0 silenced).
+web-1  | May 05, 2026 - 13:30:43
+web-1  | Django version 5.2.13, using settings 'config.settings'
+web-1  | Starting development server at http://0.0.0.0:8000/
+web-1  | Quit the server with CONTROL-C.
+web-1  | 
+web-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+web-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/
+web-1  | [05/May/2026 13:32:24] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:32:24] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:32:27] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:32:29] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:32:32] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:32:34] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:32:36] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:32:36] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:32:38] "GET /admin/shopify_sync/shopifyproduct/340/change/ HTTP/1.1" 200 30227
+web-1  | [05/May/2026 13:32:38] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:32:42] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:32:44] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:32:46] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:33:23] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:33:23] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:33:26] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:33:28] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:33:29] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:33:29] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:33:31] "GET /admin/shopify_sync/shopifyinstallation/ HTTP/1.1" 200 14737
+web-1  | [05/May/2026 13:33:31] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:33:32] "GET /admin/shopify_sync/shopifyorder/ HTTP/1.1" 500 145
+web-1  | [05/May/2026 13:33:44] "GET /admin/shopify_sync/shopifyinstallation/ HTTP/1.1" 200 14737
+web-1  | [05/May/2026 13:38:56] "GET /admin/shopify_sync/shopifyproduct/ HTTP/1.1" 200 113670
+web-1  | [05/May/2026 13:38:56] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:39:01] "GET /admin/shopify_sync/shopifyproduct/?p=5 HTTP/1.1" 200 32347
+web-1  | [05/May/2026 13:39:01] "GET /admin/jsi18n/ HTTP/1.1" 200 3342
+web-1  | [05/May/2026 13:39:04] "GET /admin/shopify_sync/shopifyproduct/?p=1 HTTP/1.1" 200 116296
+web-1  | [05/May/2026 13:39:04] "GET /admin/jsi18n/ HTTP/1.1" 200 3342

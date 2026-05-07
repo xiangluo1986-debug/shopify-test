@@ -1,0 +1,2 @@
+﻿SUPERUSER True admin
+STATUS 200 <class 'django.template.response.TemplateResponse'>

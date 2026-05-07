@@ -1,0 +1,1 @@
+cd "C:\Users\xiang\OneDrive\桌面\aftersales"; docker compose up -d --build; $t=(cloudflared tunnel token aftersales-ticket | Select-Object -First 1); Start-Process -NoNewWindow cloudflared -ArgumentList @("tunnel","run","--token",$t)

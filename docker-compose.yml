@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: aftersales
+      POSTGRES_USER: aftersales
+      POSTGRES_PASSWORD: aftersales
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  web:
+    build:
+      context: ./backend
+    env_file:
+      - ./.env
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./backend:/app
+      - media:/app/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  scheduler:
+    build:
+      context: ./backend
+    env_file:
+      - ./.env
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./backend:/app
+      - media:/app/media
+    depends_on:
+      - db
+      - web
+    restart: unless-stopped
+    command: bash -c "bash /app/run_scheduler.sh"
+
+volumes:
+  pgdata:
+  media:

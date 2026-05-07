@@ -1,0 +1,14 @@
+{% extends "admin/index.html" %}
+
+{% block content %}
+<div class="module" style="margin-bottom: 16px; padding: 16px; background: #fff; border: 1px solid #ddd;">
+    <h2>Shopify 同步操作</h2>
+    <p>使用下面按钮手动调用 Shopify 同步接口。</p>
+    <div style="display:flex; flex-wrap:wrap; gap: 8px; margin-top: 12px;">
+        <a class="button" href="{% url 'shopify_sync_products' %}">同步 Shopify 产品</a>
+        <a class="button" href="{% url 'shopify_sync_shenzhen_orders' %}">同步深圳仓订单</a>
+        <a class="button" href="{% url 'shopify_update_shenzhen_tracking' %}">更新深圳仓物流</a>
+    </div>
+</div>
+{{ block.super }}
+{% endblock %}

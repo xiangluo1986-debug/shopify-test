@@ -1,0 +1,13 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block submit_buttons_bottom %}
+  {{ block.super }}
+  {% if change and original %}
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:tickets_ticket_mark_unread' original.pk %}?next={% url 'admin:tickets_ticket_changelist' %}{% if preserved_filters %}?{{ preserved_filters|urlencode }}{% endif %}">
+        标记未读
+      </a>
+    </div>
+  {% endif %}
+{% endblock %}
