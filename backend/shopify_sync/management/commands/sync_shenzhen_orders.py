@@ -1,7 +1,11 @@
 from django.core.management.base import BaseCommand, CommandError
 
 from shopify_sync.models import ShopifyInstallation
-from shopify_sync.sync_helpers import sync_shenzhen_orders_for_installation
+from shopify_sync.sync_helpers import (
+    ORDER_SYNC_TASK_NAMES,
+    run_shopify_sync_task,
+    sync_shenzhen_orders_for_installation,
+)
 
 
 class Command(BaseCommand):
@@ -20,22 +24,40 @@ class Command(BaseCommand):
             default=60,
             help="Number of past days to fetch orders for sync.",
         )
+        parser.add_argument(
+            "--task-name",
+            dest="task_name",
+            default=None,
+            help="Sync state task name. Defaults to orders_incremental for <=3 days, otherwise orders_manual.",
+        )
 
     def handle(self, *args, **options):
         shop = options["shop"]
         days = options["days"]
+        task_name = options["task_name"] or ("orders_incremental" if days <= 3 else "orders_manual")
 
         try:
             installation = ShopifyInstallation.objects.get(shop=shop)
         except ShopifyInstallation.DoesNotExist:
             raise CommandError(f"Shopify installation not found for {shop}")
 
-        result = sync_shenzhen_orders_for_installation(installation, days=days)
+        task_result = run_shopify_sync_task(
+            task_name,
+            lambda: sync_shenzhen_orders_for_installation(installation, days=days),
+            conflict_task_names=ORDER_SYNC_TASK_NAMES,
+        )
+        if task_result.get("skipped"):
+            self.stdout.write(self.style.WARNING("同步正在运行中，已跳过。"))
+            self.stdout.write(task_result.get("reason", ""))
+            return
+        result = task_result["result"]
 
         self.stdout.write(self.style.SUCCESS("Shenzhen order sync completed."))
         self.stdout.write(f"Checked orders: {result['checked_orders']}")
         self.stdout.write(f"Created orders: {result['created_orders']}")
         self.stdout.write(f"Updated orders: {result['updated_orders']}")
+        self.stdout.write(f"Skipped missing ship from china tag: {result['skipped_missing_ship_from_china_tag']}")
+        self.stdout.write(f"Skipped no Shenzhen items: {result['skipped_no_shenzhen_items']}")
         self.stdout.write(f"Created items: {result['created_items']}")
         self.stdout.write(f"Updated items: {result['updated_items']}")
         self.stdout.write(f"Updated tracking: {result['updated_tracking']}")

@@ -1,11 +1,206 @@
 import re
+import time
+from decimal import Decimal
 from datetime import datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
 import requests
+from django.db import connection
 from django.db import models
+from django.db import transaction
 from django.utils import timezone
 
-from .models import ShopifyInstallation, ShopifyOrder, ShopifyOrderItem, ShopifyProduct, ShippingCostRule
+from .models import (
+    ShenzhenCountryShippingDefault,
+    ShenzhenProductCountryShippingDefault,
+    ShopifyInstallation,
+    ShopifyOrder,
+    ShopifyOrderItem,
+    ShopifyProduct,
+    ShopifySyncState,
+    ShippingCostRule,
+)
+
+
+def get_next_page_info_from_link_header(link_header):
+    if not link_header:
+        return None
+
+    for link in requests.utils.parse_header_links(link_header):
+        if link.get("rel") != "next":
+            continue
+        parsed = urlparse(link.get("url", ""))
+        page_info = parse_qs(parsed.query).get("page_info")
+        if page_info:
+            return page_info[0]
+    return None
+
+
+ORDER_SYNC_TASK_NAMES = [
+    "orders_incremental",
+    "orders_manual_1",
+    "orders_manual_3",
+    "orders_manual_7",
+    "orders_manual_30",
+    "orders_manual_60",
+    "orders_manual",
+]
+
+
+def summarize_sync_result(result):
+    if isinstance(result, dict):
+        parts = []
+        for key, value in result.items():
+            if key == "errors":
+                if value:
+                    parts.append(f"errors={len(value)}")
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                parts.append(f"{key}={value}")
+        return ", ".join(parts)[:1000]
+    return str(result)[:1000]
+
+
+def run_shopify_sync_task(task_name, func, stale_after_minutes=120, conflict_task_names=None):
+    now = timezone.now()
+    stale_before = now - timedelta(minutes=stale_after_minutes)
+    conflict_task_names = list(conflict_task_names or [task_name])
+
+    with transaction.atomic():
+        state, _ = ShopifySyncState.objects.select_for_update().get_or_create(
+            task_name=task_name
+        )
+        running_conflict = (
+            ShopifySyncState.objects.select_for_update()
+            .filter(
+                task_name__in=conflict_task_names,
+                is_running=True,
+                started_at__gte=stale_before,
+            )
+            .exclude(task_name=task_name)
+            .first()
+        )
+        if running_conflict:
+            state.last_result = (
+                f"Skipped because {running_conflict.task_name} is already running "
+                f"since {running_conflict.started_at}."
+            )
+            state.save(update_fields=["last_result", "updated_at"])
+            return {
+                "skipped": True,
+                "task_name": task_name,
+                "reason": state.last_result,
+            }
+
+        stale_note = ""
+        if state.is_running and state.started_at and state.started_at >= stale_before:
+            return {
+                "skipped": True,
+                "task_name": task_name,
+                "reason": f"Sync task {task_name} is already running since {state.started_at}.",
+            }
+        if state.is_running:
+            stale_note = f"Stale lock takeover. Previous started_at={state.started_at}. "
+
+        state.is_running = True
+        state.started_at = now
+        state.finished_at = None
+        state.last_error = ""
+        state.last_result = stale_note + "Started."
+        state.save(update_fields=[
+            "is_running",
+            "started_at",
+            "finished_at",
+            "last_error",
+            "last_result",
+            "updated_at",
+        ])
+
+    try:
+        result = func()
+    except Exception as exc:
+        finished_at = timezone.now()
+        ShopifySyncState.objects.filter(task_name=task_name).update(
+            is_running=False,
+            finished_at=finished_at,
+            last_error=f"{exc.__class__.__name__}: {exc}",
+            last_result="Failed.",
+            updated_at=finished_at,
+        )
+        raise
+
+    finished_at = timezone.now()
+    summary = summarize_sync_result(result)
+    if stale_note:
+        summary = (stale_note + summary)[:1000]
+    ShopifySyncState.objects.filter(task_name=task_name).update(
+        is_running=False,
+        finished_at=finished_at,
+        last_success_at=finished_at,
+        last_error="",
+        last_result=summary,
+        updated_at=finished_at,
+    )
+    return {
+        "skipped": False,
+        "task_name": task_name,
+        "result": result,
+    }
+
+
+def was_sync_successful_today(task_name):
+    state = ShopifySyncState.objects.filter(task_name=task_name).first()
+    if not state or not state.last_success_at:
+        return False
+    return timezone.localtime(state.last_success_at).date() == timezone.localdate()
+
+
+def has_ship_from_china_tag(order):
+    tags = order.get("tags") or ""
+    if not isinstance(tags, str):
+        return False
+    normalized_tags = {
+        tag.strip().lower()
+        for tag in tags.split(",")
+        if tag.strip()
+    }
+    return "ship from china" in normalized_tags
+
+
+def _shopify_retry_delay(response, attempt):
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(float(retry_after), 0)
+        except ValueError:
+            pass
+    return min(2 + attempt, 5)
+
+
+def shopify_get(url, access_token, params=None, timeout=30, max_retries=5):
+    headers = {
+        "X-Shopify-Access-Token": access_token,
+        "Content-Type": "application/json",
+    }
+
+    for attempt in range(max_retries + 1):
+        response = requests.get(url, params=params, headers=headers, timeout=timeout)
+        if response.status_code == 429 or 500 <= response.status_code < 600:
+            if attempt >= max_retries:
+                response.raise_for_status()
+            delay = _shopify_retry_delay(response, attempt)
+            print(
+                f"Warning: Shopify API returned {response.status_code}; "
+                f"retrying in {delay:.1f}s ({attempt + 1}/{max_retries})."
+            )
+            time.sleep(delay)
+            continue
+
+        response.raise_for_status()
+        return response
+
+    response.raise_for_status()
+    return response
 
 
 def normalize_location_name(name):
@@ -41,39 +236,40 @@ def summarize_current_locations(fulfillment_orders):
 
 
 def shopify_request_json(url, access_token, params=None, timeout=30):
-    headers = {
-        "X-Shopify-Access-Token": access_token,
-        "Content-Type": "application/json",
-    }
-    response = requests.get(url, params=params, headers=headers, timeout=timeout)
-    response.raise_for_status()
+    response = shopify_get(url, access_token, params=params, timeout=timeout)
     return response.json()
 
 
 def fetch_shopify_orders(shop_domain, access_token, start_date_str):
     api_url = f"https://{shop_domain}/admin/api/2024-01/orders.json"
-    cursor = None
+    page_info = None
+    seen_page_info = set()
     while True:
-        params = {
-            "limit": 250,
-            "created_at_min": start_date_str,
-            "status": "any",
-            "fields": "id,name,order_number,created_at,financial_status,fulfillment_status,total_price,currency,customer,shipping_address,line_items"
-        }
-        if cursor:
-            params["cursor"] = cursor
+        if page_info:
+            params = {"limit": 250, "page_info": page_info}
+        else:
+            params = {
+                "limit": 250,
+                "created_at_min": start_date_str,
+                "status": "any",
+                "fields": "id,name,order_number,created_at,financial_status,fulfillment_status,total_price,currency,customer,shipping_address,line_items,tags,note,note_attributes"
+            }
 
-        data = shopify_request_json(api_url, access_token, params=params)
+        response = shopify_get(api_url, access_token, params=params, timeout=30)
+        data = response.json()
         orders = data.get("orders", [])
         for order in orders:
             yield order, data
 
-        link_header = data.get("link") or ""
-        if "rel=\"next\"" in link_header:
-            match = re.search(r'cursor=([^&;>]+)', link_header)
-            if match:
-                cursor = match.group(1)
-                continue
+        link_header = response.headers.get("Link", "")
+        next_page_info = get_next_page_info_from_link_header(link_header)
+        if next_page_info:
+            if next_page_info in seen_page_info:
+                print("Warning: repeated Shopify orders page_info detected; stopping pagination.")
+                break
+            seen_page_info.add(next_page_info)
+            page_info = next_page_info
+            continue
         break
 
 
@@ -265,6 +461,8 @@ def _process_shenzhen_order(
     fulfillment_status = order_data.get("fulfillment_status", "")
     total_price = order_data.get("total_price", 0)
     currency = order_data.get("currency", "USD")
+    shopify_note = order_data.get("note")
+    shopify_note_attributes = order_data.get("note_attributes") or []
     created_at = order_data.get("created_at", "")
     if created_at:
         order_created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
@@ -295,6 +493,8 @@ def _process_shenzhen_order(
             "total_price": total_price,
             "currency": currency,
             "order_created_at": order_created_at,
+            "shopify_note": shopify_note,
+            "shopify_note_attributes": shopify_note_attributes,
             "original_location_raw": original_location_raw,
             "current_location_raw": current_location_raw,
             "original_location": original_location,
@@ -323,6 +523,8 @@ def _process_shenzhen_order(
             "shipping_phone": shipping_phone,
             "total_price": total_price,
             "currency": currency,
+            "shopify_note": shopify_note,
+            "shopify_note_attributes": shopify_note_attributes,
         }
 
         if order_obj.original_location == "shenzhen" and current_location_normalized not in {"shenzhen", "mixed"}:
@@ -364,12 +566,228 @@ def _process_shenzhen_order(
     return order_obj, created
 
 
-def _process_shenzhen_order_items(order_obj, shenzhen_items):
+def _match_shopify_product(order_obj, shopify_product_id, shopify_variant_id, sku):
+    if shopify_variant_id:
+        matched_product = ShopifyProduct.objects.filter(
+            installation=order_obj.installation,
+            shopify_variant_id=shopify_variant_id,
+        ).first()
+        if matched_product:
+            return matched_product, "Matched by variant_id", "matched_by_variant_id"
+
+    if shopify_product_id:
+        matched_product = ShopifyProduct.objects.filter(
+            installation=order_obj.installation,
+            shopify_product_id=shopify_product_id,
+        ).first()
+        if matched_product:
+            return matched_product, "Matched by product_id", "matched_by_product_id"
+
+    if sku:
+        matched_product = ShopifyProduct.objects.filter(
+            installation=order_obj.installation,
+            sku=sku,
+        ).first()
+        if matched_product:
+            return matched_product, "Matched by sku", "matched_by_sku"
+
+    return None, "No matched product; saved Shopify line item snapshot", "unmatched_variant_not_found"
+
+
+def _order_item_has_model_field(field_name):
+    return any(field.name == field_name for field in ShopifyOrderItem._meta.fields)
+
+
+def _create_shopify_order_item(order_obj, line_item_id, defaults):
+    if _order_item_has_model_field("match_note") and _order_item_has_model_field("match_status"):
+        return ShopifyOrderItem.objects.create(
+            order=order_obj,
+            shopify_line_item_id=line_item_id,
+            **defaults,
+        )
+
+    now = timezone.now()
+    locked_product_cost_rmb = defaults.get("locked_product_cost_rmb")
+    locked_shipping_cost_rmb = defaults.get("locked_shipping_cost_rmb")
+    handling_fee_rmb = defaults.get("handling_fee_rmb") or 0
+    total_cost_rmb = None
+    if locked_product_cost_rmb is not None:
+        total_cost_rmb = (
+            Decimal(locked_product_cost_rmb) * defaults.get("quantity", 1)
+            + Decimal(locked_shipping_cost_rmb or 0)
+            - Decimal(handling_fee_rmb or 0)
+        )
+
+    table_name = ShopifyOrderItem._meta.db_table
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            INSERT INTO {table_name} (
+                order_id,
+                shopify_line_item_id,
+                shopify_product_id,
+                shopify_variant_id,
+                sku,
+                product_title,
+                variant_title,
+                quantity,
+                price,
+                fulfillment_location,
+                matched_product_id,
+                locked_product_cost_rmb,
+                locked_shipping_cost_rmb,
+                handling_fee_rmb,
+                total_cost_rmb,
+                created_at,
+                updated_at,
+                match_note,
+                match_status
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            [
+                order_obj.id,
+                line_item_id,
+                defaults.get("shopify_product_id"),
+                defaults.get("shopify_variant_id"),
+                defaults.get("sku"),
+                defaults.get("product_title"),
+                defaults.get("variant_title"),
+                defaults.get("quantity"),
+                defaults.get("price"),
+                defaults.get("fulfillment_location"),
+                defaults.get("matched_product").id if defaults.get("matched_product") else None,
+                locked_product_cost_rmb,
+                locked_shipping_cost_rmb,
+                handling_fee_rmb,
+                total_cost_rmb,
+                now,
+                now,
+                defaults.get("match_note") or "Saved from Shopify line_items snapshot",
+                defaults.get("match_status") or "unmatched_variant_not_found",
+            ],
+        )
+    return ShopifyOrderItem.objects.get(order=order_obj, shopify_line_item_id=line_item_id)
+
+
+def _update_order_item_match_note_if_empty(item_obj, match_note):
+    if _order_item_has_model_field("match_note"):
+        if not getattr(item_obj, "match_note", ""):
+            item_obj.match_note = match_note
+            item_obj.save(update_fields=["match_note"])
+        return
+
+    table_name = ShopifyOrderItem._meta.db_table
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"""
+            UPDATE {table_name}
+            SET match_note = %s
+            WHERE id = %s AND (match_note IS NULL OR match_note = '')
+            """,
+            [match_note, item_obj.id],
+        )
+
+
+def _find_product_country_shipping_default(order_obj, shopify_variant_id):
+    if not order_obj.shipping_country or not shopify_variant_id:
+        return None
+    shipping_default = ShenzhenProductCountryShippingDefault.objects.filter(
+        country_code__iexact=order_obj.shipping_country,
+        shopify_variant_id=shopify_variant_id,
+    ).first()
+    return shipping_default.default_shipping_cost_rmb if shipping_default else None
+
+
+def _decimal_or_zero(value):
+    return Decimal(value or 0)
+
+
+def _item_product_cost_total(item):
+    return _decimal_or_zero(item.locked_product_cost_rmb) * item.quantity
+
+
+def _item_full_cost_total(item):
+    return (
+        _item_product_cost_total(item)
+        + _decimal_or_zero(item.locked_shipping_cost_rmb)
+        - _decimal_or_zero(item.handling_fee_rmb)
+    )
+
+
+def _package_total_cost(package):
+    package_items = package.items.filter(fulfillment_location="shenzhen")
+    product_cost = sum((_item_product_cost_total(item) for item in package_items), Decimal("0.00"))
+    return product_cost + _decimal_or_zero(package.shipping_cost_rmb) - _decimal_or_zero(package.ordering_cost_rmb)
+
+
+def _package_level_order_totals(order_obj):
+    shenzhen_items = list(order_obj.order_items.select_related("package").filter(fulfillment_location="shenzhen"))
+    package_ids = {item.package_id for item in shenzhen_items if item.package_id}
+    packages = list(order_obj.packages.filter(id__in=package_ids))
+    unpackaged_items = [item for item in shenzhen_items if not item.package_id]
+    product_cost = sum((_item_product_cost_total(item) for item in shenzhen_items), Decimal("0.00"))
+    shipping_cost = (
+        sum((_decimal_or_zero(package.shipping_cost_rmb) for package in packages), Decimal("0.00"))
+        + sum((_decimal_or_zero(item.locked_shipping_cost_rmb) for item in unpackaged_items), Decimal("0.00"))
+    )
+    ordering_cost = (
+        sum((_decimal_or_zero(package.ordering_cost_rmb) for package in packages), Decimal("0.00"))
+        + sum((_decimal_or_zero(item.handling_fee_rmb) for item in unpackaged_items), Decimal("0.00"))
+    )
+    package_total = sum((_package_total_cost(package) for package in packages), Decimal("0.00"))
+    unpackaged_total = sum((_item_full_cost_total(item) for item in unpackaged_items), Decimal("0.00"))
+    return {
+        "product_cost": product_cost,
+        "shipping_cost": shipping_cost,
+        "ordering_cost": ordering_cost,
+        "total_cost": package_total + unpackaged_total,
+    }
+
+
+def allocate_package_costs(order_obj):
+    packages_processed = 0
+    skipped_packages = 0
+
+    packages = list(order_obj.packages.all().order_by("package_no"))
+
+    for package in packages:
+        package_items = list(
+            package.items.filter(fulfillment_location="shenzhen").order_by("id")
+        )
+        if not package_items:
+            skipped_packages += 1
+            continue
+
+        packages_processed += 1
+
+    totals = _package_level_order_totals(order_obj)
+    order_obj.order_shipping_cost_rmb = totals["shipping_cost"]
+    order_obj.order_handling_fee_rmb = totals["ordering_cost"]
+    order_obj.total_locked_cost_rmb = totals["total_cost"]
+    order_obj.cost_calculated_at = timezone.now()
+    order_obj.cost_calculation_note = (
+        "使用混合结算重算订单总成本：有包裹的商品按包裹费用计算，未分配包裹的商品按商品行费用计算。"
+    )
+    order_obj.save(update_fields=[
+        "order_shipping_cost_rmb",
+        "order_handling_fee_rmb",
+        "total_locked_cost_rmb",
+        "cost_calculated_at",
+        "cost_calculation_note",
+    ])
+    return {
+        "packages_processed": packages_processed,
+        "skipped_packages": skipped_packages,
+    }
+
+
+def _process_shenzhen_order_items(order_obj, order_items):
     created_count = 0
     updated_count = 0
-    for item_data in shenzhen_items:
+    for item_data in order_items:
         line_item = item_data["line_item"]
-        fulfillment_location = item_data["fulfillment_location"]
+        fulfillment_location = item_data.get("fulfillment_location")
         line_item_id = line_item.get("id")
         if not line_item_id:
             continue
@@ -380,75 +798,146 @@ def _process_shenzhen_order_items(order_obj, shenzhen_items):
         variant_title = line_item.get("variant_title", "")
         quantity = line_item.get("quantity", 1)
         price = line_item.get("price", 0)
-        matched_product = None
         locked_product_cost_rmb = None
         locked_shipping_cost_rmb = None
-
-        if shopify_variant_id:
-            matched_product = ShopifyProduct.objects.filter(
-                installation=order_obj.installation,
-                shopify_variant_id=shopify_variant_id,
-            ).first()
-
-        if not matched_product and shopify_product_id:
-            candidates = ShopifyProduct.objects.filter(
-                installation=order_obj.installation,
-                shopify_product_id=shopify_product_id,
-            )
-            if variant_title:
-                candidates = candidates.filter(variant_title=variant_title)
-            matched_product = candidates.first()
-
-        if not matched_product and sku:
-            matched_product = ShopifyProduct.objects.filter(
-                installation=order_obj.installation,
-                sku=sku,
-            ).first()
+        matched_product, match_note, match_status = _match_shopify_product(
+            order_obj,
+            shopify_product_id,
+            shopify_variant_id,
+            sku,
+        )
 
         if matched_product:
             locked_product_cost_rmb = matched_product.product_cost_rmb
-            locked_shipping_cost_rmb = 0
+        weight_kg = matched_product.weight_kg if matched_product else None
+        length_cm = matched_product.length_cm if matched_product else None
+        width_cm = matched_product.width_cm if matched_product else None
+        height_cm = matched_product.height_cm if matched_product else None
+        volume_weight_kg = matched_product.volume_weight_kg if matched_product else None
+        default_shipping_cost = _find_product_country_shipping_default(
+            order_obj,
+            shopify_variant_id,
+        )
+        if default_shipping_cost is not None:
+            locked_shipping_cost_rmb = default_shipping_cost
 
-        item_obj, created = ShopifyOrderItem.objects.get_or_create(
+        defaults = {
+            "shopify_product_id": shopify_product_id,
+            "shopify_variant_id": shopify_variant_id,
+            "sku": sku,
+            "product_title": product_title,
+            "variant_title": variant_title,
+            "quantity": quantity,
+            "price": price,
+            "fulfillment_location": fulfillment_location,
+            "matched_product": matched_product,
+            "locked_product_cost_rmb": locked_product_cost_rmb,
+            "locked_shipping_cost_rmb": locked_shipping_cost_rmb,
+            "handling_fee_rmb": 0,
+            "weight_kg": weight_kg,
+            "length_cm": length_cm,
+            "width_cm": width_cm,
+            "height_cm": height_cm,
+            "volume_weight_kg": volume_weight_kg,
+            "match_note": match_note,
+            "match_status": match_status,
+        }
+
+        item_obj = ShopifyOrderItem.objects.filter(
             order=order_obj,
             shopify_line_item_id=line_item_id,
-            defaults={
+        ).first()
+        if item_obj is None:
+            item_obj = _create_shopify_order_item(order_obj, line_item_id, defaults)
+            created = True
+        else:
+            created = False
+
+        if created:
+            created_count += 1
+        else:
+            _update_order_item_match_note_if_empty(item_obj, match_note)
+            protected_statuses = ["cost_confirmed", "admin_confirmed", "pending_payment", "paid"]
+            update_fields = {
                 "shopify_product_id": shopify_product_id,
                 "shopify_variant_id": shopify_variant_id,
                 "sku": sku,
                 "product_title": product_title,
                 "variant_title": variant_title,
-                "quantity": quantity,
                 "price": price,
                 "fulfillment_location": fulfillment_location,
-                "matched_product": matched_product,
-                "locked_product_cost_rmb": locked_product_cost_rmb,
-                "locked_shipping_cost_rmb": locked_shipping_cost_rmb,
-                "handling_fee_rmb": 0,
-            },
-        )
-
-        if created:
-            created_count += 1
-        else:
-            protected_statuses = ["cost_confirmed", "admin_confirmed", "pending_payment", "paid"]
+            }
             if order_obj.settlement_status not in protected_statuses:
-                update_fields = {
-                    "quantity": quantity,
-                    "price": price,
-                    "fulfillment_location": fulfillment_location,
-                }
-                if matched_product and not item_obj.matched_product:
-                    update_fields.update({
-                        "matched_product": matched_product,
-                        "locked_product_cost_rmb": locked_product_cost_rmb,
-                        "locked_shipping_cost_rmb": locked_shipping_cost_rmb,
-                    })
-                for field, value in update_fields.items():
+                update_fields["quantity"] = quantity
+            if matched_product and not item_obj.matched_product:
+                update_fields["matched_product"] = matched_product
+                if order_obj.settlement_status not in protected_statuses:
+                    update_fields["locked_product_cost_rmb"] = locked_product_cost_rmb
+            if matched_product:
+                for field, value in {
+                    "locked_product_cost_rmb": locked_product_cost_rmb,
+                    "weight_kg": weight_kg,
+                    "length_cm": length_cm,
+                    "width_cm": width_cm,
+                    "height_cm": height_cm,
+                    "volume_weight_kg": volume_weight_kg,
+                }.items():
+                    current_value = getattr(item_obj, field)
+                    if value is not None and (current_value is None or current_value == 0):
+                        update_fields[field] = value
+            if (
+                order_obj.settlement_status not in protected_statuses
+                and default_shipping_cost is not None
+                and (not item_obj.locked_shipping_cost_rmb or item_obj.locked_shipping_cost_rmb <= 0)
+            ):
+                update_fields["locked_shipping_cost_rmb"] = default_shipping_cost
+
+            changed_fields = []
+            for field, value in update_fields.items():
+                if getattr(item_obj, field) != value:
                     setattr(item_obj, field, value)
-                item_obj.save(update_fields=list(update_fields.keys()))
+                    changed_fields.append(field)
+            if changed_fields:
+                item_obj.save(update_fields=changed_fields)
                 updated_count += 1
     return created_count, updated_count
+
+
+def _build_order_item_snapshots(line_items, fulfillment_orders):
+    fulfillment_locations = {}
+    fulfillment_location_raws = {}
+
+    for fulfillment_order in fulfillment_orders:
+        assigned_location = fulfillment_order.get("assigned_location", {})
+        location_name = assigned_location.get("name", "")
+        normalized = normalize_location_name(location_name)
+        for fulfillment_item in fulfillment_order.get("line_items", []):
+            line_item_id = fulfillment_item.get("line_item_id")
+            if line_item_id is None:
+                continue
+            fulfillment_locations[line_item_id] = normalized
+            fulfillment_location_raws[line_item_id] = location_name
+
+    snapshots = []
+    for line_item in line_items:
+        line_item_id = line_item.get("id")
+        snapshots.append(
+            {
+                "line_item": line_item,
+                "fulfillment_location": fulfillment_locations.get(line_item_id),
+                "fulfillment_location_raw": fulfillment_location_raws.get(line_item_id, ""),
+            }
+        )
+    return snapshots
+
+
+def _parse_shopify_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def sync_products_for_installation(installation):
@@ -456,6 +945,7 @@ def sync_products_for_installation(installation):
     access_token = installation.access_token
     api_url = f"https://{shop_domain}/admin/api/2024-01/products.json"
     page_info = None
+    seen_page_info = set()
     created_count = 0
     updated_count = 0
     skipped_no_sku = 0
@@ -470,10 +960,9 @@ def sync_products_for_installation(installation):
         if page_info:
             params["page_info"] = page_info
 
-        response = requests.get(api_url, params=params, headers={"X-Shopify-Access-Token": access_token, "Content-Type": "application/json"}, timeout=30)
+        response = shopify_get(api_url, access_token, params=params, timeout=30)
         api_status_code = response.status_code
         api_response_preview = response.text[:1000]
-        response.raise_for_status()
         data = response.json()
         products = data.get("products", [])
         if is_first_page:
@@ -487,6 +976,9 @@ def sync_products_for_installation(installation):
             vendor = product.get("vendor", "")
             product_type = product.get("product_type", "")
             status = product.get("status", "active")
+            shopify_product_created_at = _parse_shopify_datetime(product.get("created_at"))
+            shopify_product_updated_at = _parse_shopify_datetime(product.get("updated_at"))
+            shopify_published_at = _parse_shopify_datetime(product.get("published_at"))
             image = product.get("image")
             image_url = image.get("src", "") if image else ""
             variants = product.get("variants", [])
@@ -516,6 +1008,9 @@ def sync_products_for_installation(installation):
                         "image_url": image_url,
                         "price": price,
                         "inventory_quantity": inventory_quantity,
+                        "shopify_product_created_at": shopify_product_created_at,
+                        "shopify_product_updated_at": shopify_product_updated_at,
+                        "shopify_published_at": shopify_published_at,
                     },
                 )
                 if created:
@@ -556,16 +1051,28 @@ def sync_products_for_installation(installation):
                     if obj.inventory_quantity != inventory_quantity:
                         obj.inventory_quantity = inventory_quantity
                         update_fields.append("inventory_quantity")
+                    if obj.shopify_product_created_at != shopify_product_created_at:
+                        obj.shopify_product_created_at = shopify_product_created_at
+                        update_fields.append("shopify_product_created_at")
+                    if obj.shopify_product_updated_at != shopify_product_updated_at:
+                        obj.shopify_product_updated_at = shopify_product_updated_at
+                        update_fields.append("shopify_product_updated_at")
+                    if obj.shopify_published_at != shopify_published_at:
+                        obj.shopify_published_at = shopify_published_at
+                        update_fields.append("shopify_published_at")
                     if update_fields:
                         obj.save(update_fields=update_fields)
                         updated_count += 1
 
         link_header = response.headers.get("Link", "")
-        if "rel=\"next\"" in link_header:
-            match = re.search(r'page_info=([^&;>]+)', link_header)
-            if match:
-                page_info = match.group(1)
-                continue
+        next_page_info = get_next_page_info_from_link_header(link_header)
+        if next_page_info:
+            if next_page_info in seen_page_info:
+                print("Warning: repeated Shopify products page_info detected; stopping pagination.")
+                break
+            seen_page_info.add(next_page_info)
+            page_info = next_page_info
+            continue
         break
 
     return {
@@ -599,6 +1106,8 @@ def sync_shenzhen_orders_for_installation(installation, days=60):
         "detected_tracking_count": 0,
         "errors": [],
         "checked_orders": 0,
+        "skipped_missing_ship_from_china_tag": 0,
+        "skipped_no_shenzhen_items": 0,
     }
 
     for order, data in fetch_shopify_orders(shop_domain, access_token, start_date):
@@ -606,6 +1115,7 @@ def sync_shenzhen_orders_for_installation(installation, days=60):
         order_id = order.get("id")
         if not order_id:
             continue
+        has_china_tag = has_ship_from_china_tag(order)
         try:
             fulfillment_orders = fetch_order_fulfillment_orders(shop_domain, order_id, access_token)
         except requests.exceptions.RequestException as exc:
@@ -639,8 +1149,16 @@ def sync_shenzhen_orders_for_installation(installation, days=60):
             shopify_order_id=order_id,
         ).first()
 
-        if not shenzhen_items and not existing_order:
-            result["skipped_non_shenzhen"] += 1
+        if not has_china_tag:
+            result["skipped_missing_ship_from_china_tag"] += 1
+            if not existing_order:
+                result["skipped_non_shenzhen"] += 1
+            continue
+
+        if not shenzhen_items:
+            result["skipped_no_shenzhen_items"] += 1
+            if not existing_order:
+                result["skipped_non_shenzhen"] += 1
             continue
 
         order_obj, created = _process_shenzhen_order(
@@ -699,8 +1217,12 @@ def _find_applicable_shipping_rule(country_code, total_actual_weight_kg, max_len
     return None
 
 
-def recalculate_order_shipping_cost(order_obj, force=False):
-    order_items = list(order_obj.order_items.select_related('matched_product').all())
+def _legacy_recalculate_order_shipping_cost_by_rule(order_obj, force=False):
+    order_items = list(
+        order_obj.order_items.select_related('matched_product').filter(
+            fulfillment_location="shenzhen"
+        )
+    )
     if not order_items:
         order_obj.cost_calculation_note = "订单无 item，无法计算运费。"
         order_obj.save(update_fields=["cost_calculation_note"])
@@ -798,7 +1320,7 @@ def recalculate_order_shipping_cost(order_obj, force=False):
         first_item.save()
 
     total_product_cost = sum((float(item.locked_product_cost_rmb or 0) * item.quantity) for item in order_items)
-    order_obj.total_locked_cost_rmb = total_product_cost + order_shipping_cost + order_handling_fee
+    order_obj.total_locked_cost_rmb = total_product_cost + order_shipping_cost - order_handling_fee
     order_obj.save(update_fields=[
         "total_actual_weight_kg",
         "total_volume_weight_kg",
@@ -810,6 +1332,149 @@ def recalculate_order_shipping_cost(order_obj, force=False):
         "cost_calculation_note",
     ])
     return True
+
+
+def _legacy_recalculate_order_shipping_cost_by_order_default(order_obj, force=False):
+    order_items = list(
+        order_obj.order_items.select_related("matched_product").filter(
+            fulfillment_location="shenzhen"
+        )
+    )
+    if not order_items:
+        order_obj.cost_calculation_note = "订单无深圳仓 item，无法计算运费。"
+        order_obj.save(update_fields=["cost_calculation_note"])
+        return False
+
+    shipping_cost = Decimal(order_obj.order_shipping_cost_rmb or 0)
+    if shipping_cost <= 0 and order_obj.shipping_country:
+        shipping_default = ShenzhenCountryShippingDefault.objects.filter(
+            country_code__iexact=order_obj.shipping_country
+        ).first()
+        if shipping_default:
+            shipping_cost = shipping_default.default_shipping_cost_rmb
+            order_obj.order_shipping_cost_rmb = shipping_cost
+
+    handling_fee = Decimal(order_obj.order_handling_fee_rmb or 0)
+    missing_costs = []
+    missing_package_costs = []
+    for item in order_items:
+        product = item.matched_product
+        if not product:
+            missing_costs.append(item.sku or item.product_title)
+            continue
+        if item.locked_product_cost_rmb is None and product.product_cost_rmb is not None:
+            item.locked_product_cost_rmb = product.product_cost_rmb
+        if item.locked_product_cost_rmb is None:
+            missing_costs.append(item.sku or item.product_title)
+
+    order_obj.total_actual_weight_kg = None
+    order_obj.total_volume_weight_kg = None
+    order_obj.chargeable_weight_kg = None
+    order_obj.order_shipping_cost_rmb = shipping_cost
+    order_obj.order_handling_fee_rmb = handling_fee
+    order_obj.cost_calculated_at = timezone.now()
+    if shipping_cost > 0:
+        order_obj.cost_calculation_note = "使用人工输入或国家默认深圳仓国际运费计算。"
+    else:
+        order_obj.cost_calculation_note = "未填写深圳仓国际运费，也未找到该国家默认运费；本次按 0 RMB 运费计算。"
+    if missing_costs:
+        order_obj.cost_calculation_note += f" 以下商品缺少产品成本：{', '.join(missing_costs)}。"
+
+    item_count = len(order_items)
+    shipping_share = (shipping_cost / item_count).quantize(Decimal("0.01"))
+    handling_share = (handling_fee / item_count).quantize(Decimal("0.01"))
+    allocated_shipping = Decimal("0.00")
+    allocated_handling = Decimal("0.00")
+
+    for index, item in enumerate(order_items):
+        if index == item_count - 1:
+            item_shipping = shipping_cost - allocated_shipping
+            item_handling = handling_fee - allocated_handling
+        else:
+            item_shipping = shipping_share
+            item_handling = handling_share
+        item.locked_shipping_cost_rmb = item_shipping
+        item.handling_fee_rmb = item_handling
+        item.save()
+        allocated_shipping += item_shipping
+        allocated_handling += item_handling
+
+    total_product_cost = sum(
+        (Decimal(item.locked_product_cost_rmb or 0) * item.quantity)
+        for item in order_items
+    )
+    order_obj.total_locked_cost_rmb = total_product_cost + shipping_cost - handling_fee
+    order_obj.save(update_fields=[
+        "total_actual_weight_kg",
+        "total_volume_weight_kg",
+        "chargeable_weight_kg",
+        "order_shipping_cost_rmb",
+        "order_handling_fee_rmb",
+        "total_locked_cost_rmb",
+        "cost_calculated_at",
+        "cost_calculation_note",
+    ])
+    return not missing_costs
+
+
+def recalculate_order_shipping_cost(order_obj, force=False):
+    order_items = list(
+        order_obj.order_items.select_related("matched_product", "package").filter(
+            fulfillment_location="shenzhen"
+        )
+    )
+    if not order_items:
+        order_obj.cost_calculation_note = "订单无深圳仓 item，无法计算运费。"
+        order_obj.save(update_fields=["cost_calculation_note"])
+        return False
+
+    missing_costs = []
+    missing_package_costs = []
+    for item in order_items:
+        product = item.matched_product
+        if product and item.locked_product_cost_rmb is None and product.product_cost_rmb is not None:
+            item.locked_product_cost_rmb = product.product_cost_rmb
+        if item.locked_product_cost_rmb is None:
+            missing_costs.append(item.sku or item.product_title)
+        if item.package_id:
+            if item.package.shipping_cost_rmb is None or item.package.shipping_cost_rmb <= 0:
+                missing_package_costs.append(f"Package {item.package.package_no} 缺少包裹运费")
+            if item.package.ordering_cost_rmb is None:
+                missing_package_costs.append(f"Package {item.package.package_no} 缺少包裹拍单成本")
+        else:
+            if item.locked_shipping_cost_rmb is None or item.locked_shipping_cost_rmb <= 0:
+                missing_package_costs.append(f"{item.sku or item.product_title} 缺少商品行运费")
+            if item.handling_fee_rmb is None:
+                missing_package_costs.append(f"{item.sku or item.product_title} 缺少商品行拍单成本")
+
+        item.save()
+
+    totals = _package_level_order_totals(order_obj)
+    order_obj.total_actual_weight_kg = None
+    order_obj.total_volume_weight_kg = None
+    order_obj.chargeable_weight_kg = None
+    order_obj.order_shipping_cost_rmb = totals["shipping_cost"]
+    order_obj.order_handling_fee_rmb = totals["ordering_cost"]
+    order_obj.total_locked_cost_rmb = totals["total_cost"]
+    order_obj.cost_calculated_at = timezone.now()
+
+    notes = ["使用混合结算重算：有包裹的商品按包裹费用计算，未分配包裹的商品按商品行费用计算。"]
+    if missing_costs:
+        notes.append(f"以下商品缺少产品成本：{', '.join(missing_costs)}。")
+    if missing_package_costs:
+        notes.append(f"以下包裹信息不完整：{'; '.join(missing_package_costs)}。")
+    order_obj.cost_calculation_note = " ".join(notes)
+    order_obj.save(update_fields=[
+        "total_actual_weight_kg",
+        "total_volume_weight_kg",
+        "chargeable_weight_kg",
+        "order_shipping_cost_rmb",
+        "order_handling_fee_rmb",
+        "total_locked_cost_rmb",
+        "cost_calculated_at",
+        "cost_calculation_note",
+    ])
+    return not missing_costs and not missing_package_costs
 
 
 def update_shenzhen_tracking_for_installation(installation):

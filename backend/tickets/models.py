@@ -28,6 +28,17 @@ class Ticket(models.Model):
     status = models.CharField("状态", max_length=20, choices=Status.choices, default=Status.NEW)
     priority = models.CharField("优先级", max_length=20, choices=Priority.choices, default=Priority.NORMAL)
 
+    is_pinned = models.BooleanField("置顶", default=False)
+    pinned_at = models.DateTimeField("置顶时间", null=True, blank=True)
+    pinned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pinned_tickets",
+        verbose_name="置顶人",
+    )
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -49,6 +60,16 @@ class Ticket(models.Model):
 
     def __str__(self):
         return f"#{self.id} {self.title}"
+
+    def save(self, *args, **kwargs):
+        if self.status == self.Status.RESOLVED:
+            self.is_pinned = False
+            self.pinned_at = None
+            self.pinned_by = None
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                kwargs["update_fields"] = set(update_fields) | {"is_pinned", "pinned_at", "pinned_by"}
+        super().save(*args, **kwargs)
 
 
 class TicketComment(models.Model):

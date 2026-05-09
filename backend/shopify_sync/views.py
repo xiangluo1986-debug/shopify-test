@@ -16,9 +16,12 @@ from django.http import (
     HttpResponseServerError,
     JsonResponse,
 )
+from django.utils.html import escape
 
-from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem
+from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem, ShopifySyncState
 from .sync_helpers import (
+    ORDER_SYNC_TASK_NAMES,
+    run_shopify_sync_task,
     sync_products_for_installation,
     sync_shenzhen_orders_for_installation,
     update_shenzhen_tracking_for_installation,
@@ -34,6 +37,55 @@ def _shopify_configured():
     )
 
 
+@login_required
+def sync_dashboard(request):
+    if not _user_has_shopify_sync_access(request):
+        return HttpResponseForbidden("Only authorized Shopify sync users can view the Shopify sync dashboard.")
+
+    rows = []
+    for state in ShopifySyncState.objects.all():
+        rows.append(
+            "<tr>"
+            f"<td>{escape(state.task_name)}</td>"
+            f"<td>{'Running' if state.is_running else 'Idle'}</td>"
+            f"<td>{state.started_at or ''}</td>"
+            f"<td>{state.finished_at or ''}</td>"
+            f"<td>{state.last_success_at or ''}</td>"
+            f"<td>{escape(state.last_error[:300])}</td>"
+            f"<td>{escape(state.last_result[:500])}</td>"
+            "</tr>"
+        )
+    state_rows = "".join(rows) or "<tr><td colspan='7'>No sync state recorded yet.</td></tr>"
+
+    return HttpResponse(
+        "<html><head><meta charset='utf-8'><title>Shopify Sync Dashboard</title></head>"
+        "<body style='font-family: Arial, sans-serif; padding: 24px; color:#222;'>"
+        "<h1>Shopify 同步仪表盘</h1>"
+        "<p>手动同步会使用同步锁；如果同类任务正在运行，会返回跳过提示。</p>"
+        "<div style='display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0;'>"
+        "<a style='display:inline-block;padding:10px 16px;background:#198754;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/sync-shenzhen-orders/?days=3'>同步最近 3 天订单</a>"
+        "<a style='display:inline-block;padding:10px 16px;background:#198754;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/sync-shenzhen-orders/?days=7'>同步最近 7 天订单</a>"
+        "<a style='display:inline-block;padding:10px 16px;background:#198754;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/sync-shenzhen-orders/?days=30'>同步最近 30 天订单</a>"
+        "<a style='display:inline-block;padding:10px 16px;background:#198754;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/sync-shenzhen-orders/?days=60'>同步最近 60 天订单</a>"
+        "<a style='display:inline-block;padding:10px 16px;background:#0b5ed7;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/sync-products/'>同步 Shopify 产品</a>"
+        "<a style='display:inline-block;padding:10px 16px;background:#fd7e14;color:#fff;text-decoration:none;border-radius:4px;' href='/auth/shopify/update-shenzhen-tracking/'>更新深圳仓物流</a>"
+        "</div>"
+        "<h2>同步状态</h2>"
+        "<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
+        "<thead><tr>"
+        "<th style='border:1px solid #ddd;padding:6px;text-align:left;'>Task</th>"
+        "<th style='border:1px solid #ddd;padding:6px;text-align:left;'>Status</th>"
+        "<th style='border:1px solid #ddd;padding:6px;text-align:left;'>Started</th>"
+        "<th style='border:1px solid #ddd;padding:6px;text-align:left;'>Finished</th>"
+        "<th style='border:1px solid #ddd;padding:6px;text-align:left;'>Last Success</th>"
+        "<th style='border:1px solid #ddd;padding:6px;text-align:left;'>Last Error</th>"
+        "<th style='border:1px solid #ddd;padding:6px;text-align:left;'>Last Result</th>"
+        "</tr></thead>"
+        f"<tbody>{state_rows}</tbody>"
+        "</table>"
+        "</body></html>",
+        content_type="text/html; charset=utf-8",
+    )
 @login_required
 def install(request):
     if not request.user.is_superuser:
@@ -317,14 +369,27 @@ def sync_products(request):
             status=400,
         )
 
-    result = sync_products_for_installation(installation)
-    return JsonResponse(result)
+    task_result = run_shopify_sync_task(
+        "products_daily",
+        lambda: sync_products_for_installation(installation),
+        conflict_task_names=["products_daily"],
+    )
+    if task_result.get("skipped"):
+        return JsonResponse(task_result, status=409)
+    return JsonResponse(task_result["result"])
 
 
 @login_required
 def sync_shenzhen_orders(request):
     if not _user_has_shopify_sync_access(request):
         return HttpResponseForbidden("Only authorized Shopify sync users can sync Shenzhen orders.")
+
+    try:
+        days = int(request.GET.get("days", "3"))
+    except ValueError:
+        return JsonResponse({"error": "Invalid days value."}, status=400)
+    if days not in {1, 3, 7, 30, 60}:
+        return JsonResponse({"error": "days must be one of 1, 3, 7, 30, 60."}, status=400)
 
     shop_domain = "kidstoylover.myshopify.com"
     try:
@@ -335,8 +400,14 @@ def sync_shenzhen_orders(request):
             status=400,
         )
 
-    result = sync_shenzhen_orders_for_installation(installation)
-    return JsonResponse(result)
+    task_result = run_shopify_sync_task(
+        f"orders_manual_{days}",
+        lambda: sync_shenzhen_orders_for_installation(installation, days=days),
+        conflict_task_names=ORDER_SYNC_TASK_NAMES,
+    )
+    if task_result.get("skipped"):
+        return JsonResponse(task_result, status=409)
+    return JsonResponse(task_result["result"])
 
 
 @login_required
@@ -353,12 +424,18 @@ def update_shenzhen_tracking(request):
             status=400,
         )
 
-    result = update_shenzhen_tracking_for_installation(installation)
-    return JsonResponse(result)
+    task_result = run_shopify_sync_task(
+        "tracking_update",
+        lambda: update_shenzhen_tracking_for_installation(installation),
+        conflict_task_names=["tracking_update"],
+    )
+    if task_result.get("skipped"):
+        return JsonResponse(task_result, status=409)
+    return JsonResponse(task_result["result"])
 
 
 @login_required
-def sync_dashboard(request):
+def _legacy_sync_dashboard(request):
     if not _user_has_shopify_sync_access(request):
         return HttpResponseForbidden("Only authorized Shopify sync users can view the Shopify sync dashboard.")
 

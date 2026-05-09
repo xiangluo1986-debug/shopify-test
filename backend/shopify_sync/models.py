@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -53,6 +54,8 @@ class ShopifyOrder(models.Model):
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default="USD")
     order_created_at = models.DateTimeField()
+    shopify_note = models.TextField(blank=True, null=True)
+    shopify_note_attributes = models.JSONField(default=list, blank=True)
     
     # Location information (normalized)
     original_location_raw = models.CharField(max_length=255, blank=True, null=True)
@@ -123,9 +126,9 @@ class ShopifyOrder(models.Model):
         unique_together = ("installation", "shopify_order_id")
         ordering = ["-order_created_at"]
         indexes = [
-            models.Index(fields=["is_shenzhen_order", "settlement_status"]),
-            models.Index(fields=["order_created_at"]),
-            models.Index(fields=["current_location"]),
+            models.Index(fields=["is_shenzhen_order", "settlement_status"], name="shopify_syn_is_shen_60811a_idx"),
+            models.Index(fields=["order_created_at"], name="shopify_syn_order_c_d20b1a_idx"),
+            models.Index(fields=["current_location"], name="shopify_syn_current_fec5a8_idx"),
         ]
 
     def __str__(self):
@@ -135,7 +138,7 @@ class ShopifyOrder(models.Model):
     def missing_product_data(self):
         """Returns list of SKUs with missing product data (cost, dimensions)"""
         missing_skus = []
-        for item in self.order_items.all():
+        for item in self.order_items.filter(fulfillment_location="shenzhen"):
             if not item.matched_product:
                 continue
             product = item.matched_product
@@ -150,9 +153,40 @@ class ShopifyOrder(models.Model):
         return missing_skus
 
 
+class ShopifyOrderPackage(models.Model):
+    order = models.ForeignKey(
+        ShopifyOrder, on_delete=models.CASCADE, related_name="packages"
+    )
+    package_no = models.PositiveIntegerField(default=1)
+    tracking_number = models.CharField(max_length=255, blank=True, default="")
+    carrier = models.CharField(max_length=100, blank=True, default="")
+    country_code = models.CharField(max_length=10, blank=True, default="")
+    shipping_cost_rmb = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    ordering_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order", "package_no"]
+        unique_together = ("order", "package_no")
+
+    def __str__(self):
+        return f"{self.order.order_name} Package {self.package_no}"
+
+
 class ShopifyOrderItem(models.Model):
     order = models.ForeignKey(
         ShopifyOrder, on_delete=models.CASCADE, related_name="order_items"
+    )
+    package = models.ForeignKey(
+        ShopifyOrderPackage,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="items",
     )
     shopify_line_item_id = models.BigIntegerField()
     shopify_product_id = models.BigIntegerField(null=True, blank=True)
@@ -192,6 +226,26 @@ class ShopifyOrderItem(models.Model):
     total_cost_rmb = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
     )
+    weight_kg = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    length_cm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    width_cm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    height_cm = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    volume_weight_kg = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    match_note = models.TextField(blank=True, help_text="匹配备注")
+    match_status = models.CharField(
+        max_length=50,
+        choices=[
+            ("matched_by_variant_id", "通过 variant_id 匹配"),
+            ("matched_by_sku", "通过 SKU 匹配"),
+            ("matched_by_sku_normalized", "通过 SKU 标准化匹配"),
+            ("unmatched_missing_variant_and_sku", "未匹配：缺少 variant_id 和 SKU"),
+            ("unmatched_variant_not_found", "未匹配：variant_id 未找到"),
+            ("unmatched_sku_not_found", "未匹配：SKU 未找到"),
+            ("custom_item", "自定义商品"),
+        ],
+        default="unmatched_missing_variant_and_sku",
+        help_text="产品匹配状态",
+    )
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -200,9 +254,9 @@ class ShopifyOrderItem(models.Model):
     class Meta:
         unique_together = ("order", "shopify_line_item_id")
         indexes = [
-            models.Index(fields=["shopify_variant_id"]),
-            models.Index(fields=["sku"]),
-            models.Index(fields=["fulfillment_location"]),
+            models.Index(fields=["shopify_variant_id"], name="shopify_syn_shopify_4a6263_idx"),
+            models.Index(fields=["sku"], name="shopify_syn_sku_3a1627_idx"),
+            models.Index(fields=["fulfillment_location"], name="shopify_syn_fulfill_8b0859_idx"),
         ]
 
     def __str__(self):
@@ -213,12 +267,12 @@ class ShopifyOrderItem(models.Model):
         if self.locked_product_cost_rmb is None and self.matched_product and self.matched_product.product_cost_rmb:
             self.locked_product_cost_rmb = self.matched_product.product_cost_rmb
         
-        # Calculate total cost when saving
-        if self.locked_product_cost_rmb is not None and self.locked_shipping_cost_rmb is not None:
+        # Item total is still used for single-product / non-package settlement.
+        if self.locked_product_cost_rmb is not None:
             self.total_cost_rmb = (
                 (self.locked_product_cost_rmb * self.quantity) +
-                self.locked_shipping_cost_rmb +
-                self.handling_fee_rmb
+                (self.locked_shipping_cost_rmb or 0) -
+                (self.handling_fee_rmb or 0)
             )
         super().save(*args, **kwargs)
 
@@ -231,7 +285,7 @@ class ShopifyProduct(models.Model):
     shopify_variant_id = models.BigIntegerField(unique=True)
     product_title = models.CharField(max_length=255)
     variant_title = models.CharField(max_length=255, blank=True)
-    sku = models.CharField(max_length=255, blank=True)
+    sku = models.CharField(max_length=255, blank=True, null=True)
     handle = models.CharField(max_length=255, blank=True)
     vendor = models.CharField(max_length=255, blank=True)
     product_type = models.CharField(max_length=255, blank=True)
@@ -239,6 +293,11 @@ class ShopifyProduct(models.Model):
     image_url = models.URLField(max_length=500, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     inventory_quantity = models.IntegerField(default=0)
+    shopify_product_created_at = models.DateTimeField(null=True, blank=True)
+    shopify_product_updated_at = models.DateTimeField(null=True, blank=True)
+    shopify_published_at = models.DateTimeField(null=True, blank=True)
+    shopify_variant_created_at = models.DateTimeField(null=True, blank=True)
+    shopify_variant_updated_at = models.DateTimeField(null=True, blank=True)
 
     # 人工填写字段（不被同步覆盖）
     is_shenzhen_product = models.BooleanField(default=False)
@@ -272,10 +331,10 @@ class ShopifyProduct(models.Model):
 
     class Meta:
         unique_together = ("installation", "shopify_variant_id")
-        ordering = ["-updated_at"]
+        ordering = ["-shopify_published_at", "-shopify_product_created_at", "-id"]
         indexes = [
-            models.Index(fields=["installation", "sku"]),
-            models.Index(fields=["shopify_variant_id"]),
+            models.Index(fields=["installation", "sku"], name="shopify_syn_install_92b439_idx"),
+            models.Index(fields=["shopify_variant_id"], name="shopify_syn_shopify_7fbdde_idx"),
         ]
 
     def __str__(self):
@@ -286,6 +345,87 @@ class ShopifyProduct(models.Model):
         if self.length_cm and self.width_cm and self.height_cm:
             self.volume_weight_kg = (self.length_cm * self.width_cm * self.height_cm) / 6000
         super().save(*args, **kwargs)
+
+class ShopifyProductCostHistory(models.Model):
+    order = models.ForeignKey(
+        ShopifyOrder,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="product_cost_histories",
+    )
+    order_item = models.ForeignKey(
+        ShopifyOrderItem,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="product_cost_histories",
+    )
+    product = models.ForeignKey(
+        ShopifyProduct,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="cost_histories",
+    )
+    shopify_product_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    shopify_variant_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    sku = models.CharField(max_length=255, blank=True, default="")
+    product_title = models.CharField(max_length=500, blank=True, default="")
+    old_item_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    new_item_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    old_product_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    new_product_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    overwrite_product_cost = models.BooleanField(default=False)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shopify_product_cost_changes",
+    )
+    changed_at = models.DateTimeField(auto_now_add=True)
+    source = models.CharField(max_length=100, blank=True, default="order_item_inline")
+    note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-changed_at"]
+
+    def __str__(self):
+        label = self.product_title or self.sku or self.shopify_variant_id or "Product cost"
+        return f"{label}: {self.old_item_cost_rmb} -> {self.new_item_cost_rmb}"
+
+
+class FinanceExchangeRate(models.Model):
+    base_currency = models.CharField(max_length=3, default="AUD", db_index=True)
+    quote_currency = models.CharField(max_length=3, default="CNY", db_index=True)
+    rate = models.DecimalField(max_digits=10, decimal_places=4)
+    effective_date = models.DateField(default=timezone.localdate, db_index=True)
+    is_active = models.BooleanField(default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="updated_finance_exchange_rates",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-effective_date", "-updated_at"]
+        indexes = [
+            models.Index(fields=["base_currency", "quote_currency", "is_active"], name="shopify_syn_fx_pair_active_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.base_currency = (self.base_currency or "AUD").strip().upper()
+        self.quote_currency = (self.quote_currency or "CNY").strip().upper()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"1 {self.base_currency} = {self.rate} {self.quote_currency}"
+
 
 class ShippingCostRule(models.Model):
     name = models.CharField(max_length=255, help_text="规则名称")
@@ -308,11 +448,88 @@ class ShippingCostRule(models.Model):
     class Meta:
         ordering = ["country_code", "name"]
         indexes = [
-            models.Index(fields=["country_code", "is_active"]),
+            models.Index(fields=["country_code", "is_active"], name="shopify_syn_country_e13938_idx"),
         ]
 
     def __str__(self):
         return f"{self.name} ({self.country_code})"
+
+
+class ShenzhenCountryShippingDefault(models.Model):
+    country_code = models.CharField(max_length=10, unique=True, db_index=True)
+    country_name = models.CharField(max_length=100, blank=True, default="")
+    default_shipping_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="updated_shenzhen_shipping_defaults",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["country_code"]
+
+    def __str__(self):
+        return f"{self.country_code}: {self.default_shipping_cost_rmb} RMB"
+
+
+class ShenzhenProductCountryShippingDefault(models.Model):
+    country_code = models.CharField(max_length=10, db_index=True)
+    country_name = models.CharField(max_length=100, blank=True, default="")
+    shopify_product_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    shopify_variant_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    sku = models.CharField(max_length=255, blank=True, default="")
+    product_title = models.CharField(max_length=500, blank=True, default="")
+    variant_title = models.CharField(max_length=255, blank=True, default="")
+    matched_product = models.ForeignKey(
+        ShopifyProduct,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shipping_defaults",
+    )
+    default_shipping_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="updated_shenzhen_product_shipping_defaults",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+    note = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["country_code", "product_title", "variant_title"]
+        unique_together = ("country_code", "shopify_variant_id")
+        indexes = [
+            models.Index(fields=["country_code", "shopify_variant_id"], name="shopify_syn_country_dba550_idx"),
+            models.Index(fields=["country_code", "shopify_product_id"], name="shopify_syn_country_9eb8b8_idx"),
+        ]
+
+    def __str__(self):
+        label = self.variant_title or self.sku or self.shopify_variant_id
+        return f"{self.country_code}: {label} - {self.default_shipping_cost_rmb} RMB"
+
+
+class ShopifySyncState(models.Model):
+    task_name = models.CharField(max_length=100, unique=True, db_index=True)
+    is_running = models.BooleanField(default=False)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    last_success_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default="")
+    last_result = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["task_name"]
+
+    def __str__(self):
+        return self.task_name
 
 
 class SettlementBatch(models.Model):
@@ -348,8 +565,8 @@ class SettlementBatch(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["status", "created_at"]),
-            models.Index(fields=["batch_no"]),
+            models.Index(fields=["status", "created_at"], name="shopify_syn_status_4d8e10_idx"),
+            models.Index(fields=["batch_no"], name="shopify_syn_batch_n_9b6ebd_idx"),
         ]
 
     def __str__(self):

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Shopify Sync Scheduler
 # 执行周期：
@@ -35,7 +35,7 @@ while true; do
         LAST_SYNC_DATE=$(cat "$LAST_PRODUCT_SYNC_FILE" 2>/dev/null || echo "")
         if [ "$LAST_SYNC_DATE" != "$CURRENT_DATE" ]; then
             log_message "执行产品同步..."
-            python manage.py sync_shopify_products --shop=kidstoylover.myshopify.com >> "$LOG_FILE" 2>&1
+            python manage.py sync_shopify_products --shop=kidstoylover.myshopify.com --skip-if-success-today >> "$LOG_FILE" 2>&1
             SYNC_EXIT_CODE=$?
             if [ $SYNC_EXIT_CODE -eq 0 ]; then
                 log_message "产品同步成功"
@@ -49,7 +49,18 @@ while true; do
     # 每 30 分钟执行订单同步和物流更新（检查分钟是否是 0 或 30）
     if [ "$CURRENT_MINUTE" -eq 0 ] || [ "$CURRENT_MINUTE" -eq 30 ]; then
         log_message "执行订单同步..."
-        python manage.py sync_shenzhen_orders --shop=kidstoylover.myshopify.com --days=60 >> "$LOG_FILE" 2>&1
+        if [ "$CURRENT_HOUR" -ge 3 ]; then
+            log_message "Check daily product sync..."
+            python manage.py sync_shopify_products --shop=kidstoylover.myshopify.com --skip-if-success-today >> "$LOG_FILE" 2>&1
+            PRODUCT_DAILY_EXIT=$?
+            if [ $PRODUCT_DAILY_EXIT -eq 0 ]; then
+                log_message "Daily product sync check completed"
+            else
+                log_message "Daily product sync check failed (exit code: $PRODUCT_DAILY_EXIT), continuing"
+            fi
+        fi
+
+        python manage.py sync_shenzhen_orders --shop=kidstoylover.myshopify.com --days=3 >> "$LOG_FILE" 2>&1
         ORDERS_SYNC_EXIT=$?
         if [ $ORDERS_SYNC_EXIT -eq 0 ]; then
             log_message "订单同步成功"

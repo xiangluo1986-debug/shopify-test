@@ -1,4 +1,5 @@
 from django.contrib import admin, messages
+from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import reverse, path
 from django.shortcuts import redirect
@@ -258,6 +259,7 @@ class TicketAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "title",
+        "pinned_badge",
         "update_badge",
         "status",
         "priority",
@@ -270,10 +272,11 @@ class TicketAdmin(admin.ModelAdmin):
         "last_update_time",
     )
     list_display_links = ("id", "title")
-    list_filter = ("status", "priority", FollowUpByFilter, UpdatedFilter)
-    search_fields = ("title", "order_no", "customer_name", "product_name", "description")
+    list_filter = ("is_pinned", "status", "priority", FollowUpByFilter, UpdatedFilter)
+    search_fields = ("=id", "title", "order_no", "customer_name", "product_name", "description")
     list_editable = ("status", "priority")
-    ordering = ("-created_at",)
+    ordering = ("-is_pinned", "-created_at", "-id")
+    actions = ("pin_selected_tickets", "unpin_selected_tickets")
     list_per_page = 20
     list_select_related = ("created_by",)
     date_hierarchy = "created_at"
@@ -286,9 +289,12 @@ class TicketAdmin(admin.ModelAdmin):
         "description",
         "status",
         "priority",
+        "is_pinned",
+        "pinned_at",
+        "pinned_by",
         "created_by",
     )
-    readonly_fields = ("created_by",)
+    readonly_fields = ("created_by", "pinned_at", "pinned_by")
 
     def get_queryset(self, request):
         self.request = request
@@ -327,6 +333,16 @@ class TicketAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.mark_unread_view),
                 name="tickets_ticket_mark_unread",
             ),
+            path(
+                "<path:object_id>/pin/",
+                self.admin_site.admin_view(self.pin_ticket_view),
+                name="tickets_ticket_pin",
+            ),
+            path(
+                "<path:object_id>/unpin/",
+                self.admin_site.admin_view(self.unpin_ticket_view),
+                name="tickets_ticket_unpin",
+            ),
         ]
         return custom_urls + urls
 
@@ -352,9 +368,63 @@ class TicketAdmin(admin.ModelAdmin):
             return redirect(next_url)
         return redirect("admin:tickets_ticket_changelist")
 
+    def _pin_ticket(self, request, obj: Ticket) -> bool:
+        if ticket_is_closed(obj):
+            return False
+        pinned_at = timezone.now()
+        Ticket.objects.filter(pk=obj.pk).update(
+            is_pinned=True,
+            pinned_at=pinned_at,
+            pinned_by=request.user,
+        )
+        obj.is_pinned = True
+        obj.pinned_at = pinned_at
+        obj.pinned_by = request.user
+        return True
+
+    def _unpin_ticket(self, obj: Ticket):
+        Ticket.objects.filter(pk=obj.pk).update(
+            is_pinned=False,
+            pinned_at=None,
+            pinned_by=None,
+        )
+        obj.is_pinned = False
+        obj.pinned_at = None
+        obj.pinned_by = None
+
+    def pin_ticket_view(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            messages.error(request, "工单不存在")
+            return redirect("admin:tickets_ticket_changelist")
+        if self._pin_ticket(request, obj):
+            messages.success(request, "工单已置顶")
+        else:
+            messages.warning(request, "已结束/关闭的工单不能置顶")
+        return redirect("admin:tickets_ticket_change", object_id=obj.pk)
+
+    def unpin_ticket_view(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            messages.error(request, "工单不存在")
+            return redirect("admin:tickets_ticket_changelist")
+        self._unpin_ticket(obj)
+        messages.success(request, "工单已取消置顶")
+        return redirect("admin:tickets_ticket_change", object_id=obj.pk)
+
     def save_model(self, request, obj, form, change):
         if not change and hasattr(obj, "created_by_id") and not obj.created_by_id:
             obj.created_by = request.user
+        if obj.status == Ticket.Status.RESOLVED:
+            obj.is_pinned = False
+            obj.pinned_at = None
+            obj.pinned_by = None
+        elif obj.is_pinned and not obj.pinned_at:
+            obj.pinned_at = timezone.now()
+            obj.pinned_by = request.user
+        elif not obj.is_pinned:
+            obj.pinned_at = None
+            obj.pinned_by = None
         super().save_model(request, obj, form, change)
 
     def save_formset(self, request, form, formset, change):
@@ -382,6 +452,35 @@ class TicketAdmin(admin.ModelAdmin):
     def last_update_time(self, obj: Ticket):
         last_comment = self._get_last_comment(obj)
         return getattr(last_comment, "created_at", None) or obj.created_at
+
+    @admin.display(description="置顶", ordering="is_pinned")
+    def pinned_badge(self, obj: Ticket):
+        if obj.is_pinned:
+            return format_html("<span style='font-weight:700;color:#d9534f'>📌 置顶</span>")
+        return "-"
+
+    @admin.action(description="置顶所选工单")
+    def pin_selected_tickets(self, request, queryset):
+        pinned_count = 0
+        skipped_count = 0
+        for ticket in queryset:
+            if self._pin_ticket(request, ticket):
+                pinned_count += 1
+            else:
+                skipped_count += 1
+        if pinned_count:
+            messages.success(request, f"已置顶 {pinned_count} 个工单")
+        if skipped_count:
+            messages.warning(request, f"{skipped_count} 个已结束/关闭工单未置顶")
+
+    @admin.action(description="取消置顶所选工单")
+    def unpin_selected_tickets(self, request, queryset):
+        updated_count = 0
+        for ticket in queryset:
+            if ticket.is_pinned:
+                self._unpin_ticket(ticket)
+                updated_count += 1
+        messages.success(request, f"已取消置顶 {updated_count} 个工单")
 
     @admin.display(description="更新")
     def update_badge(self, obj: Ticket):

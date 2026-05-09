@@ -1,7 +1,10 @@
 from django.core.management.base import BaseCommand, CommandError
 
 from shopify_sync.models import ShopifyInstallation
-from shopify_sync.sync_helpers import update_shenzhen_tracking_for_installation
+from shopify_sync.sync_helpers import (
+    run_shopify_sync_task,
+    update_shenzhen_tracking_for_installation,
+)
 
 
 class Command(BaseCommand):
@@ -23,7 +26,16 @@ class Command(BaseCommand):
         except ShopifyInstallation.DoesNotExist:
             raise CommandError(f"Shopify installation not found for {shop}")
 
-        result = update_shenzhen_tracking_for_installation(installation)
+        task_result = run_shopify_sync_task(
+            "tracking_update",
+            lambda: update_shenzhen_tracking_for_installation(installation),
+            conflict_task_names=["tracking_update"],
+        )
+        if task_result.get("skipped"):
+            self.stdout.write(self.style.WARNING("同步正在运行中，已跳过。"))
+            self.stdout.write(task_result.get("reason", ""))
+            return
+        result = task_result["result"]
 
         self.stdout.write(self.style.SUCCESS("Shenzhen tracking update completed."))
         self.stdout.write(f"Checked orders: {result['checked_orders']}")

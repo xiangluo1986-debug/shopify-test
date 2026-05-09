@@ -8,6 +8,17 @@
       <a class="button" href="{% url 'admin:tickets_ticket_mark_unread' original.pk %}?next={% url 'admin:tickets_ticket_changelist' %}{% if preserved_filters %}?{{ preserved_filters|urlencode }}{% endif %}">
         标记未读
       </a>
+      {% if user.is_authenticated %}
+        {% if original.is_pinned %}
+          <a class="button" href="{% url 'admin:tickets_ticket_unpin' original.pk %}">
+            取消置顶
+          </a>
+        {% else %}
+          <a class="button" href="{% url 'admin:tickets_ticket_pin' original.pk %}">
+            置顶工单
+          </a>
+        {% endif %}
+      {% endif %}
     </div>
   {% endif %}
 {% endblock %}
