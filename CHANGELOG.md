@@ -12,6 +12,13 @@
 - Shopify Order 的 settlement status 改为详情页只读，避免手动跳过深圳仓审核或 Admin/Finance 审核顺序。
 - Shopify Order 后台将 `cost_confirmed` 显示为“深圳仓已确认成本，待 Admin 确认”，避免和 Admin 已确认状态混淆。
 - Shopify Orders 右侧 settlement status filter 隐藏“Admin 已确认”项，因为 Admin/Finance 确认后会直接进入“待支付”。
+- Shopify Order 商品行在“商品行拍单成本 RMB”旁新增“拍单提示”悬浮窗口，方便审核时核对 PL note 推断信息。
+- Shopify Order 详情页审核通过后会自动返回原来的 Orders 筛选列表，方便继续审核下一个订单。
+- Shopify Order 详情页的“审核操作”移动到页面底部，方便核对成本明细后直接确认。
+- Shopify Orders 主列表每页改为 25 条，并关闭大量订单一次性显示，减少首次打开卡顿。
+- Shopify 结算流程在“待支付”和“已支付”之间新增“已提交支付，待深圳仓确认收款”状态。
+- Admin / Finance 可对已加入结算批次的待支付订单或结算批次执行“提交支付”，深圳仓确认收款后才会变为已支付。
+- 结算批次新增付款凭证上传字段，深圳仓确认收款时会要求对应结算批次已有付款凭证。
 - 利润统计汇率改为 Admin / Finance 手动维护的 AUD/CNY 汇率，不再依赖外部汇率接口；Shenzhen Warehouse 看不到汇率维护页面和利润数据。
 - Shopify 订单详情页新增跟随滚动的当前订单摘要栏，滚动到商品行底部时仍可看到订单号、客户、国家、状态、深圳仓产品行数、结算总成本和 tracking number。
 - 当前订单摘要栏改为浅蓝底、深色文字和蓝色边框，提升滚动时的可读性。

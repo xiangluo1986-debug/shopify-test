@@ -1,6 +1,7 @@
 import csv
 import re
 from decimal import Decimal
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from django import forms
 from django.contrib import admin, messages
@@ -31,10 +32,11 @@ from .models import (
 SHENZHEN_ITEM_LOCATION = "shenzhen"
 ZERO = Decimal("0.00")
 SHENZHEN_COST_EDITABLE_STATUSES = {"pending_warehouse", "warehouse_fulfilled"}
-FINANCE_LOCKED_STATUSES = {"pending_payment", "paid"}
+FINANCE_LOCKED_STATUSES = {"pending_payment", "payment_submitted", "paid"}
 SETTLEMENT_STATUS_ADMIN_LABELS = {
     "cost_confirmed": "深圳仓已确认成本，待 Admin 确认",
     "admin_confirmed": "Admin 已确认",
+    "payment_submitted": "已提交支付，待深圳仓确认收款",
 }
 COUNTRY_NAME_ZH = {
     "AU": "澳大利亚",
@@ -545,7 +547,7 @@ def can_apply_country_shipping_default(order):
         return False
     if order.settlement_batch_id:
         return False
-    return order.settlement_status not in {"pending_payment", "paid"}
+    return order.settlement_status not in {"pending_payment", "payment_submitted", "paid"}
 
 
 def apply_country_shipping_default(order):
@@ -933,6 +935,7 @@ class ShopifyOrderItemInline(admin.TabularInline):
         "update_product_default_cost",
         "locked_shipping_cost_rmb",
         "handling_fee_rmb",
+        "ordering_note_hover",
         "total_cost_rmb",
         "weight_kg",
         "length_cm",
@@ -954,6 +957,7 @@ class ShopifyOrderItemInline(admin.TabularInline):
         "product_image_preview",
         "edit_product_link",
         "product_cost_rmb_from_product",
+        "ordering_note_hover",
     )
     show_change_link = False
 
@@ -1041,6 +1045,27 @@ class ShopifyOrderItemInline(admin.TabularInline):
             return fallback or "—"
         return "—"
     fallback_product_display.short_description = "Fallback Product"
+
+    def ordering_note_hover(self, obj):
+        order = getattr(obj, "order", None)
+        if not order:
+            return "-"
+        tooltip = parse_ordering_note(order.shopify_note)
+        return format_html(
+            '<style>'
+            '.shopify-ordering-note-hover:hover .shopify-ordering-note-popover {{ display:block !important; }}'
+            '</style>'
+            '<span class="shopify-ordering-note-hover" style="position:relative;display:inline-block;">'
+            '<span style="cursor:help;text-decoration:underline;color:#0c66e4;font-weight:600;">查看拍单提示</span>'
+            '<span class="shopify-ordering-note-popover" '
+            'style="display:none;position:absolute;z-index:9999;left:0;top:1.7em;'
+            'width:360px;max-width:60vw;padding:10px 12px;background:#111827;color:#fff;'
+            'border-radius:6px;box-shadow:0 8px 24px rgba(15,23,42,.25);'
+            'white-space:pre-line;line-height:1.5;text-align:left;">{}</span>'
+            '</span>',
+            tooltip,
+        )
+    ordering_note_hover.short_description = "拍单提示"
 
     def product_match_status(self, obj):
         if obj.matched_product:
@@ -1177,6 +1202,8 @@ class ShopifyInstallationAdmin(admin.ModelAdmin):
 class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     change_list_template = "admin/shopify_sync_changelist.html"
     inlines = [ShopifyOrderPackageInline, ShopifyOrderItemInline]
+    list_per_page = 25
+    list_max_show_all = 25
     actions = [
         "recalculate_order_shipping_cost",
         "allocate_package_costs",
@@ -1187,6 +1214,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "mark_cost_confirmed",
         "withdraw_cost_confirmation",
         "mark_pending_payment",
+        "submit_payment",
         "mark_paid",
     ]
     list_display = (
@@ -1239,10 +1267,6 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 "fields": ("sticky_order_summary",),
                 "classes": ("shopify-sticky-order-summary",),
             },
-        ),
-        (
-            "审核操作",
-            {"fields": ("review_workflow_actions",)},
         ),
         (
             "订单信息",
@@ -1306,6 +1330,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             },
         ),
         ("时间戳", {"fields": ("synced_at", "updated_at")}),
+        (
+            "审核操作",
+            {"fields": ("review_workflow_actions",)},
+        ),
     )
 
     def get_queryset(self, request):
@@ -1359,6 +1387,35 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     def _redirect_to_change(self, obj):
         return HttpResponseRedirect(self._change_url(obj))
 
+    def _preserved_changelist_filters(self, request):
+        filters = request.GET.get("_changelist_filters") or request.POST.get("_changelist_filters")
+        if filters:
+            return filters
+        referer = request.META.get("HTTP_REFERER", "")
+        if referer:
+            query = parse_qs(urlparse(referer).query)
+            values = query.get("_changelist_filters")
+            if values:
+                return values[0]
+        return ""
+
+    def _review_action_url(self, request, admin_url_name, obj):
+        url = reverse(f"admin:{admin_url_name}", args=[obj.pk])
+        filters = self._preserved_changelist_filters(request)
+        if filters:
+            return f"{url}?{urlencode({'_changelist_filters': filters})}"
+        return url
+
+    def _changelist_url_with_filters(self, request):
+        url = reverse("admin:shopify_sync_shopifyorder_changelist")
+        filters = self._preserved_changelist_filters(request)
+        if filters:
+            return f"{url}?{filters}"
+        return url
+
+    def _redirect_after_successful_review(self, request):
+        return HttpResponseRedirect(self._changelist_url_with_filters(request))
+
     def warehouse_review_order(self, request, object_id):
         obj = self.get_object(request, object_id)
         if not obj:
@@ -1378,7 +1435,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return self._redirect_to_change(obj)
         ShopifyOrder.objects.filter(pk=obj.pk).update(settlement_status="cost_confirmed")
         self.message_user(request, "深圳仓已确认成本，订单已提交 Admin/Finance 审核。")
-        return self._redirect_to_change(obj)
+        return self._redirect_after_successful_review(request)
 
     def finance_review_order(self, request, object_id):
         obj = self.get_object(request, object_id)
@@ -1399,7 +1456,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return self._redirect_to_change(obj)
         ShopifyOrder.objects.filter(pk=obj.pk).update(settlement_status="pending_payment")
         self.message_user(request, "Admin/Finance 已确认成本，订单已进入待结算状态。")
-        return self._redirect_to_change(obj)
+        return self._redirect_after_successful_review(request)
 
     def withdraw_warehouse_review_order(self, request, object_id):
         obj = self.get_object(request, object_id)
@@ -1450,7 +1507,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 return format_html(
                     '<a href="{}" style="{}" onclick="return confirm(\'确认提交给 Admin/Finance 审核？\');">确认成本 / 提交 Admin-Finance 审核</a>'
                     '<br><span style="{}">当前状态：{}</span>',
-                    reverse("admin:shopify_sync_shopifyorder_warehouse_review", args=[obj.pk]),
+                    self._review_action_url(request, "shopify_sync_shopifyorder_warehouse_review", obj),
                     button_style,
                     muted_style,
                     status_label,
@@ -1460,7 +1517,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     '<span style="{}">深圳仓已确认，等待 Admin/Finance 审核。</span><br>'
                     '<a href="{}" style="{}background:#667085;" onclick="return confirm(\'撤回后订单会回到待深圳仓确认，确定继续？\');">撤回确认 / 返回修改成本</a>',
                     muted_style,
-                    reverse("admin:shopify_sync_shopifyorder_withdraw_warehouse_review", args=[obj.pk]),
+                    self._review_action_url(request, "shopify_sync_shopifyorder_withdraw_warehouse_review", obj),
                     button_style,
                 )
             return format_html('<span style="{}">当前状态：{}</span>', muted_style, status_label)
@@ -1485,7 +1542,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 return format_html(
                     '<a href="{}" style="{}" onclick="return confirm(\'确认 Admin/Finance 审核，并进入待结算状态？\');">Admin/Finance 确认成本 / 进入待结算</a>'
                     '<br><span style="{}">深圳仓已确认成本。</span>',
-                    reverse("admin:shopify_sync_shopifyorder_finance_review", args=[obj.pk]),
+                    self._review_action_url(request, "shopify_sync_shopifyorder_finance_review", obj),
                     button_style,
                     muted_style,
                 )
@@ -1739,10 +1796,6 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     },
                 ),
                 (
-                    "审核操作",
-                    {"fields": ("review_workflow_actions",)},
-                ),
-                (
                     "深圳仓订单信息",
                     {
                         "fields": (
@@ -1772,6 +1825,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     },
                 ),
                 ("时间戳", {"fields": ("synced_at", "updated_at", "last_order_synced_at")} ),
+                (
+                    "审核操作",
+                    {"fields": ("review_workflow_actions",)},
+                ),
             )
         return super().get_fieldsets(request, obj)
 
@@ -1889,11 +1946,11 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     def get_actions(self, request):
         actions = super().get_actions(request)
         if self.is_shenzhen_user(request):
-            for action_name in ["add_to_settlement_batch", "mark_pending_payment", "mark_paid"]:
+            for action_name in ["add_to_settlement_batch", "mark_pending_payment", "submit_payment"]:
                 if action_name in actions:
                     del actions[action_name]
         else:
-            for action_name in ["mark_cost_confirmed", "withdraw_cost_confirmation"]:
+            for action_name in ["mark_cost_confirmed", "withdraw_cost_confirmation", "mark_paid"]:
                 if action_name in actions:
                     del actions[action_name]
         return actions
@@ -2138,18 +2195,79 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
 
     mark_pending_payment.short_description = "Admin/Finance 审核订单 / 进入待结算"
 
-    def mark_paid(self, request, queryset):
+    def submit_payment(self, request, queryset):
         if not (self.is_super_admin(request) or self.is_finance_user(request)):
-            self.message_user(request, "只有 Finance 或超级管理员可以执行此操作。")
+            self.message_user(request, "只有 Finance 或超级管理员可以提交支付。", level=messages.WARNING)
             return
-        valid_orders = queryset.filter(settlement_status="pending_payment")
-        updated = valid_orders.update(settlement_status="paid")
-        if updated != queryset.count():
-            self.message_user(request, f"只有 {updated} 个订单可以标记为 paid（必须是 pending_payment 状态）。")
-        else:
-            self.message_user(request, f"成功标记 {updated} 个订单为 paid。")
 
-    mark_paid.short_description = "标记已支付"
+        eligible_orders = queryset.filter(
+            settlement_status="pending_payment",
+            settlement_batch__isnull=False,
+        )
+        skipped = queryset.count() - eligible_orders.count()
+        order_ids = list(eligible_orders.values_list("pk", flat=True))
+        updated = ShopifyOrder.objects.filter(pk__in=order_ids).update(settlement_status="payment_submitted")
+        now = timezone.now()
+        touched_batches = SettlementBatch.objects.filter(orders__pk__in=order_ids).distinct()
+        batch_updated = 0
+        for batch in touched_batches:
+            if not batch.orders.exclude(settlement_status__in=["payment_submitted", "paid"]).exists():
+                batch.status = "payment_submitted"
+                batch.payment_submitted_at = now
+                batch.payment_submitted_by = request.user.get_username()
+                batch.save(update_fields=["status", "payment_submitted_at", "payment_submitted_by"])
+                batch_updated += 1
+
+        if updated:
+            self.message_user(
+                request,
+                f"已提交支付 {updated} 个订单，状态已进入“已提交支付，待深圳仓确认收款”。"
+                f" 同步更新 {batch_updated} 个结算批次。",
+            )
+        if skipped:
+            self.message_user(
+                request,
+                f"有 {skipped} 个订单未提交支付：必须是待支付状态，并且已加入结算批次。",
+                level=messages.WARNING,
+            )
+
+    submit_payment.short_description = "提交支付 / 等待深圳仓确认收款"
+
+    def mark_paid(self, request, queryset):
+        if not self.is_shenzhen_user(request):
+            self.message_user(request, "只有 Shenzhen Warehouse 可以确认收款并标记已支付。", level=messages.WARNING)
+            return
+
+        eligible_orders = queryset.filter(settlement_status="payment_submitted")
+        paid_order_ids = []
+        skipped_missing_proof = 0
+        skipped_invalid = queryset.count() - eligible_orders.count()
+        for order in eligible_orders.select_related("settlement_batch"):
+            if not order.settlement_batch_id or not order.settlement_batch.payment_proof:
+                skipped_missing_proof += 1
+                continue
+            paid_order_ids.append(order.pk)
+
+        updated = ShopifyOrder.objects.filter(pk__in=paid_order_ids).update(settlement_status="paid")
+        touched_batches = SettlementBatch.objects.filter(orders__pk__in=paid_order_ids).distinct()
+        batch_updated = 0
+        for batch in touched_batches:
+            if not batch.orders.exclude(settlement_status="paid").exists():
+                batch.status = "paid"
+                batch.paid_at = timezone.now()
+                batch.save(update_fields=["status", "paid_at"])
+                batch_updated += 1
+
+        if updated:
+            self.message_user(request, f"深圳仓已确认收到款，{updated} 个订单已标记为已支付。同步更新 {batch_updated} 个结算批次。")
+        else:
+            self.message_user(request, "没有订单被标记为已支付。", level=messages.WARNING)
+        if skipped_missing_proof:
+            self.message_user(request, f"有 {skipped_missing_proof} 个订单未标记：结算批次缺少付款凭证。", level=messages.WARNING)
+        if skipped_invalid:
+            self.message_user(request, f"有 {skipped_invalid} 个订单未标记：必须先处于“已提交支付，待深圳仓确认收款”状态。", level=messages.WARNING)
+
+    mark_paid.short_description = "深圳仓确认收款 / 标记已支付"
 
     def add_to_settlement_batch(self, request, queryset):
         if not (self.is_finance_user(request) or self.is_super_admin(request)):
@@ -2220,36 +2338,117 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "batch_no",
         "status",
         "total_amount_rmb",
+        "payment_proof_link",
+        "payment_submitted_at",
         "created_by",
         "created_at",
         "paid_at",
     )
-    readonly_fields = ("created_at", "paid_at")
-    actions = ["mark_batch_paid", "export_batch_csv"]
+    fields = (
+        "batch_no",
+        "status",
+        "total_amount_rmb",
+        "created_by",
+        "created_at",
+        "payment_proof",
+        "payment_proof_link",
+        "payment_submitted_at",
+        "payment_submitted_by",
+        "paid_at",
+        "note",
+    )
+    readonly_fields = (
+        "status",
+        "total_amount_rmb",
+        "created_by",
+        "created_at",
+        "payment_proof_link",
+        "payment_submitted_at",
+        "payment_submitted_by",
+        "paid_at",
+    )
+    actions = ["submit_batch_payment", "mark_batch_paid", "export_batch_csv"]
     search_fields = ("batch_no", "created_by", "note")
     list_filter = ("status", "created_at")
 
     def get_actions(self, request):
         actions = super().get_actions(request)
         if self.is_shenzhen_user(request):
-            for action_name in ["mark_batch_paid", "export_batch_csv"]:
+            for action_name in ["submit_batch_payment", "export_batch_csv"]:
                 if action_name in actions:
                     del actions[action_name]
+        else:
+            if "mark_batch_paid" in actions:
+                del actions["mark_batch_paid"]
         return actions
 
-    def mark_batch_paid(self, request, queryset):
+    def has_view_permission(self, request, obj=None):
+        return self.is_role_allowed(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self.is_role_allowed(request)
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(self.readonly_fields)
+        if self.is_shenzhen_user(request):
+            readonly.extend(field.name for field in self.model._meta.fields)
+        return tuple(dict.fromkeys(readonly))
+
+    def payment_proof_link(self, obj):
+        if not obj or not obj.payment_proof:
+            return "-"
+        return format_html('<a href="{}" target="_blank">查看付款凭证</a>', obj.payment_proof.url)
+    payment_proof_link.short_description = "付款凭证"
+
+    def submit_batch_payment(self, request, queryset):
         if not (self.is_super_admin(request) or self.is_finance_user(request)):
-            self.message_user(request, "只有 Finance 或超级管理员可以执行此操作。")
+            self.message_user(request, "只有 Finance 或超级管理员可以提交支付。", level=messages.WARNING)
             return
         updated = 0
+        skipped = 0
+        now = timezone.now()
         for batch in queryset:
+            if batch.status != "pending_payment":
+                skipped += 1
+                continue
+            batch.status = "payment_submitted"
+            batch.payment_submitted_at = now
+            batch.payment_submitted_by = request.user.get_username()
+            batch.save(update_fields=["status", "payment_submitted_at", "payment_submitted_by"])
+            batch.orders.filter(settlement_status="pending_payment").update(settlement_status="payment_submitted")
+            updated += 1
+        if updated:
+            self.message_user(request, f"已提交支付 {updated} 个结算批次，相关订单进入“已提交支付，待深圳仓确认收款”。")
+        if skipped:
+            self.message_user(request, f"有 {skipped} 个结算批次未提交支付：必须是待支付状态。", level=messages.WARNING)
+    submit_batch_payment.short_description = "提交支付 / 等待深圳仓确认收款"
+
+    def mark_batch_paid(self, request, queryset):
+        if not self.is_shenzhen_user(request):
+            self.message_user(request, "只有 Shenzhen Warehouse 可以确认收款。", level=messages.WARNING)
+            return
+        updated = 0
+        skipped_status = 0
+        skipped_missing_proof = 0
+        for batch in queryset:
+            if batch.status != "payment_submitted":
+                skipped_status += 1
+                continue
+            if not batch.payment_proof:
+                skipped_missing_proof += 1
+                continue
             batch.status = "paid"
             batch.paid_at = timezone.now()
             batch.save(update_fields=["status", "paid_at"])
-            batch.orders.update(settlement_status="paid")
+            batch.orders.filter(settlement_status="payment_submitted").update(settlement_status="paid")
             updated += 1
-        self.message_user(request, f"已标记 {updated} 个结算批次为已支付。")
-    mark_batch_paid.short_description = "标记结算批次已支付"
+        if updated:
+            self.message_user(request, f"深圳仓已确认收款，{updated} 个结算批次和对应订单已标记为已支付。")
+        if skipped_status:
+            self.message_user(request, f"有 {skipped_status} 个结算批次未确认：必须先提交支付。", level=messages.WARNING)
+        if skipped_missing_proof:
+            self.message_user(request, f"有 {skipped_missing_proof} 个结算批次未确认：缺少付款凭证。", level=messages.WARNING)
+    mark_batch_paid.short_description = "深圳仓确认收款 / 标记已支付"
 
     def export_batch_csv(self, request, queryset):
         incomplete_orders = [

@@ -505,7 +505,7 @@ def _process_shenzhen_order(
     )
 
     if not created:
-        protected_statuses = ["admin_confirmed", "pending_payment", "paid"]
+        protected_statuses = ["admin_confirmed", "pending_payment", "payment_submitted", "paid"]
         update_fields = {
             "current_location_raw": current_location_raw,
             "current_location": current_location_normalized,
@@ -857,7 +857,7 @@ def _process_shenzhen_order_items(order_obj, order_items):
             created_count += 1
         else:
             _update_order_item_match_note_if_empty(item_obj, match_note)
-            protected_statuses = ["cost_confirmed", "admin_confirmed", "pending_payment", "paid"]
+            protected_statuses = ["cost_confirmed", "admin_confirmed", "pending_payment", "payment_submitted", "paid"]
             update_fields = {
                 "shopify_product_id": shopify_product_id,
                 "shopify_variant_id": shopify_variant_id,

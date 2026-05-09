@@ -21,6 +21,7 @@ class ShopifyOrder(models.Model):
         ('cost_confirmed', '深圳仓已确认成本'),
         ('admin_confirmed', 'admin已确认'),
         ('pending_payment', '待支付'),
+        ('payment_submitted', '已提交支付，待深圳仓确认收款'),
         ('paid', '已支付'),
         ('transferred', '已转其他仓'),
         ('cancelled', '已取消深圳仓履约'),
@@ -539,6 +540,7 @@ class SettlementBatch(models.Model):
     STATUS_CHOICES = [
         ('draft', '草稿'),
         ('pending_payment', '待支付'),
+        ('payment_submitted', '已提交支付，待深圳仓确认收款'),
         ('paid', '已支付'),
         ('cancelled', '已取消'),
     ]
@@ -559,6 +561,17 @@ class SettlementBatch(models.Model):
         help_text="创建人"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    payment_proof = models.FileField(
+        upload_to="settlement_payment_proofs/",
+        blank=True,
+        null=True,
+        help_text="付款凭证"
+    )
+    payment_submitted_at = models.DateTimeField(blank=True, null=True, help_text="提交支付时间")
+    payment_submitted_by = models.CharField(
+        max_length=255, blank=True, null=True,
+        help_text="提交支付人"
+    )
     paid_at = models.DateTimeField(blank=True, null=True, help_text="支付时间")
     note = models.TextField(blank=True, null=True, help_text="批次备注")
 
