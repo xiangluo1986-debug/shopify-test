@@ -1,5 +1,6 @@
 import csv
 import re
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -1341,6 +1342,106 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if self.is_shenzhen_user(request):
             return queryset.filter(models.Q(is_shenzhen_order=True) | models.Q(current_location="shenzhen"))
         return queryset
+
+    def _stats_date_range(self, start_date, end_date):
+        current_tz = timezone.get_current_timezone()
+        start_dt = timezone.make_aware(datetime.combine(start_date, time.min), current_tz)
+        end_dt = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), time.min), current_tz)
+        return start_dt, end_dt
+
+    def _pending_payment_stats_row(self, queryset, label, start_date, end_date, include_profit=False):
+        start_dt, end_dt = self._stats_date_range(start_date, end_date)
+        orders = list(queryset.filter(
+            order_created_at__gte=start_dt,
+            order_created_at__lt=end_dt,
+        ))
+        total = sum((order_package_cost_totals(order)["total_cost"] for order in orders), ZERO)
+        row = {
+            "label": label,
+            "date_range": f"{start_date:%Y-%m-%d} 至 {end_date:%Y-%m-%d}",
+            "count": len(orders),
+            "total": money(total),
+        }
+        if include_profit:
+            profit_aud = ZERO
+            net_revenue_aud = ZERO
+            profit_error = ""
+            for order in orders:
+                profit_totals = order_profit_totals(order)
+                if profit_totals["profit_aud"] is None:
+                    profit_error = profit_totals["rate_error"] or "无法计算利润。"
+                    continue
+                profit_aud += profit_totals["profit_aud"]
+                net_revenue_aud += profit_totals["net_revenue_aud"]
+            profit_rate = None
+            if net_revenue_aud:
+                profit_rate = (profit_aud / net_revenue_aud * Decimal("100")).quantize(Decimal("0.01"))
+            row.update({
+                "profit_aud": money(profit_aud),
+                "profit_rate": profit_rate,
+                "profit_error": profit_error,
+            })
+        return row
+
+    def _parse_stats_date(self, value):
+        try:
+            return datetime.strptime(value or "", "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    def _pending_payment_stats_context(self, request):
+        today = timezone.localdate()
+        pending_queryset = self.get_queryset(request).filter(settlement_status="pending_payment")
+        include_profit = self.is_finance_user(request) or self.is_super_admin(request)
+        rows = [
+            self._pending_payment_stats_row(pending_queryset, "今天", today, today, include_profit),
+            self._pending_payment_stats_row(pending_queryset, "昨天", today - timedelta(days=1), today - timedelta(days=1), include_profit),
+            self._pending_payment_stats_row(pending_queryset, "近 7 天", today - timedelta(days=6), today, include_profit),
+            self._pending_payment_stats_row(pending_queryset, "近 30 天", today - timedelta(days=29), today, include_profit),
+        ]
+
+        custom_start_value = request.GET.get("pending_stats_start", "")
+        custom_end_value = request.GET.get("pending_stats_end", "")
+        custom_start = self._parse_stats_date(custom_start_value)
+        custom_end = self._parse_stats_date(custom_end_value)
+        custom_error = ""
+        custom_row = None
+        if custom_start_value or custom_end_value:
+            if not custom_start or not custom_end:
+                custom_error = "请选择有效的开始日期和结束日期。"
+            elif custom_start > custom_end:
+                custom_error = "开始日期不能晚于结束日期。"
+            else:
+                custom_row = self._pending_payment_stats_row(
+                    pending_queryset,
+                    "自定义",
+                    custom_start,
+                    custom_end,
+                    include_profit,
+                )
+
+        return {
+            "rows": rows,
+            "custom_row": custom_row,
+            "custom_error": custom_error,
+            "custom_start": custom_start_value,
+            "custom_end": custom_end_value,
+            "show_profit": include_profit,
+        }
+
+    def changelist_view(self, request, extra_context=None):
+        original_get = request.GET
+        stats_context = self._pending_payment_stats_context(request)
+        cleaned_get = original_get.copy()
+        cleaned_get.pop("pending_stats_start", None)
+        cleaned_get.pop("pending_stats_end", None)
+        request.GET = cleaned_get
+        try:
+            extra_context = extra_context or {}
+            extra_context["pending_payment_stats"] = stats_context
+            return super().changelist_view(request, extra_context=extra_context)
+        finally:
+            request.GET = original_get
 
     def get_list_display(self, request):
         if self.is_shenzhen_user(request):

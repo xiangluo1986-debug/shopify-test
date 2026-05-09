@@ -6,3 +6,60 @@
         <a href="{% url 'shopify_sync_dashboard' %}" class="addlink">Shopify Sync Dashboard</a>
     </li>
 {% endblock %}
+
+{% block content %}
+    {% if pending_payment_stats %}
+        <div class="module" style="margin: 0 0 16px 0; padding: 12px 14px; border-radius: 6px; border: 1px solid #d0d5dd; background: #f8fafc;">
+            <h2 style="margin: 0 0 10px 0; font-size: 15px; color: #101828;">待支付订单结算金额统计</h2>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+                {% for row in pending_payment_stats.rows %}
+                    <div style="min-width: 150px; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 6px; background: #ffffff;">
+                        <div style="font-weight: 700; color: #344054;">{{ row.label }}</div>
+                        <div style="font-size: 12px; color: #667085;">{{ row.date_range }}</div>
+                        <div style="margin-top: 6px; color: #101828;">订单数：{{ row.count }}</div>
+                        <div style="font-weight: 700; color: #0b5cab;">{{ row.total }} RMB</div>
+                        {% if pending_payment_stats.show_profit %}
+                            {% if row.profit_error %}
+                                <div style="margin-top: 4px; color: #b42318; font-size: 12px;">利润：无法计算</div>
+                            {% else %}
+                                <div style="margin-top: 4px; color: #0a7f32;">利润：{{ row.profit_aud }} AUD</div>
+                                <div style="color: #0a7f32;">利润率：{{ row.profit_rate|default:"-" }}%</div>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                {% endfor %}
+                {% if pending_payment_stats.custom_row %}
+                    <div style="min-width: 170px; padding: 10px 12px; border: 1px solid #84c5f4; border-radius: 6px; background: #eff8ff;">
+                        <div style="font-weight: 700; color: #175cd3;">{{ pending_payment_stats.custom_row.label }}</div>
+                        <div style="font-size: 12px; color: #667085;">{{ pending_payment_stats.custom_row.date_range }}</div>
+                        <div style="margin-top: 6px; color: #101828;">订单数：{{ pending_payment_stats.custom_row.count }}</div>
+                        <div style="font-weight: 700; color: #0b5cab;">{{ pending_payment_stats.custom_row.total }} RMB</div>
+                        {% if pending_payment_stats.show_profit %}
+                            {% if pending_payment_stats.custom_row.profit_error %}
+                                <div style="margin-top: 4px; color: #b42318; font-size: 12px;">利润：无法计算</div>
+                            {% else %}
+                                <div style="margin-top: 4px; color: #0a7f32;">利润：{{ pending_payment_stats.custom_row.profit_aud }} AUD</div>
+                                <div style="color: #0a7f32;">利润率：{{ pending_payment_stats.custom_row.profit_rate|default:"-" }}%</div>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+            <form method="get" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                <label style="color: #344054;">自定义日期：</label>
+                <input type="date" name="pending_stats_start" value="{{ pending_payment_stats.custom_start }}" style="height: 30px;">
+                <span style="color: #667085;">至</span>
+                <input type="date" name="pending_stats_end" value="{{ pending_payment_stats.custom_end }}" style="height: 30px;">
+                <button type="submit" class="button">统计</button>
+                <span style="color: #667085;">只统计状态为“待支付”的订单，日期按 Shopify 订单创建时间，金额按当前 package / 商品行结算公式即时计算。</span>
+                {% if pending_payment_stats.show_profit %}
+                    <span style="color: #667085;">利润仅 Admin / Finance 可见，按订单详情页利润公式统计。</span>
+                {% endif %}
+            </form>
+            {% if pending_payment_stats.custom_error %}
+                <div style="margin-top: 8px; color: #b42318; font-weight: 600;">{{ pending_payment_stats.custom_error }}</div>
+            {% endif %}
+        </div>
+    {% endif %}
+    {{ block.super }}
+{% endblock %}
