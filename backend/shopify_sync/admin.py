@@ -83,6 +83,11 @@ COUNTRY_NAME_ZH = {
 }
 PAYMENT_FEE_RATE = Decimal("0.02")
 DEFAULT_SMALL_LINK_AUD_COST = Decimal("1.60")
+LOW_PROFIT_WARNING_RATE = Decimal("35.00")
+PROFIT_TARGET_RATES = (
+    ("35%", Decimal("0.35")),
+    ("40%", Decimal("0.40")),
+)
 PRODUCT_FALLBACK_FIELDS = {
     "locked_product_cost_rmb": "product_cost_rmb",
     "weight_kg": "weight_kg",
@@ -322,6 +327,69 @@ def order_profit_totals(order):
         "rate_date": rate_info.get("date", ""),
         "rate_error": "",
     }
+
+
+def profit_revenue_suggestions(totals):
+    cost_aud = totals.get("cost_aud")
+    if cost_aud is None:
+        return []
+
+    fixed_cost_aud = money(cost_aud + totals.get("ordering_note_cost_aud", ZERO))
+    if fixed_cost_aud <= 0:
+        return []
+
+    current_revenue_aud = money(totals.get("revenue_aud", ZERO))
+    suggestions = []
+    for label, target_rate in PROFIT_TARGET_RATES:
+        required_net_revenue = fixed_cost_aud / (Decimal("1.00") - target_rate)
+        required_revenue = money(required_net_revenue / (Decimal("1.00") - PAYMENT_FEE_RATE))
+        increase_aud = money(required_revenue - current_revenue_aud)
+        if increase_aud < 0:
+            increase_aud = ZERO
+        suggestions.append(
+            {
+                "label": label,
+                "target_revenue_aud": required_revenue,
+                "increase_aud": increase_aud,
+            }
+        )
+    return suggestions
+
+
+def low_profit_warning_html(totals, compact=False):
+    profit_rate = totals.get("profit_rate")
+    if profit_rate is None or profit_rate >= LOW_PROFIT_WARNING_RATE:
+        return ""
+
+    suggestions = profit_revenue_suggestions(totals)
+    if not suggestions:
+        return ""
+
+    if compact:
+        return format_html(
+            '<span style="color:#b42318;font-weight:600;">利润率 {}% &lt; 35%</span><br>'
+            '<span style="color:#667085;">35%: {} AUD</span><br>'
+            '<span style="color:#667085;">40%: {} AUD</span>',
+            profit_rate,
+            suggestions[0]["target_revenue_aud"],
+            suggestions[1]["target_revenue_aud"],
+        )
+
+    return format_html(
+        '<div style="margin-top:10px;padding:9px 10px;border:1px solid #fecdca;'
+        'background:#fffbfa;color:#7a271a;border-radius:4px;">'
+        '<strong>利润率低于 35%，建议调整本单深圳仓收款金额：</strong><br>'
+        '当前深圳仓收入：{} AUD，当前利润率：{}%<br>'
+        '若目标利润率 35%，建议提高到 {} AUD（约增加 {} AUD）<br>'
+        '若目标利润率 40%，建议提高到 {} AUD（约增加 {} AUD）'
+        '</div>',
+        totals["revenue_aud"],
+        profit_rate,
+        suggestions[0]["target_revenue_aud"],
+        suggestions[0]["increase_aud"],
+        suggestions[1]["target_revenue_aud"],
+        suggestions[1]["increase_aud"],
+    )
 
 
 def shenzhen_order_items(order):
@@ -1229,6 +1297,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "items_count",
         "settlement_total_cost_display",
         "profit_aud_display",
+        "profit_margin_alert_display",
         "is_cost_completed",
         "missing_product_data",
         "order_created_at",
@@ -1709,6 +1778,17 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             totals["profit_rate"] if totals["profit_rate"] is not None else "-",
         )
 
+    @admin.display(description="利润提醒")
+    def profit_margin_alert_display(self, obj):
+        if not self.is_cost_completed(obj):
+            return "-"
+        if (obj.currency or "AUD").upper() != "AUD":
+            return "-"
+        totals = order_profit_totals(obj)
+        if totals["profit_aud"] is None:
+            return "-"
+        return low_profit_warning_html(totals, compact=True) or "-"
+
     def is_cost_completed(self, obj):
         return shenzhen_item_costs_completed(obj)
     is_cost_completed.short_description = "Cost Completed"
@@ -1721,10 +1801,19 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         cost_completed = shenzhen_item_costs_completed(obj)
         total_cost = f'{totals["total_cost"]} RMB' if cost_completed else "未完成"
         profit_html = ""
+        profit_warning_html = ""
         if not self.is_shenzhen_user(getattr(self, "_current_request", None)):
             if cost_completed and (obj.currency or "AUD").upper() == "AUD":
                 profit_totals = order_profit_totals(obj)
                 if profit_totals["profit_aud"] is not None:
+                    suggestions = profit_revenue_suggestions(profit_totals)
+                    if profit_totals["profit_rate"] is not None and profit_totals["profit_rate"] < LOW_PROFIT_WARNING_RATE and suggestions:
+                        profit_warning_html = format_html(
+                            '<span style="border-color:#fecdca;background:#fffbfa;color:#b42318;">'
+                            "<strong>利润提醒:</strong> 35%: {} AUD / 40%: {} AUD</span>",
+                            suggestions[0]["target_revenue_aud"],
+                            suggestions[1]["target_revenue_aud"],
+                        )
                     profit_html = format_html(
                         "<span><strong>利润:</strong> {} AUD</span>"
                         "<span><strong>利润率:</strong> {}%</span>",
@@ -1757,6 +1846,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             "<span><strong>深圳仓产品行:</strong> {}</span>"
             "<span><strong>结算总成本:</strong> {}</span>"
             "{}"
+            "{}"
             "<span><strong>Tracking:</strong> {}</span>"
             "</div>",
             obj.order_name or obj.order_number or obj.pk,
@@ -1766,6 +1856,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             totals["items_count"],
             total_cost,
             profit_html,
+            profit_warning_html,
             obj.tracking_number or "-",
         )
     sticky_order_summary.short_description = "当前订单"
@@ -1823,6 +1914,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 totals["rate_error"] or "-",
             )
         color = "#0a7f32" if totals["profit_aud"] >= 0 else "#b42318"
+        low_profit_warning = low_profit_warning_html(totals)
         return format_html(
             "<div>"
             "深圳仓商品行收入合计：{} AUD<br>"
@@ -1834,6 +1926,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             "实时汇率：1 AUD = {} RMB{}<br>"
             '<strong style="color:{};">利润：{} AUD</strong><br>'
             '<strong style="color:{};">利润率：{}%</strong>'
+            "{}"
             "</div>",
             totals["shenzhen_items_revenue_aud"],
             totals["shenzhen_order_extra_aud"],
@@ -1848,6 +1941,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             totals["profit_aud"],
             color,
             totals["profit_rate"] if totals["profit_rate"] is not None else "-",
+            low_profit_warning,
         )
     profit_summary_for_finance.short_description = "利润统计（Admin/Finance）"
 

@@ -1,5 +1,9 @@
 import json
+import hmac
 import os
+import re
+import secrets
+import hashlib
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -28,12 +32,113 @@ from .sync_helpers import (
 )
 
 
+SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_states"
+SHOPIFY_SHOP_DOMAIN_RE = re.compile(
+    r"^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$"
+)
+
+
 def _shopify_configured():
     return bool(
         os.getenv("SHOPIFY_CLIENT_ID")
         and os.getenv("SHOPIFY_CLIENT_SECRET")
         and os.getenv("SHOPIFY_SCOPES")
         and os.getenv("SHOPIFY_REDIRECT_URI")
+    )
+
+
+def _normalize_shop_domain(shop):
+    shop = (shop or "").strip().lower()
+    if not SHOPIFY_SHOP_DOMAIN_RE.fullmatch(shop):
+        return ""
+    return shop
+
+
+def _hmac_digest(message, client_secret):
+    return hmac.new(
+        client_secret.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _verify_shopify_hmac(query_params, raw_query_string=""):
+    provided_hmac = query_params.get("hmac", "")
+    client_secret = os.getenv("SHOPIFY_CLIENT_SECRET", "")
+    if not provided_hmac or not client_secret:
+        return False
+
+    decoded_params = []
+    for key in sorted(query_params.keys()):
+        if key in {"hmac", "signature"}:
+            continue
+        for value in query_params.getlist(key):
+            decoded_params.append((key, value))
+
+    messages = [
+        "&".join(f"{key}={value}" for key, value in decoded_params),
+        urllib.parse.urlencode(decoded_params, doseq=True, safe=":/"),
+    ]
+
+    if raw_query_string:
+        raw_params = urllib.parse.parse_qsl(raw_query_string, keep_blank_values=True)
+        raw_params = [
+            (key, value)
+            for key, value in raw_params
+            if key not in {"hmac", "signature"}
+        ]
+        raw_params.sort(key=lambda item: item[0])
+        messages.extend(
+            [
+                "&".join(f"{key}={value}" for key, value in raw_params),
+                urllib.parse.urlencode(raw_params, doseq=True, safe=":/"),
+            ]
+        )
+
+    for message in dict.fromkeys(messages):
+        digest = _hmac_digest(message, client_secret)
+        if hmac.compare_digest(digest, provided_hmac):
+            return True
+
+    print(
+        "[SHOPIFY OAUTH] HMAC verification failed. "
+        f"shop={query_params.get('shop', '')} "
+        f"timestamp={query_params.get('timestamp', '')} "
+        f"secret_configured={bool(client_secret)} "
+        f"candidate_count={len(dict.fromkeys(messages))}"
+    )
+    return False
+
+
+def _save_oauth_state(request, shop):
+    state = secrets.token_urlsafe(32)
+    states = request.session.get(SHOPIFY_OAUTH_STATE_SESSION_KEY, {})
+    states[shop] = state
+    request.session[SHOPIFY_OAUTH_STATE_SESSION_KEY] = states
+    request.session.modified = True
+    return state
+
+
+def _pop_oauth_state(request, shop):
+    states = request.session.get(SHOPIFY_OAUTH_STATE_SESSION_KEY, {})
+    expected_state = states.pop(shop, "")
+    request.session[SHOPIFY_OAUTH_STATE_SESSION_KEY] = states
+    request.session.modified = True
+    return expected_state
+
+
+def _fetch_official_access_scopes(shop, access_token):
+    scopes_url = f"https://{shop}/admin/oauth/access_scopes.json"
+    request_obj = urllib.request.Request(
+        scopes_url,
+        headers={"X-Shopify-Access-Token": access_token},
+    )
+    response = urllib.request.urlopen(request_obj, timeout=10)
+    data = json.loads(response.read().decode("utf-8"))
+    return ",".join(
+        scope.get("handle", "")
+        for scope in data.get("access_scopes", [])
+        if scope.get("handle")
     )
 
 
@@ -91,9 +196,9 @@ def install(request):
     if not request.user.is_superuser:
         return HttpResponseForbidden("Only superusers can install Shopify apps.")
 
-    shop = request.GET.get("shop")
+    shop = _normalize_shop_domain(request.GET.get("shop"))
     if not shop:
-        return HttpResponseBadRequest("Missing shop parameter.")
+        return HttpResponseBadRequest("Missing or invalid shop parameter.")
 
     client_id = os.getenv("SHOPIFY_CLIENT_ID", "")
     scopes = os.getenv("SHOPIFY_SCOPES", "")
@@ -105,20 +210,36 @@ def install(request):
         "client_id": client_id,
         "scope": scopes,
         "redirect_uri": redirect_uri,
-        "state": "shopify_sync_install",
+        "state": _save_oauth_state(request, shop),
     }
     install_url = f"https://{shop}/admin/oauth/authorize?{urllib.parse.urlencode(params)}"
+    print(
+        "[SHOPIFY OAUTH] Install authorization URL generated "
+        f"shop={shop} scopes={scopes} "
+        f"contains_read_translations={'read_translations' in scopes.split(',')}"
+    )
     return HttpResponseRedirect(install_url)
 
 
 def callback(request):
-    shop = request.GET.get("shop")
+    shop = _normalize_shop_domain(request.GET.get("shop"))
     code = request.GET.get("code")
+    state = request.GET.get("state", "")
     if not shop or not code:
-        return HttpResponseBadRequest("Missing shop or code.")
+        return HttpResponseBadRequest("Missing or invalid shop/code.")
 
     if not _shopify_configured():
         return HttpResponseServerError("Shopify OAuth is not configured.")
+
+    hmac_valid = _verify_shopify_hmac(request.GET, request.META.get("QUERY_STRING", ""))
+    expected_state = _pop_oauth_state(request, shop)
+    if not expected_state or not hmac.compare_digest(expected_state, state):
+        return HttpResponseForbidden("Invalid Shopify OAuth state.")
+    if not hmac_valid:
+        print(
+            "[SHOPIFY OAUTH] Continuing callback after valid state despite "
+            "HMAC mismatch. Check SHOPIFY_CLIENT_SECRET if token exchange fails."
+        )
 
     token_url = f"https://{shop}/admin/oauth/access_token"
     payload = urllib.parse.urlencode(
@@ -147,10 +268,24 @@ def callback(request):
     if not access_token:
         return HttpResponseServerError("Failed to obtain Shopify access token.")
 
+    token_exchange_scope = scope
+    try:
+        official_scope = _fetch_official_access_scopes(shop, access_token)
+        if official_scope:
+            scope = official_scope
+    except (HTTPError, URLError, ValueError, json.JSONDecodeError) as exc:
+        print(f"[CALLBACK] Failed to fetch official access scopes: {exc}")
+
     # Debug: Print token info
     token_preview = f"{access_token[:5]}...{access_token[-5:]}"
     print(f"[CALLBACK] OAuth callback received for shop: {shop}")
     print(f"[CALLBACK] New access_token (preview): {token_preview}")
+    print(f"[CALLBACK] Token exchange scope: {token_exchange_scope}")
+    print(f"[CALLBACK] Stored official scope: {scope}")
+    print(
+        "[CALLBACK] Stored official scope contains read_translations: "
+        f"{'read_translations' in scope.split(',')}"
+    )
 
     # Update or create
     obj, created = ShopifyInstallation.objects.update_or_create(

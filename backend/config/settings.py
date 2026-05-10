@@ -140,4 +140,5 @@ MEDIA_ROOT = os.getenv("MEDIA_ROOT", str(BASE_DIR / "media"))
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 ADMIN_SITE_HEADER = "kidstoylover"
 ADMIN_SITE_TITLE = "kidstoylover Admin"
+LOGIN_URL = "/admin/login/"
 ADMIN_INDEX_TITLE = "kidstoylover 后台管理"

@@ -21,6 +21,7 @@
 - 结算批次新增付款凭证上传字段，深圳仓确认收款时会要求对应结算批次已有付款凭证。
 - Shopify Orders 列表页待支付订单结算金额统计改为按当前 package / 商品行结算公式即时计算，并新增“昨天”统计。
 - Shopify Orders 待支付统计为 Admin / Finance 增加利润 AUD 和利润率汇总，Shenzhen Warehouse 不显示利润数据。
+- Admin / Finance 可看到深圳仓订单低利润率提醒；当利润率低于 35% 时，系统提示本单深圳仓收款金额提高到多少 AUD 可达到 35% 和 40% 利润率，Shenzhen Warehouse 不显示该提醒。
 - 利润统计汇率改为 Admin / Finance 手动维护的 AUD/CNY 汇率，不再依赖外部汇率接口；Shenzhen Warehouse 看不到汇率维护页面和利润数据。
 - Shopify 订单详情页新增跟随滚动的当前订单摘要栏，滚动到商品行底部时仍可看到订单号、客户、国家、状态、深圳仓产品行数、结算总成本和 tracking number。
 - 当前订单摘要栏改为浅蓝底、深色文字和蓝色边框，提升滚动时的可读性。
