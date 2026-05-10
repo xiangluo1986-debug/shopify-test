@@ -53,6 +53,7 @@ class ShopifyOrder(models.Model):
     
     # Order details
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    total_tip_received = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     currency = models.CharField(max_length=3, default="USD")
     order_created_at = models.DateTimeField()
     shopify_note = models.TextField(blank=True, null=True)

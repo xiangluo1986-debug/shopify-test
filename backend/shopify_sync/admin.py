@@ -267,19 +267,24 @@ def get_aud_to_rmb_rate():
 
 
 def order_profit_totals(order):
-    items = list(shenzhen_order_items(order))
+    all_order_items = list(order.order_items.all())
+    items = [item for item in all_order_items if item.fulfillment_location == SHENZHEN_ITEM_LOCATION]
     shenzhen_items_revenue_aud = sum((money(item.price) * item.quantity for item in items), ZERO)
-    all_items_revenue_aud = sum(
-        (money(item.price) * item.quantity for item in order.order_items.all()),
-        ZERO,
-    )
+    all_items_revenue_aud = sum((money(item.price) * item.quantity for item in all_order_items), ZERO)
     order_total_aud = money(order.total_price)
+    tip_revenue_aud = money(getattr(order, "total_tip_received", ZERO))
     order_level_extra_aud = money(order_total_aud - all_items_revenue_aud)
-    shenzhen_share = ZERO
-    if all_items_revenue_aud > 0:
-        shenzhen_share = shenzhen_items_revenue_aud / all_items_revenue_aud
-    shenzhen_order_extra_aud = money(order_level_extra_aud * shenzhen_share)
-    revenue_aud = money(shenzhen_items_revenue_aud + shenzhen_order_extra_aud)
+    order_vs_shenzhen_items_diff_aud = money(order_total_aud - shenzhen_items_revenue_aud)
+    # ERP only keeps Shenzhen settlement items. Any order-level difference can include
+    # Sydney/other-warehouse item revenue, so do not count it as Shenzhen revenue.
+    shenzhen_order_extra_aud = ZERO
+    non_tip_order_total_aud = money(order_total_aud - tip_revenue_aud)
+    if non_tip_order_total_aud < 0:
+        non_tip_order_total_aud = ZERO
+    order_total_revenue_cap_aud = non_tip_order_total_aud if non_tip_order_total_aud > 0 else ZERO
+    shenzhen_product_revenue_aud = money(min(shenzhen_items_revenue_aud, order_total_revenue_cap_aud))
+    revenue_aud = money(shenzhen_product_revenue_aud + tip_revenue_aud)
+    shenzhen_revenue_adjustment_aud = money(revenue_aud - shenzhen_items_revenue_aud)
     net_revenue_aud = money(revenue_aud * (Decimal("1.00") - PAYMENT_FEE_RATE))
     ordering_note_cost_aud = ordering_note_aud_cost(order.shopify_note)
     if ordering_note_cost_aud is None:
@@ -291,8 +296,13 @@ def order_profit_totals(order):
         return {
             "items_count": len(items),
             "shenzhen_items_revenue_aud": money(shenzhen_items_revenue_aud),
+            "all_items_revenue_aud": money(all_items_revenue_aud),
+            "shenzhen_product_revenue_aud": shenzhen_product_revenue_aud,
+            "tip_revenue_aud": tip_revenue_aud,
             "order_level_extra_aud": order_level_extra_aud,
+            "order_vs_shenzhen_items_diff_aud": order_vs_shenzhen_items_diff_aud,
             "shenzhen_order_extra_aud": shenzhen_order_extra_aud,
+            "shenzhen_revenue_adjustment_aud": shenzhen_revenue_adjustment_aud,
             "revenue_aud": money(revenue_aud),
             "net_revenue_aud": net_revenue_aud,
             "ordering_note_cost_aud": ordering_note_cost_aud,
@@ -314,8 +324,13 @@ def order_profit_totals(order):
     return {
         "items_count": len(items),
         "shenzhen_items_revenue_aud": money(shenzhen_items_revenue_aud),
+        "all_items_revenue_aud": money(all_items_revenue_aud),
+        "shenzhen_product_revenue_aud": shenzhen_product_revenue_aud,
+        "tip_revenue_aud": tip_revenue_aud,
         "order_level_extra_aud": order_level_extra_aud,
+        "order_vs_shenzhen_items_diff_aud": order_vs_shenzhen_items_diff_aud,
         "shenzhen_order_extra_aud": shenzhen_order_extra_aud,
+        "shenzhen_revenue_adjustment_aud": shenzhen_revenue_adjustment_aud,
         "revenue_aud": money(revenue_aud),
         "net_revenue_aud": net_revenue_aud,
         "ordering_note_cost_aud": ordering_note_cost_aud,
@@ -562,17 +577,28 @@ def record_order_item_product_cost_history(
     note_override=None,
 ):
     new_item_cost = item.locked_product_cost_rmb
-    if decimal_values_equal(old_item_cost, new_item_cost):
-        return False, False, False
-
     product = item.matched_product
     old_product_cost = product.product_cost_rmb if product else None
     new_product_cost = old_product_cost
+    item_cost_changed = not decimal_values_equal(old_item_cost, new_item_cost)
+    product_default_empty = product is not None and not positive_decimal(old_product_cost)
+    auto_fill_empty_product_cost = product_default_empty and positive_decimal(new_item_cost)
+
+    if not item_cost_changed and not overwrite_requested and not auto_fill_empty_product_cost:
+        return False, False, False
+
     overwrite_applied = False
     overwrite_skipped = False
     note = note_override or "Temporary item cost change; product default cost unchanged."
 
-    if overwrite_requested:
+    if auto_fill_empty_product_cost:
+        product.product_cost_rmb = new_item_cost
+        product.updated_at = timezone.now()
+        product.save(update_fields=["product_cost_rmb", "updated_at"])
+        new_product_cost = new_item_cost
+        overwrite_applied = True
+        note = note_override or "Product default cost was empty and has been filled from order item cost."
+    elif overwrite_requested:
         if product and positive_decimal(new_item_cost):
             product.product_cost_rmb = new_item_cost
             product.updated_at = timezone.now()
@@ -639,7 +665,7 @@ class ShopifyOrderItemInlineForm(forms.ModelForm):
     update_product_default_cost = forms.BooleanField(
         label="更新为产品默认成本",
         required=False,
-        help_text="默认只修改当前订单商品行；勾选后才会覆盖 ShopifyProduct.product_cost_rmb。",
+        help_text="产品默认成本为空或 0 时会自动写入；已有默认成本时，勾选后才会覆盖。",
     )
 
     class Meta:
@@ -992,7 +1018,7 @@ class ShopifyOrderItemInline(admin.TabularInline):
         "sku",
         "product_title",
         "variant_title",
-        "quantity",
+        "quantity_display",
         "shopify_product_id",
         "shopify_variant_id",
         "matched_product",
@@ -1019,6 +1045,7 @@ class ShopifyOrderItemInline(admin.TabularInline):
         "sku",
         "product_title",
         "variant_title",
+        "quantity_display",
         "shopify_product_id",
         "shopify_variant_id",
         "fallback_product_display",
@@ -1034,6 +1061,16 @@ class ShopifyOrderItemInline(admin.TabularInline):
         return super().get_queryset(request).filter(
             fulfillment_location=SHENZHEN_ITEM_LOCATION
         ).select_related("matched_product")
+
+    def quantity_display(self, obj):
+        quantity = obj.quantity or 0
+        if quantity >= 2:
+            return format_html(
+                '<span style="color:#d92d20;font-weight:800;font-size:15px;">{}</span>',
+                quantity,
+            )
+        return quantity
+    quantity_display.short_description = "Quantity"
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "package":
@@ -1278,6 +1315,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "allocate_package_costs",
         "copy_product_cost_to_items",
         "backfill_items_from_matched_products",
+        "sync_filled_item_product_costs_to_products",
         "add_to_settlement_batch",
         "save_order_item_shipping_as_product_country_default",
         "mark_cost_confirmed",
@@ -1837,6 +1875,30 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             ".shopify-order-sticky-summary {{ display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }}"
             ".shopify-order-sticky-summary span {{ display: inline-block; padding: 4px 9px; border: 1px solid #8db8e8; border-radius: 4px; background: #ffffff; color: #17233c; }}"
             ".shopify-order-sticky-summary strong {{ color: #0b3f7a; }}"
+            "#order_items-group th.column-locked_product_cost_rmb,"
+            "#order_items-group th.column-locked_shipping_cost_rmb,"
+            "#order_items-group th.column-handling_fee_rmb,"
+            "#order_items-group th.column-total_cost_rmb,"
+            "#order_items-group th.column-weight_kg {{"
+            "background:#fff3cd!important;color:#7a3e00!important;"
+            "border-left:2px solid #f79009!important;border-right:2px solid #f79009!important;"
+            "box-shadow:inset 0 0 0 2px #f79009!important;font-weight:800!important;"
+            "}}"
+            "#order_items-group td.field-locked_product_cost_rmb,"
+            "#order_items-group td.field-locked_shipping_cost_rmb,"
+            "#order_items-group td.field-handling_fee_rmb,"
+            "#order_items-group td.field-total_cost_rmb,"
+            "#order_items-group td.field-weight_kg {{"
+            "background:rgba(255,243,205,.12)!important;"
+            "border-left:2px solid #f79009!important;border-right:2px solid #f79009!important;"
+            "}}"
+            "#order_items-group td.field-locked_product_cost_rmb input,"
+            "#order_items-group td.field-locked_shipping_cost_rmb input,"
+            "#order_items-group td.field-handling_fee_rmb input,"
+            "#order_items-group td.field-weight_kg input {{"
+            "border:2px solid #f79009!important;background:#fffaf0!important;color:#111827!important;font-weight:700!important;"
+            "}}"
+            "#order_items-group td.field-total_cost_rmb {{ color:#175cd3!important;font-weight:800!important; }}"
             "</style>"
             '<div class="shopify-order-sticky-summary">'
             "<span><strong>订单:</strong> {}</span>"
@@ -1915,10 +1977,26 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             )
         color = "#0a7f32" if totals["profit_aud"] >= 0 else "#b42318"
         low_profit_warning = low_profit_warning_html(totals)
+        if totals["shenzhen_revenue_adjustment_aud"] < 0:
+            revenue_adjustment_text = format_html(
+                "{} AUD（订单实收低于商品行标价，按订单实收封顶；常见于 100% off 售后补单）",
+                totals["shenzhen_revenue_adjustment_aud"],
+            )
+        elif totals["order_vs_shenzhen_items_diff_aud"] > 0:
+            revenue_adjustment_text = format_html(
+                "{} AUD（订单总额比深圳仓商品行多 {} AUD；仅明确识别为 tip 的 {} AUD 计入深圳仓收入）",
+                totals["tip_revenue_aud"],
+                totals["order_vs_shenzhen_items_diff_aud"],
+                totals["tip_revenue_aud"],
+            )
+        else:
+            revenue_adjustment_text = "0.00 AUD"
         return format_html(
             "<div>"
             "深圳仓商品行收入合计：{} AUD<br>"
-            "分摊订单级运费/差额：{} AUD<br>"
+            "其中商品实收计入：{} AUD<br>"
+            "Tip 收入计入：{} AUD<br>"
+            "折扣/订单级收入调整：{}<br>"
             "深圳仓收入合计：{} AUD<br>"
             "扣 2% 收款手续费后：{} AUD<br>"
             "PL note 拍单成本：{} AUD<br>"
@@ -1929,7 +2007,9 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             "{}"
             "</div>",
             totals["shenzhen_items_revenue_aud"],
-            totals["shenzhen_order_extra_aud"],
+            totals["shenzhen_product_revenue_aud"],
+            totals["tip_revenue_aud"],
+            revenue_adjustment_text,
             totals["revenue_aud"],
             totals["net_revenue_aud"],
             totals["ordering_note_cost_aud"],
@@ -2321,6 +2401,53 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             f"已处理 {processed_orders} 个订单、{processed_items} 个深圳仓商品行，实际回填 {updated_fields} 个字段，并记录 {history_count} 条成本历史。",
         )
     backfill_items_from_matched_products.short_description = "从匹配产品回填订单商品资料"
+
+    def sync_filled_item_product_costs_to_products(self, request, queryset):
+        processed_orders = queryset.count()
+        processed_items = 0
+        updated_products = 0
+        history_count = 0
+        skipped_no_product = 0
+        skipped_no_item_cost = 0
+        skipped_existing_product_cost = 0
+
+        for order in queryset:
+            for item in shenzhen_order_items(order).select_related("matched_product", "order"):
+                processed_items += 1
+                if not item.matched_product:
+                    skipped_no_product += 1
+                    continue
+                if not positive_decimal(item.locked_product_cost_rmb):
+                    skipped_no_item_cost += 1
+                    continue
+                if positive_decimal(item.matched_product.product_cost_rmb):
+                    skipped_existing_product_cost += 1
+                    continue
+
+                created, overwritten, _ = record_order_item_product_cost_history(
+                    item,
+                    item.locked_product_cost_rmb,
+                    False,
+                    request.user,
+                    source="sync_filled_item_product_costs_to_products",
+                    note_override="Filled empty product default cost from existing order item cost.",
+                )
+                if created:
+                    history_count += 1
+                if overwritten:
+                    updated_products += 1
+
+        self.message_user(
+            request,
+            (
+                f"已处理 {processed_orders} 个订单、{processed_items} 个深圳仓商品行；"
+                f"已把 {updated_products} 个已填写的订单商品成本写入空的产品默认成本，"
+                f"记录 {history_count} 条成本历史。"
+                f"跳过：无匹配产品 {skipped_no_product} 条、订单商品成本为空 {skipped_no_item_cost} 条、"
+                f"产品默认成本已存在 {skipped_existing_product_cost} 条。"
+            ),
+        )
+    sync_filled_item_product_costs_to_products.short_description = "将已填写商品成本同步到空的产品默认成本"
 
     def mark_cost_confirmed(self, request, queryset):
         if not self.is_shenzhen_user(request):

@@ -252,7 +252,7 @@ def fetch_shopify_orders(shop_domain, access_token, start_date_str):
                 "limit": 250,
                 "created_at_min": start_date_str,
                 "status": "any",
-                "fields": "id,name,order_number,created_at,financial_status,fulfillment_status,total_price,currency,customer,shipping_address,line_items,tags,note,note_attributes"
+                "fields": "id,name,order_number,created_at,financial_status,fulfillment_status,total_price,total_tip_received,currency,customer,shipping_address,line_items,tags,note,note_attributes"
             }
 
         response = shopify_get(api_url, access_token, params=params, timeout=30)
@@ -460,6 +460,7 @@ def _process_shenzhen_order(
     financial_status = order_data.get("financial_status", "")
     fulfillment_status = order_data.get("fulfillment_status", "")
     total_price = order_data.get("total_price", 0)
+    total_tip_received = order_data.get("total_tip_received", 0) or 0
     currency = order_data.get("currency", "USD")
     shopify_note = order_data.get("note")
     shopify_note_attributes = order_data.get("note_attributes") or []
@@ -491,6 +492,7 @@ def _process_shenzhen_order(
             "shipping_zip": shipping_zip,
             "shipping_phone": shipping_phone,
             "total_price": total_price,
+            "total_tip_received": total_tip_received,
             "currency": currency,
             "order_created_at": order_created_at,
             "shopify_note": shopify_note,
@@ -522,6 +524,7 @@ def _process_shenzhen_order(
             "shipping_zip": shipping_zip,
             "shipping_phone": shipping_phone,
             "total_price": total_price,
+            "total_tip_received": total_tip_received,
             "currency": currency,
             "shopify_note": shopify_note,
             "shopify_note_attributes": shopify_note_attributes,
