@@ -55,20 +55,101 @@ AWKWARD_3D_GERMAN_RE = re.compile(
 )
 MAX_IMG_ALT_CHARS = 120
 MAX_PRODUCT_TITLE_CHARS = 65
+MAX_META_TITLE_CHARS = 60
+MAX_META_DESCRIPTION_CHARS = 160
 GERMAN_QA_REPLACEMENTS = {
     "Produkhighlights": "Produkt-Highlights",
+    "Produkthighlights": "Produkt-Highlights",
     "Produkt Highlights": "Produkt-Highlights",
     "Product Highlights": "Produkt-Highlights",
     "Paketinhalt": "Lieferumfang",
+    "Packungsinhalt": "Lieferumfang",
     "Technische Spezifikationen": "Technische Daten",
+    "Spezifikationen": "Technische Daten",
+    "Technische Daten & Und Fotos": "Technische Daten & Fotos",
+    "Technische Daten &amp; Und Fotos": "Technische Daten &amp; Fotos",
     "Montagetipps": "Montage-Tipps",
+    "Installationstipps": "Montage-Tipps",
+    "Support und Garantie": "Support & Garantie",
+    "High-Torque Brushed Motor": "Hochdrehmoment-Bürstenmotor",
+    "Brushed Motor": "Bürstenmotor",
+    "Replacement": "Ersatzteil",
+    "High-Torque": "Hochdrehmoment",
+    "Wingspan": "",
     "Abbrechersystem": "Schutzsystem",
+    "Abbruchsystem": "Schutzsystem",
     "Propellerhalterungswellenbasis": "Propellerhalterung",
     "Propellerhalterungswelle": "Propellerhalterung",
+    "Propellerhalterungsbasis": "Propellerhalterung",
+    "Prop Saver Welle Basis": "Propellerhalterung",
+    "Prop-Saver-Wellenbasis": "Propellerhalterung",
+    "Propellerhalterung-Basis": "Propellerhalterung",
+    "RC Trainer RC Flugzeug": "RC Flugzeug",
+    "RC Trainerflugzeug": "RC Flugzeug",
+    "Trainigs-RC": "Trainings-RC",
+    "Trainigsflugzeugs": "Trainingsflugzeugs",
+    "Trainings-RC Flugzeuges": "RC-Trainingsflugzeugs",
+    "Trainings-RC Flugzeug": "RC-Trainingsflugzeug",
+    "Trainings-RC-Flugzeuges": "RC-Trainingsflugzeugs",
+    "Trainings-RC-Flugzeug": "RC-Trainingsflugzeug",
+    "Aufpralle": "Aufprälle",
+    "Aufprällenergie": "Aufprallenergie",
+    "Garantie Bei": "Garantie bei",
+    "am Motorhaube": "an der Motorhaube",
+    "Ausschließlich passend.": "Nur passend für dieses Modell.",
+    "Intelligenter Akku": "Smart-Akku",
+    "intelligenter Akku": "Smart-Akku",
+    "Type-C-Ladung": "USB-C-Ladung",
+    "USB Type-C": "USB-C",
+    "maßstabsgetreuen Kampfeinsätze": "realistische Flugmanöver",
+    "Kampfeinsätze": "Flugmanöver",
+    "Kampfkraft": "Leistung",
+    "militärische Einsätze": "realistische Flugmanöver",
+    "den Himmel zu dominieren": "stabile Flugleistung zu erzielen",
+    "Stellen Sie die Schubkraft Ihres Flugzeugs wieder her": "Stellt Schub und Flugleistung zuverlässig wieder her",
+    "Stellen Sie die Kampfkraft Ihres Flugzeugs wieder her": "Zuverlässiger Ersatzmotor für Ihr BF109 RC Flugzeug",
+    "Hochleistungs Hochdrehmoment-Bürstenmotor": "Hochdrehmoment-Bürstenmotor",
+    "dominieren": "zuverlässig fliegen",
+    "Garantie Auf": "Garantie auf",
     "eine Vibrationstest": "einen Vibrationstest",
+    "auf den Motor-/Getriebewelle": "auf die Motor-/Getriebewelle",
 }
 GERMAN_AWKWARD_TERMS_RE = re.compile(
-    r"\b(?:Produkhighlights|Abbrechersystem|Propellerhalterungswellenbasis|Propellerhalterungswelle|eine Vibrationstest)\b",
+    r"\b(?:Produkhighlights|Produkthighlights|Abbrechersystem|Abbruchsystem|Propellerhalterungswellenbasis|Propellerhalterungswelle|Propellerhalterungsbasis|Prop-Saver-Wellenbasis|Propellerhalterung-Basis|Trainigs|Trainings-RC\s+Flugzeug(?:es)?|Aufpräll(?:energie|schaden|kraft|schutz)|Garantie Bei|Garantie Auf|am Motorhaube|Ausschließlich passend\.|Intelligenter Akku|Type-C-Ladung|Kampfeinsätze|Kampfkraft|dominieren|militärische Einsätze|Wingspan|Replacement|High-Torque|eine Vibrationstest|auf den Motor-/Getriebewelle)\b",
+    flags=re.IGNORECASE,
+)
+GERMAN_COMMON_GRAMMAR_RE = re.compile(
+    r"\b(?:eine\s+Vibrationstest|ein\s+Propellerbl[a盲]tter|einen\s+RC\s+Flugzeug|eine\s+Motor)\b",
+    flags=re.IGNORECASE,
+)
+GERMAN_LONG_COMPOUND_RE = re.compile(
+    r"\b[A-Za-z脽盲枚眉脛脰脺]{28,}\b",
+    flags=re.IGNORECASE,
+)
+GERMAN_LOWERCASE_SENTENCE_START_RE = re.compile(
+    r"(?:^|[.!?]\s+)([a-zäöüß][a-zäöüß-]*)",
+)
+HTML_INLINE_TAG_SPACING_RE = re.compile(
+    r"(</(?:strong|b|em|i|span)>)([A-ZÄÖÜa-zäöüß0-9])",
+    flags=re.IGNORECASE,
+)
+HTML_AMP_SPACING_RE = re.compile(r"\s*&amp;\s*")
+URL_TEXT_NODE_RE = re.compile(r"^\s*(?:https?://|www\.)\S+\s*$", flags=re.IGNORECASE)
+VISIBLE_URL_CAPS_RE = re.compile(r"\bHttps?://")
+COMPATIBILITY_ALONE_RE = re.compile(
+    r"\bF[üu]r\s+das\s+(.+?)\s+Allein\.",
+    flags=re.IGNORECASE,
+)
+AUSSCHLIESSLICH_PASSEND_RE = re.compile(
+    r"\bAusschlie[ßs]lich\s+passend\.",
+    flags=re.IGNORECASE,
+)
+COMPATIBILITY_AUSSCHLIESSLICH_RE = re.compile(
+    r"\bF[üu]r\s+das\s+(.+?)\s+Ausschlie[ßs]lich\.",
+    flags=re.IGNORECASE,
+)
+BÜRSTENLOS_RE = re.compile(
+    r"\bb[üu]rstenlos(?:er|es|e|en)?(?:\s+Kernlos-Design|\s+Motor)?\b",
     flags=re.IGNORECASE,
 )
 EMPTY_INLINE_TAG_RE = re.compile(
@@ -257,7 +338,91 @@ def has_awkward_3d_german(text):
 
 
 def has_german_qa_issue(text):
-    return bool(GERMAN_AWKWARD_TERMS_RE.search(text or ""))
+    return bool(
+        GERMAN_AWKWARD_TERMS_RE.search(text or "")
+        or GERMAN_COMMON_GRAMMAR_RE.search(text or "")
+    )
+
+
+def has_lowercase_sentence_start(text):
+    return bool(GERMAN_LOWERCASE_SENTENCE_START_RE.search(text or ""))
+
+
+def has_html_spacing_issue(html):
+    if not html:
+        return False
+    text_parts = [
+        part
+        for part in re.split(r"(<[^>]+>)", html)
+        if not (part.startswith("<") and part.endswith(">"))
+    ]
+    return bool(
+        HTML_INLINE_TAG_SPACING_RE.search(html)
+        or any(
+            re.search(r"[A-Za-zÄÖÜäöüß0-9]&amp;|&amp;[A-Za-zÄÖÜäöüß0-9]", part)
+            for part in text_parts
+        )
+    )
+
+
+def is_url_text_node(text):
+    return bool(URL_TEXT_NODE_RE.match(text or ""))
+
+
+def has_visible_url_case_issue(text):
+    return bool(VISIBLE_URL_CAPS_RE.search(text or ""))
+
+
+def has_compatibility_alone_issue(text):
+    return bool(
+        re.search(r"\sAllein\.", text or "", flags=re.IGNORECASE)
+        or re.search(r"\sAusschlie[ßs]lich\.", text or "", flags=re.IGNORECASE)
+    )
+
+
+def source_has_brushed_motor(source_payload):
+    haystack = "\n".join(str(source_payload.get(key, "") or "") for key in FIELD_ORDER)
+    return bool(re.search(r"\bBrushed\s+Motor\b", haystack, flags=re.IGNORECASE))
+
+
+def contains_brushless_german(text):
+    return bool(BÜRSTENLOS_RE.search(text or ""))
+
+
+def strip_url_text(text):
+    if not text:
+        return text
+    return re.sub(r"\b(?:https?://|www\.)\S+", "", text, flags=re.IGNORECASE)
+
+
+def visible_output_text_without_urls(translated):
+    parts = []
+    for key in ["title", "meta_title", "meta_description"]:
+        parts.append(strip_url_text(translated.get(key, "") or ""))
+    if translated.get("body_html"):
+        parts.append(strip_url_text(html_visible_text(translated["body_html"])))
+    return "\n".join(parts)
+
+
+def enforce_brushed_motor_terms(text, source_has_brushed):
+    if not text or not source_has_brushed:
+        return text, False
+    cleaned, count = BÜRSTENLOS_RE.subn("Bürstenmotor", text)
+    return cleaned, bool(count)
+
+
+def long_german_compounds(text):
+    if not text:
+        return []
+    candidates = []
+    for match in GERMAN_LONG_COMPOUND_RE.finditer(text):
+        word = match.group(0)
+        if word.startswith(("http", "www")):
+            continue
+        if word.isupper():
+            continue
+        candidates.append(word)
+    return candidates
 
 
 def apply_german_qa_replacements(text):
@@ -269,6 +434,285 @@ def apply_german_qa_replacements(text):
     cleaned = re.sub(r"\bRC Trainer RC Flugzeug\b", "RC Flugzeug", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     return cleaned.strip()
+
+
+def fix_german_sentence_starts(text):
+    if not text:
+        return text
+
+    def replace(match):
+        whole = match.group(0)
+        word = match.group(1)
+        return whole[: -len(word)] + word[:1].upper() + word[1:]
+
+    return GERMAN_LOWERCASE_SENTENCE_START_RE.sub(replace, text)
+
+
+def apply_german_body_node_qa(text):
+    if not text:
+        return text
+    leading = re.match(r"^\s*", text).group(0)
+    trailing = re.search(r"\s*$", text).group(0)
+    cleaned = apply_german_qa_replacements(text)
+    cleaned = COMPATIBILITY_ALONE_RE.sub(r"Nur für das \1 geeignet.", cleaned)
+    cleaned = COMPATIBILITY_AUSSCHLIESSLICH_RE.sub(r"Nur passend für das \1.", cleaned)
+    cleaned = AUSSCHLIESSLICH_PASSEND_RE.sub(
+        "Nur passend für dieses Modell.",
+        cleaned,
+    )
+    cleaned = fix_german_sentence_starts(cleaned)
+    if leading and not cleaned.startswith(leading):
+        cleaned = leading + cleaned.lstrip()
+    if trailing and not cleaned.endswith(trailing):
+        cleaned = cleaned.rstrip() + trailing
+    return cleaned
+
+
+def normalize_translated_body_html_spacing(html):
+    if not html:
+        return html
+    parts = re.split(r"(<[^>]+>)", html)
+    for index, part in enumerate(parts):
+        if part.startswith("<") and part.endswith(">"):
+            continue
+        parts[index] = HTML_AMP_SPACING_RE.sub(" &amp; ", part)
+    cleaned = "".join(parts)
+    cleaned = HTML_INLINE_TAG_SPACING_RE.sub(r"\1 \2", cleaned)
+    cleaned = re.sub(
+        r"(\b(?:Technische Daten|Support)\s+)&amp;\s+(Fotos|Garantie)\b",
+        r"\1&amp; \2",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\bTechnische\s+Daten\s+&amp;\s+Und\s+Fotos\b",
+        "Technische Daten &amp; Fotos",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"((?:</(?:strong|b|em|i|span)>\s*)+)Bei\b",
+        r"\1bei",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\bAusschlie[ßs]lich\s+passend\s+f[üu]r\s+dieses\s+Modell\.",
+        "Nur passend für dieses Modell.",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\bGarantie\s+Auf\b",
+        "Garantie auf",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = COMPATIBILITY_AUSSCHLIESSLICH_RE.sub(r"Nur passend für das \1.", cleaned)
+    return cleaned
+
+
+def polish_german_product_title(title):
+    if not title:
+        return title
+    cleaned = apply_german_qa_replacements(title)
+    cleaned = compress_german_battery_title(cleaned)
+    if re.search(r"\bBF109\b", cleaned, flags=re.IGNORECASE) and re.search(
+        r"\b400\s*mm\b", cleaned, flags=re.IGNORECASE
+    ):
+        if re.search(r"\b(?:Brushed Motor|Bürstenmotor|Hochdrehmoment)\b", cleaned, flags=re.IGNORECASE):
+            compact = "Hochdrehmoment-Bürstenmotor für BF109 400mm RC Flugzeug"
+            if len(compact) <= MAX_PRODUCT_TITLE_CHARS:
+                cleaned = compact
+    cleaned = re.sub(
+        r"\bPropellerhalterung\s+f[眉u]r\s+([A-Za-z0-9 -]*Sport Cub\s+\d+mm)\s+RC\s+Flugzeug\b",
+        r"Propellerhalterung f眉r \1 RC Flugzeug",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if len(cleaned) > MAX_PRODUCT_TITLE_CHARS and re.search(r"\bSport Cub\b", cleaned, re.IGNORECASE):
+        cleaned = re.sub(r"\bVolantexRC\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bRC\s+Trainer\s+RC\s+Flugzeug\b", "RC Flugzeug", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bRC\s+Trainerflugzeug\b", "RC Flugzeug", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
+def compress_german_battery_title(title):
+    if not title or len(title) <= MAX_PRODUCT_TITLE_CHARS:
+        return title
+    if not re.search(r"\bAkku\b", title, flags=re.IGNORECASE):
+        return title
+
+    voltage_match = re.search(r"\b\d+(?:[,.]\d+)?\s*V\b", title, flags=re.IGNORECASE)
+    capacity_match = re.search(r"\b\d+\s*mAh\b", title, flags=re.IGNORECASE)
+    model_match = re.search(r"\b(?:YuXiang\s+)?F\d+[A-Z]?\b", title)
+    chemistry_match = re.search(r"\bLiPo\b", title, flags=re.IGNORECASE)
+    if not (voltage_match and capacity_match and model_match):
+        return title
+
+    chemistry = chemistry_match.group(0) if chemistry_match else ""
+    parts = [
+        model_match.group(0),
+        voltage_match.group(0).replace(" ", ""),
+        capacity_match.group(0).replace(" ", ""),
+        chemistry,
+        "Akku",
+    ]
+    compact = " ".join(part for part in parts if part)
+    if len(compact) <= MAX_PRODUCT_TITLE_CHARS:
+        return compact
+
+    fallback = (
+        f"{voltage_match.group(0).replace(' ', '')} "
+        f"{capacity_match.group(0).replace(' ', '')} "
+        f"{chemistry + ' ' if chemistry else ''}Akku für {model_match.group(0)}"
+    )
+    return fallback if len(fallback) <= MAX_PRODUCT_TITLE_CHARS else title
+
+
+def polish_german_meta_title(meta_title):
+    if not meta_title:
+        return meta_title
+    cleaned = apply_german_qa_replacements(meta_title)
+    if re.search(r"\bBF109\b", cleaned, flags=re.IGNORECASE) and re.search(
+        r"\b400\s*mm\b", cleaned, flags=re.IGNORECASE
+    ):
+        if re.search(r"\b(?:Motor|Bürstenmotor|Brushed|Wingspan)\b", cleaned, flags=re.IGNORECASE):
+            compact = "BF109 400mm Bürstenmotor | RC Flugzeug Ersatzteil"
+            if len(compact) <= MAX_META_TITLE_CHARS:
+                cleaned = compact
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+\|", " |", cleaned)
+    return cleaned.strip(" |")
+
+
+def _meta_title_core_patterns(source_text):
+    core_patterns = [
+        r"\bRC\b",
+        r"\bMoFly\b",
+        r"\bP-?51D\b",
+        r"\b690\s*mm\b",
+        r"\bBF109\b",
+        r"\b400\s*mm\b",
+        r"\b(?:Motor|Brushed|B.rstenmotor)\b",
+        r"\b(?:Akku|LiPo)\b",
+        r"\bPropeller\b",
+        r"\bErsatzteil\b",
+    ]
+    return [
+        pattern
+        for pattern in core_patterns
+        if re.search(pattern, source_text or "", flags=re.IGNORECASE)
+    ]
+
+
+def _preserves_meta_title_core(candidate, source_text):
+    return all(
+        re.search(pattern, candidate or "", flags=re.IGNORECASE)
+        for pattern in _meta_title_core_patterns(source_text)
+    )
+
+
+def _word_boundary_trim(text, max_chars):
+    if len(text) <= max_chars:
+        return text
+    trimmed = text[:max_chars].rstrip(" ,.;:-|")
+    trimmed = re.sub(r"\s+\S*$", "", trimmed).rstrip(" ,.;:-|")
+    return trimmed if trimmed else text[:max_chars].rstrip(" ,.;:-|")
+
+
+def compress_meta_title(meta_title, source_payload=None):
+    if not meta_title:
+        return meta_title
+    cleaned = polish_german_meta_title(meta_title)
+    cleaned, _ = remove_shipping_marketing_phrases(cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" |")
+    if len(cleaned) <= MAX_META_TITLE_CHARS:
+        return cleaned
+
+    source_payload = source_payload or {}
+    source_text = "\n".join(str(source_payload.get(key, "") or "") for key in FIELD_ORDER)
+    combined_text = f"{source_text}\n{cleaned}"
+    candidates = []
+
+    if (
+        re.search(r"\bMoFly\b", combined_text, flags=re.IGNORECASE)
+        and re.search(r"\bP-?51D\b", combined_text, flags=re.IGNORECASE)
+        and re.search(r"\b690\s*mm\b", combined_text, flags=re.IGNORECASE)
+    ):
+        candidates.extend(
+            [
+                "MoFly P-51D 690mm RC Flugzeug Ersatzteil",
+                "MoFly P-51D 690mm RC Flugzeug",
+            ]
+        )
+
+    if re.search(r"\bBF109\b", combined_text, flags=re.IGNORECASE) and re.search(
+        r"\b400\s*mm\b", combined_text, flags=re.IGNORECASE
+    ):
+        candidates.extend(
+            [
+                "BF109 400mm Buerstenmotor | RC Flugzeug Ersatzteil",
+                "BF109 400mm RC Flugzeug Ersatzteil",
+            ]
+        )
+
+    simplified = re.sub(r"\s*\|\s*.*$", "", cleaned).strip()
+    simplified = re.sub(
+        r"\b(?:hochwertig|leistungsstark|perfekt|ideal|optimal|zuverl[a.]ssig|original)\b",
+        "",
+        simplified,
+        flags=re.IGNORECASE,
+    )
+    simplified = re.sub(r"\s{2,}", " ", simplified).strip(" |")
+    candidates.append(simplified)
+    candidates.append(_word_boundary_trim(simplified, MAX_META_TITLE_CHARS))
+
+    for candidate in candidates:
+        candidate = re.sub(r"\s{2,}", " ", candidate).strip(" |")
+        if (
+            candidate
+            and len(candidate) <= MAX_META_TITLE_CHARS
+            and _preserves_meta_title_core(candidate, combined_text)
+        ):
+            return candidate
+
+    return cleaned
+
+
+def compress_meta_description(meta_description):
+    if not meta_description or len(meta_description) <= MAX_META_DESCRIPTION_CHARS:
+        return meta_description
+
+    cleaned = apply_german_qa_replacements(meta_description)
+    cleaned, _ = remove_shipping_marketing_phrases(cleaned)
+    cleaned = re.sub(
+        r"\b(?:hochwertig|leistungsstark|perfekt|ideal|optimal|zuverl[aä]ssig)\b",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+    if len(cleaned) <= MAX_META_DESCRIPTION_CHARS:
+        return cleaned
+
+    has_bf109 = re.search(r"\bBF109\b", cleaned, flags=re.IGNORECASE)
+    has_400mm = re.search(r"\b400\s*mm\b", cleaned, flags=re.IGNORECASE)
+    has_motor = re.search(r"\b(?:motor|brushed)\b", cleaned, flags=re.IGNORECASE)
+    if has_bf109 and has_400mm and has_motor:
+        compact = (
+            "Hochdrehmoment-Bürstenmotor für BF109 Warbird 400mm RC Flugzeug. "
+            "Ersatzteil für 4-Kanal RTF Modelle mit XPilot Stabilisierung."
+        )
+        if len(compact) <= MAX_META_DESCRIPTION_CHARS:
+            return compact
+
+    sentence = re.split(r"(?<=[.!?])\s+", cleaned)[0].strip()
+    if 0 < len(sentence) <= MAX_META_DESCRIPTION_CHARS:
+        return sentence
+    return cleaned[:MAX_META_DESCRIPTION_CHARS].rstrip(" ,.;:-")
 
 
 def is_origin_text(text):
@@ -299,6 +743,10 @@ def remove_empty_html_nodes(html):
 
 def json_dumps(data):
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def terminal_beep():
+    print("\a", end="", flush=True)
 
 
 def parse_fields(fields_value):
@@ -360,6 +808,8 @@ class ShopifyProductTranslationTool:
                 f"<p><strong>Locale:</strong> {escape(str(review_data.get('target_locale', '')))}</p>"
                 "<section><h2>Summary</h2><pre>"
                 f"{escape(json_dumps(review_data.get('summary', {})))}"
+                "</pre></section><section><h2>Info</h2><pre>"
+                f"{escape(json_dumps(review_data.get('infos', [])))}"
                 "</pre></section><section><h2>Warnings</h2><pre class='warn'>"
                 f"{escape(json_dumps(review_data.get('warnings', [])))}"
                 "</pre></section><section><h2>Source</h2><pre>"
@@ -407,16 +857,26 @@ class ShopifyProductTranslationTool:
                 "The glossary is mandatory. Prefer glossary translations over your own wording when the source term appears.",
                 "Product title must be natural, localized, searchable, and conversion-friendly.",
                 f"Product title should be {MAX_PRODUCT_TITLE_CHARS} characters or fewer when possible. If longer, shorten non-core words and remove repeated phrases like RC Trainer RC Flugzeug.",
+                "For battery/accessory titles over 65 characters, keep model + voltage/capacity + product type. Example: YuXiang F112S 7,4V 1200mAh LiPo Akku. Secondary aircraft names like AH-1 Cobra or RC Helikopter may be omitted.",
                 "For German titles, prefer German RC ecommerce phrasing. Avoid long compound nouns. Example: Propellerhalterung für Sport Cub 500mm RC Flugzeug.",
+                "For German accessory titles, shorten over-compounded names. Example: Propellerhalterungswelle für VolantexRC Sport Cub 500mm RC Trainerflugzeug -> Propellerhalterung für Sport Cub 500mm RC Flugzeug.",
                 "For German titles, prefer RC Flugzeug, RC Auto, 4-Kanal RC-Steuerung, 6-Achsen-Gyro, bürstenloser Motor, ferngesteuert, Kinder. Avoid mechanical literal translation.",
+                "Brushed Motor and Brushless Motor are different. Translate Brushed Motor as Bürstenmotor and High-Torque Brushed Motor as Hochdrehmoment-Bürstenmotor. Only translate Brushless Motor as bürstenloser Motor.",
+                "If the source contains Brushed Motor, the German output must not contain bürstenlos, bürstenloser, or bürstenloses.",
+                "Avoid English leftovers in German SEO such as Wingspan, Replacement, High-Torque, or Brushed Motor.",
                 "Example German title style: 1/16 J3 WWII RC Flugzeug mit 4-Kanal & 6-Achsen-Gyro.",
-                "German section headings must use: Produkt-Highlights, Lieferumfang, Technische Daten, Kompatibilität, Montage-Tipps.",
-                "Avoid AI-like German compounds such as Abbrechersystem, Propellerhalterungswellenbasis, or Propellerhalterungswelle. Prefer Schutzsystem, Stoßschutzsystem, or Propellerhalterung.",
-                "Run a German QA pass for article/noun gender, singular/plural, and common RC terms. Example: einen Vibrationstest, not eine Vibrationstest.",
+                "German section headings must use: Produkt-Highlights, Lieferumfang, Technische Daten, Kompatibilität, Montage-Tipps, Support & Garantie.",
+                "Avoid AI-like German compounds such as Abbrechersystem, Propellerhalterungswellenbasis, Propellerhalterungsbasis, or Propellerhalterungswelle. Prefer Schutzsystem, Stoßschutzsystem, or Propellerhalterung.",
+                "Avoid Propellerhalterung-Basis unless the source explicitly needs a base; prefer Propellerhalterung or Prop-Saver-Basis.",
+                "Run a German QA pass for sentence capitalization, spelling, article/noun gender, singular/plural, and common RC terms. Examples: Landungen, not landungen; RC-Trainingsflugzeug, not Trainings-RC Flugzeug; Aufprallenergie, not Aufprällenergie; an der Motorhaube, not am Motorhaube; Garantie bei, not Garantie Bei; Smart-Akku or Akku, not Intelligenter Akku; USB-C-Ladung, not Type-C-Ladung; einen Vibrationstest, not eine Vibrationstest; auf die Motor-/Getriebewelle, not auf den Motor-/Getriebewelle.",
+                "Avoid exaggerated military/combat wording on accessories. Replace Kampfkraft, dominieren, Kampf, militärische Einsätze, or Kampfeinsätze with neutral ecommerce phrasing such as zuverlässige Leistung, Schub und Flugleistung, stabile Flugleistung, or zuverlässiger Antrieb.",
+                "For compatibility wording, avoid fragments like 'Für das ... Allein.' or 'Ausschließlich passend.' Prefer 'Nur passend für das VolantexRC Sport Cub 500 4-Kanal RC Flugzeug (761-4 Sport Cub).' or 'Nur passend für dieses Modell.'.",
                 "Avoid awkward German phrases like 4-Kanal Fernsteuerung, 3D-Flugdesign, 3D-Stabilflug-Flügel, or hard-translated 3D-Flügel.",
                 "For German 3D wording, prefer stabile Flugeigenschaften or ruhiges Flugverhalten. Use 3D-Flugfähig only when the source clearly describes 3D aerobatics or 3D flight.",
                 "SEO title must be 60 characters or fewer.",
                 "Meta description must be 160 characters or fewer.",
+                "If the source meta description is over 160 characters, do not copy its length; write a concise target meta description within 160 characters.",
+                "For BF109 400mm motor products, preserve core keywords naturally: BF109, 400mm, RC Flugzeug or RC Plane, Brushed Motor, Ersatzmotor or replacement motor.",
                 "Preserve core commercial keywords naturally in the target language, such as RC Toy, RC Airplane, RC Helicopter, Remote Control, Kids, Brushless, Gyro.",
                 "Do not keyword-stuff and do not repeat brand names.",
                 "Do not translate full body_html here; it is translated separately as visible text nodes.",
@@ -485,6 +945,7 @@ class ShopifyProductTranslationTool:
                 "The glossary is mandatory. Prefer glossary translations over your own wording when the source term appears.",
                 "Translate each text node naturally for ecommerce product pages.",
                 "Do not translate URLs, SKU, model numbers, dimensions, battery specs, numeric values, or units.",
+                "If a text node is itself a URL, preserve it exactly with original capitalization and query parameters.",
                 "Do not preserve or translate origin/source/manufacturing origin fields. Remove content such as Origin, Made in China, Mainland China, Herkunft, or Hergestellt in Festlandchina.",
                 "Preserve leading/trailing whitespace within each node when possible.",
                 "Do not add HTML tags. Return plain translated text nodes only.",
@@ -495,9 +956,15 @@ class ShopifyProductTranslationTool:
                 "Do not keyword-stuff image alt text or end it with comma-separated keywords like ferngesteuert, Kinder.",
                 "German alt text example: J3 WWII RC Flugzeug im Maßstab 1/16 mit 4-Kanal Steuerung.",
                 "For German RC terms, prefer RC Flugzeug, RC Auto, 4-Kanal RC-Steuerung, 6-Achsen-Gyro, bürstenloser Motor, ferngesteuert, Kinder.",
-                "German section headings must use: Produkt-Highlights, Lieferumfang, Technische Daten, Kompatibilität, Montage-Tipps.",
-                "Avoid AI-like German compounds such as Abbrechersystem, Propellerhalterungswellenbasis, or Propellerhalterungswelle. Prefer Schutzsystem, Stoßschutzsystem, or Propellerhalterung.",
-                "Run a German QA pass for article/noun gender, singular/plural, and common RC terms. Example: einen Vibrationstest, not eine Vibrationstest.",
+                "Brushed Motor and Brushless Motor are different. Translate Brushed Motor as Bürstenmotor and High-Torque Brushed Motor as Hochdrehmoment-Bürstenmotor. Only translate Brushless Motor as bürstenloser Motor.",
+                "If the source contains Brushed Motor, the German output must not contain bürstenlos, bürstenloser, or bürstenloses.",
+                "Avoid English leftovers in German SEO/body text such as Wingspan, Replacement, High-Torque, or Brushed Motor.",
+                "German section headings must use: Produkt-Highlights, Lieferumfang, Technische Daten, Kompatibilität, Montage-Tipps, Support & Garantie.",
+                "Avoid AI-like German compounds such as Abbrechersystem, Propellerhalterungswellenbasis, Propellerhalterungsbasis, or Propellerhalterungswelle. Prefer Schutzsystem, Stoßschutzsystem, or Propellerhalterung.",
+                "Avoid Propellerhalterung-Basis unless the source explicitly needs a base; prefer Propellerhalterung or Prop-Saver-Basis.",
+                "Run a German QA pass for sentence capitalization, spelling, article/noun gender, singular/plural, and common RC terms. Examples: Landungen, not landungen; RC-Trainingsflugzeug, not Trainings-RC Flugzeug; Aufprallenergie, not Aufprällenergie; an der Motorhaube, not am Motorhaube; Garantie bei, not Garantie Bei; Smart-Akku or Akku, not Intelligenter Akku; USB-C-Ladung, not Type-C-Ladung; einen Vibrationstest, not eine Vibrationstest; auf die Motor-/Getriebewelle, not auf den Motor-/Getriebewelle.",
+                "Avoid exaggerated military/combat wording on accessories. Replace Kampfkraft, dominieren, Kampf, militärische Einsätze, or Kampfeinsätze with neutral ecommerce phrasing such as zuverlässige Leistung, Schub und Flugleistung, stabile Flugleistung, or zuverlässiger Antrieb.",
+                "For compatibility wording, avoid fragments like 'Für das ... Allein.' or 'Ausschließlich passend.' Prefer 'Nur passend für das VolantexRC Sport Cub 500 4-Kanal RC Flugzeug (761-4 Sport Cub).' or 'Nur passend für dieses Modell.'.",
                 "Avoid awkward German phrases like 4-Kanal Fernsteuerung, 3D-Flugdesign, 3D-Stabilflug-Flügel, or hard-translated 3D-Flügel.",
                 "For German 3D wording, prefer stabile Flugeigenschaften or ruhiges Flugverhalten. Use 3D-Flugfähig only when the source clearly describes 3D aerobatics or 3D flight.",
                 "Do not mention shipping origin, product origin, China origin, Mainland China, Made in China, Origin, Herkunft, or Hergestellt in Festlandchina.",
@@ -639,18 +1106,29 @@ class ShopifyProductTranslationTool:
             raise CommandError(f"No translatableResource found for {product_id}")
         return resource
 
-    def validate_translation(self, source_payload, translated, selected_fields):
+    def validate_translation(self, source_payload, translated, selected_fields, dry_run=False):
         selected_text_fields = [
             key for key in ["title", "meta_title", "meta_description"] if key in selected_fields
         ]
         missing = [key for key in selected_text_fields if key not in translated]
         if missing:
             raise CommandError(f"OpenAI translation missing fields: {', '.join(missing)}")
-        if "meta_title" in selected_fields and len(translated["meta_title"]) > 60:
-            raise CommandError(f"meta_title exceeds 60 chars: {len(translated['meta_title'])}")
-        if "meta_description" in selected_fields and len(translated["meta_description"]) > 160:
+        if (
+            "meta_title" in selected_fields
+            and len(translated["meta_title"]) > MAX_META_TITLE_CHARS
+            and not dry_run
+        ):
             raise CommandError(
-                f"meta_description exceeds 160 chars: {len(translated['meta_description'])}"
+                f"meta_title exceeds {MAX_META_TITLE_CHARS} chars: "
+                f"{len(translated['meta_title'])}"
+            )
+        if (
+            "meta_description" in selected_fields
+            and len(translated["meta_description"]) > MAX_META_DESCRIPTION_CHARS
+        ):
+            raise CommandError(
+                f"meta_description exceeds {MAX_META_DESCRIPTION_CHARS} chars: "
+                f"{len(translated['meta_description'])}"
             )
         for key in selected_text_fields:
             if is_origin_text(translated.get(key, "")):
@@ -788,6 +1266,7 @@ class ShopifyProductTranslationTool:
             )
         if not selected_fields:
             self.log("All selected fields already have current translations; nothing to do.")
+            terminal_beep()
             return
 
         source_items = {
@@ -804,6 +1283,20 @@ class ShopifyProductTranslationTool:
             for key in FIELD_ORDER
         }
         matched_glossary = glossary_matches(glossary, source_payload)
+        dry_run_warnings = []
+        qa_infos = []
+        has_brushed_source = source_has_brushed_motor(source_payload)
+        source_meta_description_chars = len(source_payload.get("meta_description", "") or "")
+        source_meta_description_over_limit = (
+            "meta_description" in selected_fields
+            and source_meta_description_chars > MAX_META_DESCRIPTION_CHARS
+        )
+        if source_meta_description_over_limit:
+            dry_run_warnings.append(
+                "Warning: source meta_description exceeds "
+                f"{MAX_META_DESCRIPTION_CHARS} chars ({source_meta_description_chars}); "
+                "continuing because source SEO limits do not block translation."
+            )
         self.log("Source summary:")
         self.log(f"- title: {source_payload.get('title', '')}")
         self.log(f"- body_html visible chars: {len(html_visible_text(source_payload.get('body_html', '')))}")
@@ -819,7 +1312,6 @@ class ShopifyProductTranslationTool:
                 selected_fields,
                 glossary,
             )
-            self.validate_translation(source_payload, translated, selected_fields)
         else:
             translated = {}
         removed_shipping_phrase_count = 0
@@ -831,14 +1323,54 @@ class ShopifyProductTranslationTool:
                 translated[key] = cleaned_value
                 removed_shipping_phrase_count += shipping_removed
             translated[key] = apply_german_qa_replacements(translated[key])
+            if key == "title":
+                translated[key] = polish_german_product_title(translated[key])
+            if key == "meta_title":
+                before_compress = translated[key]
+                translated[key] = compress_meta_title(translated[key], source_payload)
+                if translated[key] != before_compress:
+                    dry_run_warnings.append(
+                        "Warning: translated meta_title was compressed to fit "
+                        f"{MAX_META_TITLE_CHARS} chars."
+                    )
+            translated[key], brushed_fixed = enforce_brushed_motor_terms(
+                translated[key],
+                has_brushed_source,
+            )
+            if brushed_fixed:
+                qa_infos.append(
+                    f"Info: corrected Brushed/Brushless term in {key}; replaced bürstenlos with Bürstenmotor."
+                )
             if has_ai_cta(translated[key]):
                 raise CommandError(f"{key} contains AI-style CTA wording that must be removed.")
+        if "meta_description" in translated:
+            before_compress = translated["meta_description"]
+            translated["meta_description"] = compress_meta_description(
+                translated["meta_description"]
+            )
+            if translated["meta_description"] != before_compress:
+                dry_run_warnings.append(
+                    "Warning: translated meta_description was compressed to fit "
+                    f"{MAX_META_DESCRIPTION_CHARS} chars."
+                )
+        if text_fields:
+            if (
+                dry_run
+                and "meta_title" in selected_fields
+                and len(translated.get("meta_title", "") or "") > MAX_META_TITLE_CHARS
+            ):
+                dry_run_warnings.append(
+                    "Warning: translated meta_title still exceeds "
+                    f"{MAX_META_TITLE_CHARS} chars "
+                    f"({len(translated.get('meta_title', '') or '')}); review before any write."
+                )
+            self.validate_translation(source_payload, translated, selected_fields, dry_run=dry_run)
 
         body_node_count = 0
         translated_body_node_count = 0
         translated_img_alt_count = 0
         translated_img_alt_chars = []
-        dry_run_warnings = []
+        skipped_url_text_node_count = 0
         removed_origin_count = 0
         empty_html_nodes_removed_count = 0
         body_warning = ""
@@ -850,11 +1382,16 @@ class ShopifyProductTranslationTool:
                 try:
                     text_nodes_for_translation = []
                     skipped_source_origin_ids = set()
+                    skipped_url_text_node_ids = set()
                     for index, text in enumerate(body_parser.text_nodes):
                         if is_origin_text(text):
                             skipped_source_origin_ids.add(index)
                             text_nodes_for_translation.append("")
                             removed_origin_count += 1
+                        elif is_url_text_node(text):
+                            skipped_url_text_node_ids.add(index)
+                            text_nodes_for_translation.append("")
+                            skipped_url_text_node_count += 1
                         else:
                             text_nodes_for_translation.append(text)
                     if skipped_source_origin_ids:
@@ -871,6 +1408,9 @@ class ShopifyProductTranslationTool:
                         glossary,
                     )
                     for index, text in enumerate(translated_nodes):
+                        if index in skipped_url_text_node_ids:
+                            translated_nodes[index] = body_parser.text_nodes[index]
+                            continue
                         cleaned_text, removed = remove_origin_text(text)
                         if removed:
                             translated_nodes[index] = cleaned_text
@@ -881,9 +1421,17 @@ class ShopifyProductTranslationTool:
                         if shipping_removed:
                             translated_nodes[index] = cleaned_text
                             removed_shipping_phrase_count += shipping_removed
-                        translated_nodes[index] = apply_german_qa_replacements(
+                        translated_nodes[index] = apply_german_body_node_qa(
                             translated_nodes[index]
                         )
+                        translated_nodes[index], brushed_fixed = enforce_brushed_motor_terms(
+                            translated_nodes[index],
+                            has_brushed_source,
+                        )
+                        if brushed_fixed:
+                            qa_infos.append(
+                                f"Info: corrected Brushed/Brushless term in body text node {index}; replaced bürstenlos with Bürstenmotor."
+                            )
                     for index in body_parser.alt_nodes:
                         if index >= len(translated_nodes):
                             continue
@@ -927,6 +1475,9 @@ class ShopifyProductTranslationTool:
                     translated_body_html, empty_html_nodes_removed_count = remove_empty_html_nodes(
                         translated_body_html
                     )
+                    translated_body_html = normalize_translated_body_html_spacing(
+                        translated_body_html
+                    )
                     self.validate_body_html_structure(source_payload, translated_body_html)
                     translated["body_html"] = translated_body_html
                 except CommandError as exc:
@@ -950,6 +1501,7 @@ class ShopifyProductTranslationTool:
         self.log(f"translated text node count: {translated_body_node_count}")
         self.log(f"translated img alt count: {translated_img_alt_count}")
         self.log(f"img alt chars list: {translated_img_alt_chars}")
+        self.log(f"url text nodes skipped count: {skipped_url_text_node_count}")
         self.log(f"removed/skipped origin field count: {removed_origin_count}")
         self.log(f"removed shipping marketing phrase count: {removed_shipping_phrase_count}")
         self.log(f"empty html nodes removed count: {empty_html_nodes_removed_count}")
@@ -958,6 +1510,7 @@ class ShopifyProductTranslationTool:
         self.log(f"title chars: {len(translated.get('title', '') or '')}")
         self.log(f"meta_title chars: {len(translated.get('meta_title', '') or '')}")
         self.log(f"meta_description chars: {len(translated.get('meta_description', '') or '')}")
+        self.log(f"source meta_description chars: {source_meta_description_chars}")
         if len(translated.get("title", "") or "") > MAX_PRODUCT_TITLE_CHARS:
             dry_run_warnings.append(
                 f"Warning: title exceeds recommended {MAX_PRODUCT_TITLE_CHARS} chars "
@@ -971,10 +1524,102 @@ class ShopifyProductTranslationTool:
                 dry_run_warnings.append(f"Warning: {key} contains awkward 3D German wording.")
             if has_german_qa_issue(value):
                 dry_run_warnings.append(f"Warning: {key} may contain German QA issue.")
+            long_compounds = long_german_compounds(value)
+            if long_compounds:
+                dry_run_warnings.append(
+                    f"Warning: {key} may contain overlong German compound(s): "
+                    f"{', '.join(long_compounds[:5])}."
+                )
             if is_shipping_alt_text(value):
                 dry_run_warnings.append(f"Warning: {key} contains shipping marketing wording.")
             if has_ai_cta(value):
                 dry_run_warnings.append(f"Warning: {key} contains AI-style CTA wording.")
+        if translated.get("body_html"):
+            body_text = html_visible_text(translated["body_html"])
+            body_text_no_urls = strip_url_text(body_text)
+            body_long_compounds = long_german_compounds(body_text)
+            if body_long_compounds:
+                dry_run_warnings.append(
+                    "Warning: body_html may contain overlong German compound(s): "
+                    f"{', '.join(body_long_compounds[:10])}."
+                )
+            if has_lowercase_sentence_start(body_text):
+                dry_run_warnings.append("Warning: body_html may contain lowercase sentence starts.")
+            if has_html_spacing_issue(translated["body_html"]):
+                dry_run_warnings.append(
+                    "Warning: body_html may contain missing spaces around inline tags or &amp;."
+                )
+            if "Propellerhalterung-Basis" in translated["body_html"]:
+                dry_run_warnings.append(
+                    "Warning: body_html contains Propellerhalterung-Basis; prefer Propellerhalterung."
+                )
+            if re.search(r"\bauf\s+den\s+Motor-/Getriebewelle\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains 'auf den Motor-/Getriebewelle'; prefer 'auf die Motor-/Getriebewelle'."
+                )
+            if re.search(r"\bTrainigs\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append("Warning: body_html contains Trainigs; prefer Trainings.")
+            if has_visible_url_case_issue(body_text):
+                dry_run_warnings.append(
+                    "Warning: body_html contains visible URL text with Https:// or Http:// capitalization."
+                )
+            if has_compatibility_alone_issue(body_text):
+                dry_run_warnings.append(
+                    "Warning: body_html contains compatibility fragment ending with 'Allein.'."
+                )
+            if re.search(r"\bGarantie\s+Bei\b", body_text):
+                dry_run_warnings.append("Warning: body_html contains Garantie Bei; prefer Garantie bei.")
+            if re.search(r"\bAufpräll(?:energie|schaden|kraft|schutz)\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append("Warning: body_html contains an incorrect Aufpräll compound; prefer Aufprall.")
+            if re.search(r"\bam\s+Motorhaube\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append("Warning: body_html contains am Motorhaube; prefer an der Motorhaube.")
+            if re.search(r"\bAusschlie[ßs]lich\s+passend\.", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains standalone 'Ausschließlich passend.'."
+                )
+            if re.search(r"\bTrainings-RC\s+Flugzeug(?:es)?\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains Trainings-RC Flugzeug; prefer RC-Trainingsflugzeug."
+                )
+            if re.search(r"\bTechnische\s+Daten\s+&amp;\s+Und\s+Fotos\b", translated["body_html"], flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains Technische Daten &amp; Und Fotos; prefer Technische Daten &amp; Fotos."
+                )
+            if re.search(r"\bKampfeinsätze\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains Kampfeinsätze; prefer neutral accessory wording."
+                )
+            if re.search(r"\bIntelligenter\s+Akku\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains Intelligenter Akku; prefer Smart-Akku or Akku."
+                )
+            if re.search(r"\bType-C-Ladung\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains Type-C-Ladung; prefer USB-C-Ladung."
+                )
+            if has_brushed_source and contains_brushless_german(body_text):
+                dry_run_warnings.append(
+                    "Warning: source contains Brushed Motor but body_html still contains bürstenlos."
+                )
+            if re.search(r"\bWingspan\b", body_text_no_urls, flags=re.IGNORECASE):
+                dry_run_warnings.append("Warning: body_html contains English leftover Wingspan.")
+            if re.search(r"\b(?:Kampfkraft|dominieren|militärische Einsätze|Kampf)\b", body_text, flags=re.IGNORECASE):
+                dry_run_warnings.append(
+                    "Warning: body_html contains exaggerated military/combat wording."
+                )
+            if re.search(r"\bGarantie\s+Auf\b", body_text):
+                dry_run_warnings.append("Warning: body_html contains Garantie Auf; prefer Garantie auf.")
+        combined_text_output = visible_output_text_without_urls(translated)
+        if has_brushed_source and contains_brushless_german(combined_text_output):
+            dry_run_warnings.append(
+                "Warning: source contains Brushed Motor but translated output still contains bürstenlos."
+            )
+        if re.search(r"\bWingspan\b", combined_text_output, flags=re.IGNORECASE):
+            dry_run_warnings.append("Warning: translated output contains English leftover Wingspan.")
+        if re.search(r"\b(?:Replacement|High-Torque|Brushed Motor)\b", combined_text_output, flags=re.IGNORECASE):
+            dry_run_warnings.append("Warning: translated output contains English motor/parts wording.")
+        for info in qa_infos:
+            self.log(info)
         for warning in dry_run_warnings:
             self.log(warning)
         if body_warning:
@@ -1004,15 +1649,21 @@ class ShopifyProductTranslationTool:
             "source": source_payload,
             "translation": translated,
             "payload_preview": translations_preview,
+            "infos": qa_infos,
             "warnings": dry_run_warnings + ([body_warning] if body_warning else []),
             "summary": {
                 "payload_keys": payload_keys,
                 "title_chars": len(translated.get("title", "") or ""),
                 "meta_title_chars": len(translated.get("meta_title", "") or ""),
                 "meta_description_chars": len(translated.get("meta_description", "") or ""),
+                "source_meta_description_chars": source_meta_description_chars,
+                "translated_meta_description_chars": len(translated.get("meta_description", "") or ""),
+                "source_meta_description_over_limit": source_meta_description_over_limit,
+                "qa_info_count": len(qa_infos),
                 "translated_text_node_count": translated_body_node_count,
                 "translated_img_alt_count": translated_img_alt_count,
                 "img_alt_chars_list": translated_img_alt_chars,
+                "url_text_nodes_skipped_count": skipped_url_text_node_count,
                 "removed_skipped_origin_field_count": removed_origin_count,
                 "removed_shipping_marketing_phrase_count": removed_shipping_phrase_count,
                 "empty_html_nodes_removed_count": empty_html_nodes_removed_count,
@@ -1023,6 +1674,7 @@ class ShopifyProductTranslationTool:
 
         if dry_run:
             self.log("Dry run complete. No Shopify writes performed.")
+            terminal_beep()
             return
 
         result = self.register_translations(product_id, target_locale, source_items, translated)
@@ -1031,6 +1683,7 @@ class ShopifyProductTranslationTool:
         verification = self.verify_written_translations(product_id, target_locale, payload_keys)
         self.log("Post-write verification:")
         self.log(json_dumps(verification))
+        terminal_beep()
 
 
 class Command(BaseCommand):
@@ -1065,6 +1718,13 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        try:
+            self._handle(*args, **options)
+        except CommandError:
+            terminal_beep()
+            raise
+
+    def _handle(self, *args, **options):
         product_id = options["product_id"].strip()
         if product_id.isdigit():
             product_id = f"gid://shopify/Product/{product_id}"
