@@ -19,6 +19,8 @@ Existing Remote / Local Approval Runner framework:
 - `django_check` task
 - `git_safety_check` task
 - `shopify_translation_dry_run` task
+- `remote_approval/CODEX_TASK_WORKFLOW.md`
+- `remote_approval/CODEX_PROMPT_TEMPLATE.md`
 - `remote_approval/LOCAL_APPROVAL_WORKFLOW.md`
 - `remote_approval/TASK_TEMPLATE.md`
 
@@ -32,6 +34,10 @@ Existing Remote / Local Approval Runner framework:
 6. The user enters `Y`, `N`, `P`, `STOP`, `SHOW_LOG`, or `SUMMARY`.
 7. The runner continues, pauses, stops, or shows logs based only on fixed options.
 8. After completion, local voice prompts the user to review the result.
+
+For larger Codex App tasks, follow `remote_approval/CODEX_TASK_WORKFLOW.md`: understand task, plan small steps, make minimal changes, run fixed checks, use local approval, run `git_safety_check`, then summarize.
+
+When the user needs a reusable prompt for Codex App, use `remote_approval/CODEX_PROMPT_TEMPLATE.md`.
 
 ## Safety Rules
 
@@ -236,6 +242,8 @@ Recommended history fields:
 
 Keep these docs current:
 
+- `remote_approval/CODEX_TASK_WORKFLOW.md`
+- `remote_approval/CODEX_PROMPT_TEMPLATE.md`
 - `remote_approval/LOCAL_APPROVAL_WORKFLOW.md`
 - `remote_approval/TASK_TEMPLATE.md`
 
