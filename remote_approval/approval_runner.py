@@ -204,7 +204,7 @@ def _execute_selected_action(
 
     if approval_reply.reply == "0":
         return "stop", "Task stopped. No follow-up action executed.", "stopped"
-    if result.get("task_type") in {"django_check", "shopify_translation_dry_run"}:
+    if result.get("task_type") in {"django_check", "shopify_translation_dry_run", "git_safety_check"}:
         if approval_reply.reply == "1":
             return "keep_review_file", f"Review file kept: {result.get('review_path')}", "approved"
         return "invalid", f"Invalid reply for {result.get('task_type')}. Task stopped.", "invalid"
@@ -249,6 +249,12 @@ def _summarize_task_result(result: dict) -> str:
         "next_step",
         "products_checked",
         "warnings_count",
+        "branch",
+        "ahead_commits",
+        "changed_files",
+        "staged_files",
+        "untracked_files",
+        "secret_findings",
     ]
     summary = {key: result[key] for key in summary_keys if key in result}
     return json.dumps(summary, ensure_ascii=False)

@@ -17,6 +17,7 @@ Existing Remote / Local Approval Runner framework:
 - `approval_client`
 - `demo` task
 - `django_check` task
+- `git_safety_check` task
 - `shopify_translation_dry_run` task
 - `remote_approval/LOCAL_APPROVAL_WORKFLOW.md`
 - `remote_approval/TASK_TEMPLATE.md`
@@ -54,6 +55,7 @@ Always preserve these rules:
 
 - `demo`
 - `django_check`
+- `git_safety_check`
 - `shopify_translation_dry_run`
 
 Use task discovery before adding or running unfamiliar tasks:
@@ -98,6 +100,18 @@ Requirements:
 - Generate `logs/shopify_translation_dry_run_review.json`.
 - Do not write to Shopify.
 
+## `git_safety_check` Task
+
+Requirements:
+
+- Only allow `--mode dry-run`.
+- Use fixed read-only `git` commands only.
+- Do not run `git add`, `git commit`, `git push`, `git reset`, `git restore`, `git clean`, or rebase.
+- Do not delete files.
+- Scan changed, staged, and untracked text files for secret-risk patterns.
+- Do not print matched secret lines or values; report only file path, pattern type, and risk level.
+- Generate `logs/git_safety_check_review.json`.
+
 ## Local Approval Mode
 
 Default approval mode should be `local`.
@@ -108,6 +122,7 @@ CLI examples:
 python remote_approval_runner.py --task demo --mode dry-run
 python remote_approval_runner.py --task demo --mode dry-run --approval local
 python remote_approval_runner.py --task django_check --mode dry-run --approval local
+python remote_approval_runner.py --task git_safety_check --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task demo --mode dry-run --summary-only
 ```

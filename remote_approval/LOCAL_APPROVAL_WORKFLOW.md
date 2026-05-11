@@ -10,6 +10,7 @@ Telegram approval code is still present for future use, but local approval is th
 
 - Django checks after code changes.
 - Shopify translation dry-runs for one configured test product.
+- Git safety checks before local commits or any future push.
 - Future Shenzhen settlement check tasks.
 - Low-risk validation after Codex edits code.
 - Review-file generation and local audit workflows.
@@ -27,6 +28,7 @@ Telegram approval code is still present for future use, but local approval is th
 ```powershell
 python remote_approval_runner.py --task demo --mode dry-run
 python remote_approval_runner.py --task django_check --mode dry-run
+python remote_approval_runner.py --task git_safety_check --mode dry-run
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run
 ```
 
@@ -91,6 +93,16 @@ If it is missing, the task fails safely and does not contact Shopify.
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
 
+### Git Safety Risks
+
+Run this before local commits or any later push request:
+
+```powershell
+python remote_approval_runner.py --task git_safety_check --mode dry-run
+```
+
+This task is read-only. It checks status, branch, ahead commits, changed/staged/untracked files, suspicious paths, and secret-risk patterns. It never runs `git add`, `git commit`, `git push`, `git reset`, `git restore`, `git clean`, or rebase.
+
 ## Safety Boundary
 
 - Do not add `--command`.
@@ -100,3 +112,4 @@ The runner tries Windows PowerShell `System.Speech` for local voice prompts. If 
 - Default to `dry-run`.
 - Failures stop by default.
 - Write tasks must be separate tasks with explicit second confirmation.
+- Git safety checks are advisory only and must not perform Git writes.

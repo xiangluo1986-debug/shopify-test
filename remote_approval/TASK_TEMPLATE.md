@@ -107,3 +107,20 @@ Recommended fields:
 - [ ] Review file path is under `logs/`.
 - [ ] The local approval Skill is updated if workflow rules changed.
 - [ ] This checklist is revisited before commit.
+
+## Git Safety Checklist
+
+For tasks that inspect Git state:
+
+- [ ] Use only fixed read-only `git` commands.
+- [ ] Do not run `git add`.
+- [ ] Do not run `git commit`.
+- [ ] Do not run `git push`.
+- [ ] Do not run `git reset`.
+- [ ] Do not run `git restore`.
+- [ ] Do not run `git clean`.
+- [ ] Do not run rebase.
+- [ ] Do not delete files.
+- [ ] Do not print secret matches; report only file path, pattern type, and risk level.
+- [ ] Treat `.env`, logs, review files, approval history/state, scheduler logs, scripts, and Shopify write-sensitive files as suspicious.
+- [ ] The task should only generate a review file and approval summary.
