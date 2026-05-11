@@ -19,6 +19,7 @@ Existing Remote / Local Approval Runner framework:
 - `django_check` task
 - `git_safety_check` task
 - `shopify_translation_dry_run` task
+- `shopify_translation_multi_locale_dry_run` task
 - `remote_approval/CODEX_TASK_WORKFLOW.md`
 - `remote_approval/CODEX_PROMPT_TEMPLATE.md`
 - `remote_approval/LOCAL_APPROVAL_WORKFLOW.md`
@@ -50,6 +51,7 @@ Always preserve these rules:
 - All tasks must be registered through `task_registry`.
 - Default to `dry-run`.
 - `shopify_translation_dry_run` must never write to Shopify.
+- `shopify_translation_multi_locale_dry_run` must never write to Shopify and must never be converted into a write task.
 - Do not publish translations, call mutation/write paths, update products, update tags, update price, or update inventory.
 - Do not refund, cancel orders, bulk edit prices, or bulk edit inventory.
 - Do not run `git push`, `git reset`, or `git restore` unless the user explicitly requests that exact operation.
@@ -63,6 +65,7 @@ Always preserve these rules:
 - `django_check`
 - `git_safety_check`
 - `shopify_translation_dry_run`
+- `shopify_translation_multi_locale_dry_run`
 
 Use task discovery before adding or running unfamiliar tasks:
 
@@ -106,6 +109,23 @@ Requirements:
 - Generate `logs/shopify_translation_dry_run_review.json`.
 - Do not write to Shopify.
 
+## `shopify_translation_multi_locale_dry_run` Task
+
+Requirements:
+
+- Only allow `--mode dry-run`.
+- Require `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`.
+- Use `SHOPIFY_TRANSLATION_TEST_LOCALES` when present, otherwise default to `de,fr,es,it,ja`.
+- Run the existing `translate_shopify_product.py` management command once per locale with `--dry-run`.
+- Generate one per-locale review file named `backend/logs/shopify_translation_command_review_<locale>.json` and a summary review at `logs/shopify_translation_multi_locale_dry_run_review.json`.
+- Do not stop all locales when one locale fails; record that locale's failure and continue with the remaining configured locales.
+- Validate each locale glossary file before running the command. Missing or invalid glossary JSON must produce `failure_type=glossary_invalid` for that locale only.
+- Unsupported `SHOPIFY_TRANSLATION_TEST_LOCALES` entries must produce `failure_type=unsupported_locale` and must not be passed into a command.
+- Each locale result must include `failure_type`, `stdout_tail`, `stderr_tail`, `review_file_path`, `warnings_count`, and `no_shopify_writes_confirmed`.
+- `no_shopify_writes_confirmed` is true only when the locale command succeeds and stdout contains `Dry run complete. No Shopify writes performed.`
+- Do not write to Shopify, publish translations, call mutations, modify database rows, update products, update variants, update prices, update inventory, update orders, or run migrations.
+- Allowed approval actions are `Y` / `1`, `SHOW_LOG`, `SUMMARY`, and `N` / `0`.
+
 ## `git_safety_check` Task
 
 Requirements:
@@ -130,6 +150,7 @@ python remote_approval_runner.py --task demo --mode dry-run --approval local
 python remote_approval_runner.py --task django_check --mode dry-run --approval local
 python remote_approval_runner.py --task git_safety_check --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_multi_locale_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task demo --mode dry-run --summary-only
 ```
 

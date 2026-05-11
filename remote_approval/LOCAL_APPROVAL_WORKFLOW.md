@@ -10,6 +10,7 @@ Telegram approval code is still present for future use, but local approval is th
 
 - Django checks after code changes.
 - Shopify translation dry-runs for one configured test product.
+- Shopify multi-locale translation dry-runs for one configured test product across `de`, `fr`, `es`, `it`, and `ja`.
 - Git safety checks before local commits or any future push.
 - Future Shenzhen settlement check tasks.
 - Low-risk validation after Codex edits code.
@@ -30,6 +31,7 @@ python remote_approval_runner.py --task demo --mode dry-run
 python remote_approval_runner.py --task django_check --mode dry-run
 python remote_approval_runner.py --task git_safety_check --mode dry-run
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run
+python remote_approval_runner.py --task shopify_translation_multi_locale_dry_run --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -88,6 +90,50 @@ SHOPIFY_TRANSLATION_TEST_PRODUCT_ID=
 ```
 
 If it is missing, the task fails safely and does not contact Shopify.
+
+### Multi-Locale Shopify Translation Dry-Run
+
+`shopify_translation_multi_locale_dry_run` runs the fixed Shopify product translation command once per locale for:
+
+```text
+de,fr,es,it,ja
+```
+
+Override locales only with the fixed environment variable:
+
+```env
+SHOPIFY_TRANSLATION_TEST_LOCALES=de,fr,es,it,ja
+```
+
+The task is dry-run only. It must never publish translations, call Shopify write mutations, update products, update tags, update prices, update inventory, change orders, run migrations, or write to the database. It writes only local review/log files:
+
+```text
+logs/shopify_translation_multi_locale_dry_run_review.json
+backend/logs/shopify_translation_command_review_de.json
+backend/logs/shopify_translation_command_review_fr.json
+backend/logs/shopify_translation_command_review_es.json
+backend/logs/shopify_translation_command_review_it.json
+backend/logs/shopify_translation_command_review_ja.json
+```
+
+Each locale runs independently. A failure in one locale must be recorded and must not stop the remaining configured locales. Each locale result records `failure_type`, `stdout_tail`, `stderr_tail`, `review_file_path`, `warnings_count`, and `no_shopify_writes_confirmed`.
+
+`failure_type` values include `docker_permission_denied`, `missing_product_id`, `missing_env`, `command_error`, `timeout`, `unknown`, `glossary_invalid`, and `unsupported_locale`. Docker access errors are classified as Docker permission failures, not translation logic failures.
+
+`no_shopify_writes_confirmed` is true only when that locale command succeeds and stdout contains `Dry run complete. No Shopify writes performed.` The summary `all_no_write_confirmed` only covers successful locales; failed locales are not marked confirmed.
+
+Before running a locale command, the task validates that locale's glossary file exists and is valid JSON. Unsupported `SHOPIFY_TRANSLATION_TEST_LOCALES` entries are reported in the review and are never passed into a shell command.
+
+Allowed approval actions for this task are:
+
+```text
+Y / 1 = keep review files
+SHOW_LOG = show recent logs
+SUMMARY = show summary
+N / 0 = stop
+```
+
+Any real Shopify write or publish workflow must be created later as a separate task with explicit second confirmation.
 
 ### `System.Speech` Is Unavailable
 

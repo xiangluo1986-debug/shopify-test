@@ -90,7 +90,7 @@ def send_voice_prompt(message: str) -> bool:
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-Command", powershell],
             capture_output=True,
-            text=True,
+            text=False,
             timeout=10,
             shell=False,
             env=env,

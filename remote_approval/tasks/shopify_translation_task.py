@@ -48,13 +48,13 @@ def run_shopify_translation_dry_run_task(mode: str) -> dict:
                 command,
                 cwd=PROJECT_ROOT,
                 capture_output=True,
-                text=True,
+                text=False,
                 timeout=TIMEOUT_SECONDS,
                 shell=False,
             )
             exit_code = completed.returncode
-            stdout = completed.stdout or ""
-            stderr = completed.stderr or ""
+            stdout = _to_text(completed.stdout)
+            stderr = _to_text(completed.stderr)
             if COMMAND_REVIEW_HOST_PATH.exists():
                 command_review_path = COMMAND_REVIEW_HOST_PATH
         except FileNotFoundError:
