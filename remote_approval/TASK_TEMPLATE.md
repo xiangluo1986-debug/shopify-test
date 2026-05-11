@@ -36,6 +36,7 @@ For Shopify translation dry-run tasks:
 - Dry-run tasks must return before any Shopify mutation or `translationsRegister` write path.
 - Multi-locale dry-run tasks may generate one review per locale plus a summary review, but must not publish or write translations.
 - Batch multi-locale dry-run tasks may generate one review per product/locale plus a summary review, but must not publish or write translations.
+- Batch multi-locale dry-run tasks may also generate a local HTML dashboard for human review only; the dashboard must not trigger write, publish, apply, update, commit, or push actions.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -126,6 +127,7 @@ Recommended fields:
 - [ ] Multi-locale Shopify translation tasks record per-locale review paths, `failure_type`, and `no_shopify_writes_confirmed`.
 - [ ] Batch multi-locale Shopify translation tasks enforce the 3 product / 5 locale limit and never auto-scan the store.
 - [ ] Batch multi-locale Shopify translation tasks record per-product/locale review paths, `failure_type`, and `no_shopify_writes_confirmed`.
+- [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 
 ## Git Safety Checklist

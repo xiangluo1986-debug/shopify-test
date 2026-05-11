@@ -2,6 +2,7 @@ import json
 import re
 import subprocess
 import time
+from html import escape
 from pathlib import Path
 
 from remote_approval.utils import LOG_DIR, PROJECT_ROOT, load_env, utc_now_iso
@@ -10,6 +11,7 @@ from remote_approval.utils import LOG_DIR, PROJECT_ROOT, load_env, utc_now_iso
 TASK_NAME = "shopify_translation_batch_multi_locale_dry_run"
 COMMAND_LABEL = "docker_compose_web_translate_shopify_product_batch_multi_locale_dry_run"
 REVIEW_PATH = LOG_DIR / "shopify_translation_batch_multi_locale_dry_run_review.json"
+HTML_REVIEW_PATH = LOG_DIR / "shopify_translation_batch_multi_locale_dry_run_review.html"
 DEFAULT_LOCALES = ["de", "fr", "es", "it", "ja"]
 SUPPORTED_LOCALES = {
     "de": "German",
@@ -106,6 +108,8 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
         "task": TASK_NAME,
         "mode": mode,
         "command_label": COMMAND_LABEL,
+        "json_review_path": str(REVIEW_PATH),
+        "html_review_path": str(HTML_REVIEW_PATH),
         "product_ids": product_ids,
         "locales": locales,
         "product_count": len(product_ids),
@@ -140,16 +144,21 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
         },
     }
     review_path = _write_review(payload)
+    html_review_path = write_batch_review_html(payload, HTML_REVIEW_PATH)
     return {
         "task_type": TASK_NAME,
         "success": all_success,
         "exit_code": 0 if all_success else 1,
         "products_checked": len(product_ids) if all_success else success_count,
+        "failed_count": failed_count,
+        "all_no_write_confirmed": all_no_write_confirmed,
         "warnings_count": payload["warnings_count"],
         "command_label": COMMAND_LABEL,
         "review_path": str(review_path),
+        "json_review_path": str(review_path),
+        "html_review_path": str(html_review_path),
         "detected_issue_summary": payload["detected_issue_summary"],
-        "approval_message": _build_approval_message(payload, review_path),
+        "approval_message": _build_approval_message(payload, review_path, html_review_path),
     }
 
 
@@ -361,7 +370,106 @@ def _write_review(payload: dict) -> Path:
     return REVIEW_PATH
 
 
-def _build_approval_message(payload: dict, review_path: Path) -> str:
+def write_batch_review_html(review_data: dict, html_path: Path) -> Path:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(_render_batch_review_html(review_data), encoding="utf-8")
+    return html_path
+
+
+def _render_batch_review_html(review_data: dict) -> str:
+    status_label, status_class, status_text = _dashboard_status(review_data)
+    rows = "\n".join(_render_result_row(item) for item in review_data.get("results", []))
+    failed_rows = "\n".join(
+        _render_failed_row(item) for item in review_data.get("results", []) if not item.get("success")
+    )
+    warning_rows = "\n".join(
+        _render_warning_row(item) for item in review_data.get("results", []) if item.get("warnings_count")
+    )
+    review_links = "\n".join(_render_review_link(item) for item in review_data.get("results", []))
+    summary_rows = "\n".join(
+        _summary_row(label, review_data.get(key))
+        for label, key in [
+            ("Task", "task"),
+            ("Timestamp", "timestamp"),
+            ("Product Count", "product_count"),
+            ("Locale Count", "locale_count"),
+            ("Total Runs", "total_runs"),
+            ("Success Count", "success_count"),
+            ("Failed Count", "failed_count"),
+            ("Skipped Count", "skipped_count"),
+            ("All Success", "all_success"),
+            ("All No-Write Confirmed", "all_no_write_confirmed"),
+            ("Warnings Count", "warnings_count"),
+        ]
+    )
+    json_link = _link_for_path(review_data.get("json_review_path", ""))
+    html_link = _link_for_path(review_data.get("html_review_path", ""))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Shopify Batch Translation Dry-Run Review</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; color: #202124; background: #fff; }}
+    h1, h2 {{ margin-top: 1.4em; }}
+    table {{ border-collapse: collapse; width: 100%; margin: 12px 0 24px; }}
+    th, td {{ border: 1px solid #d0d7de; padding: 8px; vertical-align: top; text-align: left; }}
+    th {{ background: #f6f8fa; }}
+    .status {{ padding: 12px 14px; border-radius: 6px; font-weight: 700; margin: 12px 0; }}
+    .status.pass {{ background: #dafbe1; color: #116329; }}
+    .status.review {{ background: #fff8c5; color: #7d4e00; }}
+    .status.fail {{ background: #ffebe9; color: #82071e; }}
+    .tail {{ max-width: 520px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: Consolas, monospace; font-size: 12px; }}
+    .path {{ font-family: Consolas, monospace; overflow-wrap: anywhere; }}
+    .empty {{ color: #57606a; }}
+  </style>
+</head>
+<body>
+  <h1>Shopify Batch Multi-Locale Translation Dry-Run Review</h1>
+  <div class="status {status_class}">{escape(status_label)}: {escape(status_text)}</div>
+  <h2>Summary</h2>
+  <table>
+    <tbody>
+      {summary_rows}
+      <tr><th>JSON Review</th><td>{json_link}</td></tr>
+      <tr><th>HTML Review</th><td>{html_link}</td></tr>
+    </tbody>
+  </table>
+  <h2>Product × Locale Results</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Product ID</th><th>Locale</th><th>Success</th><th>Failure Type</th>
+        <th>Warnings</th><th>No Shopify Writes Confirmed</th><th>Review File</th>
+        <th>stdout Tail Summary</th><th>stderr Tail Summary</th>
+      </tr>
+    </thead>
+    <tbody>{rows or _empty_row(9, "No product/locale results.")}</tbody>
+  </table>
+  <h2>Failed Items</h2>
+  <table>
+    <thead><tr><th>Product ID</th><th>Locale</th><th>Failure Type</th><th>stderr Tail</th></tr></thead>
+    <tbody>{failed_rows or _empty_row(4, "No failed items.")}</tbody>
+  </table>
+  <h2>Warning Items</h2>
+  <table>
+    <thead><tr><th>Product ID</th><th>Locale</th><th>Warning Summary</th></tr></thead>
+    <tbody>{warning_rows or _empty_row(3, "No warnings.")}</tbody>
+  </table>
+  <h2>Review Links</h2>
+  <ul>{review_links or '<li class="empty">No per-item review links.</li>'}</ul>
+  <h2>Safety</h2>
+  <ul>
+    <li>This was a dry-run only.</li>
+    <li>No Shopify writes were performed.</li>
+    <li>Write/publish/apply/update actions are not available in this task.</li>
+  </ul>
+</body>
+</html>
+"""
+
+
+def _build_approval_message(payload: dict, review_path: Path, html_review_path: Path) -> str:
     return (
         "Shopify batch multi-locale translation dry-run completed.\n"
         f"Products: {payload.get('product_count')}\n"
@@ -371,7 +479,10 @@ def _build_approval_message(payload: dict, review_path: Path) -> str:
         f"Failed count: {payload.get('failed_count')}\n"
         f"Skipped count: {payload.get('skipped_count')}\n"
         f"Warnings: {payload.get('warnings_count')}\n"
-        f"Review file: {review_path}\n"
+        "Review JSON:\n"
+        f"{review_path}\n\n"
+        "Review HTML:\n"
+        f"{html_review_path}\n"
         "No Shopify writes confirmed for successful runs: "
         f"{payload.get('all_no_write_confirmed')}\n\n"
         "Allowed actions only:\n"
@@ -381,6 +492,109 @@ def _build_approval_message(payload: dict, review_path: Path) -> str:
         "N / 0 = stop\n\n"
         "Write, publish, apply, update, commit, and push are not allowed for this dry-run task."
     )
+
+
+def _dashboard_status(review_data: dict) -> tuple[str, str, str]:
+    if review_data.get("failed_count", 0) > 0 or not review_data.get("all_no_write_confirmed"):
+        return "FAIL", "fail", "failed_count > 0 or no-write confirmation is missing."
+    if review_data.get("warnings_count", 0) > 0:
+        return "REVIEW", "review", "warnings exist; review translated output before any future write task."
+    return "PASS", "pass", "all successful and all no-write confirmed."
+
+
+def _render_result_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td class=\"path\">{escape(str(item.get('product_id', '')))}</td>"
+        f"<td>{escape(str(item.get('locale', '')))}</td>"
+        f"<td>{_bool_text(item.get('success'))}</td>"
+        f"<td>{escape(str(item.get('failure_type') or ''))}</td>"
+        f"<td>{escape(str(item.get('warnings_count', 0)))}</td>"
+        f"<td>{_bool_text(item.get('no_shopify_writes_confirmed'))}</td>"
+        f"<td>{_link_for_path(item.get('review_file_path', ''))}</td>"
+        f"<td><div class=\"tail\">{escape(_compact_tail(item.get('stdout_tail', '')))}</div></td>"
+        f"<td><div class=\"tail\">{escape(_compact_tail(item.get('stderr_tail', '')))}</div></td>"
+        "</tr>"
+    )
+
+
+def _render_failed_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td class=\"path\">{escape(str(item.get('product_id', '')))}</td>"
+        f"<td>{escape(str(item.get('locale', '')))}</td>"
+        f"<td>{escape(str(item.get('failure_type') or ''))}</td>"
+        f"<td><div class=\"tail\">{escape(_compact_tail(item.get('stderr_tail', '')))}</div></td>"
+        "</tr>"
+    )
+
+
+def _render_warning_row(item: dict) -> str:
+    summary = f"{item.get('warnings_count', 0)} warning(s)"
+    if item.get("failure_type"):
+        summary += f"; failure_type={item.get('failure_type')}"
+    return (
+        "<tr>"
+        f"<td class=\"path\">{escape(str(item.get('product_id', '')))}</td>"
+        f"<td>{escape(str(item.get('locale', '')))}</td>"
+        f"<td>{escape(summary)}</td>"
+        "</tr>"
+    )
+
+
+def _render_review_link(item: dict) -> str:
+    path = item.get("review_file_path", "")
+    if not path:
+        return ""
+    label = _project_relative_path(path)
+    return f"<li>{_link_for_path(path, label)}</li>"
+
+
+def _summary_row(label: str, value) -> str:
+    return f"<tr><th>{escape(label)}</th><td>{escape(str(value))}</td></tr>"
+
+
+def _empty_row(colspan: int, message: str) -> str:
+    return f"<tr><td colspan=\"{colspan}\" class=\"empty\">{escape(message)}</td></tr>"
+
+
+def _bool_text(value) -> str:
+    return "true" if bool(value) else "false"
+
+
+def _compact_tail(text: str, max_chars: int = 800) -> str:
+    clean = (text or "").strip()
+    if len(clean) <= max_chars:
+        return clean
+    return "... " + clean[-max_chars:]
+
+
+def _link_for_path(path: str, label: str | None = None) -> str:
+    if not path:
+        return '<span class="empty">not generated</span>'
+    display = label or _project_relative_path(path)
+    href = _html_relative_href(path)
+    return f"<a class=\"path\" href=\"{escape(href)}\">{escape(display)}</a>"
+
+
+def _project_relative_path(path: str) -> str:
+    try:
+        absolute = Path(path)
+        if not absolute.is_absolute():
+            absolute = PROJECT_ROOT / absolute
+        return absolute.resolve().relative_to(PROJECT_ROOT).as_posix()
+    except (OSError, ValueError):
+        return str(path).replace("\\", "/")
+
+
+def _html_relative_href(path: str) -> str:
+    try:
+        absolute = Path(path)
+        if not absolute.is_absolute():
+            absolute = PROJECT_ROOT / absolute
+        return absolute.resolve().relative_to(HTML_REVIEW_PATH.parent.resolve()).as_posix()
+    except (OSError, ValueError):
+        return _project_relative_path(path)
 
 
 def _failed_result(
