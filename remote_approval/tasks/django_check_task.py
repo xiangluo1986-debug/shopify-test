@@ -29,13 +29,13 @@ def run_django_check_task(mode: str) -> dict:
             DJANGO_CHECK_COMMAND,
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True,
+            text=False,
             timeout=TIMEOUT_SECONDS,
             shell=False,
         )
         exit_code = completed.returncode
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
+        stdout = _to_text(completed.stdout)
+        stderr = _to_text(completed.stderr)
     except FileNotFoundError:
         stderr = "Docker command was not found. Please install Docker Desktop and make sure it is available in PATH."
         exit_code = 127

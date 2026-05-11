@@ -17,6 +17,28 @@ OPENAI_MODEL = "gpt-4.1-mini"
 TRANSLATABLE_KEYS = {"title", "body_html", "meta_title", "meta_description"}
 FIELD_ORDER = ["title", "body_html", "meta_title", "meta_description"]
 OPENAI_RETRY_DELAYS = [5, 15, 30]
+SUPPORTED_LOCALES = {
+    "de": {
+        "language_name": "German",
+        "glossary_file": "translation_glossary_de.json",
+    },
+    "fr": {
+        "language_name": "French",
+        "glossary_file": "translation_glossary_fr.json",
+    },
+    "es": {
+        "language_name": "Spanish",
+        "glossary_file": "translation_glossary_es.json",
+    },
+    "it": {
+        "language_name": "Italian",
+        "glossary_file": "translation_glossary_it.json",
+    },
+    "ja": {
+        "language_name": "Japanese",
+        "glossary_file": "translation_glossary_ja.json",
+    },
+}
 ORIGIN_PATTERNS = [
     r"\borigin\b",
     r"\bmade\s+in\s+china\b",
@@ -760,9 +782,20 @@ def parse_fields(fields_value):
     return fields
 
 
-def load_glossary(path):
+def locale_config(target_locale):
+    return SUPPORTED_LOCALES.get((target_locale or "").strip().lower())
+
+
+def locale_language_name(target_locale):
+    config = locale_config(target_locale)
+    return config["language_name"] if config else target_locale
+
+
+def load_glossary(path, target_locale="de"):
     if not path:
-        path = Path(__file__).resolve().parents[2] / "translation_glossary_de.json"
+        config = locale_config(target_locale)
+        glossary_file = config["glossary_file"] if config else "translation_glossary_de.json"
+        path = Path(__file__).resolve().parents[2] / glossary_file
     else:
         path = Path(path)
     if not path.exists():
@@ -851,6 +884,7 @@ class ShopifyProductTranslationTool:
             "task": "Translate Shopify product fields for ecommerce SEO.",
             "product_id": product_id,
             "target_locale": target_locale,
+            "target_language": locale_language_name(target_locale),
             "selected_fields": sorted(selected_fields),
             "glossary": glossary,
             "seo_rules": [
@@ -940,6 +974,7 @@ class ShopifyProductTranslationTool:
             "task": "Translate visible Shopify product body_html text nodes only.",
             "product_id": product_id,
             "target_locale": target_locale,
+            "target_language": locale_language_name(target_locale),
             "glossary": glossary,
             "rules": [
                 "The glossary is mandatory. Prefer glossary translations over your own wording when the source term appears.",
@@ -1243,6 +1278,7 @@ class ShopifyProductTranslationTool:
         self.log(f"Shop: {self.installation.shop}")
         self.log(f"Product ID: {product_id}")
         self.log(f"Target locale: {target_locale}")
+        self.log(f"Target language: {locale_language_name(target_locale)}")
         self.log(f"Dry run: {dry_run}")
         selected_fields = fields or set(FIELD_ORDER)
         glossary = glossary or {}
@@ -1736,7 +1772,7 @@ class Command(BaseCommand):
             raise CommandError(f"Shopify installation not found for {options['shop']}") from exc
 
         selected_fields = parse_fields(options["fields"])
-        glossary = load_glossary(options.get("glossary_file"))
+        glossary = load_glossary(options.get("glossary_file"), target_locale)
 
         tool = ShopifyProductTranslationTool(installation, self.stdout)
         tool.run(

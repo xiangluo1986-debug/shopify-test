@@ -132,15 +132,15 @@ def _run_fixed_command(command: list[str]) -> dict:
         command,
         cwd=PROJECT_ROOT,
         capture_output=True,
-        text=True,
+        text=False,
         timeout=30,
         shell=False,
         env=env,
     )
     return {
         "exit_code": completed.returncode,
-        "stdout": completed.stdout or "",
-        "stderr": completed.stderr or "",
+        "stdout": _to_text(completed.stdout),
+        "stderr": _to_text(completed.stderr),
     }
 
 
@@ -345,3 +345,11 @@ def _detected_issue_summary(risk_summary: list[dict]) -> str:
 def _tail_lines(text: str, max_lines: int) -> str:
     lines = text.splitlines()
     return "\n".join(lines[-max_lines:])
+
+
+def _to_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)

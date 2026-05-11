@@ -204,7 +204,12 @@ def _execute_selected_action(
 
     if approval_reply.reply == "0":
         return "stop", "Task stopped. No follow-up action executed.", "stopped"
-    if result.get("task_type") in {"django_check", "shopify_translation_dry_run", "git_safety_check"}:
+    if result.get("task_type") in {
+        "django_check",
+        "shopify_translation_dry_run",
+        "shopify_translation_multi_locale_dry_run",
+        "git_safety_check",
+    }:
         if approval_reply.reply == "1":
             return "keep_review_file", f"Review file kept: {result.get('review_path')}", "approved"
         return "invalid", f"Invalid reply for {result.get('task_type')}. Task stopped.", "invalid"
@@ -281,6 +286,8 @@ def _build_task_summary(task: str, mode: str, approval_mode: str, result: dict) 
 def _next_allowed_actions(task: str) -> list[str]:
     if task == "demo":
         return ["Y/1 generate review file", "2 run simulated test write", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
+    if task == "shopify_translation_multi_locale_dry_run":
+        return ["Y/1 keep review files", "N/0 stop", "SHOW_LOG", "SUMMARY"]
     return ["Y/1 keep review file", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
 
 

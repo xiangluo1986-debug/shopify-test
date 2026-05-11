@@ -6,6 +6,10 @@ Use this skill when translating Shopify products, editing translated product con
 
 - Translation command: `backend/shopify_sync/management/commands/translate_shopify_product.py`
 - German glossary: `backend/shopify_sync/translation_glossary_de.json`
+- French glossary: `backend/shopify_sync/translation_glossary_fr.json`
+- Spanish glossary: `backend/shopify_sync/translation_glossary_es.json`
+- Italian glossary: `backend/shopify_sync/translation_glossary_it.json`
+- Japanese glossary: `backend/shopify_sync/translation_glossary_ja.json`
 
 ## Required Workflow
 
@@ -13,6 +17,12 @@ Use this skill when translating Shopify products, editing translated product con
 - Work on exactly one `product_id` and one `target_locale` at a time.
 - Default to `--dry-run`; never start with a formal Shopify write.
 - Do not enable or run batch translation until the single-product workflow is stable and the user explicitly asks for batch work.
+- First-phase automatic translation supports dry-run previews for these locales: `de`, `fr`, `es`, `it`, and `ja`.
+- The registered multi-locale task is `shopify_translation_multi_locale_dry_run`; it must remain dry-run only and must not become a write task.
+- Multi-locale dry-run runs each locale independently. A single locale failure must not stop the remaining locales.
+- Each locale writes its own command review file named `backend/logs/shopify_translation_command_review_<locale>.json`, and the task writes the summary review to `logs/shopify_translation_multi_locale_dry_run_review.json`.
+- Each locale result must include `failure_type` and `no_shopify_writes_confirmed`. `no_shopify_writes_confirmed` is true only when the locale command succeeds and stdout contains `Dry run complete. No Shopify writes performed.`
+- Supported multi-locale failure types include `docker_permission_denied`, `missing_product_id`, `missing_env`, `command_error`, `timeout`, `unknown`, `glossary_invalid`, and `unsupported_locale`.
 - Generate a `--review-file` for dry-run review before any formal write.
 - Show or summarize the review output before asking for write confirmation.
 - Formal Shopify translation writes require explicit user confirmation after review.
@@ -46,6 +56,8 @@ The translation workflow can include:
 - Avoid keyword stuffing.
 - Avoid awkward literal translations; prefer idiomatic product language.
 - For German, use the glossary and existing QA replacements in the command file.
+- For non-German locales, use the matching glossary file and keep the same safety rules: preserve HTML, protect URLs/attributes, localize image alt text, avoid origin/shipping claims, and avoid exaggerated military/combat wording.
+- Glossary files must be valid JSON, cover core RC product terminology, and must not include shipping origin or exaggerated marketing claims.
 - German QA must prefer concise, natural German RC ecommerce wording, avoid overlong compounds, normalize headings such as `Produkt-Highlights`, `Lieferumfang`, `Technische Daten`, `Kompatibilität`, `Montage-Tipps`, and `Support & Garantie`, and warn on title/meta length problems.
 - For battery/accessory product titles over 65 characters, keep the model plus voltage/capacity plus product type. Example: `YuXiang F112S 7,4V 1200mAh LiPo Akku`. Secondary aircraft names such as `AH-1 Cobra` or broad category terms such as `RC Helikopter` may be omitted when needed.
 - German QA must fix common dry-run findings such as `Trainigs-RC` -> `Trainings-RC`, `Trainigsflugzeugs` -> `Trainingsflugzeugs`, `Trainings-RC Flugzeug` -> `RC-Trainingsflugzeug`, `Aufprällenergie` -> `Aufprallenergie`, `Propellerhalterungsbasis` -> `Propellerhalterung`, `am Motorhaube` -> `an der Motorhaube`, `Garantie Bei` -> `Garantie bei`, and `Für das ... Allein.` / `Ausschließlich passend.` -> natural compatibility wording such as `Nur passend für das VolantexRC Sport Cub 500 4-Kanal RC Flugzeug (761-4 Sport Cub).` or `Nur passend für dieses Modell.`. Do not warn on correct `Aufprälle`.
@@ -76,6 +88,8 @@ The translation workflow can include:
 ## Safety
 
 - Shopify publishing or translation writes require explicit user confirmation.
+- Multi-locale dry-run tasks must not call Shopify mutations, `translationsRegister`, publish translations, update products, update variants, update orders, update inventory, or modify the database.
+- Any future real Shopify translation write must be a separate task with explicit second confirmation after review.
 - Do not expose OpenAI or Shopify API keys.
 - Do not print or copy `OPENAI_API_KEY`, Shopify access tokens, or other secrets into logs, prompts, docs, review files, shell output, or Git.
 - If only reviewing translation output, stay read-only.
