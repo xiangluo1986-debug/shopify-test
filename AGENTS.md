@@ -34,6 +34,15 @@ Codex should prioritize safety, minimal edits, and read-only inspection before c
 5. After editing, report changed files, behavior changes, relevant diff or code paths, and commands the user should run.
 6. If safe, run or request a low-risk validation command.
 
+For local approval execution, PowerShell fixed tasks, Codex automation workflows, voice reminders, pause mode, or `logs/interrupt.flag` handling, refer to `.codex/skills/local-approval-runner/SKILL.md`.
+
+## Completion Notification
+
+- When Codex finishes a task, play a short sound notification from the Windows host PowerShell when possible so the user does not need to watch the screen.
+- Use a success sound for completed work and a different lower/error sound if the task fails or is blocked.
+- Do not rely only on sounds emitted inside Docker containers or Docker logs; they may not reach the Windows speaker.
+- If a browser or OAuth flow needs notification, prefer browser-based audio or a host-side PowerShell wrapper.
+
 ## Django / Docker Validation
 
 After Django code changes, prefer this validation command:
@@ -92,12 +101,24 @@ python manage.py flush
 ## Shopify Product Translation Rules
 
 - Existing translation entry point: `backend/shopify_sync/management/commands/translate_shopify_product.py`.
+- Default workflow must be dry-run first. Do not directly write Shopify translations on the first run.
+- Do not enable or create batch product translation until the single-product review workflow is stable and the user explicitly asks for it.
+- Only run one `product_id` and one `target_locale` at a time for product translation.
+- Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
+- Use `--dry-run` for preview runs and include the payload preview in the review.
+- Formal Shopify translation writes require explicit user confirmation after review.
+- After a formal write, re-read Shopify `translatableResource` and verify `translationsRegister` returned no user errors, values exist for the requested locale, and `outdated=false`.
 - Preserve Shopify HTML structure and attributes, especially product body HTML and image `alt` attributes.
+- Preserve `href`, `src`, `class`, `style`, `id`, and `data-*` attributes exactly.
 - Do not remove product specs, compatibility notes, model numbers, SKU-like text, or package contents.
 - Avoid keyword stuffing, fake urgency, generic AI marketing language, and inaccurate claims.
-- Avoid origin / China-origin marketing claims unless the user explicitly wants them.
+- Filter origin/source/manufacturing-origin wording such as Origin, Herkunft, Made in China, Mainland China, and Hergestellt in Festlandchina.
+- Filter shipping marketing phrases such as worldwide shipping, ships worldwide, Weltweiter Versand, Versand weltweit, and Lieferung weltweit.
 - For German translation, use the local glossary file when relevant: `backend/shopify_sync/translation_glossary_de.json`.
+- For German translation, preserve the German QA/localization polish rules in `translate_shopify_product.py`, including concise product titles, glossary terms, section heading normalization, and warnings for awkward German compounds.
 - Keep translated SEO titles and meta descriptions concise and natural.
+- Do not expose `OPENAI_API_KEY`, Shopify access tokens, or any other secret in prompts, logs, review files, shell output, docs, or Git.
+- If a new repeated Shopify translation rule appears, update `.codex/skills/shopify-product-translation/SKILL.md` or create a new dedicated skill so future translation runs inherit it.
 
 ## Shopify SEO Rules
 

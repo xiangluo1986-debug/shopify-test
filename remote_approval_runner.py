@@ -1,0 +1,5 @@
+from remote_approval.approval_runner import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
