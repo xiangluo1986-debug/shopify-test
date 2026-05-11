@@ -13,3 +13,5 @@ logs/*.json
 logs/*.jsonl
 logs/*_review.json
 backend/logs/shopify_translation_command_review.json
+
+backend/logs/
