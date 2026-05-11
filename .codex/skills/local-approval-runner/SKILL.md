@@ -140,6 +140,9 @@ Requirements:
 - Use `SHOPIFY_TRANSLATION_TEST_LOCALES` when present, otherwise default to `de,fr,es,it,ja`.
 - Run the existing `translate_shopify_product.py` management command once per product/locale with `--dry-run`.
 - Generate one per-product/locale review file named `backend/logs/shopify_translation_command_review_<product_id>_<locale>.json` and a summary review at `logs/shopify_translation_batch_multi_locale_dry_run_review.json`.
+- Generate a local HTML review dashboard at `logs/shopify_translation_batch_multi_locale_dry_run_review.html` alongside the JSON summary.
+- The HTML dashboard is for local human review only. It must not trigger write, publish, apply, update, commit, or push actions.
+- Generated review HTML/JSON files must stay ignored by Git, including `logs/*.html`, `logs/*_review.html`, `logs/*_review.json`, and `backend/logs/`.
 - Do not stop all combinations when one product/locale fails; record that combination's failure and continue with the remaining configured combinations.
 - Each product/locale result must include `failure_type`, `stdout_tail`, `stderr_tail`, `review_file_path`, `warnings_count`, and `no_shopify_writes_confirmed`.
 - `no_shopify_writes_confirmed` is true only when that product/locale command succeeds and stdout contains `Dry run complete. No Shopify writes performed.`

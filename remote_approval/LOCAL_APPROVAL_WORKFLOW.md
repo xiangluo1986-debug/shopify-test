@@ -151,7 +151,10 @@ The batch task is limited to 3 products and 5 locales. If either limit is exceed
 
 ```text
 logs/shopify_translation_batch_multi_locale_dry_run_review.json
+logs/shopify_translation_batch_multi_locale_dry_run_review.html
 ```
+
+The HTML dashboard is for local human review only. It must not trigger write, publish, apply, update, commit, or push actions, and generated review dashboards must remain ignored by Git.
 
 Each successful command attempt also writes a per-product/locale review such as:
 

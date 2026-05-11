@@ -27,6 +27,7 @@ Use this skill when translating Shopify products, editing translated product con
 - Batch multi-locale dry-run is limited to at most 3 configured products and at most 5 locales. It must never auto-scan the whole Shopify store.
 - Batch multi-locale dry-run runs each product/locale independently. A single product/locale failure must not stop the remaining combinations.
 - Batch per-combination review files are named `backend/logs/shopify_translation_command_review_<product_id>_<locale>.json`, and the summary review is `logs/shopify_translation_batch_multi_locale_dry_run_review.json`.
+- Batch dry-run also generates a local HTML dashboard at `logs/shopify_translation_batch_multi_locale_dry_run_review.html` for human review only. The HTML dashboard must not trigger write, publish, apply, or update actions.
 - Batch result `no_shopify_writes_confirmed` follows the same rule: the command must succeed and stdout must contain `Dry run complete. No Shopify writes performed.`
 - Generate a `--review-file` for dry-run review before any formal write.
 - Show or summarize the review output before asking for write confirmation.
@@ -94,6 +95,7 @@ The translation workflow can include:
 
 - Shopify publishing or translation writes require explicit user confirmation.
 - Multi-locale and batch multi-locale dry-run tasks must not call Shopify mutations, `translationsRegister`, publish translations, update products, update variants, update orders, update inventory, or modify the database.
+- Do not commit generated review dashboards or logs such as `logs/*.html`, `logs/*_review.html`, `logs/*_review.json`, or files under `backend/logs/`.
 - Any future real Shopify translation write must be a separate task with explicit second confirmation after review.
 - Do not expose OpenAI or Shopify API keys.
 - Do not print or copy `OPENAI_API_KEY`, Shopify access tokens, or other secrets into logs, prompts, docs, review files, shell output, or Git.
