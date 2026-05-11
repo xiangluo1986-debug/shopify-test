@@ -9,7 +9,7 @@ from remote_approval.approval_client import (
     LocalApprovalClient,
     TelegramApprovalClient,
 )
-from remote_approval.task_registry import get_task
+from remote_approval.task_registry import get_task, get_task_metadata, list_task_metadata
 from remote_approval.utils import (
     LOG_DIR,
     append_history,
@@ -24,15 +24,23 @@ from remote_approval.utils import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run fixed tasks with remote approval gates.")
-    parser.add_argument("--task", required=True, help="Registered task name, for example: demo")
+    parser.add_argument("--task", help="Registered task name, for example: demo")
     parser.add_argument("--mode", default="dry-run", choices=["dry-run"], help="Execution mode")
     parser.add_argument("--approval", default="local", choices=["local", "telegram"], help="Approval mode")
+    parser.add_argument("--list-tasks", action="store_true", help="List registered fixed tasks and exit")
+    parser.add_argument("--summary-only", action="store_true", help="Run the fixed task and print summary without approval action")
     return parser
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.list_tasks:
+        _print_task_list()
+        return 0
+    if not args.task:
+        parser.error("--task is required unless --list-tasks is used")
+
     logger = setup_logging()
     approval_id = str(uuid.uuid4())
 
@@ -47,8 +55,14 @@ def main() -> int:
 
         task_func = get_task(args.task)
         result = task_func(args.mode)
-        task_summary = _summarize_task_result(result)
+        task_summary = _build_task_summary(args.task, args.mode, args.approval, result)
         logger.info("task result summary: %s", task_summary)
+
+        if args.summary_only:
+            print(task_summary)
+            if args.approval == "local":
+                send_voice_prompt("Task completed. Please review the summary.")
+            return 0
 
         message = _build_approval_message(args.task, args.mode, result, approval_id)
         interrupt_reply = _check_local_interrupt(local_client, args.task, args.mode, approval_id, task_summary, logger)
@@ -233,9 +247,45 @@ def _summarize_task_result(result: dict) -> str:
         "checked_items",
         "warnings",
         "next_step",
+        "products_checked",
+        "warnings_count",
     ]
     summary = {key: result[key] for key in summary_keys if key in result}
     return json.dumps(summary, ensure_ascii=False)
+
+
+def _build_task_summary(task: str, mode: str, approval_mode: str, result: dict) -> str:
+    metadata = get_task_metadata(task)
+    success = result.get("success")
+    if success is None and task == "demo":
+        success = True
+    summary = {
+        "task": task,
+        "mode": mode,
+        "approval_mode": approval_mode,
+        "review_file_path": result.get("review_path") or metadata.get("review_file_path"),
+        "success": success,
+        "detected_issue_summary": result.get("detected_issue_summary") or "No issue summary for this task.",
+        "next_allowed_actions": _next_allowed_actions(task),
+        "result": json.loads(_summarize_task_result(result)),
+    }
+    return json.dumps(summary, ensure_ascii=False, indent=2)
+
+
+def _next_allowed_actions(task: str) -> list[str]:
+    if task == "demo":
+        return ["Y/1 generate review file", "2 run simulated test write", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
+    return ["Y/1 keep review file", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
+
+
+def _print_task_list() -> None:
+    print("Registered Local Approval Runner tasks:")
+    for metadata in list_task_metadata():
+        print(f"- {metadata['name']}")
+        print(f"  description: {metadata['description']}")
+        print(f"  allowed modes: {', '.join(metadata['allowed_modes'])}")
+        print(f"  write risk: {metadata['write_risk']}")
+        print(f"  review file path: {metadata['review_file_path']}")
 
 
 def _check_local_interrupt(

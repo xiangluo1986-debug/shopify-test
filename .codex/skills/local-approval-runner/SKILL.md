@@ -18,6 +18,8 @@ Existing Remote / Local Approval Runner framework:
 - `demo` task
 - `django_check` task
 - `shopify_translation_dry_run` task
+- `remote_approval/LOCAL_APPROVAL_WORKFLOW.md`
+- `remote_approval/TASK_TEMPLATE.md`
 
 ## Core Workflow
 
@@ -53,6 +55,20 @@ Always preserve these rules:
 - `demo`
 - `django_check`
 - `shopify_translation_dry_run`
+
+Use task discovery before adding or running unfamiliar tasks:
+
+```powershell
+python remote_approval_runner.py --list-tasks
+```
+
+Task metadata must include:
+
+- task name
+- description
+- allowed modes
+- write risk
+- review file path
 
 ## `django_check` Task
 
@@ -93,6 +109,7 @@ python remote_approval_runner.py --task demo --mode dry-run
 python remote_approval_runner.py --task demo --mode dry-run --approval local
 python remote_approval_runner.py --task django_check --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run --approval local
+python remote_approval_runner.py --task demo --mode dry-run --summary-only
 ```
 
 Telegram remains available only when explicitly selected, for example:
@@ -200,6 +217,15 @@ Recommended history fields:
 - `selected_action`
 - `result`
 
+## Workflow And Task Docs
+
+Keep these docs current:
+
+- `remote_approval/LOCAL_APPROVAL_WORKFLOW.md`
+- `remote_approval/TASK_TEMPLATE.md`
+
+When adding a task, start from `TASK_TEMPLATE.md`, register the task in `task_registry`, add metadata for `--list-tasks`, and update this skill if the workflow or safety boundary changes.
+
 ## Future Phases
 
 Possible future work:
@@ -213,4 +239,4 @@ Possible future work:
 
 ## Development Rule
 
-If a future change adds an approval task, PowerShell fixed task, Shopify dry-run/write task, or Shenzhen settlement check task, update this skill in the same change.
+If a future change adds an approval task, PowerShell fixed task, Shopify dry-run/write task, or Shenzhen settlement check task, update this skill and the task template checklist in the same change.
