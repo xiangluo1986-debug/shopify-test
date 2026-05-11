@@ -20,6 +20,7 @@ Existing Remote / Local Approval Runner framework:
 - `git_safety_check` task
 - `shopify_translation_dry_run` task
 - `shopify_translation_multi_locale_dry_run` task
+- `shopify_translation_batch_multi_locale_dry_run` task
 - `remote_approval/CODEX_TASK_WORKFLOW.md`
 - `remote_approval/CODEX_PROMPT_TEMPLATE.md`
 - `remote_approval/LOCAL_APPROVAL_WORKFLOW.md`
@@ -52,6 +53,7 @@ Always preserve these rules:
 - Default to `dry-run`.
 - `shopify_translation_dry_run` must never write to Shopify.
 - `shopify_translation_multi_locale_dry_run` must never write to Shopify and must never be converted into a write task.
+- `shopify_translation_batch_multi_locale_dry_run` must never write to Shopify and must never be converted into a write task.
 - Do not publish translations, call mutation/write paths, update products, update tags, update price, or update inventory.
 - Do not refund, cancel orders, bulk edit prices, or bulk edit inventory.
 - Do not run `git push`, `git reset`, or `git restore` unless the user explicitly requests that exact operation.
@@ -66,6 +68,7 @@ Always preserve these rules:
 - `git_safety_check`
 - `shopify_translation_dry_run`
 - `shopify_translation_multi_locale_dry_run`
+- `shopify_translation_batch_multi_locale_dry_run`
 
 Use task discovery before adding or running unfamiliar tasks:
 
@@ -126,6 +129,23 @@ Requirements:
 - Do not write to Shopify, publish translations, call mutations, modify database rows, update products, update variants, update prices, update inventory, update orders, or run migrations.
 - Allowed approval actions are `Y` / `1`, `SHOW_LOG`, `SUMMARY`, and `N` / `0`.
 
+## `shopify_translation_batch_multi_locale_dry_run` Task
+
+Requirements:
+
+- Only allow `--mode dry-run`.
+- Use `SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS` when present, otherwise fall back to `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`.
+- Do not automatically scan the store or discover product IDs.
+- Limit the task to at most 3 products and at most 5 locales.
+- Use `SHOPIFY_TRANSLATION_TEST_LOCALES` when present, otherwise default to `de,fr,es,it,ja`.
+- Run the existing `translate_shopify_product.py` management command once per product/locale with `--dry-run`.
+- Generate one per-product/locale review file named `backend/logs/shopify_translation_command_review_<product_id>_<locale>.json` and a summary review at `logs/shopify_translation_batch_multi_locale_dry_run_review.json`.
+- Do not stop all combinations when one product/locale fails; record that combination's failure and continue with the remaining configured combinations.
+- Each product/locale result must include `failure_type`, `stdout_tail`, `stderr_tail`, `review_file_path`, `warnings_count`, and `no_shopify_writes_confirmed`.
+- `no_shopify_writes_confirmed` is true only when that product/locale command succeeds and stdout contains `Dry run complete. No Shopify writes performed.`
+- Do not write to Shopify, publish translations, call mutations, modify database rows, update products, update variants, update prices, update inventory, update orders, or run migrations.
+- Allowed approval actions are `Y` / `1`, `SHOW_LOG`, `SUMMARY`, and `N` / `0`.
+
 ## `git_safety_check` Task
 
 Requirements:
@@ -151,6 +171,7 @@ python remote_approval_runner.py --task django_check --mode dry-run --approval l
 python remote_approval_runner.py --task git_safety_check --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_multi_locale_dry_run --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_multi_locale_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task demo --mode dry-run --summary-only
 ```
 

@@ -35,9 +35,13 @@ For Shopify translation dry-run tasks:
 
 - Dry-run tasks must return before any Shopify mutation or `translationsRegister` write path.
 - Multi-locale dry-run tasks may generate one review per locale plus a summary review, but must not publish or write translations.
+- Batch multi-locale dry-run tasks may generate one review per product/locale plus a summary review, but must not publish or write translations.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
+- Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
+- Batch multi-locale dry-run tasks should continue after a single product/locale fails and record `failure_type` per product/locale.
 - Per-locale Shopify translation results should include `no_shopify_writes_confirmed`; this is true only after the command succeeds and stdout contains `Dry run complete. No Shopify writes performed.`
+- Per-product/locale Shopify translation results should include `no_shopify_writes_confirmed` with the same stdout confirmation rule.
 - Validate each configured glossary before running the locale. Invalid or missing glossary files should fail only that locale with `failure_type=glossary_invalid`.
 - Unsupported locale configuration should be recorded as `failure_type=unsupported_locale` and must not be passed into a command.
 - Real translation writes must be implemented as a separate task with explicit second confirmation.
@@ -112,7 +116,7 @@ Recommended fields:
 - [ ] No `shell=True`.
 - [ ] No user input is concatenated into commands.
 - [ ] Default mode is `dry-run`.
-- [ ] Failure stops by default, except multi-locale dry-run tasks may continue to later locales while keeping writes disabled.
+- [ ] Failure stops by default, except multi-locale dry-run tasks may continue to later locales or product/locale combinations while keeping writes disabled.
 - [ ] Secrets are read only from `.env` or existing project config.
 - [ ] Secrets are not printed, logged, committed, or added to review files.
 - [ ] Review file path is under `logs/`.
@@ -120,6 +124,8 @@ Recommended fields:
 - [ ] Shopify translation dry-run tasks cannot become write tasks.
 - [ ] Multi-locale Shopify translation tasks keep glossary files valid JSON and avoid shipping origin / exaggerated marketing glossary entries.
 - [ ] Multi-locale Shopify translation tasks record per-locale review paths, `failure_type`, and `no_shopify_writes_confirmed`.
+- [ ] Batch multi-locale Shopify translation tasks enforce the 3 product / 5 locale limit and never auto-scan the store.
+- [ ] Batch multi-locale Shopify translation tasks record per-product/locale review paths, `failure_type`, and `no_shopify_writes_confirmed`.
 - [ ] This checklist is revisited before commit.
 
 ## Git Safety Checklist

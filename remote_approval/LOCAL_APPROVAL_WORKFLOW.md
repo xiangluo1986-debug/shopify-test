@@ -11,6 +11,7 @@ Telegram approval code is still present for future use, but local approval is th
 - Django checks after code changes.
 - Shopify translation dry-runs for one configured test product.
 - Shopify multi-locale translation dry-runs for one configured test product across `de`, `fr`, `es`, `it`, and `ja`.
+- Shopify batch multi-locale translation dry-runs for up to 3 configured products across up to 5 locales.
 - Git safety checks before local commits or any future push.
 - Future Shenzhen settlement check tasks.
 - Low-risk validation after Codex edits code.
@@ -32,6 +33,7 @@ python remote_approval_runner.py --task django_check --mode dry-run
 python remote_approval_runner.py --task git_safety_check --mode dry-run
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run
 python remote_approval_runner.py --task shopify_translation_multi_locale_dry_run --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_multi_locale_dry_run --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -135,6 +137,41 @@ N / 0 = stop
 
 Any real Shopify write or publish workflow must be created later as a separate task with explicit second confirmation.
 
+### Batch Multi-Locale Shopify Translation Dry-Run
+
+`shopify_translation_batch_multi_locale_dry_run` runs the fixed Shopify product translation command once per configured product/locale combination. It reads product IDs from:
+
+```env
+SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS=gid://shopify/Product/7655686799427,gid://shopify/Product/...
+```
+
+If that is empty, it falls back to `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`. It never scans Shopify for products automatically.
+
+The batch task is limited to 3 products and 5 locales. If either limit is exceeded, it fails safely and writes only the summary review:
+
+```text
+logs/shopify_translation_batch_multi_locale_dry_run_review.json
+```
+
+Each successful command attempt also writes a per-product/locale review such as:
+
+```text
+backend/logs/shopify_translation_command_review_7655686799427_de.json
+```
+
+Each product/locale combination runs independently. A failure in one combination must be recorded and must not stop the remaining combinations. Each result records `product_id`, `locale`, `failure_type`, `stdout_tail`, `stderr_tail`, `review_file_path`, `warnings_count`, and `no_shopify_writes_confirmed`.
+
+`no_shopify_writes_confirmed` is true only when that combination succeeds and stdout contains `Dry run complete. No Shopify writes performed.` The summary `all_no_write_confirmed` covers successful runs only; failed runs are not marked confirmed.
+
+Allowed approval actions for this task are:
+
+```text
+Y / 1 = keep review files
+SHOW_LOG = show recent logs
+SUMMARY = show summary
+N / 0 = stop
+```
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
@@ -156,6 +193,7 @@ This task is read-only. It checks status, branch, ahead commits, changed/staged/
 - Do not build commands from user input.
 - All tasks must be registered in `task_registry`.
 - Default to `dry-run`.
-- Failures stop by default.
+- Failures stop by default, except multi-locale dry-run tasks may continue through remaining locales or product/locale combinations while writes stay disabled.
 - Write tasks must be separate tasks with explicit second confirmation.
 - Git safety checks are advisory only and must not perform Git writes.
+- Batch Shopify translation dry-run tasks must not auto-scan the whole store and are limited to 3 products and 5 locales.
