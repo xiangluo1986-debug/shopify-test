@@ -42,6 +42,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_command_
 python remote_approval_runner.py --task shopify_translation_batch_apply_command_validate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_approval_validate --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_locked_runner --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -344,6 +345,25 @@ logs/shopify_translation_batch_apply_execution_approval_validation.html
 `execution_approval_status=pending` keeps `real_execution_allowed=false` and does not make any simulated item eligible for real execution. `execution_approval_status=rejected` also keeps execution blocked. `execution_approval_status=approved` is only valid when an execution approver is present, at least one simulated execution exists, every simulated item has `execution_decision=approve`, `execution_approval_ready=true`, payload preview available, and all no-write / no-command-execution fields remain false.
 
 The execution approval validation task is validation-only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. Its summary must explicitly show `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Batch Translation Locked Apply Runner
+
+`shopify_translation_batch_apply_locked_runner` reads only the execution approval validation report:
+
+```text
+logs/shopify_translation_batch_apply_execution_approval_validation.json
+```
+
+It writes local locked runner reports only:
+
+```text
+logs/shopify_translation_batch_apply_locked_runner.json
+logs/shopify_translation_batch_apply_locked_runner.html
+```
+
+When `real_execution_allowed=false`, the task outputs `locked_runner_status=locked`, `real_apply_allowed=false`, `real_apply_performed=false`, and `command_executed=false`. If a future validation report sets `real_execution_allowed=true`, this phase still outputs `locked_runner_status=ready_but_locked`, keeps `real_apply_allowed=false`, and only displays eligible item summaries.
+
+The locked runner is a shell only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. Its summary must explicitly show `real_apply_performed=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
