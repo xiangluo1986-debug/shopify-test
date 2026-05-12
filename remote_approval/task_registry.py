@@ -114,6 +114,9 @@ from remote_approval.tasks.shopify_translation_csv_json_small_batch_real_write_r
 from remote_approval.tasks.shopify_translation_csv_json_small_batch_manual_real_run_test_package_task import (
     run_shopify_translation_csv_json_small_batch_manual_real_run_test_package_task,
 )
+from remote_approval.tasks.shopify_translation_csv_json_small_batch_post_write_audit_package_task import (
+    run_shopify_translation_csv_json_small_batch_post_write_audit_package_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -217,6 +220,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_csv_json_small_batch_manual_real_run_test_package": (
         run_shopify_translation_csv_json_small_batch_manual_real_run_test_package_task
+    ),
+    "shopify_translation_csv_json_small_batch_post_write_audit_package": (
+        run_shopify_translation_csv_json_small_batch_post_write_audit_package_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -475,6 +481,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_translation_csv_json_small_batch_manual_real_run_test_package.json",
+    },
+    "shopify_translation_csv_json_small_batch_post_write_audit_package": {
+        "description": "Generate a local CSV/JSON small batch post-write audit package without new Shopify actions.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_csv_json_small_batch_post_write_audit_package.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
