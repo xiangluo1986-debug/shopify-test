@@ -1,0 +1,129 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div id="content-main">
+  <h1>Shopify Product Translation Console</h1>
+  <p>This Phase 15.0 console is read-only. It does not translate, write, publish, apply, or rollback Shopify data.</p>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Fetch read-only product translation data</h2>
+    <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+      <div>
+        <label for="id_q">Product ID, title, or handle</label><br>
+        <input id="id_q" type="text" name="q" value="{{ search_text }}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+      </div>
+      <div>
+        <label for="id_locale">Target locale</label><br>
+        <select id="id_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button">Fetch read-only data</button>
+    </form>
+  </div>
+
+  {% if error_message %}
+    <p class="errornote">{{ error_message }}</p>
+  {% endif %}
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Safety status</h2>
+    <table>
+      <tbody>
+        <tr><th>shopify_read_only</th><td>{{ result.shopify_read_only }}</td></tr>
+        <tr><th>shopify_api_call_performed</th><td>{{ result.shopify_api_call_performed }}</td></tr>
+        <tr><th>shopify_write_performed</th><td>{{ result.shopify_write_performed }}</td></tr>
+        <tr><th>mutation_performed</th><td>{{ result.mutation_performed }}</td></tr>
+        <tr><th>translations_register_called</th><td>{{ result.translations_register_called }}</td></tr>
+        <tr><th>publish_performed</th><td>{{ result.publish_performed }}</td></tr>
+        <tr><th>real_apply_performed</th><td>{{ result.real_apply_performed }}</td></tr>
+        <tr><th>rollback_performed</th><td>{{ result.rollback_performed }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  {% if result.search_results %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Search results (max 5)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Product ID</th>
+            <th>Title</th>
+            <th>Handle</th>
+            <th>Status</th>
+            <th>Product type</th>
+            <th>Vendor</th>
+            <th>Read fields</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for product in result.search_results %}
+            <tr>
+              <td>{{ product.id }}</td>
+              <td>{{ product.title }}</td>
+              <td>{{ product.handle }}</td>
+              <td>{{ product.status }}</td>
+              <td>{{ product.product_type }}</td>
+              <td>{{ product.vendor }}</td>
+              <td><a href="?q={{ product.id|urlencode }}&locale={{ selected_locale|urlencode }}">Fetch read-only data</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  {% if result.product.id %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Product</h2>
+      <table>
+        <tbody>
+          <tr><th>product_id</th><td>{{ result.product.id }}</td></tr>
+          <tr><th>title</th><td>{{ result.product.title }}</td></tr>
+          <tr><th>handle</th><td>{{ result.product.handle }}</td></tr>
+          <tr><th>status</th><td>{{ result.product.status }}</td></tr>
+          <tr><th>product_type</th><td>{{ result.product.product_type }}</td></tr>
+          <tr><th>vendor</th><td>{{ result.product.vendor }}</td></tr>
+          <tr><th>target_locale</th><td>{{ result.locale }}</td></tr>
+          <tr><th>resourceId</th><td>{{ result.translatable_resource.resource_id }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  {% if result.translatable_rows %}
+    <div class="module" style="padding: 12px;">
+      <h2>Translatable fields</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Source locale</th>
+            <th>Current source value</th>
+            <th>Digest</th>
+            <th>Has {{ result.locale }} translation</th>
+            <th>{{ result.locale }} value</th>
+            <th>Outdated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in result.translatable_rows %}
+            <tr>
+              <td>{{ row.key }}</td>
+              <td>{{ row.source_locale }}</td>
+              <td style="max-width: 520px; white-space: pre-wrap;">{{ row.source_value }}</td>
+              <td style="word-break: break-all;">{{ row.digest }}</td>
+              <td>{{ row.has_translation }}</td>
+              <td style="max-width: 520px; white-space: pre-wrap;">{{ row.translation_value }}</td>
+              <td>{{ row.translation_outdated }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

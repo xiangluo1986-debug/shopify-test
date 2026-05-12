@@ -1189,6 +1189,18 @@ This task is local-report-only. It must not call Shopify APIs, call mutations, c
 
 The audit may output `audit_status=csv_json_small_batch_post_write_audit_passed` only when the execute report is task `shopify_translation_small_batch_apply_execute`, mode `real-run` or `execute-real-write`, `plan_source=csv_json`, status `small_batch_real_write_succeeded_and_verified`, product/locale/entry count/fields match the CSV/JSON plan, readiness package, and manual test package, fields are limited to `meta_title` and `meta_description`, every readback value matched, no rollback approval is required, no rollback or automatic rollback happened, no publish or bulk write happened, and source blocking conditions are empty. It must keep `audit_package_only=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Shopify Product Translation Console Read-Only
+
+Phase 15.0 adds a staff-only internal admin page:
+
+```text
+/admin/shopify_sync/translation-console/
+```
+
+The page can read one Shopify product by GID / numeric product ID or perform a limited read-only product search, with at most 5 search results. It displays product basics, `translatableResource` content keys, source values, digests, and existing translations for a selected locale (`ja`, `de`, `fr`, `es`, or `it`).
+
+This page is read-only. It must not call OpenAI, generate translations, call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, write the database, add migrations, or expose Shopify access tokens. It must keep visible safety flags such as `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, and `rollback_performed=false`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.

@@ -10,6 +10,7 @@ from datetime import datetime
 from urllib.error import HTTPError, URLError
 
 import requests
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.http import (
@@ -20,6 +21,7 @@ from django.http import (
     HttpResponseServerError,
     JsonResponse,
 )
+from django.shortcuts import render
 from django.utils.html import escape
 
 from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem, ShopifySyncState
@@ -29,6 +31,11 @@ from .sync_helpers import (
     sync_products_for_installation,
     sync_shenzhen_orders_for_installation,
     update_shenzhen_tracking_for_installation,
+)
+from .translation_console import (
+    SUPPORTED_TRANSLATION_LOCALES,
+    ShopifyTranslationConsoleError,
+    fetch_translation_console_data,
 )
 
 
@@ -488,6 +495,53 @@ def _user_has_shopify_sync_access(request):
         return True
     allowed_groups = {"Finance", "Admin", "Shenzhen Warehouse"}
     return bool(set(request.user.groups.values_list("name", flat=True)) & allowed_groups)
+
+
+@staff_member_required
+def translation_console(request):
+    search_text = request.GET.get("q", "").strip()
+    locale = request.GET.get("locale", "ja").strip() or "ja"
+    shop_domain = "kidstoylover.myshopify.com"
+    result = {
+        "shopify_read_only": True,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "publish_performed": False,
+        "real_apply_performed": False,
+        "rollback_performed": False,
+        "product": {},
+        "search_results": [],
+        "translatable_resource": {},
+        "translatable_rows": [],
+        "locale": locale,
+        "search_text": search_text,
+    }
+    error_message = ""
+
+    if search_text:
+        try:
+            installation = ShopifyInstallation.objects.get(shop=shop_domain)
+            result.update(fetch_translation_console_data(installation, search_text, locale))
+        except ShopifyInstallation.DoesNotExist:
+            error_message = f"Shopify installation not found for {shop_domain}."
+        except (ShopifyTranslationConsoleError, requests.RequestException, ValueError) as exc:
+            error_message = f"Read-only Shopify query failed: {exc.__class__.__name__}"
+
+    return render(
+        request,
+        "admin/shopify_sync/translation_console.html",
+        {
+            "title": "Shopify Product Translation Console",
+            "search_text": search_text,
+            "selected_locale": locale,
+            "supported_locales": SUPPORTED_TRANSLATION_LOCALES,
+            "shop_domain": shop_domain,
+            "result": result,
+            "error_message": error_message,
+        },
+    )
 
 
 @login_required
