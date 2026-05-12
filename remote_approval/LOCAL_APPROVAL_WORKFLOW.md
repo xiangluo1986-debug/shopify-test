@@ -861,6 +861,26 @@ The audit must confirm the source execution report succeeded for exactly `gid://
 
 This audit is local-report-only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. The audit report may preserve source execution facts such as `source_shopify_write_performed=true`, `source_translations_register_called=true`, `source_mutation_performed=true`, and `source_readback_performed=true`, but the audit task itself must report `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Single-Field Rollback Approval Package
+
+`shopify_translation_single_field_rollback_approval_package` reads only local JSON reports:
+
+- `logs/shopify_translation_single_field_backup_fetch.json`
+- `logs/shopify_translation_single_field_readback_rollback_plan.json`
+- `logs/shopify_translation_single_field_real_write_one_shot_execute.json`
+- `logs/shopify_translation_single_field_post_write_audit_package.json`
+
+It writes:
+
+```text
+logs/shopify_translation_single_field_rollback_approval_package.json
+logs/shopify_translation_single_field_rollback_approval_package.html
+```
+
+The rollback approval package describes only a possible future restore from the current value `MOFLY P-51D Aileron Link Connector` back to the verified backup value `MOFLY P-51D Aileron Linkage Connector | RC Plane Clevis` for exactly `gid://shopify/Product/7655686799427`, locale `ja`, field `meta_title`.
+
+This task must not execute rollback, call Shopify APIs, call mutations, call `translationsRegister`, perform readback, publish, apply, update, write the database, or git push. It must output `rollback_approval_package_ready_for_manual_review` only when the source execution succeeded, the post-write audit passed, the backup is verified, the scope matches, no rollback was already performed, and source readback matched the written value. It must report `rollback_approval_package_only=true`, `rollback_execution_allowed=false`, `rollback_performed=false`, `automatic_rollback_performed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.

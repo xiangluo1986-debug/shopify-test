@@ -75,6 +75,9 @@ from remote_approval.tasks.shopify_translation_single_field_real_write_one_shot_
 from remote_approval.tasks.shopify_translation_single_field_post_write_audit_package_task import (
     run_shopify_translation_single_field_post_write_audit_package_task,
 )
+from remote_approval.tasks.shopify_translation_single_field_rollback_approval_package_task import (
+    run_shopify_translation_single_field_rollback_approval_package_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -145,6 +148,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_single_field_post_write_audit_package": (
         run_shopify_translation_single_field_post_write_audit_package_task
+    ),
+    "shopify_translation_single_field_rollback_approval_package": (
+        run_shopify_translation_single_field_rollback_approval_package_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -325,6 +331,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_translation_single_field_post_write_audit_package.json",
+    },
+    "shopify_translation_single_field_rollback_approval_package": {
+        "description": "Generate a local rollback approval package and restore plan without executing rollback.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_single_field_rollback_approval_package.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
