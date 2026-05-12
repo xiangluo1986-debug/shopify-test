@@ -104,6 +104,7 @@ python manage.py flush
 - Default workflow must be dry-run first. Do not directly write Shopify translations on the first run.
 - Do not enable or create batch product translation until the single-product review workflow is stable and the user explicitly asks for it.
 - Only run one `product_id` and one `target_locale` at a time for product translation.
+- Batch product translation dry-runs may read up to 3 product IDs from `SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS`, `backend/reviews/translation_product_ids.txt`, or `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`; they must never auto-scan Shopify for products.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.

@@ -25,6 +25,8 @@ Use this skill when translating Shopify products, editing translated product con
 - Each locale result must include `failure_type` and `no_shopify_writes_confirmed`. `no_shopify_writes_confirmed` is true only when the locale command succeeds and stdout contains `Dry run complete. No Shopify writes performed.`
 - Supported multi-locale failure types include `docker_permission_denied`, `missing_product_id`, `missing_env`, `command_error`, `timeout`, `unknown`, `glossary_invalid`, and `unsupported_locale`.
 - Batch multi-locale dry-run is limited to at most 3 configured products and at most 5 locales. It must never auto-scan the whole Shopify store.
+- Batch product ID input priority is `SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS`, then `backend/reviews/translation_product_ids.txt`, then `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`.
+- The product ID file uses one product ID per line. Empty lines and `#` comments are skipped, duplicate IDs are removed while preserving order, and invalid IDs are reported as `invalid_product_id`.
 - Batch multi-locale dry-run runs each product/locale independently. A single product/locale failure must not stop the remaining combinations.
 - Batch per-combination review files are named `backend/logs/shopify_translation_command_review_<product_id>_<locale>.json`, and the summary review is `logs/shopify_translation_batch_multi_locale_dry_run_review.json`.
 - Batch dry-run also generates a local HTML dashboard at `logs/shopify_translation_batch_multi_locale_dry_run_review.html` for human review only. The HTML dashboard must not trigger write, publish, apply, or update actions.

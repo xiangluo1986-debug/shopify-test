@@ -134,8 +134,9 @@ Requirements:
 Requirements:
 
 - Only allow `--mode dry-run`.
-- Use `SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS` when present, otherwise fall back to `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`.
+- Use `SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS` when present, otherwise read `backend/reviews/translation_product_ids.txt`, otherwise fall back to `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`.
 - Do not automatically scan the store or discover product IDs.
+- The product ID file uses one ID per line. Empty lines and `#` comments are skipped, duplicates are removed while preserving order, and invalid IDs must be reported as `invalid_product_id`.
 - Limit the task to at most 3 products and at most 5 locales.
 - Use `SHOPIFY_TRANSLATION_TEST_LOCALES` when present, otherwise default to `de,fr,es,it,ja`.
 - Run the existing `translate_shopify_product.py` management command once per product/locale with `--dry-run`.

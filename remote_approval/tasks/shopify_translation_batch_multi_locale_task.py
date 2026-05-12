@@ -1,4 +1,4 @@
-import json
+﻿import json
 import re
 import subprocess
 import time
@@ -12,6 +12,7 @@ TASK_NAME = "shopify_translation_batch_multi_locale_dry_run"
 COMMAND_LABEL = "docker_compose_web_translate_shopify_product_batch_multi_locale_dry_run"
 REVIEW_PATH = LOG_DIR / "shopify_translation_batch_multi_locale_dry_run_review.json"
 HTML_REVIEW_PATH = LOG_DIR / "shopify_translation_batch_multi_locale_dry_run_review.html"
+PRODUCT_IDS_FILE_PATH = PROJECT_ROOT / "backend" / "reviews" / "translation_product_ids.txt"
 DEFAULT_LOCALES = ["de", "fr", "es", "it", "ja"]
 SUPPORTED_LOCALES = {
     "de": "German",
@@ -50,26 +51,41 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
             "SHOPIFY_TRANSLATION_TEST_LOCALES",
         ]
     )
-    product_ids = _configured_product_ids(env)
+    product_input = _configured_product_input(env)
+    product_ids = product_input["product_ids"]
+    invalid_product_ids = product_input["invalid_product_ids"]
     locales = _configured_locales(env.get("SHOPIFY_TRANSLATION_TEST_LOCALES", ""))
     results = []
 
     preflight_failure = _limit_failure(product_ids, locales)
-    if preflight_failure:
-        results.append(preflight_failure)
-    elif not product_ids:
+    for invalid_product_id in invalid_product_ids:
         results.append(
             _failed_result(
-                product_id="",
+                product_id=invalid_product_id,
                 locale="",
-                failure_type="missing_product_id",
-                failure_reason=(
-                    "Set SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS or SHOPIFY_TRANSLATION_TEST_PRODUCT_ID. "
-                    "No Shopify translation dry-run command was executed."
-                ),
+                failure_type="invalid_product_id",
+                failure_reason="Invalid product ID format. Use a numeric product ID or gid://shopify/Product/<id>.",
                 skipped=True,
             )
         )
+
+    if preflight_failure:
+        results.append(preflight_failure)
+    elif not product_ids:
+        if not invalid_product_ids:
+            results.append(
+                _failed_result(
+                    product_id="",
+                    locale="",
+                    failure_type="missing_product_id",
+                    failure_reason=(
+                        "Set SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS, add IDs to "
+                        "backend/reviews/translation_product_ids.txt, or set SHOPIFY_TRANSLATION_TEST_PRODUCT_ID. "
+                        "No Shopify translation dry-run command was executed."
+                    ),
+                    skipped=True,
+                )
+            )
     else:
         for product_id in product_ids:
             for locale in locales:
@@ -110,7 +126,10 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
         "command_label": COMMAND_LABEL,
         "json_review_path": str(REVIEW_PATH),
         "html_review_path": str(HTML_REVIEW_PATH),
+        "product_input_source": product_input["source"],
+        "product_input_file_path": str(PRODUCT_IDS_FILE_PATH),
         "product_ids": product_ids,
+        "invalid_product_ids": invalid_product_ids,
         "locales": locales,
         "product_count": len(product_ids),
         "locale_count": len(locales),
@@ -159,19 +178,61 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
         "html_review_path": str(html_review_path),
         "detected_issue_summary": payload["detected_issue_summary"],
         "approval_message": _build_approval_message(payload, review_path, html_review_path),
+}
+
+
+def _configured_product_input(env: dict[str, str]) -> dict:
+    raw_multi = (env.get("SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS") or "").strip()
+    if raw_multi:
+        product_ids, invalid_product_ids = _parse_product_id_items(raw_multi.split(","))
+        return {
+            "source": "env_multi",
+            "product_ids": product_ids,
+            "invalid_product_ids": invalid_product_ids,
+        }
+    if PRODUCT_IDS_FILE_PATH.exists():
+        product_ids, invalid_product_ids = _parse_product_id_file(PRODUCT_IDS_FILE_PATH)
+        return {
+            "source": "file",
+            "product_ids": product_ids,
+            "invalid_product_ids": invalid_product_ids,
+        }
+    raw_single = (env.get("SHOPIFY_TRANSLATION_TEST_PRODUCT_ID") or "").strip()
+    product_ids, invalid_product_ids = _parse_product_id_items([raw_single] if raw_single else [])
+    return {
+        "source": "env_single",
+        "product_ids": product_ids,
+        "invalid_product_ids": invalid_product_ids,
     }
 
 
-def _configured_product_ids(env: dict[str, str]) -> list[str]:
-    raw_value = (env.get("SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS") or "").strip()
-    if not raw_value:
-        raw_value = (env.get("SHOPIFY_TRANSLATION_TEST_PRODUCT_ID") or "").strip()
+def _parse_product_id_file(path: Path) -> tuple[list[str], list[str]]:
+    try:
+        lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+    except OSError:
+        return [], [str(path)]
+    items = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        items.append(line)
+    return _parse_product_id_items(items)
+
+
+def _parse_product_id_items(items: list[str]) -> tuple[list[str], list[str]]:
     product_ids = []
-    for item in raw_value.split(","):
-        product_id = item.strip()
-        if product_id and product_id not in product_ids:
-            product_ids.append(product_id)
-    return product_ids
+    invalid_product_ids = []
+    for raw_item in items:
+        product_id = raw_item.strip()
+        if not product_id:
+            continue
+        if PRODUCT_ID_RE.match(product_id):
+            if product_id not in product_ids:
+                product_ids.append(product_id)
+        elif product_id not in invalid_product_ids:
+            invalid_product_ids.append(product_id)
+    return product_ids, invalid_product_ids
 
 
 def _configured_locales(raw_value: str) -> list[str]:
@@ -210,7 +271,7 @@ def _run_or_preflight_result(product_id: str, locale: str) -> dict:
         return _failed_result(
             product_id=product_id,
             locale=locale,
-            failure_type="command_error",
+            failure_type="invalid_product_id",
             failure_reason="Invalid product ID format. Use a numeric product ID or gid://shopify/Product/<id>.",
             review_paths=_review_paths(product_id, locale),
             skipped=True,
@@ -391,6 +452,9 @@ def _render_batch_review_html(review_data: dict) -> str:
         for label, key in [
             ("Task", "task"),
             ("Timestamp", "timestamp"),
+            ("Product Input Source", "product_input_source"),
+            ("Product IDs", "product_ids"),
+            ("Invalid Product IDs", "invalid_product_ids"),
             ("Product Count", "product_count"),
             ("Locale Count", "locale_count"),
             ("Total Runs", "total_runs"),
@@ -435,7 +499,7 @@ def _render_batch_review_html(review_data: dict) -> str:
       <tr><th>HTML Review</th><td>{html_link}</td></tr>
     </tbody>
   </table>
-  <h2>Product × Locale Results</h2>
+  <h2>Product x Locale Results</h2>
   <table>
     <thead>
       <tr>
@@ -473,6 +537,7 @@ def _build_approval_message(payload: dict, review_path: Path, html_review_path: 
     return (
         "Shopify batch multi-locale translation dry-run completed.\n"
         f"Products: {payload.get('product_count')}\n"
+        f"Product input source: {payload.get('product_input_source')}\n"
         f"Locales: {', '.join(payload.get('locales') or [])}\n"
         f"Total runs: {payload.get('total_runs')}\n"
         f"Success count: {payload.get('success_count')}\n"

@@ -17,3 +17,4 @@ logs/*_review.html
 backend/logs/shopify_translation_command_review.json
 
 backend/logs/
+backend/reviews/translation_product_ids.txt
