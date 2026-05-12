@@ -207,6 +207,7 @@ def _execute_selected_action(
     if result.get("task_type") in {
         "django_check",
         "shopify_translation_dry_run",
+        "shopify_translation_batch_apply_execution_preview",
         "shopify_translation_batch_apply_plan",
         "shopify_translation_batch_apply_plan_validate",
         "shopify_translation_batch_multi_locale_dry_run",
@@ -276,6 +277,11 @@ def _summarize_task_result(result: dict) -> str:
         "html_plan_path",
         "json_validation_path",
         "html_validation_path",
+        "json_preview_path",
+        "html_preview_path",
+        "preview_only",
+        "preview_apply_count",
+        "not_apply_count",
         "validation_only",
         "total_plan_items",
         "validated_for_future_apply_count",
@@ -318,6 +324,7 @@ def _next_allowed_actions(task: str) -> list[str]:
     if task in {
         "shopify_translation_multi_locale_dry_run",
         "shopify_translation_batch_multi_locale_dry_run",
+        "shopify_translation_batch_apply_execution_preview",
         "shopify_translation_batch_apply_plan",
         "shopify_translation_batch_apply_plan_validate",
     }:

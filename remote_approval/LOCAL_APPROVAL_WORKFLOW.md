@@ -36,6 +36,7 @@ python remote_approval_runner.py --task shopify_translation_multi_locale_dry_run
 python remote_approval_runner.py --task shopify_translation_batch_multi_locale_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_plan_validate --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_execution_preview --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -218,6 +219,25 @@ logs/shopify_translation_batch_apply_plan_validation.html
 Allowed manual decisions are `pending`, `approve`, `revise`, and `block`. `approve` is only valid for items that were already ready for human approval, have `qa_status=pass`, `eligible_for_apply=true`, no QA failures, and confirmed no Shopify writes. `needs_review` or `blocked` items cannot be approved directly; they are marked blocked in the validation report.
 
 The validation task is validation-only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Batch Translation Apply Execution Preview
+
+`shopify_translation_batch_apply_execution_preview` reads only the latest validation report:
+
+```text
+logs/shopify_translation_batch_apply_plan_validation.json
+```
+
+It may also read the source apply plan to display field names, then writes local preview reports only:
+
+```text
+logs/shopify_translation_batch_apply_execution_preview.json
+logs/shopify_translation_batch_apply_execution_preview.html
+```
+
+Only items with an approved manual decision, validated future-apply status, QA pass, no-write confirmation, and future-apply eligibility are shown in `preview_apply_items`. All other items are listed in `not_apply_items` with reasons.
+
+The preview is for human review only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `preview_only=true`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
