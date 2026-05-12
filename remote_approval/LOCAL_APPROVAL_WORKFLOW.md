@@ -195,7 +195,9 @@ logs/shopify_translation_batch_apply_plan.json
 logs/shopify_translation_batch_apply_plan.html
 ```
 
-Each plan item is marked `ready_for_apply`, `needs_review`, or `blocked`. The plan is for human review only and must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
+Each plan item is marked `ready_for_apply`, `needs_review`, or `blocked`. Each item also includes manual review template fields: `manual_decision`, `manual_decision_allowed_values`, `manual_reviewer`, `manual_review_notes`, `manual_review_required`, and `manual_approval_ready`. Every item starts with `manual_decision=pending` and `manual_approval_ready=false`.
+
+The plan is for human review only and must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. The plan summary should explicitly show `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 

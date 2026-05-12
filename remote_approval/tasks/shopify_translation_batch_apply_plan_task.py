@@ -16,6 +16,8 @@ MAX_LOCALES = 5
 REQUIRED_SOURCE_TASK = "shopify_translation_batch_multi_locale_dry_run"
 REQUIRED_MODE = "dry-run"
 EXPECTED_FIELDS = ["title", "body_html", "meta_title", "meta_description"]
+MANUAL_DECISION_ALLOWED_VALUES = ["pending", "approve", "revise", "block"]
+DEFAULT_MANUAL_DECISION = "pending"
 
 
 def run_shopify_translation_batch_apply_plan_task(mode: str) -> dict:
@@ -42,6 +44,9 @@ def run_shopify_translation_batch_apply_plan_task(mode: str) -> dict:
     ready_count = recommendation_counts.get("ready_for_apply", 0)
     needs_review_count = recommendation_counts.get("needs_review", 0)
     blocked_count = recommendation_counts.get("blocked", 0)
+    manual_review_required_count = sum(1 for item in plan_items if item["manual_review_required"])
+    manual_approval_ready_count = sum(1 for item in plan_items if item["manual_approval_ready"])
+    manual_pending_count = sum(1 for item in plan_items if item["manual_decision"] == DEFAULT_MANUAL_DECISION)
     success = not validation_errors
     end_time = utc_now_iso()
     payload = {
@@ -65,6 +70,13 @@ def run_shopify_translation_batch_apply_plan_task(mode: str) -> dict:
         if source_review
         else False,
         "source_qa_gate_passed": bool(source_review.get("qa_gate_passed")) if source_review else False,
+        "all_no_write_confirmed": bool(source_review.get("all_no_write_confirmed")) if source_review else False,
+        "no_shopify_writes_performed": True,
+        "apply_performed": False,
+        "publish_performed": False,
+        "update_performed": False,
+        "mutation_performed": False,
+        "translations_register_performed": False,
         "validation_errors": validation_errors,
         "source_parse_error": source_parse_error,
         "success": success,
@@ -73,6 +85,10 @@ def run_shopify_translation_batch_apply_plan_task(mode: str) -> dict:
         "needs_review_count": needs_review_count,
         "blocked_count": blocked_count,
         "eligible_for_apply_count": sum(1 for item in plan_items if item["eligible_for_apply"]),
+        "manual_review_required_count": manual_review_required_count,
+        "manual_approval_ready_count": manual_approval_ready_count,
+        "manual_pending_count": manual_pending_count,
+        "manual_decision_allowed_values": MANUAL_DECISION_ALLOWED_VALUES,
         "recommendation_counts": recommendation_counts,
         "plan_items": plan_items,
         "detected_issue_summary": _issue_summary(success, validation_errors, recommendation_counts),
@@ -82,6 +98,12 @@ def run_shopify_translation_batch_apply_plan_task(mode: str) -> dict:
         "safety": {
             "plan_only": True,
             "dry_run_only": True,
+            "no_shopify_writes_performed": True,
+            "apply_performed": False,
+            "publish_performed": False,
+            "update_performed": False,
+            "mutation_performed": False,
+            "translations_register_performed": False,
             "shopify_writes_allowed": False,
             "register_translations_allowed": False,
             "publish_allowed": False,
@@ -110,8 +132,14 @@ def run_shopify_translation_batch_apply_plan_task(mode: str) -> dict:
         "ready_for_apply_count": ready_count,
         "needs_review_count": needs_review_count,
         "blocked_count": blocked_count,
+        "manual_review_required_count": manual_review_required_count,
+        "manual_approval_ready_count": manual_approval_ready_count,
+        "manual_pending_count": manual_pending_count,
         "all_no_write_confirmed": payload["source_all_no_write_confirmed"],
         "no_shopify_writes_performed": True,
+        "apply_performed": False,
+        "publish_performed": False,
+        "translations_register_performed": False,
         "validation_errors_count": len(validation_errors),
         "detected_issue_summary": payload["detected_issue_summary"],
         "approval_message": _build_approval_message(payload, json_plan_path, html_plan_path),
@@ -179,7 +207,12 @@ def _build_plan_item(item: dict) -> dict:
         "qa_status": qa_status,
         "recommendation": recommendation,
         "eligible_for_apply": eligible_for_apply,
-        "manual_decision": "pending",
+        "manual_decision": DEFAULT_MANUAL_DECISION,
+        "manual_decision_allowed_values": MANUAL_DECISION_ALLOWED_VALUES,
+        "manual_reviewer": "",
+        "manual_review_notes": "",
+        "manual_review_required": True,
+        "manual_approval_ready": False,
         "reason": _unique(reason) or ["All dry-run and QA gates passed"],
         "fields_included": list(item.get("payload_keys") or []),
         "expected_fields": EXPECTED_FIELDS,
@@ -238,6 +271,12 @@ def _render_html_plan(payload: dict) -> str:
             ("Ready For Apply", "ready_for_apply_count"),
             ("Needs Review", "needs_review_count"),
             ("Blocked", "blocked_count"),
+            ("Manual Review Required", "manual_review_required_count"),
+            ("Manual Approval Ready", "manual_approval_ready_count"),
+            ("Manual Pending", "manual_pending_count"),
+            ("Apply Performed", "apply_performed"),
+            ("Publish Performed", "publish_performed"),
+            ("Translations Register Performed", "translations_register_performed"),
             ("Validation Errors", "validation_errors"),
         ]
     )
@@ -270,15 +309,24 @@ def _render_html_plan(payload: dict) -> str:
     <thead>
       <tr>
         <th>Product ID</th><th>Locale</th><th>QA Status</th><th>Recommendation</th>
-        <th>Eligible</th><th>Fields</th><th>Reasons</th><th>Review File</th>
+        <th>Eligible</th><th>Manual Decision</th><th>Manual Review Required</th>
+        <th>Manual Approval Ready</th><th>Manual Reviewer</th><th>Manual Notes</th>
+        <th>Fields</th><th>Reasons</th><th>Review File</th>
       </tr>
     </thead>
-    <tbody>{rows or _empty_row(8, "No plan items.")}</tbody>
+    <tbody>{rows or _empty_row(13, "No plan items.")}</tbody>
   </table>
+  <h2>Manual Review Template</h2>
+  <ul>
+    <li>Allowed manual decisions: {escape(", ".join(MANUAL_DECISION_ALLOWED_VALUES))}</li>
+    <li>Every item starts as <strong>pending</strong> and <strong>manual_approval_ready=false</strong>.</li>
+    <li>Editing this plan does not write to Shopify; a future write task still requires separate confirmation.</li>
+  </ul>
   <h2>Safety</h2>
   <ul>
     <li>This plan is review-only.</li>
     <li>No Shopify writes were performed.</li>
+    <li>apply_performed=false and publish_performed=false.</li>
     <li>Apply, publish, update, mutation, and translationsRegister are not available in this task.</li>
   </ul>
 </body>
@@ -300,6 +348,11 @@ def _render_item_row(item: dict) -> str:
         f"<td>{escape(str(item.get('qa_status', '')))}</td>"
         f"<td class=\"{rec_class}\">{escape(str(rec))}</td>"
         f"<td>{'true' if item.get('eligible_for_apply') else 'false'}</td>"
+        f"<td>{escape(str(item.get('manual_decision', '')))}</td>"
+        f"<td>{'true' if item.get('manual_review_required') else 'false'}</td>"
+        f"<td>{'true' if item.get('manual_approval_ready') else 'false'}</td>"
+        f"<td>{escape(str(item.get('manual_reviewer', '')))}</td>"
+        f"<td>{escape(str(item.get('manual_review_notes', '')))}</td>"
         f"<td>{escape(', '.join(item.get('fields_included') or []))}</td>"
         f"<td>{escape('; '.join(item.get('reason') or []))}</td>"
         f"<td class=\"path\">{escape(str(item.get('review_file_path', '')))}</td>"
@@ -334,12 +387,15 @@ def _build_approval_message(payload: dict, json_plan_path: Path, html_plan_path:
         f"Ready for apply: {payload.get('ready_for_apply_count')}\n"
         f"Needs review: {payload.get('needs_review_count')}\n"
         f"Blocked: {payload.get('blocked_count')}\n"
+        f"Manual review required: {payload.get('manual_review_required_count')}\n"
+        f"Manual approval ready: {payload.get('manual_approval_ready_count')}\n"
         f"Validation errors: {len(payload.get('validation_errors') or [])}\n"
         "Plan JSON:\n"
         f"{json_plan_path}\n\n"
         "Plan HTML:\n"
         f"{html_plan_path}\n"
-        "No Shopify writes performed by this task.\n\n"
+        "No Shopify writes performed by this task.\n"
+        "apply_performed=false; publish_performed=false; translationsRegister_performed=false.\n\n"
         "Allowed actions only:\n"
         "Y / 1 = keep plan files\n"
         "SHOW_LOG = show recent logs\n"
