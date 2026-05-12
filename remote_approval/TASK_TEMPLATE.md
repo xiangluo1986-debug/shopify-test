@@ -77,6 +77,8 @@ For Shopify translation dry-run tasks:
 - Single-field final write gate tasks must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, database writes, or git push. They may prepare a human final approval package but must keep `final_real_write_allowed=false`.
 - Single-field real write runner design tasks may read only the latest single-field preflight package, backup fetch report, readback / rollback plan, and final write gate JSON files and write local JSON/HTML design files only.
 - Single-field real write runner design tasks must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, database writes, git push, or generate directly executable real-write commands. They may describe a future runner design but must keep `design_only=true` and `real_write_allowed=false`.
+- Single-field real write locked runner tasks may read only the latest single-field preflight package, backup fetch report, readback / rollback plan, final write gate, real write runner design, and manually supplied sandbox environment variables. They must write local JSON/HTML locked-runner reports only.
+- Single-field real write locked runner tasks must stay locked even when `SHOPIFY_TRANSLATION_I_UNDERSTAND_THIS_WRITES_SHOPIFY=true` is present. They must not call Shopify APIs, execute commands, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, database writes, or git push. They must report `locked_shell=true`, `dangerous_flag_effective=false`, `real_write_allowed=false`, and `shopify_write_performed=false`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -189,6 +191,7 @@ Recommended fields:
 - [ ] Single-field readback / rollback plan tasks are local-plan-only and never call Shopify APIs or perform readback, rollback, mutation, or Shopify apply/write/publish actions.
 - [ ] Single-field final write gate tasks are local-package-only and never call Shopify APIs or perform readback, rollback, mutation, or Shopify apply/write/publish actions.
 - [ ] Single-field real write runner design tasks are design-only and never call Shopify APIs, generate executable write commands, or perform readback, rollback, mutation, or Shopify apply/write/publish actions.
+- [ ] Single-field real write locked runner tasks are locked-shell-only and never let a dangerous flag trigger Shopify API calls, commands, readback, rollback, mutations, or Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

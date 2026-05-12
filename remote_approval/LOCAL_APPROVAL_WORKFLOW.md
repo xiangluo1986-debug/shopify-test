@@ -50,6 +50,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_backup_
 python remote_approval_runner.py --task shopify_translation_single_field_readback_rollback_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_final_write_gate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_runner_design --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_real_write_locked_runner --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -549,6 +550,48 @@ The design task must not call Shopify APIs, call mutations, call `translationsRe
 The future runner design must require the later real-write phase to reject batch mode, multiple products, multiple locales, multiple fields, and any field other than `meta_title`. It must require a verified backup, final gate readiness, the dangerous flag `--i-understand-this-writes-shopify`, immediate readback after a future write, and a separate rollback approval if readback fails.
 
 The design task must explicitly report `design_only=true`, `final_real_write_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `readback_performed=false`, `rollback_performed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Real Write Locked Runner
+
+`shopify_translation_single_field_real_write_locked_runner` reads only local reports and manually supplied environment variables:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+logs/shopify_translation_single_field_backup_fetch.json
+logs/shopify_translation_single_field_readback_rollback_plan.json
+logs/shopify_translation_single_field_final_write_gate.json
+logs/shopify_translation_single_field_real_write_runner_design.json
+```
+
+Required environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SANDBOX_PRODUCT_ID=gid://shopify/Product/...
+SHOPIFY_TRANSLATION_SANDBOX_LOCALE=ja
+SHOPIFY_TRANSLATION_SANDBOX_FIELD=meta_title
+SHOPIFY_TRANSLATION_SANDBOX_PROPOSED_VALUE=Concise SEO title
+```
+
+Optional dangerous flag:
+
+```env
+SHOPIFY_TRANSLATION_I_UNDERSTAND_THIS_WRITES_SHOPIFY=true
+```
+
+The optional dangerous flag is recorded for review only. It is not effective in this phase and must never unlock a Shopify write.
+
+The locked runner writes local reports only:
+
+```text
+logs/shopify_translation_single_field_real_write_locked_runner.json
+logs/shopify_translation_single_field_real_write_locked_runner.html
+```
+
+The locked runner validates that the preflight package, verified backup, readback / rollback plan, final gate package, design package, and environment scope are consistent for exactly 1 product, 1 locale, and field `meta_title`.
+
+Even when every precondition passes, this task may only output `locked_not_executed` or `ready_but_locked`. It must never output `ready_for_real_write`, `write_allowed`, `execution_allowed`, or `real_write_allowed`.
+
+The locked runner must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. It must explicitly report `locked_shell=true`, `dangerous_flag_effective=false`, `final_real_write_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `command_executed=false`, `readback_performed=false`, `rollback_performed=false`, `real_apply_performed=false`, and `shopify_write_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
