@@ -49,6 +49,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_apply_p
 python remote_approval_runner.py --task shopify_translation_single_field_backup_fetch --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_readback_rollback_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_final_write_gate --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_real_write_runner_design --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -522,6 +523,32 @@ The final gate task must not call Shopify APIs, call mutations, call `translatio
 The final gate package must make clear that a future separate write task would call Shopify `translationsRegister`, would be limited to 1 product x 1 locale x 1 field=`meta_title`, would require immediate readback verification, and would require a separate rollback approval if readback fails.
 
 The final gate must explicitly report `final_real_write_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `readback_performed=false`, `rollback_performed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Real Write Runner Design
+
+`shopify_translation_single_field_real_write_runner_design` reads only local reports:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+logs/shopify_translation_single_field_backup_fetch.json
+logs/shopify_translation_single_field_readback_rollback_plan.json
+logs/shopify_translation_single_field_final_write_gate.json
+```
+
+It writes local runner design reports only:
+
+```text
+logs/shopify_translation_single_field_real_write_runner_design.json
+logs/shopify_translation_single_field_real_write_runner_design.html
+```
+
+The design task accepts exactly 1 product, 1 locale, and 1 field from the source reports. The only allowed field is `meta_title`; the proposed value must be non-empty and no longer than 60 characters; the backup must be verified; and the final write gate must be ready while still reporting `final_real_write_allowed=false`.
+
+The design task must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, git push, or generate directly executable real-write commands. It may describe a future runner only.
+
+The future runner design must require the later real-write phase to reject batch mode, multiple products, multiple locales, multiple fields, and any field other than `meta_title`. It must require a verified backup, final gate readiness, the dangerous flag `--i-understand-this-writes-shopify`, immediate readback after a future write, and a separate rollback approval if readback fails.
+
+The design task must explicitly report `design_only=true`, `final_real_write_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `readback_performed=false`, `rollback_performed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
