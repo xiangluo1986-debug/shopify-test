@@ -47,6 +47,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_apply_s
 python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_runner --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_apply_preflight_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_backup_fetch --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_readback_rollback_plan --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -471,6 +472,30 @@ The backup fetch task is read-only. It accepts exactly 1 product, 1 locale, and 
 This task may perform one read-only Shopify GraphQL `translatableResource` query to fetch the current `meta_title` translation for the requested locale, or the current translatable source value if the locale translation is missing. It must not scan products, read multiple locales, read multiple fields, call mutations, call `translationsRegister`, publish, apply, update, write the database, or git push.
 
 The backup report includes a readback plan and rollback plan for a future separate write task. It must explicitly report `real_write_allowed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Readback / Rollback Plan
+
+`shopify_translation_single_field_readback_rollback_plan` reads only local reports:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+logs/shopify_translation_single_field_backup_fetch.json
+```
+
+It writes local readback / rollback plan reports only:
+
+```text
+logs/shopify_translation_single_field_readback_rollback_plan.json
+logs/shopify_translation_single_field_readback_rollback_plan.html
+```
+
+The plan task accepts exactly 1 product, 1 locale, and 1 field from the source reports. The only allowed field is `meta_title`, and the preflight scope must match the backup scope exactly.
+
+The plan task must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. If the backup fetch report shows `read_only_shopify_query_performed=false`, the plan must mark `backup_source_is_verified=false` and use a non-write-ready status such as `needs_verified_backup`.
+
+The readback plan must require a future separate write task to reread only the same product / locale / `meta_title` and compare the Shopify value to the proposed value. The rollback plan must require a verified backup value from the backup fetch report and must stay limited to the same product / locale / `meta_title`.
+
+The plan must explicitly report `shopify_api_call_performed=false`, `readback_performed=false`, `rollback_performed=false`, `real_write_allowed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
