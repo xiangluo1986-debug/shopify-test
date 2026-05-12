@@ -84,6 +84,9 @@ from remote_approval.tasks.shopify_translation_second_single_field_test_prepare_
 from remote_approval.tasks.shopify_translation_second_single_field_verified_backup_fetch_task import (
     run_shopify_translation_second_single_field_verified_backup_fetch_task,
 )
+from remote_approval.tasks.shopify_translation_second_single_field_real_write_readiness_task import (
+    run_shopify_translation_second_single_field_real_write_readiness_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -161,6 +164,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_translation_second_single_field_test_prepare": run_shopify_translation_second_single_field_test_prepare_task,
     "shopify_translation_second_single_field_verified_backup_fetch": (
         run_shopify_translation_second_single_field_verified_backup_fetch_task
+    ),
+    "shopify_translation_second_single_field_real_write_readiness": (
+        run_shopify_translation_second_single_field_real_write_readiness_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -359,6 +365,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify query",
         "review_file_path": "logs/shopify_translation_second_single_field_verified_backup_fetch.json",
+    },
+    "shopify_translation_second_single_field_real_write_readiness": {
+        "description": "Generate the final readiness package for a second one-shot single-field Shopify write.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_second_single_field_real_write_readiness.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",

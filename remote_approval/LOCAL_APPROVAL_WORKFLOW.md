@@ -936,6 +936,35 @@ This task may perform exactly one read-only Shopify GraphQL `translatableResourc
 
 The verified backup fetch must not write Shopify, call mutations, call `translationsRegister`, perform rollback, perform readback beyond the backup query, publish, apply, update, batch, scan the store, write the database, or git push. On success it must output `backup_fetch_status=second_verified_backup_ready`, `second_backup_source_is_verified=true`, `read_only_shopify_query_performed=true`, and keep `second_test_real_write_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Second Single-Field Real Write Readiness
+
+`shopify_translation_second_single_field_real_write_readiness` reads only local JSON reports:
+
+- `logs/shopify_translation_second_single_field_test_prepare.json`
+- `logs/shopify_translation_second_single_field_verified_backup_fetch.json`
+
+It also reads the manually supplied second-test scope environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SECOND_TEST_PRODUCT_ID=
+SHOPIFY_TRANSLATION_SECOND_TEST_LOCALE=
+SHOPIFY_TRANSLATION_SECOND_TEST_FIELD=meta_title
+SHOPIFY_TRANSLATION_SECOND_TEST_PROPOSED_VALUE=
+```
+
+It writes:
+
+```text
+logs/shopify_translation_second_single_field_real_write_readiness.json
+logs/shopify_translation_second_single_field_real_write_readiness.html
+```
+
+This task is the final human readiness package for the second one-shot single-field real write. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, batch, scan the store, write the database, or git push. It does not create an execution preview or locked shell.
+
+The readiness task must require the environment scope to match both the Phase 12.4 prepare report and Phase 12.5 verified backup report exactly. It must block missing prepare reports, missing verified backup reports, prepare-not-ready reports, backup-not-ready reports, missing scope, scope mismatch, any field other than `meta_title`, empty proposed value, proposed value over 60 characters, and unverified backup reports.
+
+On success it may output `readiness_status=second_real_write_ready_for_human_approval`, but it must still keep `readiness_package_only=true`, `second_test_real_write_allowed=false`, `human_approval_required_before_real_write=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
