@@ -127,6 +127,7 @@ python manage.py flush
 - Batch apply command validation must never execute generated commands. It must block approved command plans with no commands, missing approver, non-approved command items, unsafe command preview text, or secret-like command preview markers.
 - Batch apply execution dry-run may read `logs/shopify_translation_batch_apply_command_validation.json` and write local execution dry-run JSON/HTML reports only. It must simulate the final execution flow while reporting `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 - Batch apply execution dry-run must not execute command previews, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. If `command_execution_allowed=false`, it must output a blocked dry-run report with zero simulated executions.
+- Batch apply execution dry-run reports should include an execution approval template with `execution_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `real_execution_allowed=false` until a later separate write task is explicitly confirmed.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.

@@ -321,6 +321,8 @@ logs/shopify_translation_batch_apply_execution_dry_run.html
 
 If `command_execution_allowed=false`, the task outputs a blocked dry-run report with `simulated_execution_count=0` and `command_executed=false`. If a future command validation allows execution, this task still only simulates the flow and must not execute command previews or call Shopify.
 
+The execution dry-run report includes an execution approval template. It starts as `execution_approval_status=pending`, allows only `pending`, `approved`, and `rejected`, and keeps `real_execution_allowed=false`. Editing this template does not execute commands or write to Shopify; any real execution must be a later separate write task with explicit confirmation.
+
 The execution dry-run task is execution-dry-run-only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. Its summary must explicitly show `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable

@@ -19,6 +19,8 @@ MAX_PRODUCTS = 3
 MAX_LOCALES = 5
 MAX_ITEMS = MAX_PRODUCTS * MAX_LOCALES
 EXECUTION_ALLOWED_STATUSES = {"approved", "validated_for_future_command_execution"}
+DEFAULT_EXECUTION_APPROVAL_STATUS = "pending"
+EXECUTION_APPROVAL_ALLOWED_VALUES = ["pending", "approved", "rejected"]
 SHOPIFY_TOKEN_PREFIX_PATTERN = re.escape("sh" + "pat_") + r"[A-Za-z0-9_]+"
 SECRET_MARKER_RE = re.compile(
     r"(access[_\s-]?token|api[_\s-]?key|password|credential|secret|" + SHOPIFY_TOKEN_PREFIX_PATTERN + r")",
@@ -51,6 +53,7 @@ def run_shopify_translation_batch_apply_execution_dry_run_task(mode: str) -> dic
         command_plan = _read_optional_command_plan(command_validation.get("source_command_plan_path", ""))
 
     execution_result = _execution_dry_run_result(command_validation, command_plan, validation_errors)
+    execution_approval_summary = _execution_approval_summary()
     validation_failures = _unique(validation_errors + execution_result["validation_failures"])
     validation_warnings = _unique(validation_warnings + execution_result["validation_warnings"])
     success = not validation_failures
@@ -87,6 +90,11 @@ def run_shopify_translation_batch_apply_execution_dry_run_task(mode: str) -> dic
         if command_validation
         else "",
         "execution_dry_run_status": execution_result["execution_dry_run_status"],
+        "execution_approval_summary": execution_approval_summary,
+        "execution_approval_required": execution_approval_summary["execution_approval_required"],
+        "execution_approval_status": execution_approval_summary["execution_approval_status"],
+        "execution_approval_ready_count": execution_approval_summary["execution_approval_ready_count"],
+        "real_execution_allowed": execution_approval_summary["real_execution_allowed"],
         "command_execution_allowed": execution_result["command_execution_allowed"],
         "generated_command_count": execution_result["generated_command_count"],
         "generated_payload_count": execution_result["generated_payload_count"],
@@ -135,6 +143,10 @@ def run_shopify_translation_batch_apply_execution_dry_run_task(mode: str) -> dic
         "source_command_validation_path": str(SOURCE_COMMAND_VALIDATION_PATH),
         "execution_dry_run_only": True,
         "execution_dry_run_status": payload["execution_dry_run_status"],
+        "execution_approval_required": payload["execution_approval_required"],
+        "execution_approval_status": payload["execution_approval_status"],
+        "execution_approval_ready_count": payload["execution_approval_ready_count"],
+        "real_execution_allowed": payload["real_execution_allowed"],
         "command_execution_allowed": payload["command_execution_allowed"],
         "command_executed": False,
         "no_shopify_writes_performed": True,
@@ -448,6 +460,18 @@ def _safe_int(value) -> int:
         return 0
 
 
+def _execution_approval_summary() -> dict:
+    return {
+        "execution_approval_required": True,
+        "execution_approval_status": DEFAULT_EXECUTION_APPROVAL_STATUS,
+        "execution_approval_allowed_values": EXECUTION_APPROVAL_ALLOWED_VALUES,
+        "execution_approved_by": "",
+        "execution_approval_notes": "",
+        "execution_approval_ready_count": 0,
+        "real_execution_allowed": False,
+    }
+
+
 def _write_json_report(payload: dict) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
@@ -476,6 +500,10 @@ def _render_html_report(payload: dict) -> str:
             ("Timestamp", "timestamp"),
             ("Source Command Validation", "source_command_validation_path"),
             ("Execution Dry-Run Status", "execution_dry_run_status"),
+            ("Execution Approval Required", "execution_approval_required"),
+            ("Execution Approval Status", "execution_approval_status"),
+            ("Execution Approval Ready Count", "execution_approval_ready_count"),
+            ("Real Execution Allowed", "real_execution_allowed"),
             ("Command Execution Allowed", "command_execution_allowed"),
             ("Generated Command Count", "generated_command_count"),
             ("Eligible Command Execution Count", "eligible_command_execution_count"),
@@ -515,6 +543,8 @@ def _render_html_report(payload: dict) -> str:
   <div class="status {status_class}">{escape(status)}: {escape(payload.get("detected_issue_summary", ""))}</div>
   <h2>Summary</h2>
   <table><tbody>{summary_rows}</tbody></table>
+  <h2>Execution Approval Template</h2>
+  { _render_execution_approval_summary(payload.get("execution_approval_summary", {})) }
   <h2>Simulated Execution Items</h2>
   <table>
     <thead>
@@ -577,6 +607,27 @@ def _summary_row(label: str, value) -> str:
     return f"<tr><th>{escape(label)}</th><td>{escape(str(value))}</td></tr>"
 
 
+def _render_execution_approval_summary(summary: dict) -> str:
+    rows = "\n".join(
+        _summary_row(label, summary.get(key))
+        for label, key in [
+            ("Execution Approval Required", "execution_approval_required"),
+            ("Execution Approval Status", "execution_approval_status"),
+            ("Allowed Values", "execution_approval_allowed_values"),
+            ("Execution Approved By", "execution_approved_by"),
+            ("Execution Approval Notes", "execution_approval_notes"),
+            ("Execution Approval Ready Count", "execution_approval_ready_count"),
+            ("Real Execution Allowed", "real_execution_allowed"),
+        ]
+    )
+    return (
+        "<table><tbody>"
+        f"{rows}"
+        "</tbody></table>"
+        "<p>The execution approval template is review-only. Editing it does not execute commands or write to Shopify.</p>"
+    )
+
+
 def _empty_row(colspan: int, message: str) -> str:
     return f"<tr><td colspan=\"{colspan}\" class=\"empty\">{escape(message)}</td></tr>"
 
@@ -592,6 +643,8 @@ def _build_approval_message(payload: dict, json_path: Path, html_path: Path) -> 
         "Shopify batch translation apply execution dry-run completed.\n"
         f"Source command validation: {payload.get('source_command_validation_path')}\n"
         f"Execution dry-run status: {payload.get('execution_dry_run_status')}\n"
+        f"Execution approval status: {payload.get('execution_approval_status')}\n"
+        f"Real execution allowed: {payload.get('real_execution_allowed')}\n"
         f"Command execution allowed: {payload.get('command_execution_allowed')}\n"
         f"Generated commands: {payload.get('generated_command_count')}\n"
         f"Eligible command execution count: {payload.get('eligible_command_execution_count')}\n"
