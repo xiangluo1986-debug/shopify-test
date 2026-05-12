@@ -69,6 +69,8 @@ For Shopify translation dry-run tasks:
 - Single-field apply sandbox runner tasks must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, database writes, or git push. They must report `real_write_allowed=false`, `real_write_attempted=false`, `translations_register_allowed=false`, `translations_register_called=false`, and `shopify_write_performed=false`.
 - Single-field apply preflight package tasks may read the latest sandbox runner JSON and write local preflight package JSON/HTML reports only. They must require manually supplied product/locale/field/proposed-value environment variables, accept only `field=meta_title`, require proposed value length <= 60 characters, and match the sandbox runner scope exactly.
 - Single-field apply preflight package tasks must not call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, database writes, or git push. They must report `real_write_allowed=false`, `real_write_attempted=false`, `translations_register_allowed=false`, `translations_register_called=false`, and `shopify_write_performed=false`.
+- Single-field backup fetch tasks may read the latest preflight package JSON and write local backup JSON/HTML reports only. They must require manually supplied product/locale/field environment variables, accept only `field=meta_title`, match the preflight package scope exactly, and may perform only one read-only Shopify GraphQL `translatableResource` query.
+- Single-field backup fetch tasks must not call Shopify mutations, call `translationsRegister`, publish, apply, update, database writes, or git push. They must report `real_write_allowed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, and `shopify_write_performed=false`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -177,6 +179,7 @@ Recommended fields:
 - [ ] Single-field apply sandbox design tasks are sandbox-design-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Single-field apply sandbox runner tasks are sandbox-runner-dry-run-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Single-field apply preflight package tasks are preflight-only and never execute generated commands or perform Shopify apply/write/publish actions.
+- [ ] Single-field backup fetch tasks are read-only and never execute generated commands, Shopify mutations, or Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

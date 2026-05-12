@@ -46,6 +46,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_locked_r
 python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_design --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_runner --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_apply_preflight_package --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_backup_fetch --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -441,6 +442,35 @@ logs/shopify_translation_single_field_apply_preflight_package.html
 The preflight package is preflight-only. It accepts exactly 1 product, 1 locale, and 1 field, and the only allowed field is `meta_title`. The proposed value must be non-empty and no longer than 60 characters. The requested scope must match the previous sandbox runner report exactly.
 
 The preflight package task must not call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. It must explicitly report `real_write_allowed=false`, `real_write_attempted=false`, `translations_register_allowed=false`, `translations_register_called=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Backup Fetch
+
+`shopify_translation_single_field_backup_fetch` reads only the preflight package:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+```
+
+It requires one manually supplied product, locale, and field through environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SANDBOX_PRODUCT_ID=gid://shopify/Product/...
+SHOPIFY_TRANSLATION_SANDBOX_LOCALE=ja
+SHOPIFY_TRANSLATION_SANDBOX_FIELD=meta_title
+```
+
+It writes local backup fetch reports only:
+
+```text
+logs/shopify_translation_single_field_backup_fetch.json
+logs/shopify_translation_single_field_backup_fetch.html
+```
+
+The backup fetch task is read-only. It accepts exactly 1 product, 1 locale, and 1 field, and the only allowed field is `meta_title`. The requested scope must match the previous preflight package exactly, and the preflight package must be `ready_for_manual_review`.
+
+This task may perform one read-only Shopify GraphQL `translatableResource` query to fetch the current `meta_title` translation for the requested locale, or the current translatable source value if the locale translation is missing. It must not scan products, read multiple locales, read multiple fields, call mutations, call `translationsRegister`, publish, apply, update, write the database, or git push.
+
+The backup report includes a readback plan and rollback plan for a future separate write task. It must explicitly report `real_write_allowed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
