@@ -1316,6 +1316,9 @@ class ShopifyInstallationAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
 
+    def get_model_perms(self, request):
+        return {}
+
     def has_view_permission(self, request, obj=None):
         return request.user.is_superuser
 
@@ -1588,13 +1591,11 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         return super().get_list_display(request)
 
     def get_list_filter(self, request):
-        if self.is_shenzhen_user(request):
-            return (
-                SettlementStatusCountFilter,
-                "shipping_country",
-                "order_created_at",
-            )
-        return super().get_list_filter(request)
+        return (
+            SettlementStatusCountFilter,
+            "shipping_country",
+            "order_created_at",
+        )
 
     def get_urls(self):
         urls = super().get_urls()
@@ -3292,9 +3293,7 @@ class ShopifyProductCostHistoryAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         return False
 
     def get_model_perms(self, request):
-        if self.is_shenzhen_user(request):
-            return {}
-        return super().get_model_perms(request)
+        return {}
 
     def has_view_permission(self, request, obj=None):
         return self.is_role_allowed(request)
@@ -3370,9 +3369,7 @@ class ShenzhenCountryShippingDefaultAdmin(ShopifyRoleAdminMixin, admin.ModelAdmi
         super().save_model(request, obj, form, change)
 
     def get_model_perms(self, request):
-        if not self.is_super_admin(request):
-            return {}
-        return super().get_model_perms(request)
+        return {}
 
     def get_fieldsets(self, request, obj=None):
         fieldsets = super().get_fieldsets(request, obj)
@@ -3460,9 +3457,7 @@ class ShenzhenProductCountryShippingDefaultAdmin(ShopifyRoleAdminMixin, admin.Mo
         super().save_model(request, obj, form, change)
 
     def get_model_perms(self, request):
-        if self.is_shenzhen_user(request):
-            return {}
-        return super().get_model_perms(request)
+        return {}
 
 
 @admin.register(ShippingCostRule)
@@ -3521,9 +3516,7 @@ class ShippingCostRuleAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         return request.user.is_superuser
 
     def get_model_perms(self, request):
-        if not self.is_super_admin(request):
-            return {}
-        return super().get_model_perms(request)
+        return {}
 
     def has_view_permission(self, request, obj=None):
         return self.is_role_allowed(request)

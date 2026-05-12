@@ -4,6 +4,7 @@
 
 - 修正 Admin / Finance 可见的深圳仓利润收入公式：全深圳仓订单会将订单级额外收入（例如运费收入）计入深圳仓收入合计；混仓订单仍不自动归属订单级额外收入，避免误算 Sydney / 其它仓收入。
 - 简化 Shenzhen Warehouse 账号后台 UI：隐藏旧运费规则、旧国家默认运费、产品国家默认运费和成本历史等非日常左侧入口，收紧 Shopify Orders 右侧筛选和批量 actions，并隐藏深圳仓视图中的 Shopify Sync Dashboard 按钮。
+- 第三轮简化 Shopify Sync 左侧导航：所有角色左侧只保留 Shopify Orders、Settlement Batches、Shopify Products 和 Finance Exchange Rates；同时统一 Shopify Orders 右侧筛选为结算状态、国家和订单创建时间。
 - Shopify Orders 新增 Admin/Finance “提出异常订单审核”流程，可将深圳仓已确认成本、待 Admin 审核的订单退回为“异常待审核”，并强制填写异常原因。
 - 新增 `exception_review` 结算状态；旧 `exception` 保留给同步异常 / 仓库位置变化异常，并显示为“同步异常待审核”。
 - 异常待审核订单会记录提出人、提出时间、异常原因、深圳仓回复、回复人和回复时间。
