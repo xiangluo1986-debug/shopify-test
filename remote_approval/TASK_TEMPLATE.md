@@ -40,6 +40,8 @@ For Shopify translation dry-run tasks:
 - Batch multi-locale dry-run review results should include QA gate fields: `qa_status`, `qa_warnings`, `qa_failures`, and `qa_checks`.
 - Batch QA gates should check title/meta length, body HTML presence, forbidden shipping/origin phrases, forbidden CTA phrases, exaggerated military/combat wording, mojibake / encoding corruption, image alt text presence, HTML structure preservation, and no-write confirmation.
 - Batch review JSON must be written with a JSON serializer in an ASCII-safe escaped form, sanitize unsafe control characters from command output, and validate with `json.loads` after writing. If validation fails, report `review_json_invalid`.
+- Batch apply plan tasks may read the latest batch dry-run review and write local JSON/HTML plan files only. They must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
+- Batch apply plan tasks should validate the source dry-run review before creating plan items and classify each product/locale as `ready_for_apply`, `needs_review`, or `blocked`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -132,6 +134,7 @@ Recommended fields:
 - [ ] Batch multi-locale Shopify translation tasks record per-product/locale review paths, `failure_type`, and `no_shopify_writes_confirmed`.
 - [ ] Batch multi-locale Shopify translation tasks record QA gate status and keep QA failures in review-only mode.
 - [ ] Batch multi-locale Shopify translation tasks validate generated JSON review files after writing.
+- [ ] Batch apply plan tasks are review-only and never perform Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

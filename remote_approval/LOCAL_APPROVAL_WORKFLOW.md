@@ -34,6 +34,7 @@ python remote_approval_runner.py --task git_safety_check --mode dry-run
 python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-run
 python remote_approval_runner.py --task shopify_translation_multi_locale_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_multi_locale_dry_run --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_plan --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -178,6 +179,23 @@ SHOW_LOG = show recent logs
 SUMMARY = show summary
 N / 0 = stop
 ```
+
+### Batch Translation Apply Plan
+
+`shopify_translation_batch_apply_plan` reads only the latest batch dry-run review:
+
+```text
+logs/shopify_translation_batch_multi_locale_dry_run_review.json
+```
+
+It validates that the source review is a batch dry-run, has `success_count > 0`, `failed_count == 0`, `all_no_write_confirmed == true`, `no_shopify_writes_performed == true`, and stays within the 3 product / 5 locale limit. It then writes local plan files only:
+
+```text
+logs/shopify_translation_batch_apply_plan.json
+logs/shopify_translation_batch_apply_plan.html
+```
+
+Each plan item is marked `ready_for_apply`, `needs_review`, or `blocked`. The plan is for human review only and must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
 
 ### `System.Speech` Is Unavailable
 

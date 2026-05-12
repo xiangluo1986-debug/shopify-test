@@ -109,6 +109,8 @@ python manage.py flush
 - Batch QA gates should check title/meta length, body HTML presence, forbidden shipping/origin phrases, forbidden CTA phrases, exaggerated military/combat wording, image alt text presence, HTML structure preservation, and no-write confirmation.
 - Batch review JSON must be strict parseable JSON. Control characters from command output should be sanitized, the summary should be written in an ASCII-safe escaped form, and the file should be validated after write.
 - Batch QA gates should detect mojibake / encoding corruption markers such as `Pr盲zise`, `f眉r`, `鈥檃`, or Japanese mojibake fragments like `銉`.
+- Batch apply plan generation is review-only. It may read `logs/shopify_translation_batch_multi_locale_dry_run_review.json` and write local plan files, but it must not call Shopify APIs, mutations, `translationsRegister`, publish, apply, or update paths.
+- Batch apply plans should mark product/locale items as `ready_for_apply`, `needs_review`, or `blocked`; this is a planning decision only and not approval to write Shopify.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.
