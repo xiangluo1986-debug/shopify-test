@@ -910,6 +910,32 @@ If any second-test scope variable is missing, the task must output `blocked_miss
 
 This task must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It must state that the second test needs a fresh verified backup and the full safety chain again before any future real write. It must report `second_test_prepare_only=true`, `second_test_real_write_allowed=false`, `batch_mode_allowed=false`, `full_store_scan_allowed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Second Single-Field Verified Backup Fetch
+
+`shopify_translation_second_single_field_verified_backup_fetch` reads:
+
+- `logs/shopify_translation_second_single_field_test_prepare.json`
+
+It also reads the manually supplied second-test scope environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SECOND_TEST_PRODUCT_ID=
+SHOPIFY_TRANSLATION_SECOND_TEST_LOCALE=
+SHOPIFY_TRANSLATION_SECOND_TEST_FIELD=meta_title
+SHOPIFY_TRANSLATION_SECOND_TEST_PROPOSED_VALUE=
+```
+
+It writes:
+
+```text
+logs/shopify_translation_second_single_field_verified_backup_fetch.json
+logs/shopify_translation_second_single_field_verified_backup_fetch.html
+```
+
+This task may perform exactly one read-only Shopify GraphQL `translatableResource` query to fetch the current online value for the prepared second-test scope. It must block with `blocked_missing_second_test_prepare_report` if the prepare report is missing, `blocked_second_test_prepare_not_ready` if the prepare report is not ready, `blocked_missing_second_test_scope` when any required environment variable is missing, `blocked_scope_mismatch` when environment scope differs from the prepare report, `blocked_invalid_field` for any field other than `meta_title`, and `blocked_backup_query_failed` if the read-only query fails.
+
+The verified backup fetch must not write Shopify, call mutations, call `translationsRegister`, perform rollback, perform readback beyond the backup query, publish, apply, update, batch, scan the store, write the database, or git push. On success it must output `backup_fetch_status=second_verified_backup_ready`, `second_backup_source_is_verified=true`, `read_only_shopify_query_performed=true`, and keep `second_test_real_write_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
