@@ -21,6 +21,9 @@ from remote_approval.tasks.shopify_translation_batch_apply_command_generate_task
 from remote_approval.tasks.shopify_translation_batch_apply_command_validate_task import (
     run_shopify_translation_batch_apply_command_validate_task,
 )
+from remote_approval.tasks.shopify_translation_batch_apply_execution_dry_run_task import (
+    run_shopify_translation_batch_apply_execution_dry_run_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -39,6 +42,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "git_safety_check": run_git_safety_check_task,
     "shopify_translation_batch_apply_command_generate": run_shopify_translation_batch_apply_command_generate_task,
     "shopify_translation_batch_apply_command_validate": run_shopify_translation_batch_apply_command_validate_task,
+    "shopify_translation_batch_apply_execution_dry_run": run_shopify_translation_batch_apply_execution_dry_run_task,
     "shopify_translation_batch_apply_execution_final_validate": (
         run_shopify_translation_batch_apply_execution_final_validate_task
     ),
@@ -87,6 +91,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_translation_batch_apply_command_validation.json",
+    },
+    "shopify_translation_batch_apply_execution_dry_run": {
+        "description": "Simulate Shopify translation apply execution from command validation without writing.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_batch_apply_execution_dry_run.json",
     },
     "shopify_translation_batch_apply_execution_preview": {
         "description": "Generate a preview-only Shopify translation apply execution list from validation results.",
