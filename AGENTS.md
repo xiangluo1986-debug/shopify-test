@@ -120,6 +120,8 @@ python manage.py flush
 - Batch apply execution preview should include a final approval template with `final_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `final_apply_allowed=false` until a future separate write task is explicitly confirmed.
 - Batch apply execution final validation may read `logs/shopify_translation_batch_apply_execution_preview.json` and write local final validation JSON/HTML reports only. It must validate final approval status and still report `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 - Batch apply execution final validation must block `final_approval_status=approved` unless the preview has approved, final-ready, QA-passing items and a non-empty final approver.
+- Batch apply command generation may read `logs/shopify_translation_batch_apply_execution_final_validation.json` and write local command/payload plan JSON/HTML reports only. It must report `command_generation_only=true`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+- Batch apply command generation must produce zero commands when `final_apply_allowed=false`. Even when final approval allows future apply, generated commands are preview-only plans and require a separate explicitly confirmed write task before execution.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.

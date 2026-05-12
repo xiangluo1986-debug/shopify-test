@@ -38,6 +38,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_plan --m
 python remote_approval_runner.py --task shopify_translation_batch_apply_plan_validate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_preview --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_final_validate --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_command_generate --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -260,6 +261,25 @@ logs/shopify_translation_batch_apply_execution_final_validation.html
 `final_approval_status=pending` keeps `final_apply_allowed=false` and does not make any item eligible for real apply. `final_approval_status=rejected` also keeps apply blocked. `final_approval_status=approved` is only valid when a final approver is present, at least one preview apply item exists, and every preview apply item is final-approved, final-ready, QA-passing, future-apply eligible, and still no-write.
 
 The final validation task is validation-only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Batch Translation Apply Command Generation
+
+`shopify_translation_batch_apply_command_generate` reads only the final approval validation report:
+
+```text
+logs/shopify_translation_batch_apply_execution_final_validation.json
+```
+
+It writes local command/payload plan reports only:
+
+```text
+logs/shopify_translation_batch_apply_command_plan.json
+logs/shopify_translation_batch_apply_command_plan.html
+```
+
+When `final_apply_allowed=false`, the task must generate zero commands and explain that final validation has not approved real apply. If a future final validation approves items, this task may generate command/payload plans for those items, but it must not execute them.
+
+The command generation task is command-generation-only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
