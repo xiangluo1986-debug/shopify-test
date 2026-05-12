@@ -16,6 +16,9 @@ migrations are blocked from staging.
 
 .EXAMPLE
 .\scripts\git_safe_commit.ps1 -Message "Add Shopify apply execution preview task" -PreviewOnly
+
+.EXAMPLE
+.\scripts\git_safe_commit.ps1 -Message "Add Shopify apply execution preview task" -DryRun
 #>
 
 [CmdletBinding()]
@@ -24,7 +27,8 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$Message,
 
-    [switch]$PreviewOnly
+    [Alias("PreviewOnly")]
+    [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
@@ -200,6 +204,12 @@ Invoke-SafeGit -Arguments @("status", "--short")
 $ChangedItems = @(Get-ChangedItems)
 
 if ($ChangedItems.Count -eq 0) {
+    if ($DryRun) {
+        Write-Host ""
+        Write-Host "Dry run complete. No changed files found. Nothing would be staged or committed."
+        exit 0
+    }
+
     throw "No changed files found. Nothing to commit."
 }
 
@@ -236,9 +246,9 @@ Write-Host ""
 Write-Host "Approved files to stage:"
 $FilesToStage | ForEach-Object { Write-Host "  $_" }
 
-if ($PreviewOnly) {
+if ($DryRun) {
     Write-Host ""
-    Write-Host "Preview only. No files were staged or committed."
+    Write-Host "Dry run complete. No files were staged or committed."
     exit 0
 }
 
