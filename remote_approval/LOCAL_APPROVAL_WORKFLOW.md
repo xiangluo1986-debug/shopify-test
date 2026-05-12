@@ -994,6 +994,28 @@ Supported modes are `dry-run`, `real-run`, and `execute-real-write`. In `dry-run
 
 Only an explicitly requested future `real-run` or `execute-real-write` command may attempt exactly one Shopify `translationsRegister` mutation for `gid://shopify/Product/7655686799427`, locale `ja`, field `meta_title`, proposed value `MOFLY P-51D Aileron Link Connector Test`, after the prepare, verified backup, readiness, scope, and ACK checks all pass. Real-run must immediately read back the same product / locale / field and mark success only when the readback value exactly matches the proposed value. Rollback must never be automatic; readback mismatch must output `second_real_write_completed_but_readback_mismatch` and require rollback approval.
 
+### Second Single-Field Post-Write Audit Package
+
+`shopify_translation_second_single_field_post_write_audit_package` reads the local Phase 12.7 execution report:
+
+- `logs/shopify_translation_second_single_field_real_write_execute.json`
+
+It may also read local reference reports:
+
+- `logs/shopify_translation_second_single_field_verified_backup_fetch.json`
+- `logs/shopify_translation_second_single_field_real_write_readiness.json`
+
+It writes:
+
+```text
+logs/shopify_translation_second_single_field_post_write_audit_package.json
+logs/shopify_translation_second_single_field_post_write_audit_package.html
+```
+
+This audit is local-report-only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It may preserve Phase 12.7 source execution facts such as `source_shopify_write_performed=true`, `source_translations_register_called=true`, `source_mutation_performed=true`, and `source_readback_performed=true`, but the audit task itself must report `audit_package_only=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
+The audit must pass only when the source execution report is task `shopify_translation_second_single_field_real_write_execute`, mode `real-run`, status `second_real_write_succeeded_and_verified`, scope `gid://shopify/Product/7655686799427` / `ja` / `meta_title`, proposed and readback value `MOFLY P-51D Aileron Link Connector Test`, exactly one real write, no bulk write, no publish, no automatic rollback, no rollback approval requirement, and empty source blocking conditions. On success it outputs `audit_status=second_post_write_audit_passed`, `rollback_needed=false`, `rollback_optional_restore_possible=true`, and `rollback_optional_restore_requires_separate_approval=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
