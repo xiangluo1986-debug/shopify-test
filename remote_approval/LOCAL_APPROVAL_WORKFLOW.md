@@ -1016,6 +1016,30 @@ This audit is local-report-only. It must not call Shopify APIs, call mutations, 
 
 The audit must pass only when the source execution report is task `shopify_translation_second_single_field_real_write_execute`, mode `real-run`, status `second_real_write_succeeded_and_verified`, scope `gid://shopify/Product/7655686799427` / `ja` / `meta_title`, proposed and readback value `MOFLY P-51D Aileron Link Connector Test`, exactly one real write, no bulk write, no publish, no automatic rollback, no rollback approval requirement, and empty source blocking conditions. On success it outputs `audit_status=second_post_write_audit_passed`, `rollback_needed=false`, `rollback_optional_restore_possible=true`, and `rollback_optional_restore_requires_separate_approval=true`.
 
+### Small Batch Apply Plan Package
+
+`shopify_translation_small_batch_apply_plan_package` reads the local second post-write audit report:
+
+- `logs/shopify_translation_second_single_field_post_write_audit_package.json`
+
+It may also read local reference reports:
+
+- `logs/shopify_translation_second_single_field_real_write_execute.json`
+- `logs/shopify_translation_second_single_field_verified_backup_fetch.json`
+
+It writes:
+
+```text
+logs/shopify_translation_small_batch_apply_plan_package.json
+logs/shopify_translation_small_batch_apply_plan_package.html
+```
+
+This task is a local plan package only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. The generated plan must stay within one product, one locale, at most 5 translation entries, and allowed fields `meta_title` / `meta_description` only.
+
+The default sample plan uses `gid://shopify/Product/7655686799427`, locale `ja`, current known `meta_title` value `MOFLY P-51D Aileron Link Connector Test`, and two entries: `meta_title=MOFLY P-51D Aileron Link Connector` plus `meta_description=High-quality replacement aileron linkage connector for MOFLY P-51D RC airplane repairs and maintenance.` On success it outputs `plan_status=small_batch_apply_plan_ready_for_manual_review`, `entry_count=2`, `manual_review_required=true`, `real_write_allowed=false`, and `next_step_requires_separate_execute_task=true`.
+
+For local blocking tests only, `SHOPIFY_TRANSLATION_SMALL_BATCH_PLAN_TEST_SCENARIO=invalid-field` or `too-many-entries` may be used to exercise plan validation while still performing no Shopify actions.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.

@@ -174,6 +174,8 @@ python manage.py flush
 - Second single-field real write execute must keep `mode=dry-run` completely no-write: no Shopify API call, no mutation, no `translationsRegister`, no readback, no rollback, no publish, and `all_new_actions_no_write_confirmed=true`. Real write execution is only eligible in a later explicit `real-run` or `execute-real-write` command with `SHOPIFY_TRANSLATION_SECOND_TEST_REAL_EXECUTION_ACK=YES_I_APPROVE_SECOND_REAL_SHOPIFY_TRANSLATION_WRITE`; it must perform exactly one `translationsRegister` mutation, immediately read back the same scope, and never run automatic rollback.
 - Second single-field post-write audit package may read the second real-write execution report and optionally the second verified backup/readiness reports, then write local audit JSON/HTML reports only.
 - Second single-field post-write audit package must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It may preserve source execution facts from Phase 12.7, but the audit task itself must report `audit_package_only=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+- Small batch apply plan package may read the second post-write audit report, second real write execution report, and second verified backup report, then write local small batch apply plan JSON/HTML reports only.
+- Small batch apply plan package must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It must keep the plan to at most 5 translation entries, exactly one product, exactly one locale, and allowed fields `meta_title` / `meta_description` only. It must report `plan_package_only=true`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.
@@ -208,6 +210,9 @@ python manage.py flush
 - Preserve existing ticket status, reply, attachment, and Shopify order display behavior.
 - For admin search changes, extend existing search logic instead of building a new page.
 - Migrations are acceptable only when adding required fields; do not create migrations that remove data.
+- `tickets.Ticket.order_no` is allowed to repeat. The same Shopify order may have multiple aftersales tickets, emails, or customer conversations.
+- Do not add a unique constraint to `Ticket.order_no`.
+- Do not use `Ticket.order_no` as the uniqueness source for Shenzhen warehouse settlement.
 
 ## Shenzhen Settlement Rules
 
@@ -215,6 +220,12 @@ python manage.py flush
 - Sydney / NULL / non-Shenzhen items must not enter Shenzhen settlement totals or CSV exports.
 - Shenzhen sync rule: an order line must have exact Shopify tag `ship from china` on the order and the line item must be identified as Shenzhen fulfillment.
 - Mixed-warehouse orders may remain in the system, but only Shenzhen item lines participate in settlement.
+- Shenzhen settlement order uniqueness is based on `shopify_sync.ShopifyOrder`, not `tickets.Ticket.order_no`.
+- `ShopifyOrder` uses `installation + shopify_order_id` as its business unique key.
+- `order_number` and `order_name` are for display, search, and manual identification only. Do not use them as settlement uniqueness keys.
+- `ShopifyOrderItem` uses `order + shopify_line_item_id` to prevent duplicate order item rows.
+- `ShopifyOrderPackage` uses `order + package_no` to prevent duplicate package numbers within one order.
+- `SettlementBatch` totals should be based on unique `ShopifyOrder` records so the same Shopify order is not settled twice.
 - `handling_fee_rmb` means ordering cost / order placement cost. It is a deduction, not an added fee.
 - Single-item or no-package settlement formula: `locked_product_cost_rmb * quantity + locked_shipping_cost_rmb - handling_fee_rmb`.
 - Package settlement formula: package item product costs + `package.shipping_cost_rmb` - `package.ordering_cost_rmb`.
@@ -227,6 +238,20 @@ python manage.py flush
 - For mixed orders, do not count Sydney / other-warehouse revenue as Shenzhen revenue.
 - For 100% off aftersales replacement orders, cap Shenzhen revenue by actual Shopify order total.
 - Only Shopify-confirmed tips, such as `total_tip_received`, should be counted as additional Shenzhen revenue.
+- Before changing Shenzhen order de-duplication, settlement totals, or order sync lookup logic, run read-only duplicate checks first.
+- Before adding any unique constraint, verify that historical data has no duplicates.
+- If duplicates are found, do not delete, merge, or overwrite automatically. Report the duplicate rows and wait for user confirmation.
+
+## Verified Order Uniqueness Snapshot
+
+Recorded on 2026-05-12:
+
+- `Ticket.order_no` has duplicates, and this is allowed by business rules.
+- `ShopifyOrderItem` duplicate check for `order + shopify_line_item_id`: `[]`.
+- `ShopifyOrder` duplicate check for `installation + shopify_order_id`: `[]`.
+- `ShopifyOrder.order_number` non-empty duplicate check: `[]`.
+- `ShopifyOrder.order_name` non-empty duplicate check: `[]`.
+- No migration is needed for this uniqueness review.
 
 ## Docker / Windows / cloudflared Notes
 
