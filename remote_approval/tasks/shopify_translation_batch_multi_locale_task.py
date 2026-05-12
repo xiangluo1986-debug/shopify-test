@@ -3,9 +3,14 @@ import re
 import subprocess
 import time
 from html import escape
+from html.parser import HTMLParser
 from pathlib import Path
 
 from remote_approval.utils import LOG_DIR, PROJECT_ROOT, load_env, utc_now_iso
+
+
+class ReviewJsonInvalidError(RuntimeError):
+    pass
 
 
 TASK_NAME = "shopify_translation_batch_multi_locale_dry_run"
@@ -29,6 +34,57 @@ PRODUCT_ID_RE = re.compile(r"^(?:\d+|gid://shopify/Product/\d+)$")
 PRODUCT_KEY_RE = re.compile(r"(\d+)$")
 PERMISSION_DENIED_RE = re.compile(r"(access is denied|permission denied|docker_engine)", re.IGNORECASE)
 DRY_RUN_NO_WRITE_PHRASE = "Dry run complete. No Shopify writes performed."
+TRANSLATION_KEYS = ("title", "body_html", "meta_title", "meta_description")
+MAX_PRODUCT_TITLE_CHARS = 65
+MAX_META_TITLE_CHARS = 60
+MAX_META_DESCRIPTION_CHARS = 160
+URL_TEXT_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+HTML_TAG_RE = re.compile(r"</?([A-Za-z][A-Za-z0-9:-]*)\b")
+JSON_UNSAFE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+MOJIBAKE_RE = re.compile(
+    r"("
+    r"�|Ã.|Â.|â[€\u0080-\u00BF]?|"
+    r"鈥|檃|茅|贸|铆|谩|聽|莽|锚|卯|"
+    r"盲|眉|脽|枚|脿|脰|脺|"
+    r"銉|儵|偍|笺|伄|伀|鍐|绶|姗|鐢|瑁|鍙|淇|瀵|儹|儶|兂|偗|偪|偣|"
+    r"縺|蜊|譁|譛|荳|蟆"
+    r")"
+)
+FORBIDDEN_SHIPPING_ORIGIN_RE = re.compile(
+    r"("
+    r"made\s+in\s+china|mainland\s+china|shipping\s+origin|"
+    r"\borigin\s*:|\bsource\s*:|herkunft\s*:|origine\s*:|origen\s*:|"
+    r"worldwide\s+shipping|ships\s+worldwide|shipping\s+worldwide|"
+    r"weltweiter\s+versand|versand\s+weltweit|lieferung\s+weltweit|"
+    r"livraison\s+mondiale|exp[eé]dition\s+mondiale|"
+    r"env[ií]o\s+mundial|env[ií]os\s+a\s+todo\s+el\s+mundo|"
+    r"spedizione\s+mondiale|spedizione\s+in\s+tutto\s+il\s+mondo|"
+    r"世界中に発送|送料無料|中国製|中国大陆"
+    r")",
+    re.IGNORECASE,
+)
+FORBIDDEN_CTA_RE = re.compile(
+    r"("
+    r"buy\s+now|shop\s+now|order\s+now|"
+    r"jetzt\s+kaufen|kaufen\s+sie\s+jetzt|"
+    r"achetez\s+maintenant|acheter\s+maintenant|"
+    r"comprar\s+ahora|compra\s+ahora|"
+    r"acquista\s+ora|compra\s+ora|"
+    r"今すぐ購入|今すぐ買う"
+    r")",
+    re.IGNORECASE,
+)
+FORBIDDEN_MILITARY_RE = re.compile(
+    r"("
+    r"battle\s+force|combat\s+power|dominate\s+the\s+sky|military\s+mission|"
+    r"kampfkraft|dominieren|milit[äa]rische\s+eins[aä]tze|kampfeins[aä]tze|"
+    r"force\s+de\s+combat|dominer\s+le\s+ciel|"
+    r"fuerza\s+de\s+combate|dominar\s+el\s+cielo|"
+    r"forza\s+di\s+combattimento|dominare\s+il\s+cielo|"
+    r"戦闘力|空を支配"
+    r")",
+    re.IGNORECASE,
+)
 GLOSSARY_PATHS = {
     "de": PROJECT_ROOT / "backend" / "shopify_sync" / "translation_glossary_de.json",
     "fr": PROJECT_ROOT / "backend" / "shopify_sync" / "translation_glossary_fr.json",
@@ -99,6 +155,9 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
     all_no_write_confirmed = bool(successful_results) and all(
         item["no_shopify_writes_confirmed"] for item in successful_results
     )
+    qa_status_counts = _qa_status_counts(results)
+    qa_gate_passed = bool(results) and qa_status_counts["fail"] == 0
+    all_qa_pass = bool(results) and qa_status_counts["fail"] == 0 and qa_status_counts["warning"] == 0
     failed_items = [
         {
             "product_id": item["product_id"],
@@ -113,9 +172,32 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
             "product_id": item["product_id"],
             "locale": item["locale"],
             "warnings_count": item["warnings_count"],
+            "qa_status": item.get("qa_status", ""),
+            "qa_warnings_count": len(item.get("qa_warnings", [])),
+            "qa_failures_count": len(item.get("qa_failures", [])),
         }
         for item in results
-        if item["warnings_count"]
+        if item["warnings_count"] or item.get("qa_status") in {"warning", "fail"}
+    ]
+    qa_failed_items = [
+        {
+            "product_id": item["product_id"],
+            "locale": item["locale"],
+            "qa_status": item.get("qa_status", ""),
+            "qa_failures": item.get("qa_failures", []),
+        }
+        for item in results
+        if item.get("qa_status") == "fail"
+    ]
+    qa_warning_items = [
+        {
+            "product_id": item["product_id"],
+            "locale": item["locale"],
+            "qa_status": item.get("qa_status", ""),
+            "qa_warnings": item.get("qa_warnings", []),
+        }
+        for item in results
+        if item.get("qa_status") == "warning"
     ]
 
     end_time = utc_now_iso()
@@ -139,17 +221,30 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
         "skipped_count": skipped_count,
         "failed_items": failed_items,
         "warning_items": warning_items,
+        "qa_failed_items": qa_failed_items,
+        "qa_warning_items": qa_warning_items,
         "all_success": all_success,
         "all_no_write_confirmed": all_no_write_confirmed,
         "no_shopify_writes_performed": all_no_write_confirmed,
         "warnings_count": sum(item["warnings_count"] for item in results),
+        "qa_status_counts": qa_status_counts,
+        "qa_pass_count": qa_status_counts["pass"],
+        "qa_warning_count": qa_status_counts["warning"],
+        "qa_fail_count": qa_status_counts["fail"],
+        "qa_gate_passed": qa_gate_passed,
+        "all_qa_pass": all_qa_pass,
         "per_product_summary": _per_product_summary(product_ids, results),
         "per_locale_summary": _per_locale_summary(locales, results),
         "results": results,
         "start_time": start_time,
         "end_time": end_time,
         "duration_seconds": round(time.time() - started, 3),
-        "detected_issue_summary": _build_issue_summary(results, all_success, all_no_write_confirmed),
+        "review_json_valid": True,
+        "review_json_error": "",
+        "review_json_validation": "json.loads after write",
+        "detected_issue_summary": _build_issue_summary(
+            results, all_success, all_no_write_confirmed, qa_status_counts
+        ),
         "safety": {
             "dry_run_only": True,
             "max_products": MAX_PRODUCTS,
@@ -162,16 +257,46 @@ def run_shopify_translation_batch_multi_locale_dry_run_task(mode: str) -> dict:
             "auto_scan_all_products_allowed": False,
         },
     }
-    review_path = _write_review(payload)
+    try:
+        review_path = _write_review(payload)
+    except ReviewJsonInvalidError as exc:
+        payload["review_json_valid"] = False
+        payload["review_json_error"] = str(exc)
+        payload["detected_issue_summary"] = f"review_json_invalid: {exc}"
+        html_review_path = write_batch_review_html(payload, HTML_REVIEW_PATH)
+        return {
+            "task_type": TASK_NAME,
+            "success": False,
+            "exit_code": 1,
+            "products_checked": len(product_ids),
+            "failed_count": failed_count,
+            "failure_type": "review_json_invalid",
+            "all_no_write_confirmed": all_no_write_confirmed,
+            "warnings_count": payload["warnings_count"],
+            "qa_gate_passed": False,
+            "qa_pass_count": payload["qa_pass_count"],
+            "qa_warning_count": payload["qa_warning_count"],
+            "qa_fail_count": payload["qa_fail_count"],
+            "command_label": COMMAND_LABEL,
+            "review_path": str(REVIEW_PATH),
+            "json_review_path": str(REVIEW_PATH),
+            "html_review_path": str(html_review_path),
+            "detected_issue_summary": payload["detected_issue_summary"],
+            "approval_message": _build_approval_message(payload, REVIEW_PATH, html_review_path),
+        }
     html_review_path = write_batch_review_html(payload, HTML_REVIEW_PATH)
     return {
         "task_type": TASK_NAME,
-        "success": all_success,
-        "exit_code": 0 if all_success else 1,
+        "success": all_success and all_no_write_confirmed and qa_gate_passed,
+        "exit_code": 0 if (all_success and all_no_write_confirmed and qa_gate_passed) else 1,
         "products_checked": len(product_ids) if all_success else success_count,
         "failed_count": failed_count,
         "all_no_write_confirmed": all_no_write_confirmed,
         "warnings_count": payload["warnings_count"],
+        "qa_gate_passed": qa_gate_passed,
+        "qa_pass_count": payload["qa_pass_count"],
+        "qa_warning_count": payload["qa_warning_count"],
+        "qa_fail_count": payload["qa_fail_count"],
         "command_label": COMMAND_LABEL,
         "review_path": str(review_path),
         "json_review_path": str(review_path),
@@ -342,7 +467,7 @@ def _run_product_locale(product_id: str, locale: str) -> dict:
     command_review, review_file_fresh = _parse_command_review(host_review_path, started)
     success = exit_code == 0
     no_write_confirmed = success and DRY_RUN_NO_WRITE_PHRASE in stdout
-    return {
+    result = {
         "product_id": product_id,
         "locale": locale,
         "language_name": SUPPORTED_LOCALES[locale],
@@ -365,6 +490,14 @@ def _run_product_locale(product_id: str, locale: str) -> dict:
         "title_length_warnings": command_review.get("title_length_warnings", 0),
         "meta_title_warnings": command_review.get("meta_title_warnings", 0),
         "meta_description_warnings": command_review.get("meta_description_warnings", 0),
+        "payload_keys": command_review.get("payload_keys", []),
+        "title_chars": command_review.get("title_chars", 0),
+        "meta_title_chars": command_review.get("meta_title_chars", 0),
+        "meta_description_chars": command_review.get("meta_description_chars", 0),
+        "source_meta_description_chars": command_review.get("source_meta_description_chars", 0),
+        "translated_text_node_count": command_review.get("translated_text_node_count", 0),
+        "translated_img_alt_count": command_review.get("translated_img_alt_count", 0),
+        "img_alt_chars_list": command_review.get("img_alt_chars_list", []),
         "removed_shipping_marketing_phrase_count": command_review.get(
             "removed_shipping_marketing_phrase_count", 0
         ),
@@ -372,6 +505,7 @@ def _run_product_locale(product_id: str, locale: str) -> dict:
         "no_shopify_writes_confirmed": no_write_confirmed,
         "no_shopify_writes_performed": no_write_confirmed,
     }
+    return _with_qa(result, command_review)
 
 
 def _build_command(product_id: str, locale: str, review_file_path: str) -> list[str]:
@@ -409,12 +543,31 @@ def _parse_command_review(path: Path, started_at: float) -> tuple[dict, bool]:
         return {}, False
     warnings = data.get("warnings") or []
     summary = data.get("summary") or {}
+    translation_values = _translation_values(data)
+    source_values = {
+        key: str(value)
+        for key, value in (data.get("source") or {}).items()
+        if key in TRANSLATION_KEYS and value is not None
+    }
+    payload_keys = summary.get("payload_keys") or _payload_keys(data.get("payload_preview") or [])
     title_chars = summary.get("title_chars") or 0
     meta_title_chars = summary.get("meta_title_chars") or 0
     meta_description_chars = summary.get("meta_description_chars") or 0
     return {
         "dry_run": data.get("dry_run"),
         "warnings_count": len(warnings),
+        "warnings": warnings,
+        "payload_keys": list(payload_keys),
+        "title_chars": title_chars,
+        "meta_title_chars": meta_title_chars,
+        "meta_description_chars": meta_description_chars,
+        "source_meta_description_chars": summary.get("source_meta_description_chars", 0),
+        "source_meta_description_over_limit": bool(summary.get("source_meta_description_over_limit")),
+        "translated_text_node_count": summary.get("translated_text_node_count", 0),
+        "translated_img_alt_count": summary.get("translated_img_alt_count", 0),
+        "img_alt_chars_list": summary.get("img_alt_chars_list", []),
+        "translation_values": translation_values,
+        "source_values": source_values,
         "title_length_warnings": 1 if title_chars and title_chars > 65 else 0,
         "meta_title_warnings": 1 if meta_title_chars and meta_title_chars > 60 else 0,
         "meta_description_warnings": 1 if meta_description_chars and meta_description_chars > 160 else 0,
@@ -423,12 +576,370 @@ def _parse_command_review(path: Path, started_at: float) -> tuple[dict, bool]:
     }, True
 
 
+def _translation_values(review_data: dict) -> dict[str, str]:
+    translation = review_data.get("translation") or {}
+    payload_values = {}
+    for item in review_data.get("payload_preview") or []:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key")
+        value = item.get("value")
+        if key in TRANSLATION_KEYS and value is not None:
+            payload_values[key] = str(value)
+
+    values = {}
+    for key in TRANSLATION_KEYS:
+        value = translation.get(key) if isinstance(translation, dict) else None
+        if value is None:
+            value = payload_values.get(key)
+        if value is not None:
+            values[key] = str(value)
+    return values
+
+
+def _payload_keys(payload_preview: list) -> list[str]:
+    keys = []
+    for item in payload_preview:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key")
+        if key and key not in keys:
+            keys.append(str(key))
+    return keys
+
+
+def _with_qa(result: dict, command_review: dict | None = None) -> dict:
+    result.update(_evaluate_qa_gates(result, command_review or {}))
+    return result
+
+
+def _evaluate_qa_gates(result: dict, command_review: dict) -> dict:
+    checks = {}
+    qa_warnings = []
+    qa_failures = []
+
+    def record(name: str, status: str, message: str = "") -> None:
+        checks[name] = status
+        if message and status == "warning":
+            qa_warnings.append(message)
+        elif message and status == "fail":
+            qa_failures.append(message)
+
+    if not result.get("success"):
+        record("command_success", "fail", f"Dry-run command failed: {result.get('failure_type') or 'unknown'}.")
+        record("no_write_confirmed", "fail", "No-write confirmation is unavailable because the command did not finish.")
+        return _qa_result(
+            checks,
+            qa_warnings,
+            qa_failures,
+            {"mojibake_issue_count": 0, "mojibake_samples": []},
+        )
+
+    record("command_success", "pass")
+    record(
+        "review_file_fresh",
+        "pass" if result.get("review_file_fresh") else "fail",
+        "" if result.get("review_file_fresh") else "Per-product/locale review file was missing or stale.",
+    )
+    record(
+        "no_write_confirmed",
+        "pass" if result.get("no_shopify_writes_confirmed") else "fail",
+        "" if result.get("no_shopify_writes_confirmed") else "Dry-run output did not confirm no Shopify writes.",
+    )
+
+    payload_keys = command_review.get("payload_keys") or result.get("payload_keys") or []
+    translation_values = command_review.get("translation_values") or {}
+    source_values = command_review.get("source_values") or {}
+    output_text = _qa_output_text(translation_values)
+
+    title_chars = _int_value(result.get("title_chars"))
+    meta_title_chars = _int_value(result.get("meta_title_chars"))
+    meta_description_chars = _int_value(result.get("meta_description_chars"))
+
+    record(
+        "title_length",
+        "warning" if title_chars > MAX_PRODUCT_TITLE_CHARS else "pass",
+        (
+            f"Product title is {title_chars} chars; recommended limit is {MAX_PRODUCT_TITLE_CHARS}."
+            if title_chars > MAX_PRODUCT_TITLE_CHARS
+            else ""
+        ),
+    )
+    record(
+        "meta_title_length",
+        "fail" if meta_title_chars > MAX_META_TITLE_CHARS else "pass",
+        (
+            f"Meta title is {meta_title_chars} chars; hard limit is {MAX_META_TITLE_CHARS}."
+            if meta_title_chars > MAX_META_TITLE_CHARS
+            else ""
+        ),
+    )
+    record(
+        "meta_description_length",
+        "fail" if meta_description_chars > MAX_META_DESCRIPTION_CHARS else "pass",
+        (
+            f"Meta description is {meta_description_chars} chars; hard limit is {MAX_META_DESCRIPTION_CHARS}."
+            if meta_description_chars > MAX_META_DESCRIPTION_CHARS
+            else ""
+        ),
+    )
+
+    body_html = translation_values.get("body_html", "")
+    if "body_html" in payload_keys:
+        record(
+            "body_html_present",
+            "pass" if body_html.strip() else "fail",
+            "" if body_html.strip() else "body_html is selected but translated output is empty.",
+        )
+    else:
+        record("body_html_present", "warning", "body_html was not included in the dry-run payload.")
+
+    has_forbidden_shipping_origin = bool(FORBIDDEN_SHIPPING_ORIGIN_RE.search(output_text))
+    record(
+        "forbidden_shipping_origin_phrases",
+        "fail" if has_forbidden_shipping_origin else "pass",
+        "Translated output contains forbidden shipping/origin/source wording."
+        if has_forbidden_shipping_origin
+        else "",
+    )
+    has_forbidden_cta = bool(FORBIDDEN_CTA_RE.search(output_text))
+    record(
+        "forbidden_cta_phrases",
+        "fail" if has_forbidden_cta else "pass",
+        "Translated output contains forbidden CTA wording such as Buy now / Shop now."
+        if has_forbidden_cta
+        else "",
+    )
+    has_forbidden_military = bool(FORBIDDEN_MILITARY_RE.search(output_text))
+    record(
+        "forbidden_military_exaggeration",
+        "fail" if has_forbidden_military else "pass",
+        "Translated output contains exaggerated military/combat wording." if has_forbidden_military else "",
+    )
+    mojibake_result = _mojibake_result(output_text)
+    record("mojibake_detected", mojibake_result["status"], mojibake_result["message"])
+
+    image_alt_result = _image_alt_result(body_html)
+    if image_alt_result["image_count"] and image_alt_result["missing_alt_count"]:
+        record(
+            "alt_text_present",
+            "warning",
+            (
+                f"{image_alt_result['missing_alt_count']} of {image_alt_result['image_count']} image tag(s) "
+                "have missing or empty alt text."
+            ),
+        )
+    else:
+        record("alt_text_present", "pass")
+
+    if "body_html" in payload_keys:
+        html_status, html_message = _html_structure_check(source_values.get("body_html", ""), body_html)
+        record("html_structure_preserved", html_status, html_message)
+    else:
+        record("html_structure_preserved", "warning", "body_html was not available for HTML structure QA.")
+
+    if command_review.get("source_meta_description_over_limit"):
+        qa_warnings.append("Source meta_description is over the recommended limit; translated output still passed gates.")
+    command_warning_count = _int_value(result.get("warnings_count"))
+    if command_warning_count:
+        qa_warnings.append(f"Translation command emitted {command_warning_count} warning(s).")
+
+    return _qa_result(
+        checks,
+        qa_warnings,
+        qa_failures,
+        {
+            "mojibake_issue_count": mojibake_result["issue_count"],
+            "mojibake_samples": mojibake_result["samples"],
+        },
+    )
+
+
+def _qa_result(
+    checks: dict,
+    qa_warnings: list[str],
+    qa_failures: list[str],
+    extra: dict | None = None,
+) -> dict:
+    if qa_failures:
+        status = "fail"
+    elif qa_warnings:
+        status = "warning"
+    else:
+        status = "pass"
+    result = {
+        "qa_status": status,
+        "qa_warnings": qa_warnings,
+        "qa_failures": qa_failures,
+        "qa_checks": checks,
+    }
+    if extra:
+        result.update(extra)
+    return result
+
+
+def _qa_status_counts(results: list[dict]) -> dict:
+    return {
+        "pass": sum(1 for item in results if item.get("qa_status") == "pass"),
+        "warning": sum(1 for item in results if item.get("qa_status") == "warning"),
+        "fail": sum(1 for item in results if item.get("qa_status") == "fail"),
+    }
+
+
+def _qa_output_text(translation_values: dict[str, str]) -> str:
+    parts = []
+    for key in ("title", "meta_title", "meta_description"):
+        value = translation_values.get(key, "")
+        if value:
+            parts.append(value)
+    body_html = translation_values.get("body_html", "")
+    if body_html:
+        parts.append(_html_visible_text(body_html))
+    return URL_TEXT_RE.sub(" ", "\n".join(parts))
+
+
+def _mojibake_result(text: str) -> dict:
+    if not text:
+        return {"status": "pass", "issue_count": 0, "samples": [], "message": ""}
+    matches = [match.group(0) for match in MOJIBAKE_RE.finditer(text)]
+    if not matches:
+        return {"status": "pass", "issue_count": 0, "samples": [], "message": ""}
+
+    samples = []
+    for marker in matches:
+        if marker not in samples:
+            samples.append(marker)
+        if len(samples) >= 8:
+            break
+    issue_count = len(matches)
+    status = "fail" if issue_count >= 2 or any(marker in {"�", "銉", "盲", "眉", "鈥"} for marker in samples) else "warning"
+    message = (
+        f"Possible mojibake/encoding corruption detected: {issue_count} marker(s), "
+        f"samples: {', '.join(samples)}."
+    )
+    return {
+        "status": status,
+        "issue_count": issue_count,
+        "samples": samples,
+        "message": message,
+    }
+
+
+def _html_visible_text(html: str) -> str:
+    parser = _VisibleTextParser()
+    try:
+        parser.feed(html or "")
+    except Exception:
+        return re.sub(r"<[^>]+>", " ", html or "")
+    return " ".join(part.strip() for part in parser.parts if part.strip())
+
+
+def _image_alt_result(html: str) -> dict:
+    parser = _ImageAltParser()
+    try:
+        parser.feed(html or "")
+    except Exception:
+        return {"image_count": 0, "missing_alt_count": 0, "alt_chars": []}
+    return {
+        "image_count": parser.image_count,
+        "missing_alt_count": parser.missing_alt_count,
+        "alt_chars": parser.alt_chars,
+    }
+
+
+def _html_structure_check(source_body: str, translated_body: str) -> tuple[str, str]:
+    if not translated_body.strip():
+        return "fail", "Translated body_html is empty."
+    source_tags = _html_tag_names(source_body)
+    translated_tags = _html_tag_names(translated_body)
+    if source_tags and not translated_tags:
+        return "fail", "Translated body_html no longer contains HTML tags."
+    if source_tags and translated_tags and source_tags[0] != translated_tags[0]:
+        return "warning", f"First HTML tag changed from {source_tags[0]} to {translated_tags[0]}."
+    if source_tags and translated_tags:
+        lower_bound = max(1, int(len(source_tags) * 0.7))
+        upper_bound = max(lower_bound, int(len(source_tags) * 1.3) + 1)
+        if len(translated_tags) < lower_bound or len(translated_tags) > upper_bound:
+            return (
+                "warning",
+                f"HTML tag count changed from {len(source_tags)} to {len(translated_tags)}; review structure.",
+            )
+    return "pass", ""
+
+
+def _html_tag_names(html: str) -> list[str]:
+    return [match.group(1).lower() for match in HTML_TAG_RE.finditer(html or "")]
+
+
+def _int_value(value) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+class _VisibleTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+
+    def handle_data(self, data):
+        if data:
+            self.parts.append(data)
+
+
+class _ImageAltParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.image_count = 0
+        self.missing_alt_count = 0
+        self.alt_chars = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "img":
+            return
+        self.image_count += 1
+        attrs_by_name = {name.lower(): value for name, value in attrs}
+        alt = (attrs_by_name.get("alt") or "").strip()
+        if not alt:
+            self.missing_alt_count += 1
+        else:
+            self.alt_chars.append(len(alt))
+
+
 def _write_review(payload: dict) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    with REVIEW_PATH.open("w", encoding="utf-8") as review_file:
-        json.dump(payload, review_file, ensure_ascii=False, indent=2)
-        review_file.write("\n")
+    safe_payload = _sanitize_for_json(payload)
+    review_text = json.dumps(safe_payload, ensure_ascii=True, indent=2) + "\n"
+    _validate_review_json_text(review_text)
+    REVIEW_PATH.write_text(review_text, encoding="utf-8")
+    _validate_review_json_text(REVIEW_PATH.read_text(encoding="utf-8"))
     return REVIEW_PATH
+
+
+def _validate_review_json_text(review_text: str) -> None:
+    try:
+        json.loads(review_text)
+    except json.JSONDecodeError as exc:
+        raise ReviewJsonInvalidError(
+            f"review_json_invalid at line {exc.lineno}, column {exc.colno}: {exc.msg}"
+        ) from exc
+
+
+def _sanitize_for_json(value):
+    if isinstance(value, str):
+        return _sanitize_json_string(value)
+    if isinstance(value, list):
+        return [_sanitize_for_json(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_for_json(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _sanitize_for_json(item) for key, item in value.items()}
+    return value
+
+
+def _sanitize_json_string(value: str) -> str:
+    return JSON_UNSAFE_CONTROL_RE.sub(lambda match: f"\\u{ord(match.group(0)):04x}", value)
 
 
 def write_batch_review_html(review_data: dict, html_path: Path) -> Path:
@@ -444,7 +955,12 @@ def _render_batch_review_html(review_data: dict) -> str:
         _render_failed_row(item) for item in review_data.get("results", []) if not item.get("success")
     )
     warning_rows = "\n".join(
-        _render_warning_row(item) for item in review_data.get("results", []) if item.get("warnings_count")
+        _render_warning_row(item)
+        for item in review_data.get("results", [])
+        if item.get("warnings_count") or item.get("qa_status") in {"warning", "fail"}
+    )
+    qa_rows = "\n".join(
+        _render_qa_row(item) for item in review_data.get("results", []) if item.get("qa_status") != "pass"
     )
     review_links = "\n".join(_render_review_link(item) for item in review_data.get("results", []))
     summary_rows = "\n".join(
@@ -464,6 +980,11 @@ def _render_batch_review_html(review_data: dict) -> str:
             ("All Success", "all_success"),
             ("All No-Write Confirmed", "all_no_write_confirmed"),
             ("Warnings Count", "warnings_count"),
+            ("QA Gate Passed", "qa_gate_passed"),
+            ("All QA Pass", "all_qa_pass"),
+            ("QA Pass Count", "qa_pass_count"),
+            ("QA Warning Count", "qa_warning_count"),
+            ("QA Fail Count", "qa_fail_count"),
         ]
     )
     json_link = _link_for_path(review_data.get("json_review_path", ""))
@@ -483,6 +1004,9 @@ def _render_batch_review_html(review_data: dict) -> str:
     .status.pass {{ background: #dafbe1; color: #116329; }}
     .status.review {{ background: #fff8c5; color: #7d4e00; }}
     .status.fail {{ background: #ffebe9; color: #82071e; }}
+    .qa-pass {{ color: #116329; font-weight: 700; }}
+    .qa-warning {{ color: #7d4e00; font-weight: 700; }}
+    .qa-fail {{ color: #82071e; font-weight: 700; }}
     .tail {{ max-width: 520px; white-space: pre-wrap; overflow-wrap: anywhere; font-family: Consolas, monospace; font-size: 12px; }}
     .path {{ font-family: Consolas, monospace; overflow-wrap: anywhere; }}
     .empty {{ color: #57606a; }}
@@ -503,12 +1027,13 @@ def _render_batch_review_html(review_data: dict) -> str:
   <table>
     <thead>
       <tr>
-        <th>Product ID</th><th>Locale</th><th>Success</th><th>Failure Type</th>
-        <th>Warnings</th><th>No Shopify Writes Confirmed</th><th>Review File</th>
+        <th>Product ID</th><th>Locale</th><th>Success</th><th>QA Status</th><th>Failure Type</th>
+        <th>Warnings</th><th>QA Warnings</th><th>QA Failures</th>
+        <th>No Shopify Writes Confirmed</th><th>Review File</th>
         <th>stdout Tail Summary</th><th>stderr Tail Summary</th>
       </tr>
     </thead>
-    <tbody>{rows or _empty_row(9, "No product/locale results.")}</tbody>
+    <tbody>{rows or _empty_row(12, "No product/locale results.")}</tbody>
   </table>
   <h2>Failed Items</h2>
   <table>
@@ -519,6 +1044,11 @@ def _render_batch_review_html(review_data: dict) -> str:
   <table>
     <thead><tr><th>Product ID</th><th>Locale</th><th>Warning Summary</th></tr></thead>
     <tbody>{warning_rows or _empty_row(3, "No warnings.")}</tbody>
+  </table>
+  <h2>QA Gate Items</h2>
+  <table>
+    <thead><tr><th>Product ID</th><th>Locale</th><th>QA Status</th><th>Warnings</th><th>Failures</th><th>Checks</th></tr></thead>
+    <tbody>{qa_rows or _empty_row(6, "All QA gates passed without warnings.")}</tbody>
   </table>
   <h2>Review Links</h2>
   <ul>{review_links or '<li class="empty">No per-item review links.</li>'}</ul>
@@ -544,6 +1074,8 @@ def _build_approval_message(payload: dict, review_path: Path, html_review_path: 
         f"Failed count: {payload.get('failed_count')}\n"
         f"Skipped count: {payload.get('skipped_count')}\n"
         f"Warnings: {payload.get('warnings_count')}\n"
+        f"QA gate passed: {payload.get('qa_gate_passed')}\n"
+        f"QA status counts: {payload.get('qa_status_counts')}\n"
         "Review JSON:\n"
         f"{review_path}\n\n"
         "Review HTML:\n"
@@ -560,10 +1092,14 @@ def _build_approval_message(payload: dict, review_path: Path, html_review_path: 
 
 
 def _dashboard_status(review_data: dict) -> tuple[str, str, str]:
-    if review_data.get("failed_count", 0) > 0 or not review_data.get("all_no_write_confirmed"):
-        return "FAIL", "fail", "failed_count > 0 or no-write confirmation is missing."
-    if review_data.get("warnings_count", 0) > 0:
-        return "REVIEW", "review", "warnings exist; review translated output before any future write task."
+    if (
+        review_data.get("failed_count", 0) > 0
+        or not review_data.get("all_no_write_confirmed")
+        or review_data.get("qa_fail_count", 0) > 0
+    ):
+        return "FAIL", "fail", "failed_count > 0, no-write confirmation is missing, or a QA gate failed."
+    if review_data.get("warnings_count", 0) > 0 or review_data.get("qa_warning_count", 0) > 0:
+        return "REVIEW", "review", "warnings or QA warnings exist; review translated output before any future write task."
     return "PASS", "pass", "all successful and all no-write confirmed."
 
 
@@ -573,8 +1109,11 @@ def _render_result_row(item: dict) -> str:
         f"<td class=\"path\">{escape(str(item.get('product_id', '')))}</td>"
         f"<td>{escape(str(item.get('locale', '')))}</td>"
         f"<td>{_bool_text(item.get('success'))}</td>"
+        f"<td>{_qa_status_label(item.get('qa_status'))}</td>"
         f"<td>{escape(str(item.get('failure_type') or ''))}</td>"
         f"<td>{escape(str(item.get('warnings_count', 0)))}</td>"
+        f"<td>{escape(_compact_list(item.get('qa_warnings', [])))}</td>"
+        f"<td>{escape(_compact_list(item.get('qa_failures', [])))}</td>"
         f"<td>{_bool_text(item.get('no_shopify_writes_confirmed'))}</td>"
         f"<td>{_link_for_path(item.get('review_file_path', ''))}</td>"
         f"<td><div class=\"tail\">{escape(_compact_tail(item.get('stdout_tail', '')))}</div></td>"
@@ -596,6 +1135,12 @@ def _render_failed_row(item: dict) -> str:
 
 def _render_warning_row(item: dict) -> str:
     summary = f"{item.get('warnings_count', 0)} warning(s)"
+    if item.get("qa_status") in {"warning", "fail"}:
+        summary += f"; qa_status={item.get('qa_status')}"
+    if item.get("qa_warnings"):
+        summary += f"; qa_warnings={len(item.get('qa_warnings', []))}"
+    if item.get("qa_failures"):
+        summary += f"; qa_failures={len(item.get('qa_failures', []))}"
     if item.get("failure_type"):
         summary += f"; failure_type={item.get('failure_type')}"
     return (
@@ -603,6 +1148,19 @@ def _render_warning_row(item: dict) -> str:
         f"<td class=\"path\">{escape(str(item.get('product_id', '')))}</td>"
         f"<td>{escape(str(item.get('locale', '')))}</td>"
         f"<td>{escape(summary)}</td>"
+        "</tr>"
+    )
+
+
+def _render_qa_row(item: dict) -> str:
+    return (
+        "<tr>"
+        f"<td class=\"path\">{escape(str(item.get('product_id', '')))}</td>"
+        f"<td>{escape(str(item.get('locale', '')))}</td>"
+        f"<td>{_qa_status_label(item.get('qa_status'))}</td>"
+        f"<td>{escape(_compact_list(item.get('qa_warnings', []), max_chars=500))}</td>"
+        f"<td>{escape(_compact_list(item.get('qa_failures', []), max_chars=500))}</td>"
+        f"<td><div class=\"tail\">{escape(_format_checks(item.get('qa_checks', {})))}</div></td>"
         "</tr>"
     )
 
@@ -625,6 +1183,31 @@ def _empty_row(colspan: int, message: str) -> str:
 
 def _bool_text(value) -> str:
     return "true" if bool(value) else "false"
+
+
+def _qa_status_label(status: str | None) -> str:
+    clean = status or "unknown"
+    css = {
+        "pass": "qa-pass",
+        "warning": "qa-warning",
+        "fail": "qa-fail",
+    }.get(clean, "")
+    return f"<span class=\"{css}\">{escape(clean)}</span>"
+
+
+def _compact_list(values: list[str], max_chars: int = 240) -> str:
+    text = "; ".join(str(value) for value in values if value)
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 4] + " ..."
+
+
+def _format_checks(checks: dict) -> str:
+    if not checks:
+        return ""
+    return "\n".join(f"{key}: {value}" for key, value in checks.items())
 
 
 def _compact_tail(text: str, max_chars: int = 800) -> str:
@@ -671,7 +1254,7 @@ def _failed_result(
     skipped: bool = False,
 ) -> dict:
     paths = review_paths or {"review_file_path": "", "host_review_file_path": "", "container_review_file_path": ""}
-    return {
+    result = {
         "product_id": product_id,
         "locale": locale,
         "language_name": SUPPORTED_LOCALES.get(locale, ""),
@@ -694,11 +1277,20 @@ def _failed_result(
         "title_length_warnings": 0,
         "meta_title_warnings": 0,
         "meta_description_warnings": 0,
+        "payload_keys": [],
+        "title_chars": 0,
+        "meta_title_chars": 0,
+        "meta_description_chars": 0,
+        "source_meta_description_chars": 0,
+        "translated_text_node_count": 0,
+        "translated_img_alt_count": 0,
+        "img_alt_chars_list": [],
         "removed_shipping_marketing_phrase_count": 0,
         "removed_skipped_origin_field_count": 0,
         "no_shopify_writes_confirmed": False,
         "no_shopify_writes_performed": False,
     }
+    return _with_qa(result)
 
 
 def _per_product_summary(product_ids: list[str], results: list[dict]) -> list[dict]:
@@ -708,6 +1300,15 @@ def _per_product_summary(product_ids: list[str], results: list[dict]) -> list[di
             "success_count": sum(1 for item in results if item["product_id"] == product_id and item["success"]),
             "failed_count": sum(1 for item in results if item["product_id"] == product_id and not item["success"]),
             "warning_count": sum(item["warnings_count"] for item in results if item["product_id"] == product_id),
+            "qa_pass_count": sum(
+                1 for item in results if item["product_id"] == product_id and item.get("qa_status") == "pass"
+            ),
+            "qa_warning_count": sum(
+                1 for item in results if item["product_id"] == product_id and item.get("qa_status") == "warning"
+            ),
+            "qa_fail_count": sum(
+                1 for item in results if item["product_id"] == product_id and item.get("qa_status") == "fail"
+            ),
         }
         for product_id in product_ids
     ]
@@ -720,6 +1321,15 @@ def _per_locale_summary(locales: list[str], results: list[dict]) -> list[dict]:
             "success_count": sum(1 for item in results if item["locale"] == locale and item["success"]),
             "failed_count": sum(1 for item in results if item["locale"] == locale and not item["success"]),
             "warning_count": sum(item["warnings_count"] for item in results if item["locale"] == locale),
+            "qa_pass_count": sum(
+                1 for item in results if item["locale"] == locale and item.get("qa_status") == "pass"
+            ),
+            "qa_warning_count": sum(
+                1 for item in results if item["locale"] == locale and item.get("qa_status") == "warning"
+            ),
+            "qa_fail_count": sum(
+                1 for item in results if item["locale"] == locale and item.get("qa_status") == "fail"
+            ),
         }
         for locale in locales
     ]
@@ -775,11 +1385,20 @@ def _failure_reason(exit_code: int, timed_out: bool, permission_denied: bool, st
     return f"Command failed with exit code {exit_code}."
 
 
-def _build_issue_summary(results: list[dict], all_success: bool, all_no_write_confirmed: bool) -> str:
+def _build_issue_summary(
+    results: list[dict],
+    all_success: bool,
+    all_no_write_confirmed: bool,
+    qa_status_counts: dict,
+) -> str:
     if not results:
         return "No product/locale dry-run combinations were configured."
+    if qa_status_counts.get("fail", 0):
+        return "Dry-runs completed, but one or more QA gates failed. Review the batch QA gate details."
+    if all_success and all_no_write_confirmed and not qa_status_counts.get("warning", 0):
+        return "All batch product/locale dry-runs completed, all no-write checks passed, and QA gates passed."
     if all_success and all_no_write_confirmed:
-        return "All batch product/locale dry-runs completed, and all successful runs confirmed no Shopify writes."
+        return "All batch product/locale dry-runs completed with no Shopify writes; QA warnings require review."
     if all_success:
         return "All batch product/locale dry-runs completed, but no-write confirmation was missing for at least one run."
     failure_types = sorted({item["failure_type"] for item in results if item.get("failure_type")})

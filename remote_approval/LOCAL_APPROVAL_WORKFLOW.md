@@ -164,6 +164,10 @@ backend/logs/shopify_translation_command_review_7655686799427_de.json
 
 Each product/locale combination runs independently. A failure in one combination must be recorded and must not stop the remaining combinations. Each result records `product_id`, `locale`, `failure_type`, `stdout_tail`, `stderr_tail`, `review_file_path`, `warnings_count`, and `no_shopify_writes_confirmed`.
 
+Each batch result also records QA gate fields: `qa_status` (`pass`, `warning`, or `fail`), `qa_warnings`, `qa_failures`, and `qa_checks`. QA gates check translated title/meta lengths, body HTML presence, forbidden shipping/origin phrases, forbidden CTA phrases, exaggerated military/combat wording, mojibake / encoding corruption, image alt text presence, HTML structure preservation, and no-write confirmation. QA failures block acceptance of the dry-run review but must never trigger Shopify writes.
+
+Batch summary JSON must remain strict parseable JSON. Command output strings should be sanitized for unsafe control characters such as the terminal bell, and the JSON is written in an ASCII-safe escaped form so Windows PowerShell can parse it without relying on code-page detection. The task should validate the JSON after writing. If validation fails, the task reports `review_json_invalid`.
+
 `no_shopify_writes_confirmed` is true only when that combination succeeds and stdout contains `Dry run complete. No Shopify writes performed.` The summary `all_no_write_confirmed` covers successful runs only; failed runs are not marked confirmed.
 
 Allowed approval actions for this task are:
@@ -200,3 +204,4 @@ This task is read-only. It checks status, branch, ahead commits, changed/staged/
 - Write tasks must be separate tasks with explicit second confirmation.
 - Git safety checks are advisory only and must not perform Git writes.
 - Batch Shopify translation dry-run tasks must not auto-scan the whole store and are limited to 3 products and 5 locales.
+- Batch Shopify translation dry-run summaries should include QA pass/warning/fail counts and keep QA gates in review-only mode.

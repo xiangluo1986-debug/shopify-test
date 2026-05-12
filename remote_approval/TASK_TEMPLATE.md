@@ -37,6 +37,9 @@ For Shopify translation dry-run tasks:
 - Multi-locale dry-run tasks may generate one review per locale plus a summary review, but must not publish or write translations.
 - Batch multi-locale dry-run tasks may generate one review per product/locale plus a summary review, but must not publish or write translations.
 - Batch multi-locale dry-run tasks may also generate a local HTML dashboard for human review only; the dashboard must not trigger write, publish, apply, update, commit, or push actions.
+- Batch multi-locale dry-run review results should include QA gate fields: `qa_status`, `qa_warnings`, `qa_failures`, and `qa_checks`.
+- Batch QA gates should check title/meta length, body HTML presence, forbidden shipping/origin phrases, forbidden CTA phrases, exaggerated military/combat wording, mojibake / encoding corruption, image alt text presence, HTML structure preservation, and no-write confirmation.
+- Batch review JSON must be written with a JSON serializer in an ASCII-safe escaped form, sanitize unsafe control characters from command output, and validate with `json.loads` after writing. If validation fails, report `review_json_invalid`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -127,6 +130,8 @@ Recommended fields:
 - [ ] Multi-locale Shopify translation tasks record per-locale review paths, `failure_type`, and `no_shopify_writes_confirmed`.
 - [ ] Batch multi-locale Shopify translation tasks enforce the 3 product / 5 locale limit and never auto-scan the store.
 - [ ] Batch multi-locale Shopify translation tasks record per-product/locale review paths, `failure_type`, and `no_shopify_writes_confirmed`.
+- [ ] Batch multi-locale Shopify translation tasks record QA gate status and keep QA failures in review-only mode.
+- [ ] Batch multi-locale Shopify translation tasks validate generated JSON review files after writing.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

@@ -105,6 +105,10 @@ python manage.py flush
 - Do not enable or create batch product translation until the single-product review workflow is stable and the user explicitly asks for it.
 - Only run one `product_id` and one `target_locale` at a time for product translation.
 - Batch product translation dry-runs may read up to 3 product IDs from `SHOPIFY_TRANSLATION_TEST_PRODUCT_IDS`, `backend/reviews/translation_product_ids.txt`, or `SHOPIFY_TRANSLATION_TEST_PRODUCT_ID`; they must never auto-scan Shopify for products.
+- Batch product translation dry-run reviews should include QA gates with `qa_status`, `qa_warnings`, `qa_failures`, and `qa_checks` for each product/locale result.
+- Batch QA gates should check title/meta length, body HTML presence, forbidden shipping/origin phrases, forbidden CTA phrases, exaggerated military/combat wording, image alt text presence, HTML structure preservation, and no-write confirmation.
+- Batch review JSON must be strict parseable JSON. Control characters from command output should be sanitized, the summary should be written in an ASCII-safe escaped form, and the file should be validated after write.
+- Batch QA gates should detect mojibake / encoding corruption markers such as `Pr盲zise`, `f眉r`, `鈥檃`, or Japanese mojibake fragments like `銉`.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.
