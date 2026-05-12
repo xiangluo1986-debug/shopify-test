@@ -63,6 +63,8 @@ For Shopify translation dry-run tasks:
 - Batch apply execution approval validation should block approved status unless an execution approver is present, at least one simulated execution exists, every simulated item is approved and ready, payload preview is available, and all no-write / no-command-execution fields remain false.
 - Batch apply locked runner tasks may read the latest execution approval validation JSON and write local locked runner JSON/HTML reports only. They must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, database writes, or git push.
 - Batch apply locked runner should output `locked` when `real_execution_allowed=false` and `ready_but_locked` when a future validation reports eligible execution, but it must always keep `real_apply_allowed=false`, `real_apply_performed=false`, and `command_executed=false`.
+- Single-field apply sandbox design tasks may read the latest locked runner JSON and write local sandbox design JSON/HTML reports only. They must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, database writes, or git push.
+- Single-field apply sandbox design must hard-code a future sandbox scope of 1 product, 1 locale, 1 field, allowed field `meta_title`, default field `meta_title`, `real_write_allowed=false`, and `translations_register_allowed=false`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -168,6 +170,7 @@ Recommended fields:
 - [ ] Batch apply execution dry-run reports keep execution approval pending and do not treat dry-run output as permission to execute commands or write Shopify.
 - [ ] Batch apply execution approval validation tasks are validation-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Batch apply locked runner tasks are locked-shell-only and never execute generated commands or perform Shopify apply/write/publish actions.
+- [ ] Single-field apply sandbox design tasks are sandbox-design-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

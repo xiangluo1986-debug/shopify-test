@@ -43,6 +43,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_command_
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_approval_validate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_locked_runner --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_design --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -364,6 +365,25 @@ logs/shopify_translation_batch_apply_locked_runner.html
 When `real_execution_allowed=false`, the task outputs `locked_runner_status=locked`, `real_apply_allowed=false`, `real_apply_performed=false`, and `command_executed=false`. If a future validation report sets `real_execution_allowed=true`, this phase still outputs `locked_runner_status=ready_but_locked`, keeps `real_apply_allowed=false`, and only displays eligible item summaries.
 
 The locked runner is a shell only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. Its summary must explicitly show `real_apply_performed=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Apply Sandbox Design
+
+`shopify_translation_single_field_apply_sandbox_design` reads only the locked runner report:
+
+```text
+logs/shopify_translation_batch_apply_locked_runner.json
+```
+
+It writes local sandbox design reports only:
+
+```text
+logs/shopify_translation_single_field_apply_sandbox_design.json
+logs/shopify_translation_single_field_apply_sandbox_design.html
+```
+
+The sandbox design hard-codes a future write scope of 1 product, 1 locale, and 1 field. The only allowed field is `meta_title`, and the default field is `meta_title`. `title`, `body_html`, and `meta_description` are not allowed in this sandbox design.
+
+The sandbox design task is design-only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. It must explicitly report `real_write_allowed=false`, `translations_register_allowed=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 

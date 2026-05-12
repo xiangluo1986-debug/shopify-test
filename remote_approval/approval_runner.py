@@ -217,6 +217,7 @@ def _execute_selected_action(
         "shopify_translation_batch_apply_plan",
         "shopify_translation_batch_apply_plan_validate",
         "shopify_translation_batch_multi_locale_dry_run",
+        "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_multi_locale_dry_run",
         "git_safety_check",
     }:
@@ -336,6 +337,16 @@ def _summarize_task_result(result: dict) -> str:
         "source_real_execution_allowed",
         "real_apply_allowed",
         "real_apply_performed",
+        "json_sandbox_design_path",
+        "html_sandbox_design_path",
+        "sandbox_design_only",
+        "sandbox_design_status",
+        "real_write_allowed",
+        "translations_register_allowed",
+        "max_products",
+        "max_locales",
+        "max_fields",
+        "default_field",
         "total_final_validation_items",
         "blocked_items_count",
         "validation_failures_count",
@@ -391,6 +402,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_batch_apply_locked_runner",
         "shopify_translation_batch_apply_plan",
         "shopify_translation_batch_apply_plan_validate",
+        "shopify_translation_single_field_apply_sandbox_design",
     }:
         return ["Y/1 keep review files", "N/0 stop", "SHOW_LOG", "SUMMARY"]
     return ["Y/1 keep review file", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
