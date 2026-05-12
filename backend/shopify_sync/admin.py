@@ -276,17 +276,23 @@ def order_profit_totals(order):
     all_items_revenue_aud = sum((money(item.price) * item.quantity for item in all_order_items), ZERO)
     order_total_aud = money(order.total_price)
     tip_revenue_aud = money(getattr(order, "total_tip_received", ZERO))
+    inferred_order_extra_aud = money(order_total_aud - all_items_revenue_aud - tip_revenue_aud)
+    positive_order_extra_aud = inferred_order_extra_aud if inferred_order_extra_aud > 0 else ZERO
     order_level_extra_aud = money(order_total_aud - all_items_revenue_aud)
     order_vs_shenzhen_items_diff_aud = money(order_total_aud - shenzhen_items_revenue_aud)
-    # ERP only keeps Shenzhen settlement items. Any order-level difference can include
-    # Sydney/other-warehouse item revenue, so do not count it as Shenzhen revenue.
-    shenzhen_order_extra_aud = ZERO
+    all_items_are_shenzhen = bool(all_order_items) and len(items) == len(all_order_items)
+    order_is_pure_shenzhen = order.current_location == SHENZHEN_ITEM_LOCATION
+    # Only pure Shenzhen orders can safely receive order-level extras such as shipping
+    # revenue. Mixed orders may contain Sydney/other-warehouse revenue in the difference.
+    shenzhen_order_extra_aud = positive_order_extra_aud if all_items_are_shenzhen and order_is_pure_shenzhen else ZERO
     non_tip_order_total_aud = money(order_total_aud - tip_revenue_aud)
     if non_tip_order_total_aud < 0:
         non_tip_order_total_aud = ZERO
-    order_total_revenue_cap_aud = non_tip_order_total_aud if non_tip_order_total_aud > 0 else ZERO
-    shenzhen_product_revenue_aud = money(min(shenzhen_items_revenue_aud, order_total_revenue_cap_aud))
-    revenue_aud = money(shenzhen_product_revenue_aud + tip_revenue_aud)
+    product_revenue_cap_aud = money(non_tip_order_total_aud - shenzhen_order_extra_aud)
+    if product_revenue_cap_aud < 0:
+        product_revenue_cap_aud = ZERO
+    shenzhen_product_revenue_aud = money(min(shenzhen_items_revenue_aud, product_revenue_cap_aud))
+    revenue_aud = money(shenzhen_product_revenue_aud + tip_revenue_aud + shenzhen_order_extra_aud)
     shenzhen_revenue_adjustment_aud = money(revenue_aud - shenzhen_items_revenue_aud)
     net_revenue_aud = money(revenue_aud * (Decimal("1.00") - PAYMENT_FEE_RATE))
     ordering_note_cost_aud = ordering_note_aud_cost(order.shopify_note)
@@ -303,6 +309,8 @@ def order_profit_totals(order):
             "shenzhen_product_revenue_aud": shenzhen_product_revenue_aud,
             "tip_revenue_aud": tip_revenue_aud,
             "order_level_extra_aud": order_level_extra_aud,
+            "inferred_order_extra_aud": inferred_order_extra_aud,
+            "positive_order_extra_aud": positive_order_extra_aud,
             "order_vs_shenzhen_items_diff_aud": order_vs_shenzhen_items_diff_aud,
             "shenzhen_order_extra_aud": shenzhen_order_extra_aud,
             "shenzhen_revenue_adjustment_aud": shenzhen_revenue_adjustment_aud,
@@ -331,6 +339,8 @@ def order_profit_totals(order):
         "shenzhen_product_revenue_aud": shenzhen_product_revenue_aud,
         "tip_revenue_aud": tip_revenue_aud,
         "order_level_extra_aud": order_level_extra_aud,
+        "inferred_order_extra_aud": inferred_order_extra_aud,
+        "positive_order_extra_aud": positive_order_extra_aud,
         "order_vs_shenzhen_items_diff_aud": order_vs_shenzhen_items_diff_aud,
         "shenzhen_order_extra_aud": shenzhen_order_extra_aud,
         "shenzhen_revenue_adjustment_aud": shenzhen_revenue_adjustment_aud,
@@ -2247,19 +2257,23 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 totals["shenzhen_revenue_adjustment_aud"],
             )
         elif totals["order_vs_shenzhen_items_diff_aud"] > 0:
-            revenue_adjustment_text = format_html(
-                "{} AUD（订单总额比深圳仓商品行多 {} AUD；仅明确识别为 tip 的 {} AUD 计入深圳仓收入）",
-                totals["tip_revenue_aud"],
-                totals["order_vs_shenzhen_items_diff_aud"],
-                totals["tip_revenue_aud"],
-            )
+            if totals["shenzhen_order_extra_aud"] > 0:
+                revenue_adjustment_text = format_html(
+                    "{} AUD（全深圳仓订单，订单级额外收入计入深圳仓；通常为运费收入）",
+                    totals["shenzhen_order_extra_aud"],
+                )
+            else:
+                revenue_adjustment_text = format_html(
+                    "0.00 AUD（订单级额外收入 {} AUD 暂不自动归属深圳仓；混仓订单可能包含 Sydney / 其它仓收入）",
+                    totals["positive_order_extra_aud"],
+                )
         else:
             revenue_adjustment_text = "0.00 AUD"
         return format_html(
             "<div>"
             "深圳仓商品行收入合计：{} AUD<br>"
             "其中商品实收计入：{} AUD<br>"
-            "Tip 收入计入：{} AUD<br>"
+            "Tip / insurance 收入计入：{} AUD<br>"
             "折扣/订单级收入调整：{}<br>"
             "深圳仓收入合计：{} AUD<br>"
             "扣 2% 收款手续费后：{} AUD<br>"
