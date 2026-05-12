@@ -208,6 +208,7 @@ def _execute_selected_action(
         "django_check",
         "shopify_translation_dry_run",
         "shopify_translation_batch_apply_plan",
+        "shopify_translation_batch_apply_plan_validate",
         "shopify_translation_batch_multi_locale_dry_run",
         "shopify_translation_multi_locale_dry_run",
         "git_safety_check",
@@ -273,6 +274,15 @@ def _summarize_task_result(result: dict) -> str:
         "translations_register_performed",
         "json_plan_path",
         "html_plan_path",
+        "json_validation_path",
+        "html_validation_path",
+        "validation_only",
+        "total_plan_items",
+        "validated_for_future_apply_count",
+        "needs_revision_count",
+        "pending_count",
+        "validation_warning_count",
+        "validation_failure_count",
         "branch",
         "ahead_commits",
         "changed_files",
@@ -309,6 +319,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_multi_locale_dry_run",
         "shopify_translation_batch_multi_locale_dry_run",
         "shopify_translation_batch_apply_plan",
+        "shopify_translation_batch_apply_plan_validate",
     }:
         return ["Y/1 keep review files", "N/0 stop", "SHOW_LOG", "SUMMARY"]
     return ["Y/1 keep review file", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]

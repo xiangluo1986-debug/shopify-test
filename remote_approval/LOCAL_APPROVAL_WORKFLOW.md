@@ -35,6 +35,7 @@ python remote_approval_runner.py --task shopify_translation_dry_run --mode dry-r
 python remote_approval_runner.py --task shopify_translation_multi_locale_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_multi_locale_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_plan --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_plan_validate --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -198,6 +199,25 @@ logs/shopify_translation_batch_apply_plan.html
 Each plan item is marked `ready_for_apply`, `needs_review`, or `blocked`. Each item also includes manual review template fields: `manual_decision`, `manual_decision_allowed_values`, `manual_reviewer`, `manual_review_notes`, `manual_review_required`, and `manual_approval_ready`. Every item starts with `manual_decision=pending` and `manual_approval_ready=false`.
 
 The plan is for human review only and must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. The plan summary should explicitly show `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Batch Translation Apply Plan Validation
+
+`shopify_translation_batch_apply_plan_validate` reads only the manually reviewable apply plan:
+
+```text
+logs/shopify_translation_batch_apply_plan.json
+```
+
+It validates manual decisions and writes local validation reports only:
+
+```text
+logs/shopify_translation_batch_apply_plan_validation.json
+logs/shopify_translation_batch_apply_plan_validation.html
+```
+
+Allowed manual decisions are `pending`, `approve`, `revise`, and `block`. `approve` is only valid for items that were already ready for human approval, have `qa_status=pass`, `eligible_for_apply=true`, no QA failures, and confirmed no Shopify writes. `needs_review` or `blocked` items cannot be approved directly; they are marked blocked in the validation report.
+
+The validation task is validation-only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 

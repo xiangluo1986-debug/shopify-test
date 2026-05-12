@@ -113,6 +113,8 @@ python manage.py flush
 - Batch apply plans should mark product/locale items as `ready_for_apply`, `needs_review`, or `blocked`; this is a planning decision only and not approval to write Shopify.
 - Batch apply plan items should include manual review template fields: `manual_decision`, `manual_decision_allowed_values`, `manual_reviewer`, `manual_review_notes`, `manual_review_required`, and `manual_approval_ready`.
 - Batch apply plan summaries should explicitly report `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+- Batch apply plan validation may read manually edited `logs/shopify_translation_batch_apply_plan.json` and write local validation JSON/HTML reports only. It must not apply, publish, update, call mutations, or call `translationsRegister`.
+- Batch apply plan validation should only treat manually approved items as future-apply eligible when the item was already ready for human approval, QA passed, `eligible_for_apply=true`, `qa_failures` is empty, and no-write was confirmed.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.
