@@ -37,6 +37,7 @@ python remote_approval_runner.py --task shopify_translation_batch_multi_locale_d
 python remote_approval_runner.py --task shopify_translation_batch_apply_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_plan_validate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_preview --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_execution_final_validate --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -240,6 +241,25 @@ Only items with an approved manual decision, validated future-apply status, QA p
 The preview includes a final approval template under `final_approval_summary`. It starts as `final_approval_status=pending`, allows only `pending`, `approved`, and `rejected`, and keeps `final_apply_allowed=false`.
 
 The preview is for human review only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `preview_only=true`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Batch Translation Final Approval Validation
+
+`shopify_translation_batch_apply_execution_final_validate` reads only the execution preview:
+
+```text
+logs/shopify_translation_batch_apply_execution_preview.json
+```
+
+It validates the final approval status and writes local validation reports only:
+
+```text
+logs/shopify_translation_batch_apply_execution_final_validation.json
+logs/shopify_translation_batch_apply_execution_final_validation.html
+```
+
+`final_approval_status=pending` keeps `final_apply_allowed=false` and does not make any item eligible for real apply. `final_approval_status=rejected` also keeps apply blocked. `final_approval_status=approved` is only valid when a final approver is present, at least one preview apply item exists, and every preview apply item is final-approved, final-ready, QA-passing, future-apply eligible, and still no-write.
+
+The final validation task is validation-only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 

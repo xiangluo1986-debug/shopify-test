@@ -49,6 +49,8 @@ For Shopify translation dry-run tasks:
 - Batch apply execution preview tasks may read the latest apply plan validation JSON and write local preview JSON/HTML reports only. They must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
 - Batch apply execution previews should list only future-approved items in `preview_apply_items` and list every excluded item in `not_apply_items` with reasons.
 - Batch apply execution previews should include `final_approval_summary` with `final_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `final_apply_allowed=false`; they should also report `shopify_write_performed=false`.
+- Batch apply execution final validation tasks may read the latest execution preview JSON and write local final validation JSON/HTML reports only. They must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
+- Batch apply execution final validation should block approved status unless a final approver is present, at least one preview apply item exists, and every preview apply item is final-approved, final-ready, QA-passing, future-apply eligible, and still no-write.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -146,6 +148,7 @@ Recommended fields:
 - [ ] Batch apply plan validation tasks are validation-only and never perform Shopify apply/write/publish actions.
 - [ ] Batch apply execution preview tasks are preview-only and never perform Shopify apply/write/publish actions.
 - [ ] Batch apply execution previews keep final approval pending and do not treat preview generation as permission to write.
+- [ ] Batch apply execution final validation tasks are validation-only and never perform Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 
