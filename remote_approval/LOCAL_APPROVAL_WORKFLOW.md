@@ -52,6 +52,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_final_w
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_runner_design --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_locked_runner --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_pre_execution_validate --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_final_human_approval_package --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -631,6 +632,43 @@ The validator checks that the preflight package, verified backup, readback / rol
 If all checks pass and the dangerous flag is exactly `true`, the task may output `ready_for_manual_write_approval` or `pre_execution_validation_passed_pending_human_approval`. It must never output `ready_for_real_write`, `write_allowed`, `execution_allowed`, or `real_write_allowed`.
 
 The pre-execution validator must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. It must explicitly report `pre_execution_validation_only=true`, `write_execution_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `command_executed=false`, `readback_performed=false`, `rollback_performed=false`, `real_apply_performed=false`, and `shopify_write_performed=false`.
+
+### Single-Field Final Human Approval Package
+
+`shopify_translation_single_field_final_human_approval_package` reads only local reports and manually supplied environment variables:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+logs/shopify_translation_single_field_backup_fetch.json
+logs/shopify_translation_single_field_readback_rollback_plan.json
+logs/shopify_translation_single_field_final_write_gate.json
+logs/shopify_translation_single_field_real_write_runner_design.json
+logs/shopify_translation_single_field_real_write_locked_runner.json
+logs/shopify_translation_single_field_real_write_pre_execution_validate.json
+```
+
+Required environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SANDBOX_PRODUCT_ID=gid://shopify/Product/...
+SHOPIFY_TRANSLATION_SANDBOX_LOCALE=ja
+SHOPIFY_TRANSLATION_SANDBOX_FIELD=meta_title
+SHOPIFY_TRANSLATION_SANDBOX_PROPOSED_VALUE=Concise SEO title
+SHOPIFY_TRANSLATION_I_UNDERSTAND_THIS_WRITES_SHOPIFY=true
+```
+
+The task writes local reports only:
+
+```text
+logs/shopify_translation_single_field_final_human_approval_package.json
+logs/shopify_translation_single_field_final_human_approval_package.html
+```
+
+The package checks that the preflight package, verified backup, readback / rollback plan, final gate, design package, locked runner, pre-execution validation, and environment scope are consistent for exactly 1 product, 1 locale, and field `meta_title`.
+
+If every check passes, the task may output `ready_for_final_human_review` or `ready_for_phase_12_manual_approval_review`. It must never output `ready_for_real_write`, `write_allowed`, `execution_allowed`, or `real_write_allowed`. Phase 12 must still be a separate task and must require a new explicit human confirmation.
+
+The final human approval package must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. It must explicitly report `final_human_approval_package_only=true`, `phase_12_entry_allowed=false`, `write_execution_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `command_executed=false`, `readback_performed=false`, `rollback_performed=false`, `real_apply_performed=false`, and `shopify_write_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
