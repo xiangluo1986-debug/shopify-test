@@ -843,6 +843,9 @@ class ShopifyRoleAdminMixin:
     def is_role_allowed(self, request):
         return self.is_super_admin(request) or self.is_finance_user(request) or self.is_shenzhen_user(request)
 
+    def can_view_sync_dashboard(self, request):
+        return self.is_super_admin(request) or self.is_finance_user(request)
+
     def has_module_permission(self, request):
         return self.is_role_allowed(request)
 
@@ -1561,6 +1564,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         try:
             extra_context = extra_context or {}
             extra_context["pending_payment_stats"] = stats_context
+            extra_context["show_shopify_sync_dashboard"] = self.can_view_sync_dashboard(request)
             return super().changelist_view(request, extra_context=extra_context)
         finally:
             request.GET = original_get
@@ -1582,6 +1586,15 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 "order_created_at",
             )
         return super().get_list_display(request)
+
+    def get_list_filter(self, request):
+        if self.is_shenzhen_user(request):
+            return (
+                SettlementStatusCountFilter,
+                "shipping_country",
+                "order_created_at",
+            )
+        return super().get_list_filter(request)
 
     def get_urls(self):
         urls = super().get_urls()
@@ -2352,7 +2365,6 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     "深圳仓订单信息",
                     {
                         "fields": (
-                            "shopify_order_id",
                             "order_number",
                             "order_name",
                             "customer_name",
@@ -2364,21 +2376,17 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                             "shipping_country",
                             "shipping_zip",
                             "current_location",
-                            "is_shenzhen_order",
-                    "settlement_status_display",
-                    "tracking_number",
-                    "tracking_company",
-                    "tracking_info_summary",
-                    "shopify_note_display",
-                    "fulfilled_at",
-                    "fulfillment_status_raw",
-                    "warehouse_note",
+                            "settlement_status_display",
+                            "tracking_number",
+                            "tracking_company",
+                            "tracking_info_summary",
+                            "shopify_note_display",
+                            "warehouse_note",
                             "exception_review_summary",
                             "shenzhen_items_total_cost_summary",
                         )
                     },
                 ),
-                ("时间戳", {"fields": ("synced_at", "updated_at", "last_order_synced_at")} ),
                 (
                     "审核操作",
                     {"fields": ("review_workflow_actions",)},
@@ -2500,7 +2508,15 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     def get_actions(self, request):
         actions = super().get_actions(request)
         if self.is_shenzhen_user(request):
-            for action_name in ["add_to_settlement_batch", "mark_pending_payment", "submit_payment"]:
+            for action_name in [
+                "add_to_settlement_batch",
+                "mark_pending_payment",
+                "submit_payment",
+                "recalculate_order_shipping_cost",
+                "allocate_package_costs",
+                "save_order_item_shipping_as_product_country_default",
+                "copy_product_cost_to_items",
+            ]:
                 if action_name in actions:
                     del actions[action_name]
         else:
@@ -3216,6 +3232,11 @@ class ShopifyProductAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     def has_view_permission(self, request, obj=None):
         return self.is_role_allowed(request)
 
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["show_shopify_sync_dashboard"] = self.can_view_sync_dashboard(request)
+        return super().changelist_view(request, extra_context=extra_context)
+
 
 @admin.register(ShopifyProductCostHistory)
 class ShopifyProductCostHistoryAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
@@ -3269,6 +3290,11 @@ class ShopifyProductCostHistoryAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def get_model_perms(self, request):
+        if self.is_shenzhen_user(request):
+            return {}
+        return super().get_model_perms(request)
 
     def has_view_permission(self, request, obj=None):
         return self.is_role_allowed(request)
@@ -3342,6 +3368,11 @@ class ShenzhenCountryShippingDefaultAdmin(ShopifyRoleAdminMixin, admin.ModelAdmi
         obj.country_code = (obj.country_code or "").strip().upper()
         obj.updated_by = request.user
         super().save_model(request, obj, form, change)
+
+    def get_model_perms(self, request):
+        if not self.is_super_admin(request):
+            return {}
+        return super().get_model_perms(request)
 
     def get_fieldsets(self, request, obj=None):
         fieldsets = super().get_fieldsets(request, obj)
@@ -3428,6 +3459,11 @@ class ShenzhenProductCountryShippingDefaultAdmin(ShopifyRoleAdminMixin, admin.Mo
         obj.updated_by = request.user
         super().save_model(request, obj, form, change)
 
+    def get_model_perms(self, request):
+        if self.is_shenzhen_user(request):
+            return {}
+        return super().get_model_perms(request)
+
 
 @admin.register(ShippingCostRule)
 class ShippingCostRuleAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
@@ -3483,6 +3519,11 @@ class ShippingCostRuleAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
+
+    def get_model_perms(self, request):
+        if not self.is_super_admin(request):
+            return {}
+        return super().get_model_perms(request)
 
     def has_view_permission(self, request, obj=None):
         return self.is_role_allowed(request)

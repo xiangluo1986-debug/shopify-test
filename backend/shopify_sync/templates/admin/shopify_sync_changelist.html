@@ -2,9 +2,11 @@
 
 {% block object-tools-items %}
     {{ block.super }}
-    <li>
-        <a href="{% url 'shopify_sync_dashboard' %}" class="addlink">Shopify Sync Dashboard</a>
-    </li>
+    {% if show_shopify_sync_dashboard %}
+        <li>
+            <a href="{% url 'shopify_sync_dashboard' %}" class="addlink">Shopify Sync Dashboard</a>
+        </li>
+    {% endif %}
 {% endblock %}
 
 {% block content %}
