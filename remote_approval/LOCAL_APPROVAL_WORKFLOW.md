@@ -881,6 +881,35 @@ The rollback approval package describes only a possible future restore from the 
 
 This task must not execute rollback, call Shopify APIs, call mutations, call `translationsRegister`, perform readback, publish, apply, update, write the database, or git push. It must output `rollback_approval_package_ready_for_manual_review` only when the source execution succeeded, the post-write audit passed, the backup is verified, the scope matches, no rollback was already performed, and source readback matched the written value. It must report `rollback_approval_package_only=true`, `rollback_execution_allowed=false`, `rollback_performed=false`, `automatic_rollback_performed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Second Single-Field Test Preparation
+
+`shopify_translation_second_single_field_test_prepare` reads only local JSON reports:
+
+- `logs/shopify_translation_single_field_post_write_audit_package.json`
+- `logs/shopify_translation_single_field_rollback_approval_package.json`
+- `logs/shopify_translation_single_field_real_write_one_shot_execute.json`
+- `logs/shopify_translation_single_field_backup_fetch.json`
+
+It also reads manually supplied second-test scope environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SECOND_TEST_PRODUCT_ID=
+SHOPIFY_TRANSLATION_SECOND_TEST_LOCALE=
+SHOPIFY_TRANSLATION_SECOND_TEST_FIELD=meta_title
+SHOPIFY_TRANSLATION_SECOND_TEST_PROPOSED_VALUE=
+```
+
+It writes:
+
+```text
+logs/shopify_translation_second_single_field_test_prepare.json
+logs/shopify_translation_second_single_field_test_prepare.html
+```
+
+If any second-test scope variable is missing, the task must output `blocked_missing_second_test_scope` or `needs_second_test_scope`. It must not guess a product, must not automatically reuse the first-test product as a real plan, and must not scan Shopify. When the supplied scope is complete, it may output `second_single_field_test_prepare_ready_for_manual_review` only for exactly one product, one locale, one field `meta_title`, and proposed value length <= 60.
+
+This task must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It must state that the second test needs a fresh verified backup and the full safety chain again before any future real write. It must report `second_test_prepare_only=true`, `second_test_real_write_allowed=false`, `batch_mode_allowed=false`, `full_store_scan_allowed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.

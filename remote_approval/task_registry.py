@@ -78,6 +78,9 @@ from remote_approval.tasks.shopify_translation_single_field_post_write_audit_pac
 from remote_approval.tasks.shopify_translation_single_field_rollback_approval_package_task import (
     run_shopify_translation_single_field_rollback_approval_package_task,
 )
+from remote_approval.tasks.shopify_translation_second_single_field_test_prepare_task import (
+    run_shopify_translation_second_single_field_test_prepare_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -152,6 +155,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_translation_single_field_rollback_approval_package": (
         run_shopify_translation_single_field_rollback_approval_package_task
     ),
+    "shopify_translation_second_single_field_test_prepare": run_shopify_translation_second_single_field_test_prepare_task,
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
 }
@@ -337,6 +341,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_translation_single_field_rollback_approval_package.json",
+    },
+    "shopify_translation_second_single_field_test_prepare": {
+        "description": "Prepare a second one-shot single-field Shopify translation test without Shopify actions.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_second_single_field_test_prepare.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
