@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -58,6 +59,7 @@ def main() -> int:
         if interrupt_reply:
             return _finish_stopped_by_interrupt(args, approval_id, interrupt_reply, logger)
 
+        os.environ["REMOTE_APPROVAL_MODE"] = args.approval
         task_func = get_task(args.task)
         result = task_func(args.mode)
         task_summary = _build_task_summary(args.task, args.mode, args.approval, result)
@@ -239,6 +241,7 @@ def _execute_selected_action(
         "shopify_translation_second_single_field_test_prepare",
         "shopify_translation_second_single_field_verified_backup_fetch",
         "shopify_translation_second_single_field_real_write_readiness",
+        "shopify_translation_second_single_field_real_write_execute",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
         "shopify_translation_multi_locale_dry_run",
@@ -501,6 +504,13 @@ def _summarize_task_result(result: dict) -> str:
         "backup_source_verified",
         "read_only_backup_query_performed",
         "human_approval_required_before_real_write",
+        "json_second_real_write_execute_path",
+        "html_second_real_write_execute_path",
+        "second_real_write_execute_task",
+        "second_real_execution_ack_present",
+        "second_real_execution_ack_valid",
+        "second_real_write_scope_limited",
+        "bulk_write_performed",
         "batch_mode_allowed",
         "full_store_scan_allowed",
         "automatic_rollback_allowed",
@@ -590,6 +600,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_second_single_field_test_prepare",
         "shopify_translation_second_single_field_verified_backup_fetch",
         "shopify_translation_second_single_field_real_write_readiness",
+        "shopify_translation_second_single_field_real_write_execute",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
     }:

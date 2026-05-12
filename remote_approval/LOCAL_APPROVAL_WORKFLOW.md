@@ -965,6 +965,35 @@ The readiness task must require the environment scope to match both the Phase 12
 
 On success it may output `readiness_status=second_real_write_ready_for_human_approval`, but it must still keep `readiness_package_only=true`, `second_test_real_write_allowed=false`, `human_approval_required_before_real_write=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Second Single-Field Real Write Execute
+
+`shopify_translation_second_single_field_real_write_execute` reads only local JSON reports before any eligible real-run path:
+
+- `logs/shopify_translation_second_single_field_test_prepare.json`
+- `logs/shopify_translation_second_single_field_verified_backup_fetch.json`
+- `logs/shopify_translation_second_single_field_real_write_readiness.json`
+
+It also reads the manually supplied second-test scope environment variables and the second real execution ACK:
+
+```env
+SHOPIFY_TRANSLATION_SECOND_TEST_PRODUCT_ID=gid://shopify/Product/7655686799427
+SHOPIFY_TRANSLATION_SECOND_TEST_LOCALE=ja
+SHOPIFY_TRANSLATION_SECOND_TEST_FIELD=meta_title
+SHOPIFY_TRANSLATION_SECOND_TEST_PROPOSED_VALUE=MOFLY P-51D Aileron Link Connector Test
+SHOPIFY_TRANSLATION_SECOND_TEST_REAL_EXECUTION_ACK=YES_I_APPROVE_SECOND_REAL_SHOPIFY_TRANSLATION_WRITE
+```
+
+It writes:
+
+```text
+logs/shopify_translation_second_single_field_real_write_execute.json
+logs/shopify_translation_second_single_field_real_write_execute.html
+```
+
+Supported modes are `dry-run`, `real-run`, and `execute-real-write`. In `dry-run`, this task must never call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. Dry-run must output `execution_status=dry_run_second_real_write_not_executed` when all preconditions pass, and must report `translations_register_called=false`, `shopify_write_performed=false`, `mutation_performed=false`, `shopify_api_call_performed=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, and `all_new_actions_no_write_confirmed=true`.
+
+Only an explicitly requested future `real-run` or `execute-real-write` command may attempt exactly one Shopify `translationsRegister` mutation for `gid://shopify/Product/7655686799427`, locale `ja`, field `meta_title`, proposed value `MOFLY P-51D Aileron Link Connector Test`, after the prepare, verified backup, readiness, scope, and ACK checks all pass. Real-run must immediately read back the same product / locale / field and mark success only when the readback value exactly matches the proposed value. Rollback must never be automatic; readback mismatch must output `second_real_write_completed_but_readback_mismatch` and require rollback approval.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
