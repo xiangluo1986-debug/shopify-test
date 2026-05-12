@@ -1067,6 +1067,27 @@ Missing or invalid ACK blocks `real-run` / `execute-real-write`. A valid ACK is 
 
 When a future human explicitly runs `real-run` or `execute-real-write` with the correct ACK, the task performs one small-batch Shopify `translationsRegister` mutation, immediately reads back every planned entry, and can output `execution_status=small_batch_real_write_succeeded_and_verified` only when every readback value matches the proposed value. Readback mismatch must output `small_batch_real_write_completed_but_readback_mismatch`, require rollback approval, and never trigger automatic rollback. Bulk write, publish, full-store scan, unsupported fields, and scope expansion remain forbidden.
 
+### Small Batch Post-Write Audit Package
+
+`shopify_translation_small_batch_post_write_audit_package` reads:
+
+- `logs/shopify_translation_small_batch_apply_execute.json`
+
+It may also read:
+
+- `logs/shopify_translation_small_batch_apply_plan_package.json`
+
+It writes:
+
+```text
+logs/shopify_translation_small_batch_post_write_audit_package.json
+logs/shopify_translation_small_batch_post_write_audit_package.html
+```
+
+This task is local-report-only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It may preserve source execution facts from a prior successful small-batch real-run, but the audit task itself must report `audit_package_only=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
+The audit passes only when the source execute report is task `shopify_translation_small_batch_apply_execute`, mode `real-run` or `execute-real-write`, status `small_batch_real_write_succeeded_and_verified`, product `gid://shopify/Product/7655686799427`, locale `ja`, `entry_count=2`, fields `meta_title` and `meta_description`, `translations_register_called=true`, `shopify_write_performed=true`, `mutation_performed=true`, `readback_performed=true`, `readback_all_entries_match=true`, `readback_matched_entry_count=2`, no rollback approval requirement, no rollback performed, no automatic rollback, no publish, no bulk write, `small_batch_write_performed=true`, and empty source blocking conditions.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
