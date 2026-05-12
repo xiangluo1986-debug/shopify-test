@@ -1107,6 +1107,28 @@ This task is local-report-only. It must not call Shopify APIs, call mutations, c
 
 The package passes only when the source execute report is successful, the small-batch post-write audit has passed, product `gid://shopify/Product/7655686799427`, locale `ja`, `entry_count=2`, fields are exactly `meta_title` and `meta_description`, readback matched, no rollback is required, no rollback approval is currently required, and source blocking conditions are empty. If locally recorded restore values are incomplete, the package still generates for manual review but must output `restore_plan_status=restore_values_incomplete_manual_review_required`, `rollback_optional_restore_possible=false`, and `manual_backup_review_required=true` instead of guessing missing values.
 
+### CSV/JSON Small Batch Apply Plan Package
+
+`shopify_translation_csv_json_small_batch_apply_plan_package` reads one local input file:
+
+```text
+remote_approval/inputs/shopify_translation_small_batch_input.json
+remote_approval/inputs/shopify_translation_small_batch_input.csv
+```
+
+If both input files exist, JSON is used and the report sets `input_source=json`. If only CSV exists, CSV is used. If neither exists, the task writes a blocked report with `plan_status=blocked_missing_input_file`.
+
+The input rows must contain `product_id`, `locale`, `field`, and `proposed_value`. This Phase 14.0 package is limited to at most 5 entries, exactly one `gid://shopify/Product/...` product, exactly one locale `ja`, and fields `meta_title` / `meta_description` only. `meta_title` values must be <= 60 characters, `meta_description` values <= 160 characters, and proposed values must be non-empty.
+
+It writes:
+
+```text
+logs/shopify_translation_csv_json_small_batch_apply_plan_package.json
+logs/shopify_translation_csv_json_small_batch_apply_plan_package.html
+```
+
+This task is local-input-only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. On success it outputs `plan_status=csv_json_small_batch_apply_plan_ready_for_manual_review`, `manual_review_required=true`, `real_write_allowed=false`, and `next_step_requires_separate_execute_task=true`. It must also report `plan_package_only=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
