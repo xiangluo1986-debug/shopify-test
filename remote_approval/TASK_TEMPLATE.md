@@ -54,6 +54,8 @@ For Shopify translation dry-run tasks:
 - Batch apply command generation tasks may read the latest final validation JSON and write local command/payload plan JSON/HTML reports only. They must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
 - Batch apply command generation should produce zero commands when `final_apply_allowed=false`. If future final validation allows apply, generated command plans remain preview-only and still require a separate explicitly confirmed write task before execution.
 - Batch apply command generation should include a command approval template with `command_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `command_execution_allowed=false`.
+- Batch apply command validation tasks may read the latest command plan JSON and write local command validation JSON/HTML reports only. They must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, database writes, or git push.
+- Batch apply command validation should block approved status unless a command approver is present, at least one generated command exists, every command item is approved and ready, command previews contain no secret-like markers, and all write flags remain false.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -154,6 +156,7 @@ Recommended fields:
 - [ ] Batch apply execution final validation tasks are validation-only and never perform Shopify apply/write/publish actions.
 - [ ] Batch apply command generation tasks are command-generation-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Batch apply command generation tasks keep command approval pending and do not treat command plan generation as permission to execute writes.
+- [ ] Batch apply command validation tasks are command-validation-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

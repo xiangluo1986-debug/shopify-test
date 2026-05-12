@@ -39,6 +39,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_plan_val
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_preview --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_final_validate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_command_generate --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_command_validate --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -282,6 +283,25 @@ When `final_apply_allowed=false`, the task must generate zero commands and expla
 The command plan includes a command approval template. It starts as `command_approval_status=pending`, allows only `pending`, `approved`, and `rejected`, and keeps `command_execution_allowed=false`. Any later real execution must be a separate write task with explicit confirmation.
 
 The command generation task is command-generation-only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Batch Translation Apply Command Validation
+
+`shopify_translation_batch_apply_command_validate` reads only the command plan:
+
+```text
+logs/shopify_translation_batch_apply_command_plan.json
+```
+
+It validates command approval status and writes local validation reports only:
+
+```text
+logs/shopify_translation_batch_apply_command_validation.json
+logs/shopify_translation_batch_apply_command_validation.html
+```
+
+`command_approval_status=pending` keeps `command_execution_allowed=false` and does not make any command eligible for future execution. `command_approval_status=rejected` also keeps execution blocked. `command_approval_status=approved` is only valid when a command approver is present, at least one generated command exists, every command item has `command_decision=approve`, `command_approval_ready=true`, and all no-write / preview-only safety fields remain intact.
+
+The command validation task is command-validation-only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. Its summary must explicitly show `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
