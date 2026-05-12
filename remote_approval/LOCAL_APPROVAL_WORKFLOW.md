@@ -45,6 +45,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_executio
 python remote_approval_runner.py --task shopify_translation_batch_apply_locked_runner --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_design --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_runner --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_apply_preflight_package --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -412,6 +413,34 @@ logs/shopify_translation_single_field_apply_sandbox_runner.html
 The sandbox runner is forced dry-run only. It accepts exactly 1 product, 1 locale, and 1 field, and the only allowed field is `meta_title`. It must not read product ID batch files, auto-scan Shopify products, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push.
 
 The sandbox runner must explicitly report `real_write_allowed=false`, `real_write_attempted=false`, `translations_register_allowed=false`, `translations_register_called=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Apply Preflight Package
+
+`shopify_translation_single_field_apply_preflight_package` reads only the sandbox runner report:
+
+```text
+logs/shopify_translation_single_field_apply_sandbox_runner.json
+```
+
+It requires one manually supplied product, locale, field, and proposed value through environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SANDBOX_PRODUCT_ID=gid://shopify/Product/...
+SHOPIFY_TRANSLATION_SANDBOX_LOCALE=ja
+SHOPIFY_TRANSLATION_SANDBOX_FIELD=meta_title
+SHOPIFY_TRANSLATION_SANDBOX_PROPOSED_VALUE=Concise SEO title
+```
+
+It writes local preflight package reports only:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+logs/shopify_translation_single_field_apply_preflight_package.html
+```
+
+The preflight package is preflight-only. It accepts exactly 1 product, 1 locale, and 1 field, and the only allowed field is `meta_title`. The proposed value must be non-empty and no longer than 60 characters. The requested scope must match the previous sandbox runner report exactly.
+
+The preflight package task must not call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. It must explicitly report `real_write_allowed=false`, `real_write_attempted=false`, `translations_register_allowed=false`, `translations_register_called=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
