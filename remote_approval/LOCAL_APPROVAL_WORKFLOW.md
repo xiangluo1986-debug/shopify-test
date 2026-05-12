@@ -806,6 +806,37 @@ If every check passes, the task may output `one_shot_locked_ready_for_manual_rev
 
 The one-shot locked shell must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. It must explicitly report `one_shot_locked_shell_only=true`, `phase_12_1b_real_execution_allowed=false`, `phase_12_1b_entry_allowed=false`, `phase_12_1_entry_allowed=false`, `phase_12_entry_allowed=false`, `write_execution_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `command_executed=false`, `readback_performed=false`, `rollback_performed=false`, `real_apply_performed=false`, and `shopify_write_performed=false`.
 
+### Single-Field Real Write One-Shot Execute
+
+`shopify_translation_single_field_real_write_one_shot_execute` reads the full local single-field report chain through the one-shot locked shell plus manually supplied environment variables.
+
+Fixed allowed scope:
+
+```text
+product_id: gid://shopify/Product/7655686799427
+locale: ja
+field: meta_title
+proposed_value: MOFLY P-51D Aileron Link Connector
+```
+
+Required environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SANDBOX_PRODUCT_ID=gid://shopify/Product/7655686799427
+SHOPIFY_TRANSLATION_SANDBOX_LOCALE=ja
+SHOPIFY_TRANSLATION_SANDBOX_FIELD=meta_title
+SHOPIFY_TRANSLATION_SANDBOX_PROPOSED_VALUE=MOFLY P-51D Aileron Link Connector
+SHOPIFY_TRANSLATION_I_UNDERSTAND_THIS_WRITES_SHOPIFY=true
+SHOPIFY_TRANSLATION_PHASE_12_FINAL_SAFE_SHELL_ACK=true
+SHOPIFY_TRANSLATION_PHASE_12_1A_PLAN_ACK=true
+SHOPIFY_TRANSLATION_PHASE_12_1B_LOCKED_SHELL_ACK=true
+SHOPIFY_TRANSLATION_PHASE_12_1B_REAL_EXECUTION_ACK=YES_I_APPROVE_ONE_REAL_SHOPIFY_TRANSLATION_WRITE
+```
+
+Supported modes are `dry-run`, `real-run`, and `execute-real-write`. In `dry-run`, this task must never call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. Dry-run must report `translations_register_called=false`, `shopify_write_performed=false`, `mutation_performed=false`, `shopify_api_call_performed=false`, `readback_performed=false`, `real_apply_performed=false`, and `all_no_write_confirmed=true`.
+
+Only an explicitly requested future `real-run` or `execute-real-write` command may attempt exactly one Shopify `translationsRegister` mutation for the fixed scope above. Real-run must immediately read back the same product / locale / field and mark success only when the readback value exactly matches the proposed value. Rollback must never be automatic; failures must preserve the verified backup and require a separate rollback approval flow.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.

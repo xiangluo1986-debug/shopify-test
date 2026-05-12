@@ -25,7 +25,12 @@ from remote_approval.utils import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run fixed tasks with remote approval gates.")
     parser.add_argument("--task", help="Registered task name, for example: demo")
-    parser.add_argument("--mode", default="dry-run", choices=["dry-run"], help="Execution mode")
+    parser.add_argument(
+        "--mode",
+        default="dry-run",
+        choices=["dry-run", "real-run", "execute-real-write"],
+        help="Execution mode",
+    )
     parser.add_argument("--approval", default="local", choices=["local", "telegram"], help="Approval mode")
     parser.add_argument("--list-tasks", action="store_true", help="List registered fixed tasks and exit")
     parser.add_argument("--summary-only", action="store_true", help="Run the fixed task and print summary without approval action")
@@ -228,6 +233,7 @@ def _execute_selected_action(
         "shopify_translation_single_field_real_write_runner_final_safe_shell",
         "shopify_translation_single_field_real_write_execution_plan",
         "shopify_translation_single_field_real_write_one_shot_locked_shell",
+        "shopify_translation_single_field_real_write_one_shot_execute",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
         "shopify_translation_multi_locale_dry_run",
@@ -430,6 +436,20 @@ def _summarize_task_result(result: dict) -> str:
         "phase_12_final_safe_shell_ack_effective",
         "phase_12_1b_locked_shell_ack_present",
         "phase_12_1b_locked_shell_ack_effective",
+        "json_one_shot_execute_path",
+        "html_one_shot_execute_path",
+        "execution_status",
+        "one_shot_real_execution_task",
+        "real_execution_ack_present",
+        "real_execution_ack_valid",
+        "real_write_scope_limited",
+        "real_write_count",
+        "readback_matches_proposed_value",
+        "rollback_approval_required",
+        "automatic_rollback_performed",
+        "batch_mode_allowed",
+        "full_store_scan_allowed",
+        "automatic_rollback_allowed",
         "would_apply_field",
         "would_call_shopify_mutation",
         "proposed_value_chars",
@@ -510,6 +530,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_single_field_real_write_runner_final_safe_shell",
         "shopify_translation_single_field_real_write_execution_plan",
         "shopify_translation_single_field_real_write_one_shot_locked_shell",
+        "shopify_translation_single_field_real_write_one_shot_execute",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
     }:
