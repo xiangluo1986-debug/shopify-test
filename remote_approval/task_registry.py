@@ -33,6 +33,9 @@ from remote_approval.tasks.shopify_translation_batch_apply_locked_runner_task im
 from remote_approval.tasks.shopify_translation_single_field_apply_sandbox_design_task import (
     run_shopify_translation_single_field_apply_sandbox_design_task,
 )
+from remote_approval.tasks.shopify_translation_single_field_apply_sandbox_runner_task import (
+    run_shopify_translation_single_field_apply_sandbox_runner_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -65,6 +68,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_translation_batch_multi_locale_dry_run": run_shopify_translation_batch_multi_locale_dry_run_task,
     "shopify_translation_single_field_apply_sandbox_design": (
         run_shopify_translation_single_field_apply_sandbox_design_task
+    ),
+    "shopify_translation_single_field_apply_sandbox_runner": (
+        run_shopify_translation_single_field_apply_sandbox_runner_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -161,6 +167,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_translation_single_field_apply_sandbox_design.json",
+    },
+    "shopify_translation_single_field_apply_sandbox_runner": {
+        "description": "Run a forced dry-run single-product single-locale meta_title Shopify apply sandbox preview.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_single_field_apply_sandbox_runner.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",

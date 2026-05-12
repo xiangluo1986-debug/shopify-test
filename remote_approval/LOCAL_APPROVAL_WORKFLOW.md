@@ -44,6 +44,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_executio
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_approval_validate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_locked_runner --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_design --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_apply_sandbox_runner --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -384,6 +385,33 @@ logs/shopify_translation_single_field_apply_sandbox_design.html
 The sandbox design hard-codes a future write scope of 1 product, 1 locale, and 1 field. The only allowed field is `meta_title`, and the default field is `meta_title`. `title`, `body_html`, and `meta_description` are not allowed in this sandbox design.
 
 The sandbox design task is design-only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. It must explicitly report `real_write_allowed=false`, `translations_register_allowed=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Apply Sandbox Runner
+
+`shopify_translation_single_field_apply_sandbox_runner` reads only the sandbox design report:
+
+```text
+logs/shopify_translation_single_field_apply_sandbox_design.json
+```
+
+It requires one manually supplied product, locale, and field through environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SANDBOX_PRODUCT_ID=gid://shopify/Product/...
+SHOPIFY_TRANSLATION_SANDBOX_LOCALE=ja
+SHOPIFY_TRANSLATION_SANDBOX_FIELD=meta_title
+```
+
+It writes local sandbox runner reports only:
+
+```text
+logs/shopify_translation_single_field_apply_sandbox_runner.json
+logs/shopify_translation_single_field_apply_sandbox_runner.html
+```
+
+The sandbox runner is forced dry-run only. It accepts exactly 1 product, 1 locale, and 1 field, and the only allowed field is `meta_title`. It must not read product ID batch files, auto-scan Shopify products, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push.
+
+The sandbox runner must explicitly report `real_write_allowed=false`, `real_write_attempted=false`, `translations_register_allowed=false`, `translations_register_called=false`, `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 

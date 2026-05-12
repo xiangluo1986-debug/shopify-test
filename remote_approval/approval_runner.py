@@ -218,6 +218,7 @@ def _execute_selected_action(
         "shopify_translation_batch_apply_plan_validate",
         "shopify_translation_batch_multi_locale_dry_run",
         "shopify_translation_single_field_apply_sandbox_design",
+        "shopify_translation_single_field_apply_sandbox_runner",
         "shopify_translation_multi_locale_dry_run",
         "git_safety_check",
     }:
@@ -263,6 +264,7 @@ def _summarize_task_result(result: dict) -> str:
         "html_review_path",
         "detected_issue_summary",
         "failed_count",
+        "no_shopify_writes_performed",
         "all_no_write_confirmed",
         "checked_items",
         "warnings",
@@ -341,8 +343,17 @@ def _summarize_task_result(result: dict) -> str:
         "html_sandbox_design_path",
         "sandbox_design_only",
         "sandbox_design_status",
+        "json_sandbox_runner_path",
+        "html_sandbox_runner_path",
+        "sandbox_runner_dry_run_only",
+        "sandbox_runner_status",
+        "would_apply_field",
+        "would_call_shopify_mutation",
         "real_write_allowed",
+        "real_write_attempted",
         "translations_register_allowed",
+        "translations_register_called",
+        "shopify_api_called",
         "max_products",
         "max_locales",
         "max_fields",
@@ -403,6 +414,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_batch_apply_plan",
         "shopify_translation_batch_apply_plan_validate",
         "shopify_translation_single_field_apply_sandbox_design",
+        "shopify_translation_single_field_apply_sandbox_runner",
     }:
         return ["Y/1 keep review files", "N/0 stop", "SHOW_LOG", "SUMMARY"]
     return ["Y/1 keep review file", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
