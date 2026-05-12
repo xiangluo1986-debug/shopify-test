@@ -55,6 +55,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_real_wr
 python remote_approval_runner.py --task shopify_translation_single_field_final_human_approval_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_runner_final_safe_shell --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_execution_plan --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_real_write_one_shot_locked_shell --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -756,6 +757,54 @@ The execution plan validates that all prior reports, the final-safe shell, verif
 If every check passes, the task may output `execution_plan_ready_for_manual_review` or `ready_for_phase_12_1b_manual_review`. It may include a `translationsRegister` payload preview, but that preview is not executable and must keep `payload_preview_only=true` and `translations_register_called=false`.
 
 The execution plan must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. It must explicitly report `execution_plan_only=true`, `payload_preview_only=true`, `phase_12_1b_entry_allowed=false`, `phase_12_1_entry_allowed=false`, `phase_12_entry_allowed=false`, `write_execution_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `command_executed=false`, `readback_performed=false`, `rollback_performed=false`, `real_apply_performed=false`, and `shopify_write_performed=false`.
+
+### Single-Field Real Write One-Shot Locked Shell
+
+`shopify_translation_single_field_real_write_one_shot_locked_shell` reads only local reports and manually supplied environment variables:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+logs/shopify_translation_single_field_backup_fetch.json
+logs/shopify_translation_single_field_readback_rollback_plan.json
+logs/shopify_translation_single_field_final_write_gate.json
+logs/shopify_translation_single_field_real_write_runner_design.json
+logs/shopify_translation_single_field_real_write_locked_runner.json
+logs/shopify_translation_single_field_real_write_pre_execution_validate.json
+logs/shopify_translation_single_field_final_human_approval_package.json
+logs/shopify_translation_single_field_real_write_runner_final_safe_shell.json
+logs/shopify_translation_single_field_real_write_execution_plan.json
+```
+
+Required environment variables:
+
+```env
+SHOPIFY_TRANSLATION_SANDBOX_PRODUCT_ID=gid://shopify/Product/...
+SHOPIFY_TRANSLATION_SANDBOX_LOCALE=ja
+SHOPIFY_TRANSLATION_SANDBOX_FIELD=meta_title
+SHOPIFY_TRANSLATION_SANDBOX_PROPOSED_VALUE=Concise SEO title
+SHOPIFY_TRANSLATION_I_UNDERSTAND_THIS_WRITES_SHOPIFY=true
+SHOPIFY_TRANSLATION_PHASE_12_FINAL_SAFE_SHELL_ACK=true
+SHOPIFY_TRANSLATION_PHASE_12_1A_PLAN_ACK=true
+```
+
+Review-only locked-shell ack:
+
+```env
+SHOPIFY_TRANSLATION_PHASE_12_1B_LOCKED_SHELL_ACK=true
+```
+
+The task writes local locked shell reports only:
+
+```text
+logs/shopify_translation_single_field_real_write_one_shot_locked_shell.json
+logs/shopify_translation_single_field_real_write_one_shot_locked_shell.html
+```
+
+The one-shot locked shell validates that all prior reports, execution plan, verified backup, final human approval, final-safe shell, and environment scope are consistent for exactly 1 product, 1 locale, and field `meta_title`.
+
+If every check passes, the task may output `one_shot_locked_ready_for_manual_review` or `ready_for_real_write_shell_review_but_locked`. It must never output `ready_for_real_write`, `write_allowed`, `execution_allowed`, `real_write_allowed`, `phase_12_entry_allowed`, `phase_12_1_entry_allowed`, or `phase_12_1b_entry_allowed`.
+
+The one-shot locked shell must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, execute commands, publish, apply, update, write the database, or git push. It must explicitly report `one_shot_locked_shell_only=true`, `phase_12_1b_real_execution_allowed=false`, `phase_12_1b_entry_allowed=false`, `phase_12_1_entry_allowed=false`, `phase_12_entry_allowed=false`, `write_execution_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `command_executed=false`, `readback_performed=false`, `rollback_performed=false`, `real_apply_performed=false`, and `shopify_write_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
