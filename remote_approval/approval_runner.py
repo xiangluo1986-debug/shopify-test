@@ -396,6 +396,7 @@ def _summarize_task_result(result: dict) -> str:
         "json_readback_rollback_plan_path",
         "html_readback_rollback_plan_path",
         "plan_status",
+        "plan_source",
         "backup_source_is_verified",
         "source_preflight_status",
         "source_backup_fetch_status",

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import time
 from html import escape
@@ -10,6 +11,7 @@ from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 TASK_NAME = "shopify_translation_small_batch_apply_execute"
 COMMAND_LABEL = "shopify_translation_small_batch_apply_execute"
+SOURCE_CSV_JSON_SMALL_BATCH_PLAN_PATH = LOG_DIR / "shopify_translation_csv_json_small_batch_apply_plan_package.json"
 SOURCE_SMALL_BATCH_PLAN_PATH = LOG_DIR / "shopify_translation_small_batch_apply_plan_package.json"
 SMALL_BATCH_APPLY_EXECUTE_JSON_PATH = LOG_DIR / "shopify_translation_small_batch_apply_execute.json"
 SMALL_BATCH_APPLY_EXECUTE_HTML_PATH = LOG_DIR / "shopify_translation_small_batch_apply_execute.html"
@@ -19,9 +21,8 @@ EXECUTION_ACK_VALUE = "YES_I_APPROVE_SMALL_BATCH_SHOPIFY_TRANSLATION_WRITE"
 SUPPORTED_MODES = {"dry-run", "real-run", "execute-real-write"}
 REAL_RUN_MODES = {"real-run", "execute-real-write"}
 
-READY_PLAN_STATUS = "small_batch_apply_plan_ready_for_manual_review"
-EXPECTED_PRODUCT_ID = "gid://shopify/Product/7655686799427"
-EXPECTED_LOCALE = "ja"
+CSV_JSON_READY_PLAN_STATUS = "csv_json_small_batch_apply_plan_ready_for_manual_review"
+LEGACY_READY_PLAN_STATUS = "small_batch_apply_plan_ready_for_manual_review"
 ALLOWED_FIELDS = ["meta_title", "meta_description"]
 FIELD_MAX_CHARS = {
     "meta_title": 60,
@@ -31,6 +32,7 @@ MAX_ENTRIES = 5
 SHOP_DOMAIN = "kidstoylover.myshopify.com"
 SHOPIFY_API_VERSION = "2026-01"
 DOCKER_TIMEOUT_SECONDS = 120
+PRODUCT_GID_RE = re.compile(r"^gid://shopify/Product/\d+$")
 
 
 def run_shopify_translation_small_batch_apply_execute_task(mode: str) -> dict:
@@ -42,15 +44,21 @@ def run_shopify_translation_small_batch_apply_execute_task(mode: str) -> dict:
     validation_errors = []
     parse_errors = []
     plan_report = {}
+    plan_source = ""
+    source_plan_path = None
 
-    try:
-        plan_report = _read_json(SOURCE_SMALL_BATCH_PLAN_PATH)
-    except FileNotFoundError as exc:
-        parse_errors.append(f"Small batch apply plan JSON not found: {exc}")
+    plan_source, source_plan_path = _select_plan_report()
+    if not source_plan_path:
         validation_errors.append("missing_small_batch_apply_plan_report")
-    except (OSError, json.JSONDecodeError) as exc:
-        parse_errors.append(f"Could not parse small batch apply plan JSON: {exc}")
-        validation_errors.append("small_batch_apply_plan_json_invalid")
+        parse_errors.append(
+            "Neither CSV/JSON small batch apply plan nor legacy sample small batch apply plan was found."
+        )
+    else:
+        try:
+            plan_report = _read_json(source_plan_path)
+        except (OSError, json.JSONDecodeError) as exc:
+            parse_errors.append(f"Could not parse {plan_source} small batch apply plan JSON: {exc}")
+            validation_errors.append(f"{plan_source}_small_batch_apply_plan_json_invalid")
 
     ack_value = os.environ.get(EXECUTION_ACK_ENV, "").strip()
     ack_present = bool(ack_value)
@@ -65,7 +73,7 @@ def run_shopify_translation_small_batch_apply_execute_task(mode: str) -> dict:
             validation_errors.append("approval_not_local")
 
     if plan_report:
-        validation_errors.extend(_validate_plan_report(plan_report))
+        validation_errors.extend(_validate_plan_report(plan_report, plan_source))
 
     blocking_conditions = _blocking_conditions(validation_errors)
     entries = plan_report.get("entries", []) if isinstance(plan_report.get("entries"), list) else []
@@ -100,7 +108,10 @@ def run_shopify_translation_small_batch_apply_execute_task(mode: str) -> dict:
         "task_name": TASK_NAME,
         "mode": mode,
         "command_label": COMMAND_LABEL,
+        "source_csv_json_small_batch_apply_plan_path": str(SOURCE_CSV_JSON_SMALL_BATCH_PLAN_PATH),
         "source_small_batch_apply_plan_path": str(SOURCE_SMALL_BATCH_PLAN_PATH),
+        "selected_small_batch_apply_plan_path": str(source_plan_path) if source_plan_path else "",
+        "plan_source": plan_source,
         "json_small_batch_apply_execute_path": str(SMALL_BATCH_APPLY_EXECUTE_JSON_PATH),
         "html_small_batch_apply_execute_path": str(SMALL_BATCH_APPLY_EXECUTE_HTML_PATH),
         "success": success,
@@ -112,6 +123,7 @@ def run_shopify_translation_small_batch_apply_execute_task(mode: str) -> dict:
         "allowed_fields": ALLOWED_FIELDS,
         "source_plan_summary": _source_plan_summary(plan_report, entries),
         "validated_execution_scope": _validated_execution_scope(plan_report, entries),
+        "entries": _planned_entries(entries),
         "planned_entries": _planned_entries(entries),
         "small_batch_execution_ack_summary": {
             "ack_env": EXECUTION_ACK_ENV,
@@ -192,6 +204,9 @@ def run_shopify_translation_small_batch_apply_execute_task(mode: str) -> dict:
         "html_small_batch_apply_execute_path": str(html_path),
         "execution_status": execution_status,
         "plan_status": plan_report.get("plan_status", ""),
+        "plan_source": plan_source,
+        "product_id": plan_report.get("product_id", ""),
+        "locale": plan_report.get("locale", ""),
         "small_batch_execute_task": True,
         "small_batch_execute_dry_run_only": mode == "dry-run",
         "small_batch_execution_ack_present": ack_present,
@@ -226,23 +241,45 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
-def _validate_plan_report(report: dict) -> list[str]:
+def _select_plan_report() -> tuple[str, Path | None]:
+    if SOURCE_CSV_JSON_SMALL_BATCH_PLAN_PATH.exists():
+        return "csv_json", SOURCE_CSV_JSON_SMALL_BATCH_PLAN_PATH
+    if SOURCE_SMALL_BATCH_PLAN_PATH.exists():
+        return "legacy_sample", SOURCE_SMALL_BATCH_PLAN_PATH
+    return "missing", None
+
+
+def _validate_plan_report(report: dict, plan_source: str) -> list[str]:
     errors = []
-    if report.get("task") != "shopify_translation_small_batch_apply_plan_package":
-        errors.append("small_batch_apply_plan_not_ready")
-    if report.get("plan_status") != READY_PLAN_STATUS:
-        errors.append("small_batch_apply_plan_not_ready")
+    expected_task = (
+        "shopify_translation_csv_json_small_batch_apply_plan_package"
+        if plan_source == "csv_json"
+        else "shopify_translation_small_batch_apply_plan_package"
+    )
+    expected_status = CSV_JSON_READY_PLAN_STATUS if plan_source == "csv_json" else LEGACY_READY_PLAN_STATUS
+    not_ready_error = (
+        "csv_json_small_batch_apply_plan_not_ready"
+        if plan_source == "csv_json"
+        else "small_batch_apply_plan_not_ready"
+    )
+
+    if report.get("task") != expected_task:
+        errors.append(not_ready_error)
+    if report.get("plan_status") != expected_status:
+        errors.append(not_ready_error)
     if report.get("plan_package_only") is not True:
-        errors.append("small_batch_apply_plan_not_ready")
+        errors.append(not_ready_error)
     if report.get("real_write_allowed") is not False:
         errors.append("unexpected_side_effect_risk")
     if report.get("next_step_requires_separate_execute_task") is not True:
-        errors.append("small_batch_apply_plan_not_ready")
+        errors.append(not_ready_error)
 
     entries = report.get("entries")
     if not isinstance(entries, list):
-        errors.append("small_batch_apply_plan_not_ready")
+        errors.append(not_ready_error)
         entries = []
+    if not entries:
+        errors.append(not_ready_error)
     if len(entries) > MAX_ENTRIES:
         errors.append("too_many_entries")
     if int(report.get("entry_count") or len(entries)) > MAX_ENTRIES:
@@ -250,10 +287,14 @@ def _validate_plan_report(report: dict) -> list[str]:
 
     product_ids = {entry.get("product_id") for entry in entries if entry.get("product_id")}
     locales = {entry.get("locale") for entry in entries if entry.get("locale")}
-    if len(product_ids) != 1 or product_ids != {EXPECTED_PRODUCT_ID} or report.get("product_id") != EXPECTED_PRODUCT_ID:
+    if len(product_ids) != 1 or report.get("product_id") not in product_ids:
         errors.append("multiple_products")
-    if len(locales) != 1 or locales != {EXPECTED_LOCALE} or report.get("locale") != EXPECTED_LOCALE:
+    if len(locales) != 1 or report.get("locale") not in locales:
         errors.append("multiple_locales")
+    if len(product_ids) == 1:
+        product_id = next(iter(product_ids))
+        if not PRODUCT_GID_RE.match(product_id or ""):
+            errors.append("multiple_products")
 
     for entry in entries:
         field = entry.get("field")
@@ -293,7 +334,13 @@ def _validate_plan_report(report: dict) -> list[str]:
 def _source_plan_summary(report: dict, entries: list[dict]) -> dict:
     return {
         "source_plan_loaded": bool(report),
+        "source_plan_task": report.get("task", "") if report else "",
+        "source_plan_kind": "csv_json"
+        if report and report.get("task") == "shopify_translation_csv_json_small_batch_apply_plan_package"
+        else ("legacy_sample" if report else ""),
         "source_plan_status": report.get("plan_status", "") if report else "",
+        "source_input_source": report.get("input_source", "") if report else "",
+        "source_input_path": report.get("input_path", "") if report else "",
         "source_product_id": report.get("product_id", "") if report else "",
         "source_locale": report.get("locale", "") if report else "",
         "source_entry_count": len(entries),
@@ -349,7 +396,10 @@ def _planned_entries(entries: list[dict]) -> list[dict]:
 def _blocking_conditions(validation_errors: list[str]) -> list[str]:
     mapping = {
         "missing_small_batch_apply_plan_report": "blocked_missing_small_batch_apply_plan_report",
+        "csv_json_small_batch_apply_plan_not_ready": "blocked_csv_json_small_batch_apply_plan_not_ready",
+        "csv_json_small_batch_apply_plan_json_invalid": "blocked_csv_json_small_batch_apply_plan_not_ready",
         "small_batch_apply_plan_not_ready": "blocked_small_batch_apply_plan_not_ready",
+        "legacy_sample_small_batch_apply_plan_json_invalid": "blocked_small_batch_apply_plan_not_ready",
         "missing_small_batch_execution_ack": "blocked_missing_small_batch_execution_ack",
         "invalid_small_batch_execution_ack": "blocked_invalid_small_batch_execution_ack",
         "approval_not_local": "blocked_approval_not_local",
@@ -369,6 +419,7 @@ def _execution_status(mode: str, blocking_conditions: list[str], execution_resul
         return "dry_run_small_batch_write_not_executed"
     for status in [
         "blocked_missing_small_batch_apply_plan_report",
+        "blocked_csv_json_small_batch_apply_plan_not_ready",
         "blocked_small_batch_apply_plan_not_ready",
         "blocked_missing_small_batch_execution_ack",
         "blocked_invalid_small_batch_execution_ack",
@@ -854,6 +905,7 @@ def _render_html_report(payload: dict) -> str:
             ("Task", "task"),
             ("Mode", "mode"),
             ("Execution Status", "execution_status"),
+            ("Plan Source", "plan_source"),
             ("Plan Status", "plan_status"),
             ("Product ID", "product_id"),
             ("Locale", "locale"),
@@ -962,6 +1014,7 @@ def _build_approval_message(payload: dict, json_path: Path, html_path: Path) -> 
         "Shopify small batch apply execute report generated.\n"
         f"Mode: {payload.get('mode')}\n"
         f"Execution status: {payload.get('execution_status')}\n"
+        f"Plan source: {payload.get('plan_source')}\n"
         f"Plan status: {payload.get('plan_status')}\n"
         f"Entry count: {payload.get('entry_count')}\n"
         f"Real write allowed: {payload.get('real_write_allowed')}\n"

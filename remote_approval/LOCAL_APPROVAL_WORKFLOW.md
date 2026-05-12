@@ -1044,7 +1044,10 @@ For local blocking tests only, `SHOPIFY_TRANSLATION_SMALL_BATCH_PLAN_TEST_SCENAR
 
 `shopify_translation_small_batch_apply_execute` reads:
 
+- `logs/shopify_translation_csv_json_small_batch_apply_plan_package.json` when present
 - `logs/shopify_translation_small_batch_apply_plan_package.json`
+
+The CSV/JSON plan is preferred when both reports exist and the execute report must mark `plan_source=csv_json`. If the CSV/JSON plan is absent, the legacy sample plan is used and the report marks `plan_source=legacy_sample`. A present CSV/JSON plan that is not ready must block as `blocked_csv_json_small_batch_apply_plan_not_ready`; fallback is only allowed when that report is missing.
 
 It writes:
 
@@ -1055,7 +1058,7 @@ logs/shopify_translation_small_batch_apply_execute.html
 
 Dry-run mode must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push.
 
-In `dry-run` mode, a ready small batch plan outputs `execution_status=dry_run_small_batch_write_not_executed`, keeps `entry_count=2` for the sample plan, and reports `real_write_allowed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, and `all_new_actions_no_write_confirmed=true`.
+In `dry-run` mode, a ready small batch plan outputs `execution_status=dry_run_small_batch_write_not_executed`, includes `plan_source`, keeps the scope to one product / one locale / at most 5 entries, and reports `real_write_allowed=false`, `write_execution_allowed=false`, `translations_register_allowed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
 The future small batch execution ACK is:
 
