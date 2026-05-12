@@ -1088,6 +1088,25 @@ This task is local-report-only. It must not call Shopify APIs, call mutations, c
 
 The audit passes only when the source execute report is task `shopify_translation_small_batch_apply_execute`, mode `real-run` or `execute-real-write`, status `small_batch_real_write_succeeded_and_verified`, product `gid://shopify/Product/7655686799427`, locale `ja`, `entry_count=2`, fields `meta_title` and `meta_description`, `translations_register_called=true`, `shopify_write_performed=true`, `mutation_performed=true`, `readback_performed=true`, `readback_all_entries_match=true`, `readback_matched_entry_count=2`, no rollback approval requirement, no rollback performed, no automatic rollback, no publish, no bulk write, `small_batch_write_performed=true`, and empty source blocking conditions.
 
+### Small Batch Rollback Approval Package
+
+`shopify_translation_small_batch_rollback_approval_package` reads:
+
+- `logs/shopify_translation_small_batch_apply_plan_package.json`
+- `logs/shopify_translation_small_batch_apply_execute.json`
+- `logs/shopify_translation_small_batch_post_write_audit_package.json`
+
+It writes:
+
+```text
+logs/shopify_translation_small_batch_rollback_approval_package.json
+logs/shopify_translation_small_batch_rollback_approval_package.html
+```
+
+This task is local-report-only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, perform restore, publish, apply, update, write the database, or git push. It may preserve source write facts from the prior successful small-batch real-run, but the rollback approval task itself must report `rollback_approval_package_only=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `restore_performed=false`, `publish_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
+The package passes only when the source execute report is successful, the small-batch post-write audit has passed, product `gid://shopify/Product/7655686799427`, locale `ja`, `entry_count=2`, fields are exactly `meta_title` and `meta_description`, readback matched, no rollback is required, no rollback approval is currently required, and source blocking conditions are empty. If locally recorded restore values are incomplete, the package still generates for manual review but must output `restore_plan_status=restore_values_incomplete_manual_review_required`, `rollback_optional_restore_possible=false`, and `manual_backup_review_required=true` instead of guessing missing values.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
