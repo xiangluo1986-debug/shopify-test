@@ -411,9 +411,9 @@ TASK_METADATA: Dict[str, dict] = {
         "review_file_path": "logs/shopify_translation_small_batch_apply_plan_package.json",
     },
     "shopify_translation_small_batch_apply_execute": {
-        "description": "Validate small batch Shopify translation apply execution in dry-run / blocking mode without Shopify actions.",
+        "description": "Execute or dry-run a tightly scoped small batch Shopify translation apply with immediate readback.",
         "allowed_modes": ["dry-run", "real-run", "execute-real-write"],
-        "write_risk": "none in Phase 13.1; real-run is blocked",
+        "write_risk": "high outside dry-run",
         "review_file_path": "logs/shopify_translation_small_batch_apply_execute.json",
     },
     "shopify_translation_multi_locale_dry_run": {

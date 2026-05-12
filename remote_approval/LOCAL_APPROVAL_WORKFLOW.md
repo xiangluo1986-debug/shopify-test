@@ -1040,7 +1040,7 @@ The default sample plan uses `gid://shopify/Product/7655686799427`, locale `ja`,
 
 For local blocking tests only, `SHOPIFY_TRANSLATION_SMALL_BATCH_PLAN_TEST_SCENARIO=invalid-field` or `too-many-entries` may be used to exercise plan validation while still performing no Shopify actions.
 
-### Small Batch Apply Execute Dry-run / Blocking
+### Small Batch Apply Execute
 
 `shopify_translation_small_batch_apply_execute` reads:
 
@@ -1053,7 +1053,7 @@ logs/shopify_translation_small_batch_apply_execute.json
 logs/shopify_translation_small_batch_apply_execute.html
 ```
 
-Phase 13.1 is dry-run / blocking only. This task must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push.
+Dry-run mode must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push.
 
 In `dry-run` mode, a ready small batch plan outputs `execution_status=dry_run_small_batch_write_not_executed`, keeps `entry_count=2` for the sample plan, and reports `real_write_allowed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, and `all_new_actions_no_write_confirmed=true`.
 
@@ -1063,7 +1063,9 @@ The future small batch execution ACK is:
 SHOPIFY_TRANSLATION_SMALL_BATCH_EXECUTION_ACK=YES_I_APPROVE_SMALL_BATCH_SHOPIFY_TRANSLATION_WRITE
 ```
 
-The ACK is checked only for blocking behavior in Phase 13.1. Missing or invalid ACK blocks `real-run` / `execute-real-write`; a valid ACK still cannot trigger a write in this phase. A future separate phase must implement any real small-batch execution with explicit approval, immediate readback, and separate rollback approval.
+Missing or invalid ACK blocks `real-run` / `execute-real-write`. A valid ACK is necessary but not sufficient: the source plan must still be ready, the runner must be invoked with local approval, the scope must remain one product / one locale / at most 5 entries, and fields must be limited to `meta_title` and `meta_description`.
+
+When a future human explicitly runs `real-run` or `execute-real-write` with the correct ACK, the task performs one small-batch Shopify `translationsRegister` mutation, immediately reads back every planned entry, and can output `execution_status=small_batch_real_write_succeeded_and_verified` only when every readback value matches the proposed value. Readback mismatch must output `small_batch_real_write_completed_but_readback_mismatch`, require rollback approval, and never trigger automatic rollback. Bulk write, publish, full-store scan, unsupported fields, and scope expansion remain forbidden.
 
 ### `System.Speech` Is Unavailable
 
