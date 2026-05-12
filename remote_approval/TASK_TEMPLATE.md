@@ -232,6 +232,7 @@ Recommended fields:
 - [ ] Second single-field real write execute tasks keep dry-run no-write, limit any future real-run path to exactly 1 product x 1 locale x 1 field=meta_title, require the exact second real execution ACK, perform immediate readback after a real mutation, and never perform automatic rollback.
 - [ ] Second single-field post-write audit package tasks are audit-only, read local JSON reports only, preserve second source write facts separately, and never perform new Shopify API calls, writes, mutations, readback, rollback, or Shopify apply/publish actions.
 - [ ] Small batch apply plan package tasks are plan-only, read local JSON reports only, limit plans to one product, one locale, at most 5 entries, fields `meta_title` / `meta_description` only, and never perform Shopify API calls, writes, mutations, readback, rollback, publish, or apply actions.
+- [ ] Small batch apply execute tasks are dry-run / blocking only in Phase 13.1, read the local small batch apply plan only, block real-run attempts, and never perform Shopify API calls, writes, mutations, `translationsRegister`, readback, rollback, publish, bulk write, or real apply actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

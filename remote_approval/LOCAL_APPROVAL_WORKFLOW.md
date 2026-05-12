@@ -1040,6 +1040,31 @@ The default sample plan uses `gid://shopify/Product/7655686799427`, locale `ja`,
 
 For local blocking tests only, `SHOPIFY_TRANSLATION_SMALL_BATCH_PLAN_TEST_SCENARIO=invalid-field` or `too-many-entries` may be used to exercise plan validation while still performing no Shopify actions.
 
+### Small Batch Apply Execute Dry-run / Blocking
+
+`shopify_translation_small_batch_apply_execute` reads:
+
+- `logs/shopify_translation_small_batch_apply_plan_package.json`
+
+It writes:
+
+```text
+logs/shopify_translation_small_batch_apply_execute.json
+logs/shopify_translation_small_batch_apply_execute.html
+```
+
+Phase 13.1 is dry-run / blocking only. This task must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push.
+
+In `dry-run` mode, a ready small batch plan outputs `execution_status=dry_run_small_batch_write_not_executed`, keeps `entry_count=2` for the sample plan, and reports `real_write_allowed=false`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, and `all_new_actions_no_write_confirmed=true`.
+
+The future small batch execution ACK is:
+
+```env
+SHOPIFY_TRANSLATION_SMALL_BATCH_EXECUTION_ACK=YES_I_APPROVE_SMALL_BATCH_SHOPIFY_TRANSLATION_WRITE
+```
+
+The ACK is checked only for blocking behavior in Phase 13.1. Missing or invalid ACK blocks `real-run` / `execute-real-write`; a valid ACK still cannot trigger a write in this phase. A future separate phase must implement any real small-batch execution with explicit approval, immediate readback, and separate rollback approval.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
