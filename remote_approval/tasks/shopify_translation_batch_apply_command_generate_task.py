@@ -18,6 +18,8 @@ MAX_LOCALES = 5
 MAX_ITEMS = MAX_PRODUCTS * MAX_LOCALES
 FINAL_APPROVED_STATUSES = {"approved", "validated_for_real_apply"}
 DEFAULT_FIELDS = ["title", "body_html", "meta_title", "meta_description"]
+COMMAND_APPROVAL_ALLOWED_VALUES = ["pending", "approved", "rejected"]
+DEFAULT_COMMAND_APPROVAL_STATUS = "pending"
 
 
 def run_shopify_translation_batch_apply_command_generate_task(mode: str) -> dict:
@@ -42,6 +44,7 @@ def run_shopify_translation_batch_apply_command_generate_task(mode: str) -> dict
     command_result = _build_command_generation_result(final_validation, validation_errors)
     success = not validation_errors
     end_time = utc_now_iso()
+    command_approval_summary = _command_approval_summary(command_result)
     payload = {
         "timestamp": end_time,
         "task": TASK_NAME,
@@ -73,6 +76,11 @@ def run_shopify_translation_batch_apply_command_generate_task(mode: str) -> dict
         "generated_command_count": len(command_result["commands"]),
         "generated_payload_count": len(command_result["payload_previews"]),
         "command_generation_status": command_result["command_generation_status"],
+        "command_approval_summary": command_approval_summary,
+        "command_approval_required": command_approval_summary["command_approval_required"],
+        "command_approval_status": command_approval_summary["command_approval_status"],
+        "command_approval_ready_count": command_approval_summary["command_approval_ready_count"],
+        "command_execution_allowed": command_approval_summary["command_execution_allowed"],
         "commands": command_result["commands"],
         "payload_previews": command_result["payload_previews"],
         "blocked_items": command_result["blocked_items"],
@@ -125,6 +133,10 @@ def run_shopify_translation_batch_apply_command_generate_task(mode: str) -> dict
         "eligible_for_real_apply_count": payload["eligible_for_real_apply_count"],
         "generated_command_count": payload["generated_command_count"],
         "generated_payload_count": payload["generated_payload_count"],
+        "command_approval_required": payload["command_approval_required"],
+        "command_approval_status": payload["command_approval_status"],
+        "command_approval_ready_count": payload["command_approval_ready_count"],
+        "command_execution_allowed": payload["command_execution_allowed"],
         "blocked_items_count": len(payload["blocked_items"]),
         "validation_errors_count": len(validation_errors),
         "detected_issue_summary": payload["detected_issue_summary"],
@@ -295,6 +307,12 @@ def _command_plan_item(item: dict, index: int) -> dict:
         "executable_in_phase9": False,
         "requires_separate_write_task": True,
         "future_task_required": "A separate explicitly confirmed Shopify write task must be created before execution.",
+        "command_decision": "pending",
+        "command_decision_allowed_values": ["pending", "approve", "reject"],
+        "command_reviewer": "",
+        "command_review_notes": "",
+        "command_approval_required": True,
+        "command_approval_ready": False,
         "command_preview": f"FUTURE_WRITE_TASK_REQUIRED translationsRegister product_id={product_id} locale={locale}",
         "would_call_shopify_mutation": "translationsRegister",
         "would_apply_fields": _fields_for_item(item),
@@ -359,6 +377,19 @@ def _raw_fields_for_item(item: dict) -> list[str]:
     return [str(value) for value in item.get("would_apply_fields") or [] if value]
 
 
+def _command_approval_summary(command_result: dict) -> dict:
+    return {
+        "command_approval_required": True,
+        "command_approval_status": DEFAULT_COMMAND_APPROVAL_STATUS,
+        "command_approval_allowed_values": COMMAND_APPROVAL_ALLOWED_VALUES,
+        "command_approved_by": "",
+        "command_approval_notes": "",
+        "command_approval_ready_count": 0,
+        "command_execution_allowed": False,
+        "generated_command_count": len(command_result.get("commands") or []),
+    }
+
+
 def _safe_int(value) -> int:
     try:
         return int(value or 0)
@@ -400,6 +431,10 @@ def _render_html_report(payload: dict) -> str:
             ("Eligible For Real Apply", "eligible_for_real_apply_count"),
             ("Generated Command Count", "generated_command_count"),
             ("Generated Payload Count", "generated_payload_count"),
+            ("Command Approval Required", "command_approval_required"),
+            ("Command Approval Status", "command_approval_status"),
+            ("Command Approval Ready Count", "command_approval_ready_count"),
+            ("Command Execution Allowed", "command_execution_allowed"),
             ("All No-Write Confirmed", "all_no_write_confirmed"),
             ("No Shopify Writes Performed", "no_shopify_writes_performed"),
             ("Shopify Write Performed", "shopify_write_performed"),
@@ -432,15 +467,18 @@ def _render_html_report(payload: dict) -> str:
   <div class="status {status_class}">{escape(status)}: {escape(payload.get("detected_issue_summary", ""))}</div>
   <h2>Summary</h2>
   <table><tbody>{summary_rows}</tbody></table>
+  <h2>Command Approval Template</h2>
+  { _render_command_approval_summary(payload.get("command_approval_summary", {})) }
   <h2>Generated Command Plans</h2>
   <table>
     <thead>
       <tr>
         <th>Command ID</th><th>Product ID</th><th>Locale</th><th>Executable In Phase 9</th>
-        <th>Requires Separate Write Task</th><th>Fields</th><th>Command Preview</th>
+        <th>Requires Separate Write Task</th><th>Command Decision</th><th>Command Ready</th>
+        <th>Fields</th><th>Command Preview</th>
       </tr>
     </thead>
-    <tbody>{command_rows or _empty_row(7, "No executable or future command plans generated.")}</tbody>
+    <tbody>{command_rows or _empty_row(9, "No executable or future command plans generated.")}</tbody>
   </table>
   <h2>Payload Previews</h2>
   <table>
@@ -482,6 +520,8 @@ def _render_command_row(item: dict) -> str:
         f"<td>{escape(str(item.get('locale', '')))}</td>"
         f"<td>{'true' if item.get('executable_in_phase9') else 'false'}</td>"
         f"<td>{'true' if item.get('requires_separate_write_task') else 'false'}</td>"
+        f"<td>{escape(str(item.get('command_decision', '')))}</td>"
+        f"<td>{'true' if item.get('command_approval_ready') else 'false'}</td>"
         f"<td>{escape(', '.join(item.get('would_apply_fields') or []))}</td>"
         f"<td class=\"path\">{escape(str(item.get('command_preview', '')))}</td>"
         "</tr>"
@@ -518,6 +558,28 @@ def _summary_row(label: str, value) -> str:
     return f"<tr><th>{escape(label)}</th><td>{escape(str(value))}</td></tr>"
 
 
+def _render_command_approval_summary(summary: dict) -> str:
+    rows = "\n".join(
+        _summary_row(label, summary.get(key))
+        for label, key in [
+            ("Command Approval Required", "command_approval_required"),
+            ("Command Approval Status", "command_approval_status"),
+            ("Allowed Values", "command_approval_allowed_values"),
+            ("Command Approved By", "command_approved_by"),
+            ("Command Approval Notes", "command_approval_notes"),
+            ("Command Approval Ready Count", "command_approval_ready_count"),
+            ("Command Execution Allowed", "command_execution_allowed"),
+            ("Generated Command Count", "generated_command_count"),
+        ]
+    )
+    return (
+        "<table><tbody>"
+        f"{rows}"
+        "</tbody></table>"
+        "<p>The command approval template is review-only. Editing it does not execute Shopify writes.</p>"
+    )
+
+
 def _empty_row(colspan: int, message: str) -> str:
     return f"<tr><td colspan=\"{colspan}\" class=\"empty\">{escape(message)}</td></tr>"
 
@@ -539,6 +601,8 @@ def _build_approval_message(payload: dict, json_path: Path, html_path: Path) -> 
         f"Eligible for real apply: {payload.get('eligible_for_real_apply_count')}\n"
         f"Generated commands: {payload.get('generated_command_count')}\n"
         f"Generated payload previews: {payload.get('generated_payload_count')}\n"
+        f"Command approval status: {payload.get('command_approval_status')}\n"
+        f"Command execution allowed: {payload.get('command_execution_allowed')}\n"
         f"Validation errors: {len(payload.get('validation_errors') or [])}\n"
         "Command plan JSON:\n"
         f"{json_path}\n\n"

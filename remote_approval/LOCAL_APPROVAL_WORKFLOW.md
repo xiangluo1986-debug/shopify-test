@@ -279,6 +279,8 @@ logs/shopify_translation_batch_apply_command_plan.html
 
 When `final_apply_allowed=false`, the task must generate zero commands and explain that final validation has not approved real apply. If a future final validation approves items, this task may generate command/payload plans for those items, but it must not execute them.
 
+The command plan includes a command approval template. It starts as `command_approval_status=pending`, allows only `pending`, `approved`, and `rejected`, and keeps `command_execution_allowed=false`. Any later real execution must be a separate write task with explicit confirmation.
+
 The command generation task is command-generation-only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable

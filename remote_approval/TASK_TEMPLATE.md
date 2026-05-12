@@ -53,6 +53,7 @@ For Shopify translation dry-run tasks:
 - Batch apply execution final validation should block approved status unless a final approver is present, at least one preview apply item exists, and every preview apply item is final-approved, final-ready, QA-passing, future-apply eligible, and still no-write.
 - Batch apply command generation tasks may read the latest final validation JSON and write local command/payload plan JSON/HTML reports only. They must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
 - Batch apply command generation should produce zero commands when `final_apply_allowed=false`. If future final validation allows apply, generated command plans remain preview-only and still require a separate explicitly confirmed write task before execution.
+- Batch apply command generation should include a command approval template with `command_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `command_execution_allowed=false`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -152,6 +153,7 @@ Recommended fields:
 - [ ] Batch apply execution previews keep final approval pending and do not treat preview generation as permission to write.
 - [ ] Batch apply execution final validation tasks are validation-only and never perform Shopify apply/write/publish actions.
 - [ ] Batch apply command generation tasks are command-generation-only and never execute generated commands or perform Shopify apply/write/publish actions.
+- [ ] Batch apply command generation tasks keep command approval pending and do not treat command plan generation as permission to execute writes.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 
