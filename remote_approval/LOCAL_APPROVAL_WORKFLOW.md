@@ -48,6 +48,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_apply_s
 python remote_approval_runner.py --task shopify_translation_single_field_apply_preflight_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_backup_fetch --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_readback_rollback_plan --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_single_field_final_write_gate --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -496,6 +497,31 @@ The plan task must not call Shopify APIs, call mutations, call `translationsRegi
 The readback plan must require a future separate write task to reread only the same product / locale / `meta_title` and compare the Shopify value to the proposed value. The rollback plan must require a verified backup value from the backup fetch report and must stay limited to the same product / locale / `meta_title`.
 
 The plan must explicitly report `shopify_api_call_performed=false`, `readback_performed=false`, `rollback_performed=false`, `real_write_allowed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Single-Field Final Write Gate
+
+`shopify_translation_single_field_final_write_gate` reads only local reports:
+
+```text
+logs/shopify_translation_single_field_apply_preflight_package.json
+logs/shopify_translation_single_field_backup_fetch.json
+logs/shopify_translation_single_field_readback_rollback_plan.json
+```
+
+It writes local final gate package reports only:
+
+```text
+logs/shopify_translation_single_field_final_write_gate.json
+logs/shopify_translation_single_field_final_write_gate.html
+```
+
+The final gate task accepts exactly 1 product, 1 locale, and 1 field from the source reports. The only allowed field is `meta_title`; the proposed value must be non-empty and no longer than 60 characters; the backup must be verified by a completed read-only query; and the readback / rollback plan must be in a safe ready status such as `ready_for_manual_review`.
+
+The final gate task must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It may output `ready_for_human_final_approval` or `ready_for_final_write_gate_review`, but it must never output `ready_for_real_write`, `write_allowed`, or `execution_allowed`.
+
+The final gate package must make clear that a future separate write task would call Shopify `translationsRegister`, would be limited to 1 product x 1 locale x 1 field=`meta_title`, would require immediate readback verification, and would require a separate rollback approval if readback fails.
+
+The final gate must explicitly report `final_real_write_allowed=false`, `real_write_allowed=false`, `shopify_api_call_performed=false`, `readback_performed=false`, `rollback_performed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 

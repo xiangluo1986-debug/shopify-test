@@ -45,6 +45,9 @@ from remote_approval.tasks.shopify_translation_single_field_backup_fetch_task im
 from remote_approval.tasks.shopify_translation_single_field_readback_rollback_plan_task import (
     run_shopify_translation_single_field_readback_rollback_plan_task,
 )
+from remote_approval.tasks.shopify_translation_single_field_final_write_gate_task import (
+    run_shopify_translation_single_field_final_write_gate_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -88,6 +91,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_translation_single_field_readback_rollback_plan": (
         run_shopify_translation_single_field_readback_rollback_plan_task
     ),
+    "shopify_translation_single_field_final_write_gate": run_shopify_translation_single_field_final_write_gate_task,
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
 }
@@ -207,6 +211,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_translation_single_field_readback_rollback_plan.json",
+    },
+    "shopify_translation_single_field_final_write_gate": {
+        "description": "Generate a local final write gate package for single-field Shopify translation apply.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_single_field_final_write_gate.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",

@@ -73,6 +73,8 @@ For Shopify translation dry-run tasks:
 - Single-field backup fetch tasks must not call Shopify mutations, call `translationsRegister`, publish, apply, update, database writes, or git push. They must report `real_write_allowed=false`, `translations_register_allowed=false`, `translations_register_called=false`, `mutation_performed=false`, `shopify_mutations_called=[]`, and `shopify_write_performed=false`.
 - Single-field readback / rollback plan tasks may read only the latest single-field preflight package and backup fetch JSON files and write local JSON/HTML plan files only. They must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, database writes, or git push.
 - Single-field readback / rollback plan tasks must mark the backup unverified and block future writes when `read_only_shopify_query_performed=false`; verified empty backups are allowed only when the read-only backup query really ran and confirmed an empty value.
+- Single-field final write gate tasks may read only the latest single-field preflight package, backup fetch report, and readback / rollback plan JSON files and write local JSON/HTML final gate files only.
+- Single-field final write gate tasks must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, database writes, or git push. They may prepare a human final approval package but must keep `final_real_write_allowed=false`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -183,6 +185,7 @@ Recommended fields:
 - [ ] Single-field apply preflight package tasks are preflight-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Single-field backup fetch tasks are read-only and never execute generated commands, Shopify mutations, or Shopify apply/write/publish actions.
 - [ ] Single-field readback / rollback plan tasks are local-plan-only and never call Shopify APIs or perform readback, rollback, mutation, or Shopify apply/write/publish actions.
+- [ ] Single-field final write gate tasks are local-package-only and never call Shopify APIs or perform readback, rollback, mutation, or Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 
