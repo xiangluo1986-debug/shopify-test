@@ -54,6 +54,9 @@ from remote_approval.tasks.shopify_translation_single_field_real_write_runner_de
 from remote_approval.tasks.shopify_translation_single_field_real_write_locked_runner_task import (
     run_shopify_translation_single_field_real_write_locked_runner_task,
 )
+from remote_approval.tasks.shopify_translation_single_field_real_write_pre_execution_validate_task import (
+    run_shopify_translation_single_field_real_write_pre_execution_validate_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -103,6 +106,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_single_field_real_write_locked_runner": (
         run_shopify_translation_single_field_real_write_locked_runner_task
+    ),
+    "shopify_translation_single_field_real_write_pre_execution_validate": (
+        run_shopify_translation_single_field_real_write_pre_execution_validate_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -241,6 +247,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_translation_single_field_real_write_locked_runner.json",
+    },
+    "shopify_translation_single_field_real_write_pre_execution_validate": {
+        "description": "Validate single-field Shopify translation write preconditions without executing writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_translation_single_field_real_write_pre_execution_validate.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
