@@ -837,6 +837,30 @@ Supported modes are `dry-run`, `real-run`, and `execute-real-write`. In `dry-run
 
 Only an explicitly requested future `real-run` or `execute-real-write` command may attempt exactly one Shopify `translationsRegister` mutation for the fixed scope above. Real-run must immediately read back the same product / locale / field and mark success only when the readback value exactly matches the proposed value. Rollback must never be automatic; failures must preserve the verified backup and require a separate rollback approval flow.
 
+### Single-Field Post-Write Audit Package
+
+`shopify_translation_single_field_post_write_audit_package` reads only local JSON reports:
+
+- `logs/shopify_translation_single_field_apply_preflight_package.json`
+- `logs/shopify_translation_single_field_backup_fetch.json`
+- `logs/shopify_translation_single_field_readback_rollback_plan.json`
+- `logs/shopify_translation_single_field_final_write_gate.json`
+- `logs/shopify_translation_single_field_real_write_pre_execution_validate.json`
+- `logs/shopify_translation_single_field_final_human_approval_package.json`
+- `logs/shopify_translation_single_field_real_write_execution_plan.json`
+- `logs/shopify_translation_single_field_real_write_one_shot_execute.json`
+
+It writes:
+
+```text
+logs/shopify_translation_single_field_post_write_audit_package.json
+logs/shopify_translation_single_field_post_write_audit_package.html
+```
+
+The audit must confirm the source execution report succeeded for exactly `gid://shopify/Product/7655686799427`, locale `ja`, field `meta_title`, with backup value `MOFLY P-51D Aileron Linkage Connector | RC Plane Clevis` and written/readback value `MOFLY P-51D Aileron Link Connector`.
+
+This audit is local-report-only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. The audit report may preserve source execution facts such as `source_shopify_write_performed=true`, `source_translations_register_called=true`, `source_mutation_performed=true`, and `source_readback_performed=true`, but the audit task itself must report `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
