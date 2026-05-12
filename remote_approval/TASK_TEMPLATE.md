@@ -236,6 +236,7 @@ Recommended fields:
 - [ ] Small batch post-write audit package tasks are audit-only, read local JSON reports only, preserve small-batch source write facts separately, and never perform new Shopify API calls, writes, mutations, `translationsRegister`, readback, rollback, publish, or apply actions.
 - [ ] Small batch rollback approval package tasks are approval-package-only, read local JSON reports only, preserve small-batch source write facts separately, never perform Shopify API calls, writes, mutations, `translationsRegister`, readback, rollback, restore, publish, or apply actions, and must mark missing restore values for manual backup review instead of guessing.
 - [ ] CSV/JSON small batch apply plan package tasks are plan-only, read local CSV/JSON input files only, prefer JSON over CSV when both exist, limit plans to one product, one locale `ja`, at most 5 entries, fields `meta_title` / `meta_description` only, and never perform Shopify API calls, writes, mutations, `translationsRegister`, readback, rollback, publish, or apply actions.
+- [ ] CSV/JSON small batch real-write readiness package tasks are readiness-only, read the CSV/JSON plan and small batch execute dry-run reports only, require `plan_source=csv_json`, may include a manual real-run command preview, and never perform Shopify API calls, writes, mutations, `translationsRegister`, readback, rollback, publish, or apply actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 
