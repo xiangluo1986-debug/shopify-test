@@ -11,9 +11,10 @@ from django.core.exceptions import FieldError, ValidationError
 from django.db import models
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpResponse, HttpResponseRedirect
+from django.middleware.csrf import get_token
 from django.urls import path, reverse
 from django.utils import timezone
-from django.utils.html import format_html
+from django.utils.html import escape, format_html
 
 from .models import (
     FinanceExchangeRate,
@@ -32,12 +33,14 @@ from .models import (
 
 SHENZHEN_ITEM_LOCATION = "shenzhen"
 ZERO = Decimal("0.00")
-SHENZHEN_COST_EDITABLE_STATUSES = {"pending_warehouse", "warehouse_fulfilled"}
+SHENZHEN_COST_EDITABLE_STATUSES = {"pending_warehouse", "warehouse_fulfilled", "exception_review"}
 FINANCE_LOCKED_STATUSES = {"pending_payment", "payment_submitted", "paid"}
 SETTLEMENT_STATUS_ADMIN_LABELS = {
     "cost_confirmed": "深圳仓已确认成本，待 Admin 确认",
     "admin_confirmed": "Admin 已确认",
     "payment_submitted": "已提交支付，待深圳仓确认收款",
+    "exception": "同步异常待审核",
+    "exception_review": "异常待审核",
 }
 COUNTRY_NAME_ZH = {
     "AU": "澳大利亚",
@@ -1352,6 +1355,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "order_handling_fee_rmb",
         "total_locked_cost_rmb",
         "settlement_status_display",
+        "exception_review_summary",
         "shenzhen_items_total_cost_summary",
         "profit_summary_for_finance",
         "tracking_info_summary",
@@ -1414,6 +1418,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     "transfer_note",
                     "tracking_number",
                     "warehouse_note",
+                    "exception_review_summary",
                     "total_actual_weight_kg",
                     "total_volume_weight_kg",
                     "chargeable_weight_kg",
@@ -1586,6 +1591,16 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 self.admin_site.admin_view(self.withdraw_warehouse_review_order),
                 name="shopify_sync_shopifyorder_withdraw_warehouse_review",
             ),
+            path(
+                "<path:object_id>/request-exception-review/",
+                self.admin_site.admin_view(self.request_exception_review_order),
+                name="shopify_sync_shopifyorder_request_exception_review",
+            ),
+            path(
+                "<path:object_id>/resubmit-exception-review/",
+                self.admin_site.admin_view(self.resubmit_exception_review_order),
+                name="shopify_sync_shopifyorder_resubmit_exception_review",
+            ),
         ]
         return custom_urls + urls
 
@@ -1624,6 +1639,175 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     def _redirect_after_successful_review(self, request):
         return HttpResponseRedirect(self._changelist_url_with_filters(request))
 
+    def _review_text_form_response(
+        self,
+        request,
+        obj,
+        title,
+        field_name,
+        label,
+        submit_label,
+        initial_text="",
+        error_message="",
+        help_text="",
+    ):
+        filters = self._preserved_changelist_filters(request)
+        back_url = self._change_url(obj)
+        if filters:
+            back_url = f"{back_url}?{urlencode({'_changelist_filters': filters})}"
+        error_html = ""
+        if error_message:
+            error_html = (
+                '<div style="margin:0 0 14px;padding:10px 12px;background:#fef3f2;'
+                'border:1px solid #fecdca;color:#b42318;border-radius:4px;">'
+                f"{escape(error_message)}</div>"
+            )
+        help_html = f'<p style="color:#667085;margin:8px 0 0;">{escape(help_text)}</p>' if help_text else ""
+        html = f"""
+        <!doctype html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>{escape(title)}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; background: #f5f5f5; color: #1f2937; margin: 0; padding: 24px; }}
+                .box {{ max-width: 820px; background: #fff; border: 1px solid #d0d5dd; border-radius: 6px; padding: 20px 22px; }}
+                h1 {{ margin: 0 0 12px; font-size: 20px; }}
+                label {{ display:block; font-weight:700; margin: 16px 0 8px; }}
+                textarea {{ width: 100%; min-height: 150px; box-sizing: border-box; border: 1px solid #98a2b3; border-radius: 4px; padding: 10px; font-size: 14px; }}
+                .actions {{ margin-top: 16px; }}
+                button {{ background:#0c66e4; color:#fff; border:0; border-radius:4px; padding:8px 14px; font-weight:700; cursor:pointer; }}
+                a {{ margin-left: 10px; color:#0c66e4; text-decoration:none; }}
+                .meta {{ color:#475467; margin: 0 0 4px; }}
+            </style>
+        </head>
+        <body>
+            <div class="box">
+                <h1>{escape(title)}</h1>
+                <p class="meta">订单：{escape(obj.order_name or str(obj.pk))}</p>
+                <p class="meta">当前状态：{escape(settlement_status_admin_label(obj.settlement_status))}</p>
+                {error_html}
+                <form method="post">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="{escape(get_token(request))}">
+                    <input type="hidden" name="_changelist_filters" value="{escape(filters)}">
+                    <label for="{escape(field_name)}">{escape(label)}</label>
+                    <textarea id="{escape(field_name)}" name="{escape(field_name)}">{escape(initial_text or "")}</textarea>
+                    {help_html}
+                    <div class="actions">
+                        <button type="submit">{escape(submit_label)}</button>
+                        <a href="{escape(back_url)}">返回订单</a>
+                    </div>
+                </form>
+            </div>
+        </body>
+        </html>
+        """
+        return HttpResponse(html)
+
+    def request_exception_review_order(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if not obj:
+            self.message_user(request, "订单不存在。", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:shopify_sync_shopifyorder_changelist"))
+        if not (self.is_finance_user(request) or self.is_super_admin(request)):
+            self.message_user(request, "只有 Admin / Finance 可以提出异常订单审核。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        if obj.settlement_batch_id or obj.settlement_status in FINANCE_LOCKED_STATUSES:
+            self.message_user(request, "订单已进入待支付/已提交支付/已支付/结算批次阶段，不能退回异常审核。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        if obj.settlement_status not in {"cost_confirmed", "admin_confirmed"}:
+            self.message_user(request, "只有深圳仓已确认成本、待 Admin 审核的订单可以提出异常审核。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+
+        if request.method == "POST":
+            reason = (request.POST.get("exception_review_reason") or "").strip()
+            if not reason:
+                return self._review_text_form_response(
+                    request,
+                    obj,
+                    "提出异常订单审核",
+                    "exception_review_reason",
+                    "异常原因",
+                    "提交异常审核",
+                    initial_text=reason,
+                    error_message="必须填写异常原因。",
+                    help_text="请说明运费、产品成本、拍单成本、包裹信息或订单信息哪里需要深圳仓重新确认。",
+                )
+            ShopifyOrder.objects.filter(pk=obj.pk).update(
+                settlement_status="exception_review",
+                exception_review_reason=reason,
+                exception_review_requested_by_id=request.user.pk,
+                exception_review_requested_at=timezone.now(),
+                exception_review_response="",
+                exception_review_responded_by_id=None,
+                exception_review_responded_at=None,
+            )
+            self.message_user(request, "已提出异常订单审核，订单已退回深圳仓重新审核。")
+            return self._redirect_after_successful_review(request)
+
+        return self._review_text_form_response(
+            request,
+            obj,
+            "提出异常订单审核",
+            "exception_review_reason",
+            "异常原因",
+            "提交异常审核",
+            initial_text=obj.exception_review_reason,
+            help_text="提交后订单状态会变为“异常待审核”，深圳仓可以重新维护成本和包裹信息。",
+        )
+
+    def resubmit_exception_review_order(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if not obj:
+            self.message_user(request, "订单不存在。", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:shopify_sync_shopifyorder_changelist"))
+        if not self.is_shenzhen_user(request):
+            self.message_user(request, "只有 Shenzhen Warehouse 可以重新提交异常审核订单。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        if obj.settlement_batch_id or obj.settlement_status in FINANCE_LOCKED_STATUSES:
+            self.message_user(request, "订单已进入财务/结算阶段，不能重新提交异常审核。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        if obj.settlement_status != "exception_review":
+            self.message_user(request, "只有异常待审核状态的订单可以重新提交 Admin 审核。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        if not self.is_cost_completed(obj):
+            self.message_user(request, "成本未完整，不能重新提交 Admin 审核。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+
+        if request.method == "POST":
+            response = (request.POST.get("exception_review_response") or "").strip()
+            if not response:
+                return self._review_text_form_response(
+                    request,
+                    obj,
+                    "重新提交 Admin 审核",
+                    "exception_review_response",
+                    "深圳仓回复说明",
+                    "重新提交 Admin 审核",
+                    initial_text=response,
+                    error_message="必须填写深圳仓回复说明。",
+                    help_text="可以说明已修改哪些成本/包裹信息，或说明无需修改的原因。",
+                )
+            ShopifyOrder.objects.filter(pk=obj.pk).update(
+                settlement_status="cost_confirmed",
+                exception_review_response=response,
+                exception_review_responded_by_id=request.user.pk,
+                exception_review_responded_at=timezone.now(),
+            )
+            self.message_user(request, "异常订单已重新提交 Admin/Finance 审核。")
+            return self._redirect_after_successful_review(request)
+
+        return self._review_text_form_response(
+            request,
+            obj,
+            "重新提交 Admin 审核",
+            "exception_review_response",
+            "深圳仓回复说明",
+            "重新提交 Admin 审核",
+            initial_text=obj.exception_review_response,
+            help_text="提交后订单会回到“深圳仓已确认成本，待 Admin 确认”状态。",
+        )
+
     def warehouse_review_order(self, request, object_id):
         obj = self.get_object(request, object_id)
         if not obj:
@@ -1635,7 +1819,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if obj.settlement_batch_id or obj.settlement_status in FINANCE_LOCKED_STATUSES:
             self.message_user(request, "订单已进入财务/结算阶段，不能重新提交深圳仓审核。", level=messages.WARNING)
             return self._redirect_to_change(obj)
-        if obj.settlement_status not in SHENZHEN_COST_EDITABLE_STATUSES:
+        if obj.settlement_status == "exception_review":
+            self.message_user(request, "异常待审核订单请使用“重新提交 Admin 审核”，并填写深圳仓回复说明。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        if obj.settlement_status not in {"pending_warehouse", "warehouse_fulfilled"}:
             self.message_user(request, "只有待深圳仓确认或深圳仓已发货状态可以提交深圳仓审核。", level=messages.WARNING)
             return self._redirect_to_change(obj)
         if not self.is_cost_completed(obj):
@@ -1697,6 +1884,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             "border-radius:4px;background:#0c66e4;color:#fff;font-weight:600;"
             "text-decoration:none;"
         )
+        exception_button_style = button_style + "background:#d92d20;"
         muted_style = "display:inline-block;margin-top:4px;color:#667085;"
         warning_style = "display:inline-block;margin-top:4px;color:#b42318;font-weight:600;"
 
@@ -1706,7 +1894,20 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     '<span style="{}">订单已进入 Admin/Finance 或结算阶段，深圳仓不能再审核或撤回。</span>',
                     warning_style,
                 )
-            if obj.settlement_status in SHENZHEN_COST_EDITABLE_STATUSES:
+            if obj.settlement_status == "exception_review":
+                if not cost_completed:
+                    return format_html(
+                        '<span style="{}">异常待审核：请先维护深圳仓商品成本、运费、拍单成本或包裹费用。</span>',
+                        warning_style,
+                    )
+                return format_html(
+                    '<span style="{}">异常待审核：请填写回复说明后重新提交 Admin/Finance 审核。</span><br>'
+                    '<a href="{}" style="{}">重新提交 Admin 审核</a>',
+                    warning_style,
+                    self._review_action_url(request, "shopify_sync_shopifyorder_resubmit_exception_review", obj),
+                    button_style,
+                )
+            if obj.settlement_status in {"pending_warehouse", "warehouse_fulfilled"}:
                 if not cost_completed:
                     return format_html(
                         '<span style="{}">成本未完整，暂不能提交审核。请先维护深圳仓商品成本、运费或包裹费用。</span>',
@@ -1731,7 +1932,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return format_html('<span style="{}">当前状态：{}</span>', muted_style, status_label)
 
         if self.is_finance_user(request) or self.is_super_admin(request):
-            if obj.settlement_status in SHENZHEN_COST_EDITABLE_STATUSES:
+            if obj.settlement_status in {"pending_warehouse", "warehouse_fulfilled"}:
                 return format_html(
                     '<span style="{}">等待深圳仓先确认成本。Admin/Finance 暂不能跳过深圳仓审核。</span>',
                     muted_style,
@@ -1744,16 +1945,37 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     )
                 if not cost_completed:
                     return format_html(
-                        '<span style="{}">成本未完整，不能进入待结算。</span>',
+                        '<span style="{}">成本未完整，不能进入待结算。</span><br>'
+                        '<a href="{}" style="{}">提出异常订单审核</a>',
                         warning_style,
+                        self._review_action_url(request, "shopify_sync_shopifyorder_request_exception_review", obj),
+                        exception_button_style,
                     )
                 return format_html(
                     '<a href="{}" style="{}" onclick="return confirm(\'确认 Admin/Finance 审核，并进入待结算状态？\');">Admin/Finance 确认成本 / 进入待结算</a>'
+                    '<a href="{}" style="{}">提出异常订单审核</a>'
                     '<br><span style="{}">深圳仓已确认成本。</span>',
                     self._review_action_url(request, "shopify_sync_shopifyorder_finance_review", obj),
                     button_style,
+                    self._review_action_url(request, "shopify_sync_shopifyorder_request_exception_review", obj),
+                    exception_button_style,
                     muted_style,
                 )
+            if obj.settlement_status == "admin_confirmed":
+                if obj.settlement_batch_id:
+                    return format_html(
+                        '<span style="{}">订单已加入结算批次，不能退回异常审核。</span>',
+                        warning_style,
+                    )
+                return format_html(
+                    '<a href="{}" style="{}">提出异常订单审核</a>'
+                    '<br><span style="{}">遗留 Admin 已确认状态，仍可在进入待结算前退回深圳仓重审。</span>',
+                    self._review_action_url(request, "shopify_sync_shopifyorder_request_exception_review", obj),
+                    exception_button_style,
+                    muted_style,
+                )
+            if obj.settlement_status == "exception_review":
+                return format_html('<span style="{}">已退回深圳仓异常审核，等待深圳仓重新提交。</span>', warning_style)
             if obj.settlement_status == "pending_payment":
                 return format_html('<span style="{}">Admin/Finance 已确认，订单已进入待结算。</span>', muted_style)
             if obj.settlement_status == "paid":
@@ -1767,6 +1989,48 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         return settlement_status_admin_label(obj.settlement_status)
     settlement_status_display.short_description = "结算状态"
     settlement_status_display.admin_order_field = "settlement_status"
+
+    def exception_review_summary(self, obj):
+        if not obj:
+            return "-"
+
+        requested_by = obj.exception_review_requested_by.get_username() if obj.exception_review_requested_by else "-"
+        responded_by = obj.exception_review_responded_by.get_username() if obj.exception_review_responded_by else "-"
+        requested_at = (
+            timezone.localtime(obj.exception_review_requested_at).strftime("%Y-%m-%d %H:%M")
+            if obj.exception_review_requested_at
+            else "-"
+        )
+        responded_at = (
+            timezone.localtime(obj.exception_review_responded_at).strftime("%Y-%m-%d %H:%M")
+            if obj.exception_review_responded_at
+            else "-"
+        )
+        if not any([
+            obj.exception_review_reason,
+            obj.exception_review_requested_at,
+            obj.exception_review_response,
+            obj.exception_review_responded_at,
+        ]):
+            return "-"
+
+        return format_html(
+            '<div style="line-height:1.6;max-width:760px;">'
+            '<strong>异常原因：</strong><br>'
+            '<span style="white-space:pre-line;">{}</span><br>'
+            '<span style="color:#667085;">提出人：{} ｜ 提出时间：{}</span><br><br>'
+            '<strong>深圳仓回复：</strong><br>'
+            '<span style="white-space:pre-line;">{}</span><br>'
+            '<span style="color:#667085;">回复人：{} ｜ 回复时间：{}</span>'
+            '</div>',
+            obj.exception_review_reason or "-",
+            requested_by,
+            requested_at,
+            obj.exception_review_response or "-",
+            responded_by,
+            responded_at,
+        )
+    exception_review_summary.short_description = "异常审核记录"
 
     def items_count(self, obj):
         items_qs = shenzhen_order_items(obj).select_related("package").order_by("id")
@@ -2095,6 +2359,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     "fulfilled_at",
                     "fulfillment_status_raw",
                     "warehouse_note",
+                            "exception_review_summary",
                             "shenzhen_items_total_cost_summary",
                         )
                     },

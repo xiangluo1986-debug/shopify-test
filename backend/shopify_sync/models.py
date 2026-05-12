@@ -25,7 +25,8 @@ class ShopifyOrder(models.Model):
         ('paid', '已支付'),
         ('transferred', '已转其他仓'),
         ('cancelled', '已取消深圳仓履约'),
-        ('exception', '异常待审核'),
+        ('exception', '同步异常待审核'),
+        ('exception_review', '异常待审核'),
     ]
 
     installation = models.ForeignKey(
@@ -109,6 +110,26 @@ class ShopifyOrder(models.Model):
     fulfillment_status_raw = models.CharField(max_length=255, blank=True)
     last_order_synced_at = models.DateTimeField(blank=True, null=True)
     warehouse_note = models.TextField(blank=True, null=True)
+
+    # Admin/Finance exception review workflow.
+    exception_review_reason = models.TextField(blank=True, default="")
+    exception_review_requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shopify_orders_exception_requested",
+    )
+    exception_review_requested_at = models.DateTimeField(null=True, blank=True)
+    exception_review_response = models.TextField(blank=True, default="")
+    exception_review_responded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shopify_orders_exception_responded",
+    )
+    exception_review_responded_at = models.DateTimeField(null=True, blank=True)
     
     # Transfer fields (转仓)
     transferred_at = models.DateTimeField(blank=True, null=True, help_text="转仓时间")
