@@ -59,6 +59,8 @@ For Shopify translation dry-run tasks:
 - Batch apply execution dry-run tasks may read the latest command validation JSON and write local execution dry-run JSON/HTML reports only. They must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, database writes, or git push.
 - Batch apply execution dry-run should output a blocked dry-run report with zero simulated executions when `command_execution_allowed=false`; if future command validation allows execution, it still only simulates the flow and must report `command_executed=false`.
 - Batch apply execution dry-run reports should include an execution approval template with `execution_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `real_execution_allowed=false`; editing this template must not execute commands or write Shopify.
+- Batch apply execution approval validation tasks may read the latest execution dry-run JSON and write local execution approval validation JSON/HTML reports only. They must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, database writes, or git push.
+- Batch apply execution approval validation should block approved status unless an execution approver is present, at least one simulated execution exists, every simulated item is approved and ready, payload preview is available, and all no-write / no-command-execution fields remain false.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -162,6 +164,7 @@ Recommended fields:
 - [ ] Batch apply command validation tasks are command-validation-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Batch apply execution dry-run tasks are execution-dry-run-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Batch apply execution dry-run reports keep execution approval pending and do not treat dry-run output as permission to execute commands or write Shopify.
+- [ ] Batch apply execution approval validation tasks are validation-only and never execute generated commands or perform Shopify apply/write/publish actions.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

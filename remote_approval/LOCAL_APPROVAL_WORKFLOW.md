@@ -41,6 +41,7 @@ python remote_approval_runner.py --task shopify_translation_batch_apply_executio
 python remote_approval_runner.py --task shopify_translation_batch_apply_command_generate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_command_validate --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_batch_apply_execution_dry_run --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_translation_batch_apply_execution_approval_validate --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -324,6 +325,25 @@ If `command_execution_allowed=false`, the task outputs a blocked dry-run report 
 The execution dry-run report includes an execution approval template. It starts as `execution_approval_status=pending`, allows only `pending`, `approved`, and `rejected`, and keeps `real_execution_allowed=false`. Editing this template does not execute commands or write to Shopify; any real execution must be a later separate write task with explicit confirmation.
 
 The execution dry-run task is execution-dry-run-only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. Its summary must explicitly show `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+
+### Batch Translation Apply Execution Approval Validation
+
+`shopify_translation_batch_apply_execution_approval_validate` reads only the execution dry-run report:
+
+```text
+logs/shopify_translation_batch_apply_execution_dry_run.json
+```
+
+It validates the execution approval status and writes local validation reports only:
+
+```text
+logs/shopify_translation_batch_apply_execution_approval_validation.json
+logs/shopify_translation_batch_apply_execution_approval_validation.html
+```
+
+`execution_approval_status=pending` keeps `real_execution_allowed=false` and does not make any simulated item eligible for real execution. `execution_approval_status=rejected` also keeps execution blocked. `execution_approval_status=approved` is only valid when an execution approver is present, at least one simulated execution exists, every simulated item has `execution_decision=approve`, `execution_approval_ready=true`, payload preview available, and all no-write / no-command-execution fields remain false.
+
+The execution approval validation task is validation-only. It must not execute commands, call Shopify APIs, call `translationsRegister`, mutate Shopify, publish, apply, update, write the database, or git push. Its summary must explicitly show `command_executed=false`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
