@@ -19,6 +19,8 @@ MAX_LOCALES = 5
 MAX_ITEMS = MAX_PRODUCTS * MAX_LOCALES
 EXPECTED_FIELDS = ["title", "body_html", "meta_title", "meta_description"]
 READY_RECOMMENDATIONS = {"ready_for_human_approval", "ready_for_apply"}
+FINAL_APPROVAL_ALLOWED_VALUES = ["pending", "approved", "rejected"]
+DEFAULT_FINAL_APPROVAL_STATUS = "pending"
 
 
 def run_shopify_translation_batch_apply_execution_preview_task(mode: str) -> dict:
@@ -58,6 +60,7 @@ def run_shopify_translation_batch_apply_execution_preview_task(mode: str) -> dic
                 not_apply_items.append(_not_apply_item(item, reasons, plan_item))
 
     end_time = utc_now_iso()
+    final_approval_summary = _final_approval_summary()
     payload = {
         "timestamp": end_time,
         "task": TASK_NAME,
@@ -73,6 +76,7 @@ def run_shopify_translation_batch_apply_execution_preview_task(mode: str) -> dic
         "all_no_write_confirmed": bool(validation_report.get("all_no_write_confirmed"))
         if validation_report
         else False,
+        "shopify_write_performed": False,
         "apply_performed": False,
         "publish_performed": False,
         "update_performed": False,
@@ -89,6 +93,11 @@ def run_shopify_translation_batch_apply_execution_preview_task(mode: str) -> dic
         else 0,
         "preview_apply_count": len(preview_apply_items),
         "not_apply_count": len(not_apply_items),
+        "final_approval_summary": final_approval_summary,
+        "final_approval_required": final_approval_summary["final_approval_required"],
+        "final_approval_status": final_approval_summary["final_approval_status"],
+        "final_approval_ready_count": final_approval_summary["final_approval_ready_count"],
+        "final_apply_allowed": final_approval_summary["final_apply_allowed"],
         "preview_apply_items": preview_apply_items,
         "not_apply_items": not_apply_items,
         "validation_errors": validation_errors,
@@ -130,12 +139,17 @@ def run_shopify_translation_batch_apply_execution_preview_task(mode: str) -> dic
         "preview_only": True,
         "no_shopify_writes_performed": True,
         "all_no_write_confirmed": payload["all_no_write_confirmed"],
+        "shopify_write_performed": False,
         "apply_performed": False,
         "publish_performed": False,
         "translations_register_performed": False,
         "total_items": len(validation_items),
         "preview_apply_count": len(preview_apply_items),
         "not_apply_count": len(not_apply_items),
+        "final_approval_status": final_approval_summary["final_approval_status"],
+        "final_approval_required": final_approval_summary["final_approval_required"],
+        "final_approval_ready_count": final_approval_summary["final_approval_ready_count"],
+        "final_apply_allowed": final_approval_summary["final_apply_allowed"],
         "validation_errors_count": len(validation_errors),
         "detected_issue_summary": payload["detected_issue_summary"],
         "approval_message": _build_approval_message(payload, json_preview_path, html_preview_path),
@@ -277,6 +291,18 @@ def _not_apply_item(item: dict, reasons: list[str], plan_item: dict) -> dict:
     }
 
 
+def _final_approval_summary() -> dict:
+    return {
+        "final_approval_required": True,
+        "final_approval_status": DEFAULT_FINAL_APPROVAL_STATUS,
+        "final_approval_allowed_values": FINAL_APPROVAL_ALLOWED_VALUES,
+        "final_approved_by": "",
+        "final_approval_notes": "",
+        "final_approval_ready_count": 0,
+        "final_apply_allowed": False,
+    }
+
+
 def _plan_item_index(plan: dict) -> dict[tuple[str, str], dict]:
     items = plan.get("plan_items", []) if isinstance(plan.get("plan_items"), list) else []
     return {_item_key(item): item for item in items}
@@ -348,8 +374,13 @@ def _render_html_preview(payload: dict) -> str:
             ("Validated For Future Apply", "validated_for_future_apply_count"),
             ("Preview Apply Count", "preview_apply_count"),
             ("Not Apply Count", "not_apply_count"),
+            ("Final Approval Required", "final_approval_required"),
+            ("Final Approval Status", "final_approval_status"),
+            ("Final Approval Ready Count", "final_approval_ready_count"),
+            ("Final Apply Allowed", "final_apply_allowed"),
             ("All No-Write Confirmed", "all_no_write_confirmed"),
             ("No Shopify Writes Performed", "no_shopify_writes_performed"),
+            ("Shopify Write Performed", "shopify_write_performed"),
             ("Apply Performed", "apply_performed"),
             ("Publish Performed", "publish_performed"),
             ("Translations Register Performed", "translations_register_performed"),
@@ -378,6 +409,8 @@ def _render_html_preview(payload: dict) -> str:
   <div class="status {status_class}">{escape(status)}: {escape(payload.get("detected_issue_summary", ""))}</div>
   <h2>Summary</h2>
   <table><tbody>{summary_rows}</tbody></table>
+  <h2>Final Approval Template</h2>
+  { _render_final_approval_summary(payload.get("final_approval_summary", {})) }
   <h2>Would Apply Items</h2>
   <table>
     <thead>
@@ -402,6 +435,7 @@ def _render_html_preview(payload: dict) -> str:
   <ul>
     <li>This task is preview-only.</li>
     <li>No Shopify writes were performed.</li>
+    <li>shopify_write_performed=false.</li>
     <li>apply_performed=false and publish_performed=false.</li>
     <li>translations_register_performed=false.</li>
     <li>Apply, publish, update, mutation, and translationsRegister are not available in this task.</li>
@@ -438,6 +472,27 @@ def _render_not_apply_row(item: dict) -> str:
         f"<td>{escape('; '.join(item.get('not_apply_reason') or []))}</td>"
         f"<td>{escape(', '.join(item.get('would_apply_fields_if_approved') or []))}</td>"
         "</tr>"
+    )
+
+
+def _render_final_approval_summary(summary: dict) -> str:
+    rows = "\n".join(
+        _summary_row(label, summary.get(key))
+        for label, key in [
+            ("Final Approval Required", "final_approval_required"),
+            ("Final Approval Status", "final_approval_status"),
+            ("Allowed Values", "final_approval_allowed_values"),
+            ("Final Approved By", "final_approved_by"),
+            ("Final Approval Notes", "final_approval_notes"),
+            ("Final Approval Ready Count", "final_approval_ready_count"),
+            ("Final Apply Allowed", "final_apply_allowed"),
+        ]
+    )
+    return (
+        "<table><tbody>"
+        f"{rows}"
+        "</tbody></table>"
+        "<p>The final approval template is review-only. Editing it does not write to Shopify.</p>"
     )
 
 
@@ -494,12 +549,15 @@ def _build_approval_message(payload: dict, json_preview_path: Path, html_preview
         f"Total items: {payload.get('total_items')}\n"
         f"Preview apply items: {payload.get('preview_apply_count')}\n"
         f"Not apply items: {payload.get('not_apply_count')}\n"
+        f"Final approval status: {payload.get('final_approval_summary', {}).get('final_approval_status')}\n"
+        f"Final apply allowed: {payload.get('final_approval_summary', {}).get('final_apply_allowed')}\n"
         f"Validation errors: {len(payload.get('validation_errors') or [])}\n"
         "Preview JSON:\n"
         f"{json_preview_path}\n\n"
         "Preview HTML:\n"
         f"{html_preview_path}\n"
         "Preview only. No Shopify writes performed by this task.\n"
+        "shopify_write_performed=false.\n"
         "apply_performed=false; publish_performed=false; translationsRegister_performed=false.\n\n"
         "Allowed actions only:\n"
         "Y / 1 = keep preview files\n"

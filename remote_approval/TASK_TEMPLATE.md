@@ -48,6 +48,7 @@ For Shopify translation dry-run tasks:
 - Batch apply plan validation should allow `manual_decision=approve` only for items that were already ready for human approval, have `qa_status=pass`, `eligible_for_apply=true`, no QA failures, and confirmed no-write status.
 - Batch apply execution preview tasks may read the latest apply plan validation JSON and write local preview JSON/HTML reports only. They must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push.
 - Batch apply execution previews should list only future-approved items in `preview_apply_items` and list every excluded item in `not_apply_items` with reasons.
+- Batch apply execution previews should include `final_approval_summary` with `final_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `final_apply_allowed=false`; they should also report `shopify_write_performed=false`.
 - Supported first-phase locales are `de`, `fr`, `es`, `it`, and `ja`.
 - Batch multi-locale dry-run tasks are limited to 3 products and 5 locales and must not auto-scan the whole Shopify store.
 - Multi-locale dry-run tasks should continue after a single locale fails and record `failure_type` per locale.
@@ -144,6 +145,7 @@ Recommended fields:
 - [ ] Batch apply plan tasks include manual review fields while keeping all items pending until a future confirmed write workflow.
 - [ ] Batch apply plan validation tasks are validation-only and never perform Shopify apply/write/publish actions.
 - [ ] Batch apply execution preview tasks are preview-only and never perform Shopify apply/write/publish actions.
+- [ ] Batch apply execution previews keep final approval pending and do not treat preview generation as permission to write.
 - [ ] Batch multi-locale Shopify translation tasks keep generated HTML/JSON review files ignored by Git.
 - [ ] This checklist is revisited before commit.
 

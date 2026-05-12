@@ -116,7 +116,8 @@ python manage.py flush
 - Batch apply plan validation may read manually edited `logs/shopify_translation_batch_apply_plan.json` and write local validation JSON/HTML reports only. It must not apply, publish, update, call mutations, or call `translationsRegister`.
 - Batch apply plan validation should only treat manually approved items as future-apply eligible when the item was already ready for human approval, QA passed, `eligible_for_apply=true`, `qa_failures` is empty, and no-write was confirmed.
 - Batch apply execution preview may read `logs/shopify_translation_batch_apply_plan_validation.json` and write local preview JSON/HTML reports only. It must only show which product / locale / fields would be prepared for a future apply task.
-- Batch apply execution preview must report `preview_only=true`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`; it must not call Shopify APIs, mutations, `translationsRegister`, publish, apply, or update paths.
+- Batch apply execution preview must report `preview_only=true`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`; it must not call Shopify APIs, mutations, `translationsRegister`, publish, apply, or update paths.
+- Batch apply execution preview should include a final approval template with `final_approval_status=pending`, allowed values `pending`, `approved`, and `rejected`, and `final_apply_allowed=false` until a future separate write task is explicitly confirmed.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.

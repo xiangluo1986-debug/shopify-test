@@ -237,7 +237,9 @@ logs/shopify_translation_batch_apply_execution_preview.html
 
 Only items with an approved manual decision, validated future-apply status, QA pass, no-write confirmation, and future-apply eligibility are shown in `preview_apply_items`. All other items are listed in `not_apply_items` with reasons.
 
-The preview is for human review only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `preview_only=true`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
+The preview includes a final approval template under `final_approval_summary`. It starts as `final_approval_status=pending`, allows only `pending`, `approved`, and `rejected`, and keeps `final_apply_allowed=false`.
+
+The preview is for human review only. It must not call Shopify APIs, `translationsRegister`, mutations, publish, apply, update, database writes, or git push. Its summary must explicitly show `preview_only=true`, `shopify_write_performed=false`, `apply_performed=false`, `publish_performed=false`, and `translations_register_performed=false`.
 
 ### `System.Speech` Is Unavailable
 
