@@ -1150,6 +1150,25 @@ This task is local-report-only. It must not call Shopify APIs, call mutations, c
 
 The readiness package may output `readiness_status=csv_json_small_batch_real_write_ready_for_human_approval` only when the CSV/JSON plan is ready, the small batch execute report is a no-write dry-run, `plan_source=csv_json`, product/locale/entries match, entry count is at most 5, fields are limited to `meta_title` and `meta_description`, and every proposed value is non-empty and within field limits. It must keep `readiness_package_only=true`, `manual_human_approval_required=true`, `real_write_allowed=false`, `next_step_manual_real_run_required=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### CSV/JSON Small Batch Manual Real-Run Test Package
+
+`shopify_translation_csv_json_small_batch_manual_real_run_test_package` reads:
+
+- `logs/shopify_translation_csv_json_small_batch_apply_plan_package.json`
+- `logs/shopify_translation_small_batch_apply_execute.json`
+- `logs/shopify_translation_csv_json_small_batch_real_write_readiness_package.json`
+
+It writes:
+
+```text
+logs/shopify_translation_csv_json_small_batch_manual_real_run_test_package.json
+logs/shopify_translation_csv_json_small_batch_manual_real_run_test_package.html
+```
+
+This task is local-report-only. It must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It may show manual PowerShell commands for a later human-run `real-run` followed by the post-write audit, but it must never execute those commands, set ACK variables, or trigger Shopify work.
+
+The manual test package may output `manual_test_package_status=csv_json_small_batch_manual_real_run_test_ready` only when the CSV/JSON apply plan is ready, the small batch execute report is a no-write dry-run from `plan_source=csv_json`, the CSV/JSON readiness report is ready, product/locale/entries match, entry count is at most 5, fields are limited to `meta_title` and `meta_description`, every proposed value is non-empty and within field limits, and all precondition reports remain no-write. It must keep `manual_test_package_only=true`, `manual_test_required=true`, `real_run_not_executed_by_this_task=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `bulk_write_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### `System.Speech` Is Unavailable
 
 The runner tries Windows PowerShell `System.Speech` for local voice prompts. If unavailable, it falls back to console text or a beep. Voice failure must not fail the task.
