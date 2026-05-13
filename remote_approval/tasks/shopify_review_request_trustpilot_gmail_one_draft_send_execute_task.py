@@ -14,12 +14,14 @@ COMMAND_LABEL = "shopify_review_request_trustpilot_gmail_one_draft_send_execute"
 SOURCE_PREFLIGHT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight.json"
 SOURCE_PREFLIGHT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight.html"
 PROTECTED_DRAFT_SOURCE_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_locked_runner.json"
+REPEAT_CUSTOMER_GUARD_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_repeat_customer_guard.json"
 REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_send_execute.json"
 REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_send_execute.html"
 
 DRY_RUN_STATUS = "dry_run_real_send_not_executed"
 SENT_STATUS = "one_gmail_draft_sent_and_needs_send_audit"
 EXPECTED_PREFLIGHT_STATUS = "trustpilot_gmail_one_draft_send_final_preflight_ready"
+EXPECTED_REPEAT_CUSTOMER_GUARD_STATUS = "repeat_customer_guard_passed"
 EXPECTED_ORDER_NAME = "#22621"
 EXPECTED_MASKED_EMAIL = "m***@gmail.com"
 EXPECTED_DRAFT_ID_PARTIAL = "r-22...3521"
@@ -87,6 +89,15 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _read_repeat_customer_guard_report() -> tuple[dict, str]:
+    if not REPEAT_CUSTOMER_GUARD_JSON_PATH.exists():
+        return {}, "blocked_repeat_customer_guard_missing"
+    try:
+        return json.loads(REPEAT_CUSTOMER_GUARD_JSON_PATH.read_text(encoding="utf-8")), ""
+    except json.JSONDecodeError as exc:
+        return {}, _sanitize_text(f"blocked_repeat_customer_guard_missing: guard JSON parse failed: {exc}")
+
+
 def _gate_status() -> dict:
     requested_send_enabled = os.environ.get(SEND_DRAFT_ENV, "").strip() == "1"
     requested_send_max = os.environ.get(SEND_DRAFT_MAX_ENV, "").strip()
@@ -144,6 +155,9 @@ def _blocking_conditions(source_preflight: dict, source_error: str, source_priva
     if gates["ack_present"] and not gates["ack_valid"]:
         conditions.append({"status": "blocked_invalid_send_ack", "detail": "TRUSTPILOT_GMAIL_SEND_DRAFT_ACK is invalid"})
     if not gates["dry_run"]:
+        repeat_guard_condition = _repeat_customer_guard_blocking_condition()
+        if repeat_guard_condition:
+            conditions.append(repeat_guard_condition)
         if not gates["requested_send_enabled"]:
             conditions.append({"status": "blocked_missing_send_enabled", "detail": "TRUSTPILOT_GMAIL_SEND_DRAFT is not 1"})
         if not gates["requested_send_max"]:
@@ -151,6 +165,34 @@ def _blocking_conditions(source_preflight: dict, source_error: str, source_priva
         if not gates["ack_present"]:
             conditions.append({"status": "blocked_missing_send_ack", "detail": "TRUSTPILOT_GMAIL_SEND_DRAFT_ACK is missing"})
     return conditions
+
+
+def _repeat_customer_guard_blocking_condition() -> dict:
+    guard_report, guard_error = _read_repeat_customer_guard_report()
+    if guard_error:
+        return {"status": "blocked_repeat_customer_guard_missing", "detail": guard_error}
+    guard_status = guard_report.get("repeat_customer_guard_status")
+    if guard_status != EXPECTED_REPEAT_CUSTOMER_GUARD_STATUS:
+        if guard_status == "blocked_first_order_customer" or guard_report.get("first_order_customer") is True:
+            return {
+                "status": "blocked_first_order_customer",
+                "detail": "Repeat-customer guard indicates this is a first-order customer.",
+            }
+        return {
+            "status": "blocked_repeat_customer_guard_not_passed",
+            "detail": "Repeat-customer guard did not pass.",
+        }
+    if guard_report.get("repeat_customer_confirmed") is not True:
+        return {
+            "status": "blocked_repeat_customer_guard_not_passed",
+            "detail": "Repeat-customer guard did not confirm repeat customer.",
+        }
+    if guard_report.get("future_trustpilot_send_allowed") is not True:
+        return {
+            "status": "blocked_repeat_customer_guard_not_passed",
+            "detail": "Repeat-customer guard does not allow future Trustpilot send.",
+        }
+    return {}
 
 
 def _send_result(source_preflight: dict, gates: dict, blocking_conditions: list[dict]) -> dict:
@@ -327,6 +369,7 @@ def _build_payload(
     duration_seconds: float,
 ) -> dict:
     safety = _safety_summary(send_result)
+    repeat_guard_report, repeat_guard_error = _read_repeat_customer_guard_report()
     payload = {
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
@@ -347,6 +390,11 @@ def _build_payload(
         "selected_order_name": _safe_text(source_preflight.get("selected_order_name", "")),
         "selected_masked_email": _safe_masked_email(source_preflight.get("selected_masked_email", "")),
         "source_gmail_draft_id_partial": _safe_text(source_preflight.get("source_gmail_draft_id_partial", "")),
+        "repeat_customer_guard_status": _safe_text(repeat_guard_report.get("repeat_customer_guard_status", "")),
+        "repeat_customer_guard_report_present": not bool(repeat_guard_error),
+        "repeat_customer_confirmed": repeat_guard_report.get("repeat_customer_confirmed") is True,
+        "future_trustpilot_send_allowed": repeat_guard_report.get("future_trustpilot_send_allowed") is True,
+        "repeat_customer_guard_error_sanitized": _sanitize_text(repeat_guard_error),
         "requested_send_enabled": gates["requested_send_enabled"],
         "requested_send_max": gates["requested_send_max"],
         "ack_valid": gates["ack_valid"],
@@ -412,6 +460,9 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "selected_order_name": payload["selected_order_name"],
         "selected_masked_email": payload["selected_masked_email"],
         "source_gmail_draft_id_partial": payload["source_gmail_draft_id_partial"],
+        "repeat_customer_guard_status": payload["repeat_customer_guard_status"],
+        "repeat_customer_confirmed": payload["repeat_customer_confirmed"],
+        "future_trustpilot_send_allowed": payload["future_trustpilot_send_allowed"],
         "requested_send_enabled": payload["requested_send_enabled"],
         "requested_send_max": payload["requested_send_max"],
         "ack_valid": payload["ack_valid"],
@@ -471,6 +522,9 @@ def _render_html_report(payload: dict) -> str:
   <p>Selected order: <code>{escape(payload["selected_order_name"])}</code></p>
   <p>Selected masked email: <code>{escape(payload["selected_masked_email"])}</code></p>
   <p>Source Gmail draft id partial: <code>{escape(payload["source_gmail_draft_id_partial"])}</code></p>
+  <p>Repeat-customer guard status: <code>{escape(payload["repeat_customer_guard_status"])}</code></p>
+  <p>Repeat customer confirmed: <strong>{escape(str(payload["repeat_customer_confirmed"]))}</strong></p>
+  <p>Future Trustpilot send allowed: <strong>{escape(str(payload["future_trustpilot_send_allowed"]))}</strong></p>
   <p>Dry-run: <strong>{escape(str(payload["dry_run"]))}</strong></p>
   <p>Real send allowed: <strong>{escape(str(payload["real_send_allowed"]))}</strong></p>
   <p>Sent count: <strong>{escape(str(payload["sent_count"]))}</strong></p>
