@@ -92,6 +92,13 @@ def _build_payload(
     current_entries = list(
         (docker_result.get("manual_action_package") or {}).get("eligible_entries") or []
     )
+    current_entries.extend(
+        _draft_fallback_entries_for_targets(
+            audit_target_entries,
+            current_entries,
+            (docker_result.get("manual_action_package") or {}).get("draft_entries") or [],
+        )
+    )
     if docker_result.get("failure_type"):
         match_result = _current_scan_failed_match(
             audit_target_entries, docker_result["failure_type"]
@@ -144,6 +151,21 @@ def _build_payload(
         "locked_next_batch_target_entries": match_result["locked_entries"],
         "locked_next_batch_max_entries": LOCKED_MAX_ENTRIES,
         "locked_next_batch_entry_count": len(match_result["locked_entries"]),
+        "locked_next_batch_planned_values_persisted": all(
+            bool(entry.get("planned_value") or entry.get("proposed_translation"))
+            for entry in match_result["locked_entries"]
+        ),
+        "locked_next_batch_planned_value_sources": [
+            {
+                "locale": entry.get("locale", ""),
+                "field": entry.get("field", ""),
+                "planned_value_source": entry.get("planned_value_source", ""),
+                "planned_value_present": bool(
+                    entry.get("planned_value") or entry.get("proposed_translation")
+                ),
+            }
+            for entry in match_result["locked_entries"]
+        ],
         "next_batch_candidate_count": match_result["candidate_count"],
         "would_write_count": match_result["would_write_count"],
         "blocking_conditions": blocking_conditions,
@@ -280,6 +302,9 @@ def _match_locked_targets(
         if audit_entry.get("digest") and item.get("digest") != audit_entry.get("digest"):
             reasons.append("next_batch_digest_changed")
             blocking_conditions.append("next_batch_digest_changed")
+        if not (item.get("planned_value") or item.get("proposed_translation")):
+            reasons.append("next_batch_missing_planned_value")
+            blocking_conditions.append("next_batch_missing_planned_value")
         seo_issue = _seo_blocking_reason(item)
         if seo_issue:
             reasons.append(seo_issue)
@@ -293,12 +318,98 @@ def _match_locked_targets(
         blocking_conditions.append("next_batch_candidate_count_not_two")
     if would_write_count != LOCKED_MAX_ENTRIES:
         blocking_conditions.append("next_batch_would_write_count_not_two")
+    if any(
+        not (entry.get("planned_value") or entry.get("proposed_translation"))
+        for entry in locked_entries
+    ):
+        blocking_conditions.append("next_batch_locked_entries_missing_planned_values")
     return {
         "locked_entries": locked_entries,
         "candidate_count": candidate_count,
         "would_write_count": would_write_count,
         "blocking_conditions": _unique(blocking_conditions),
     }
+
+
+def _draft_fallback_entries_for_targets(
+    audit_entries: dict[tuple[str, str], dict],
+    current_entries: list[dict],
+    draft_entries: list[dict],
+) -> list[dict]:
+    fallback_entries = []
+    for target in LOCKED_TARGETS:
+        if _entry_for_target(current_entries, target["locale"], target["field"]):
+            continue
+        audit_entry = audit_entries.get((target["locale"], target["field"])) or {}
+        draft_entry = _entry_for_target(draft_entries, target["locale"], target["field"])
+        if not _audit_entry_allows_draft_fallback(audit_entry):
+            continue
+        item = _draft_fallback_entry(audit_entry, draft_entry)
+        if item:
+            fallback_entries.append(item)
+    return fallback_entries
+
+
+def _audit_entry_allows_draft_fallback(audit_entry: dict) -> bool:
+    return bool(
+        audit_entry
+        and audit_entry.get("would_write") is True
+        and audit_entry.get("current_translation_present") is False
+        and audit_entry.get("current_translation_outdated") is False
+        and not audit_entry.get("blocking_reasons")
+        and not audit_entry.get("seo_warning")
+        and audit_entry.get("digest")
+    )
+
+
+def _draft_fallback_entry(audit_entry: dict, draft_entry: dict) -> dict:
+    if not draft_entry:
+        return {}
+    planned_value = (
+        draft_entry.get("planned_value")
+        or draft_entry.get("proposed_translation")
+        or draft_entry.get("draft_value")
+        or ""
+    )
+    digest = draft_entry.get("digest") or draft_entry.get("source_digest") or ""
+    field = audit_entry.get("field", "")
+    if not planned_value:
+        return {}
+    if not digest or digest != audit_entry.get("digest"):
+        return {}
+    item = _safe_entry(
+        {
+            **audit_entry,
+            **draft_entry,
+            "product_id": audit_entry.get("product_id") or PRODUCT_ID,
+            "locale": audit_entry.get("locale", ""),
+            "field": field,
+            "key": audit_entry.get("key") or field,
+            "resource_key": audit_entry.get("resource_key") or field,
+            "digest": digest,
+            "planned_value": planned_value,
+            "proposed_translation": planned_value,
+            "planned_value_source": "draft_package_fallback",
+            "proposed_value_chars": len(planned_value),
+            "would_write": True,
+            "current_translation_present": bool(draft_entry.get("current_translation_present")),
+            "current_translation_outdated": bool(draft_entry.get("current_translation_outdated")),
+            "blocking_reasons": [],
+            "seo_warning": "",
+        }
+    )
+    if item.get("current_translation_present") or item.get("current_translation_outdated"):
+        return {}
+    if _seo_blocking_reason(item):
+        return {}
+    item["planned_value_source"] = "draft_package_fallback"
+    item["draft_validation_status"] = draft_entry.get("draft_validation_status", "")
+    item["draft_seo_validation_status"] = draft_entry.get("draft_seo_validation_status", "")
+    item["draft_eligible_for_apply_plan"] = bool(draft_entry.get("draft_eligible_for_apply_plan"))
+    item["draft_seo_eligible_for_apply_plan"] = bool(
+        draft_entry.get("draft_seo_eligible_for_apply_plan")
+    )
+    return item
 
 
 def _current_scan_failed_match(
@@ -389,6 +500,8 @@ def _render_html(payload: dict) -> str:
             ("Locked Next Batch Ready", "locked_next_batch_ready"),
             ("Target Product ID", "locked_next_batch_target_product_id"),
             ("Locked Entry Count", "locked_next_batch_entry_count"),
+            ("Planned Values Persisted", "locked_next_batch_planned_values_persisted"),
+            ("Planned Value Sources", "locked_next_batch_planned_value_sources"),
             ("Next Batch Candidate Count", "next_batch_candidate_count"),
             ("Would Write Count", "would_write_count"),
             ("Future Real Write Allowed", "future_next_batch_real_write_allowed"),
@@ -417,6 +530,8 @@ def _render_html(payload: dict) -> str:
         f"<td>{escape(str(entry.get('key', '')))}</td>"
         f"<td>{escape(str(entry.get('resource_key', '')))}</td>"
         f"<td>{escape(str(entry.get('digest', '')))}</td>"
+        f"<td>{escape(str(entry.get('planned_value', '') or entry.get('proposed_translation', '')))}</td>"
+        f"<td>{escape(str(entry.get('planned_value_source', '')))}</td>"
         f"<td>{escape(str(entry.get('proposed_value_chars', '')))}</td>"
         f"<td>{escape(str(entry.get('would_write', '')))}</td>"
         f"<td>{escape(str(entry.get('current_translation_present', '')))}</td>"
@@ -442,7 +557,7 @@ def _render_html(payload: dict) -> str:
   <table border="1" cellspacing="0" cellpadding="6"><tbody>{safety_rows}</tbody></table>
   <h2>Locked Target Entries</h2>
   <table border="1" cellspacing="0" cellpadding="6">
-    <thead><tr><th>Locale</th><th>Field</th><th>Key</th><th>Resource Key</th><th>Digest</th><th>Proposed Value Chars</th><th>Would Write</th><th>Current Translation</th><th>Outdated</th><th>Blocking Reasons</th><th>SEO Warning</th></tr></thead>
+    <thead><tr><th>Locale</th><th>Field</th><th>Key</th><th>Resource Key</th><th>Digest</th><th>Planned Value</th><th>Planned Value Source</th><th>Proposed Value Chars</th><th>Would Write</th><th>Current Translation</th><th>Outdated</th><th>Blocking Reasons</th><th>SEO Warning</th></tr></thead>
     <tbody>{entry_rows}</tbody>
   </table>
   <h2>Dry-Run Command Preview</h2>
@@ -462,6 +577,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         "Phase 16.7 next-batch locked dry-run package generated.\n"
         f"- next_batch_locked_status: {payload.get('next_batch_locked_status')}\n"
         f"- locked_next_batch_ready: {payload.get('locked_next_batch_ready')}\n"
+        f"- locked_next_batch_planned_values_persisted: {payload.get('locked_next_batch_planned_values_persisted')}\n"
         f"- next_batch_candidate_count: {payload.get('next_batch_candidate_count')}\n"
         f"- would_write_count: {payload.get('would_write_count')}\n"
         f"- future_next_batch_real_write_allowed: {payload.get('future_next_batch_real_write_allowed')}\n"

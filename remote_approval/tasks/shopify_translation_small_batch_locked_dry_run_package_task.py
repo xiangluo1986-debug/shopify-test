@@ -469,12 +469,41 @@ def safe_entry(entry):
         "key": key,
         "resource_key": key,
         "digest": entry.get("digest", "") or entry.get("planned_translatable_content_digest", ""),
+        "planned_value": planned_value,
+        "proposed_translation": planned_value,
+        "planned_value_source": "manual_action_entries" if planned_value else "",
         "proposed_value_chars": len(planned_value),
         "would_write": bool(entry.get("would_write")),
         "current_translation_present": present,
         "current_translation_outdated": outdated,
         "blocking_reasons": list(entry.get("blocking_reasons") or []),
         "seo_warning": "",
+    }}
+
+def safe_draft_entry(entry):
+    field = entry.get("field") or entry.get("source_key") or ""
+    planned_value = entry.get("draft_value") or entry.get("proposed_translation") or ""
+    return {{
+        "product_id": PRODUCT_ID,
+        "locale": entry.get("locale", ""),
+        "field": field,
+        "key": field,
+        "resource_key": field,
+        "digest": entry.get("source_digest", "") or entry.get("digest", ""),
+        "planned_value": planned_value,
+        "proposed_translation": planned_value,
+        "planned_value_source": "draft_package_fallback" if planned_value else "",
+        "source_value": entry.get("source_value", ""),
+        "proposed_value_chars": len(planned_value),
+        "would_write": bool(planned_value),
+        "current_translation_present": bool(entry.get("existing_translation_present")),
+        "current_translation_outdated": entry.get("existing_translation_outdated") is True,
+        "blocking_reasons": [],
+        "seo_warning": "",
+        "draft_validation_status": entry.get("validation_status", ""),
+        "draft_seo_validation_status": entry.get("seo_validation_status", ""),
+        "draft_eligible_for_apply_plan": bool(entry.get("eligible_for_apply_plan")),
+        "draft_seo_eligible_for_apply_plan": bool(entry.get("seo_eligible_for_apply_plan")),
     }}
 
 result = {{
@@ -511,12 +540,14 @@ else:
         selected_product_id=PRODUCT_ID,
     )
     entries = [safe_entry(entry) for entry in manual.get("manual_action_entries", [])]
+    draft_entries = [safe_draft_entry(entry) for entry in draft.get("draft_entries", [])]
     result["manual_action_package"] = {{
         "package_status": manual.get("package_status", ""),
         "entry_count": manual.get("entry_count", 0),
         "blocked_entry_count": manual.get("blocked_entry_count", 0),
         "blocking_conditions": list(manual.get("blocking_conditions") or []),
         "eligible_entries": [entry for entry in entries if entry.get("would_write")],
+        "draft_entries": draft_entries,
     }}
     result["shopify_api_call_performed"] = True
     result["success"] = True
@@ -534,6 +565,9 @@ def _safe_entry(entry: dict) -> dict:
         "key": entry.get("key", "") or entry.get("resource_key", "") or field,
         "resource_key": entry.get("resource_key", "") or entry.get("key", "") or field,
         "digest": entry.get("digest", ""),
+        "planned_value": entry.get("planned_value", ""),
+        "proposed_translation": entry.get("proposed_translation", ""),
+        "planned_value_source": entry.get("planned_value_source", ""),
         "proposed_value_chars": chars,
         "would_write": bool(entry.get("would_write")),
         "current_translation_present": bool(entry.get("current_translation_present")),

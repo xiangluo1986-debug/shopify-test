@@ -269,6 +269,9 @@ def _build_payload(
     missing_target_diagnostics = list(
         docker_result.get("next_batch_missing_target_diagnostics") or []
     )
+    fallback_target_keys = list(
+        docker_result.get("next_batch_locked_report_fallback_target_keys") or []
+    )
 
     payload = {
         "phase": PHASE,
@@ -288,6 +291,7 @@ def _build_payload(
         "next_batch_selected_target_keys": selected_target_keys,
         "next_batch_missing_target_keys": missing_target_keys,
         "next_batch_missing_target_diagnostics": missing_target_diagnostics,
+        "next_batch_locked_report_fallback_target_keys": fallback_target_keys,
         "max_entries": int(settings.get("max_entries") or 0),
         "source_locked_dry_run_report_path": str(LOCKED_DRY_RUN_REPORT_PATH),
         "source_locked_dry_run_report_exists": bool(locked_diag.get("file_exists")),
@@ -469,6 +473,7 @@ def safe_entry(entry):
         "pre_write_digest": entry.get("pre_write_digest", ""),
         "digest_matches": bool(entry.get("digest_matches")),
         "proposed_value_chars": len(planned_value),
+        "planned_value_source": entry.get("planned_value_source", "manual_action_entries"),
         "seo_warning": seo_warning(entry.get("field", ""), len(planned_value)),
         "would_write": bool(entry.get("would_write")),
         "current_translation_present": bool(state.get("existing_translation_present")),
@@ -528,6 +533,15 @@ def locked_entry(locale, field):
             return entry
     return {{}}
 
+def locked_planned_value(entry):
+    return entry.get("planned_value") or entry.get("proposed_translation") or ""
+
+def target_is_exactly_requested(target):
+    return (
+        target in LOCKED_TARGETS
+        and settings.get("requested_next_batch_targets") == LOCKED_TARGET_LABEL
+    )
+
 def missing_target_diagnostic(target, scan_entries, readback_entries):
     scan_entry = first_scan_entry(scan_entries, target)
     readback_entry = first_scan_entry(readback_entries, target)
@@ -537,6 +551,7 @@ def missing_target_diagnostic(target, scan_entries, readback_entries):
         or scan_entry.get("proposed_translation")
         or readback_entry.get("planned_value")
         or readback_entry.get("proposed_translation")
+        or locked_planned_value(locked)
         or ""
     )
     proposed_value_chars = len(planned_value) if planned_value else int(locked.get("proposed_value_chars") or 0)
@@ -567,6 +582,8 @@ def missing_target_diagnostic(target, scan_entries, readback_entries):
     blocking_reasons.extend(scan_entry.get("blocking_reasons") or [])
     blocking_reasons.extend(readback_entry.get("blocking_reasons") or [])
     warning = seo_warning(target.get("field", ""), proposed_value_chars)
+    if not locked_planned_value(locked):
+        blocking_reasons.append("missing_locked_report_planned_value")
     if warning:
         blocking_reasons.append(warning)
     if current_translation_present:
@@ -583,6 +600,8 @@ def missing_target_diagnostic(target, scan_entries, readback_entries):
         exclusion_reason = "current_translation_outdated"
     elif not found_in_current_scan:
         exclusion_reason = "not_found_in_manual_action_entries"
+    elif not locked_planned_value(locked):
+        exclusion_reason = "missing_locked_report_planned_value"
     elif not digest_matches:
         exclusion_reason = "digest_changed"
     elif warning:
@@ -600,6 +619,11 @@ def missing_target_diagnostic(target, scan_entries, readback_entries):
         "digest_matches": digest_matches,
         "seo_warning": warning,
         "would_write": would_write,
+        "planned_value_source": (
+            "locked_report_fallback"
+            if locked_planned_value(locked)
+            else "locked_report_fallback_unavailable"
+        ),
         "blocking_conditions": _unique(blocking_reasons),
         "skipped_reason": exclusion_reason,
         "exclusion_reason": exclusion_reason,
@@ -608,6 +632,42 @@ def missing_target_diagnostic(target, scan_entries, readback_entries):
         "current_scan_digest": current_scan_digest,
         "proposed_value_chars": proposed_value_chars,
     }}
+
+def locked_report_fallback_entry(target, readback_entry):
+    locked = locked_entry(target.get("locale"), target.get("field"))
+    planned_value = locked_planned_value(locked)
+    if not target_is_exactly_requested(target):
+        return {{}}
+    if not locked or not planned_value:
+        return {{}}
+    state = readback_entry.get("pre_existing_translation_state") or {{}}
+    current_translation_present = bool(state.get("existing_translation_present"))
+    current_translation_outdated = state.get("existing_translation_outdated") is True
+    current_digest = readback_entry.get("pre_write_digest") or readback_entry.get("digest") or ""
+    chars = len(planned_value)
+    if current_translation_present or current_translation_outdated:
+        return {{}}
+    if not current_digest or current_digest != locked.get("digest"):
+        return {{}}
+    if seo_warning(target.get("field", ""), chars):
+        return {{}}
+    if readback_entry.get("blocking_reasons"):
+        return {{}}
+    item = dict(readback_entry)
+    item["planned_value"] = planned_value
+    item["proposed_translation"] = planned_value
+    item["source_value"] = locked.get("source_value", "")
+    item["digest"] = locked.get("digest", "")
+    item["planned_value_source"] = "locked_report_fallback"
+    item["would_write"] = True
+    item["blocking_reasons"] = []
+    item["write_input"] = {{
+        "locale": target.get("locale", ""),
+        "key": target.get("field", ""),
+        "value": planned_value,
+        "translatableContentDigest": locked.get("digest", ""),
+    }}
+    return item
 
 result = {{
     "success": False,
@@ -620,6 +680,7 @@ result = {{
     "next_batch_selected_target_keys": [],
     "next_batch_missing_target_keys": [],
     "next_batch_missing_target_diagnostics": [],
+    "next_batch_locked_report_fallback_target_keys": [],
     "translations_register_payload_count": 0,
     "write_attempted_count": 0,
     "write_succeeded_count": 0,
@@ -659,25 +720,26 @@ else:
     for target in LOCKED_TARGETS:
         candidates = [entry for entry in entries if entry_matches_target(entry, target)]
         if len(candidates) == 0:
-            blocking.append("next_batch_target_missing")
             missing_targets.append(target)
         elif len(candidates) > 1:
             blocking.append("next_batch_target_not_unique")
         else:
+            candidates[0]["planned_value_source"] = candidates[0].get("planned_value_source") or "manual_action_entries"
             selected.append(candidates[0])
     if missing_targets:
         missing_readback_entries = []
         for target in missing_targets:
             locked = locked_entry(target.get("locale"), target.get("field"))
+            planned_value = locked_planned_value(locked)
             missing_readback_entries.append({{
                 "product_id": product_id,
                 "locale": target.get("locale", ""),
                 "field": target.get("field", ""),
                 "key": target.get("field", ""),
                 "digest": locked.get("digest", ""),
-                "planned_value": "",
-                "proposed_translation": "",
-                "would_write": False,
+                "planned_value": planned_value,
+                "proposed_translation": planned_value,
+                "would_write": bool(planned_value),
                 "blocking_reasons": [],
             }})
         missing_precheck = _pre_write_readback(
@@ -695,9 +757,31 @@ else:
             )
             for target in missing_targets
         ]
-        result["next_batch_missing_target_keys"] = [
-            target_key_for_target(target) for target in missing_targets
+        recovered_targets = []
+        unresolved_targets = []
+        readback_entries = missing_precheck.get("entries") or []
+        for target in missing_targets:
+            readback_entry = first_scan_entry(readback_entries, target)
+            fallback_entry = locked_report_fallback_entry(target, readback_entry)
+            if fallback_entry:
+                selected.append(fallback_entry)
+                recovered_targets.append(target)
+            else:
+                unresolved_targets.append(target)
+        result["next_batch_locked_report_fallback_target_keys"] = [
+            target_key_for_target(target) for target in recovered_targets
         ]
+        result["next_batch_missing_target_keys"] = [
+            target_key_for_target(target) for target in unresolved_targets
+        ]
+        result["next_batch_missing_target_diagnostics"] = [
+            item
+            for item in result["next_batch_missing_target_diagnostics"]
+            if target_key(item.get("locale"), item.get("field"))
+            in result["next_batch_missing_target_keys"]
+        ]
+        if unresolved_targets:
+            blocking.append("next_batch_target_missing")
     if len(selected) != LOCKED_MAX_ENTRIES:
         blocking.append("next_batch_selected_count_not_two")
 
@@ -876,6 +960,13 @@ def _locked_entries_from_locked_report(report: dict) -> list[dict]:
                 "key": match.get("key") or target["field"],
                 "digest": match.get("digest", ""),
                 "proposed_value_chars": int(match.get("proposed_value_chars") or 0),
+                "planned_value": match.get("planned_value", ""),
+                "proposed_translation": match.get("proposed_translation", ""),
+                "planned_value_source": (
+                    "locked_report"
+                    if match.get("planned_value") or match.get("proposed_translation")
+                    else ""
+                ),
             }
         )
     return entries
@@ -918,6 +1009,7 @@ def _post_write_check_command() -> str:
         "next_batch_selected_target_keys",
         "next_batch_missing_target_keys",
         "next_batch_missing_target_diagnostics",
+        "next_batch_locked_report_fallback_target_keys",
         "next_batch_selected_count",
     ]
     keys_literal = repr(keys)
@@ -958,6 +1050,7 @@ def _render_html(payload: dict) -> str:
             ("Requested Target Keys", "next_batch_requested_target_keys"),
             ("Selected Target Keys", "next_batch_selected_target_keys"),
             ("Missing Target Keys", "next_batch_missing_target_keys"),
+            ("Locked Report Fallback Target Keys", "next_batch_locked_report_fallback_target_keys"),
             ("Selected Count", "next_batch_selected_count"),
             ("Payload Count", "translations_register_payload_count"),
             ("Manual Next Step Allowed", "manual_next_batch_real_write_allowed_next_step"),
@@ -986,6 +1079,7 @@ def _render_html(payload: dict) -> str:
         f"<td>{escape(str(entry.get('pre_write_digest', '')))}</td>"
         f"<td>{escape(str(entry.get('proposed_value_chars', '')))}</td>"
         f"<td>{escape(str(entry.get('seo_warning', '')))}</td>"
+        f"<td>{escape(str(entry.get('planned_value_source', '')))}</td>"
         f"<td>{escape(str(entry.get('would_write', '')))}</td>"
         f"<td>{escape(str(entry.get('write_performed', '')))}</td>"
         f"<td>{escape(str(entry.get('verified', '')))}</td>"
@@ -1028,7 +1122,7 @@ def _render_html(payload: dict) -> str:
   <table border="1" cellspacing="0" cellpadding="6"><tbody>{safety_rows}</tbody></table>
   <h2>Selected Entries</h2>
   <table border="1" cellspacing="0" cellpadding="6">
-    <thead><tr><th>Locale</th><th>Field</th><th>Key</th><th>Digest</th><th>Pre-Write Digest</th><th>Chars</th><th>SEO Warning</th><th>Would Write</th><th>Write Performed</th><th>Verified</th><th>Blocking Conditions</th></tr></thead>
+    <thead><tr><th>Locale</th><th>Field</th><th>Key</th><th>Digest</th><th>Pre-Write Digest</th><th>Chars</th><th>SEO Warning</th><th>Planned Value Source</th><th>Would Write</th><th>Write Performed</th><th>Verified</th><th>Blocking Conditions</th></tr></thead>
     <tbody>{entry_rows}</tbody>
   </table>
   <h2>Missing Target Diagnostics</h2>
@@ -1060,6 +1154,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"- audit_status: {payload.get('audit_status')}\n"
         f"- dry_run: {payload.get('dry_run')}\n"
         f"- next_batch_missing_target_keys: {payload.get('next_batch_missing_target_keys')}\n"
+        f"- next_batch_locked_report_fallback_target_keys: {payload.get('next_batch_locked_report_fallback_target_keys')}\n"
         f"- next_batch_selected_count: {payload.get('next_batch_selected_count')}\n"
         f"- translations_register_payload_count: {payload.get('translations_register_payload_count')}\n"
         f"- manual_next_batch_real_write_allowed_next_step: {payload.get('manual_next_batch_real_write_allowed_next_step')}\n"
