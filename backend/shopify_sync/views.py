@@ -37,6 +37,11 @@ from .translation_console import (
     ShopifyTranslationConsoleError,
     fetch_translation_console_data,
 )
+from .translation_apply_plan import (
+    APPLY_PLAN_HTML_PATH,
+    APPLY_PLAN_JSON_PATH,
+    build_selected_product_translation_apply_plan,
+)
 from .translation_drafts import (
     DEFAULT_FIELDS as TRANSLATION_DRAFT_FIELDS,
     DEFAULT_TARGET_LOCALES as TRANSLATION_DRAFT_TARGET_LOCALES,
@@ -505,7 +510,8 @@ def _user_has_shopify_sync_access(request):
 @staff_member_required
 def translation_console(request):
     is_draft_post = request.method == "POST" and request.POST.get("action") == "generate_missing_translation_drafts"
-    is_post_action = is_draft_post
+    is_apply_plan_post = request.method == "POST" and request.POST.get("action") == "generate_translation_apply_plan"
+    is_post_action = is_draft_post or is_apply_plan_post
     search_text = (request.POST.get("q") if is_post_action else request.GET.get("q", "")).strip()
     locale = ((request.POST.get("locale") if is_post_action else request.GET.get("locale", "ja")) or "ja").strip()
     shop_domain = "kidstoylover.myshopify.com"
@@ -516,6 +522,7 @@ def translation_console(request):
         "mutation_performed": False,
         "translations_register_called": False,
         "publish_performed": False,
+        "apply_performed": False,
         "real_apply_performed": False,
         "rollback_performed": False,
         "product": {},
@@ -528,17 +535,19 @@ def translation_console(request):
     error_message = ""
     draft_result = None
     draft_error_message = ""
+    apply_plan_result = None
+    apply_plan_error_message = ""
 
     if search_text:
         try:
             installation = ShopifyInstallation.objects.first()
             if installation is None:
                 error_message = f"Shopify installation not found for {shop_domain}."
-            elif is_draft_post:
+            elif is_draft_post or is_apply_plan_post:
                 selected_product_id = _resolve_translation_console_product_id(installation, search_text, locale)
                 if selected_product_id:
                     result.update(fetch_translation_console_data(installation, selected_product_id, locale))
-                if is_draft_post and selected_product_id:
+                if selected_product_id:
                     draft_result = generate_selected_product_missing_translation_draft_package(
                         product_id=selected_product_id,
                         target_locales=TRANSLATION_DRAFT_TARGET_LOCALES,
@@ -550,8 +559,17 @@ def translation_console(request):
                             "Draft generation blocked: "
                             + ", ".join(draft_result.get("blocking_conditions") or [])
                         )
-                elif is_draft_post:
+                    if is_apply_plan_post:
+                        apply_plan_result = build_selected_product_translation_apply_plan(draft_result)
+                        if apply_plan_result.get("blocking_conditions"):
+                            apply_plan_error_message = (
+                                "Apply plan generation blocked: "
+                                + ", ".join(apply_plan_result.get("blocking_conditions") or [])
+                            )
+                else:
                     draft_error_message = "Select a single Shopify product before generating drafts."
+                    if is_apply_plan_post:
+                        apply_plan_error_message = "Select a single Shopify product before generating an apply plan."
             else:
                 result.update(fetch_translation_console_data(installation, search_text, locale))
         except ShopifyInstallation.DoesNotExist:
@@ -572,10 +590,14 @@ def translation_console(request):
             "error_message": error_message,
             "draft_result": draft_result,
             "draft_error_message": draft_error_message,
+            "apply_plan_result": apply_plan_result,
+            "apply_plan_error_message": apply_plan_error_message,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
             "draft_fields": TRANSLATION_DRAFT_FIELDS,
             "draft_json_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
             "draft_html_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.html",
+            "apply_plan_json_report_path": str(APPLY_PLAN_JSON_PATH),
+            "apply_plan_html_report_path": str(APPLY_PLAN_HTML_PATH),
         },
     )
 

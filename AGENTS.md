@@ -105,6 +105,8 @@ python manage.py flush
 - Phase 0.2 is Ali Reviews / Kudosi capability discovery only: docs, support questions, dashboard checklist, and local reports.
 - Phase 0.3 is Gmail / Trustpilot send permission readiness only: docs, `.env.example` placeholders, template draft, and local reports.
 - Phase 0.4 is Shopify tag write permission readiness only: docs, planned tag names, scope checks, and local reports.
+- Phase 1 candidate scanning is read-only, dry-run, and report-only. It may query recent Shopify orders for candidate classification, but must not send email, call Gmail, call Ali Reviews / Kudosi, write Shopify, run Shopify mutations, or modify tags.
+- Phase 1 reports must mask customer emails, must not output customer addresses or phone numbers, and must classify ticket status as unknown unless a later phase adds a safe ticket-system check.
 - No Ali Reviews / Kudosi API call is allowed until official API documentation, authentication method, and token handling are confirmed.
 - No real Ali Reviews / Kudosi review request may be sent until send-by-order and sent-status API support are confirmed.
 - If Ali Reviews / Kudosi cannot confirm send/status API support, future automation must only produce Shopify candidate reports and may require manual sending in the Ali Reviews dashboard.
@@ -131,6 +133,7 @@ python manage.py flush
 - The first implementation phase must produce a dry-run report only.
 - No customer email may be sent during Phase 0 or Phase 1.
 - No Shopify write or mutation may be performed during Phase 0 or Phase 1.
+- Phase 1 must use exact tag matching for `Delivered` and `1: reveiw request`; `1: review request` is not equivalent, and half-width `:` / U+003A is not equivalent to full-width colon U+FF1A.
 - Do not store real Ali Reviews / Kudosi tokens, Gmail OAuth credentials, Shopify tokens, Trustpilot private links, or other secrets in docs, logs, `.env.example`, or Git.
 - Ticket system review-request filtering rules must be documented and reviewed before any customer-facing or Shopify-writing workflow is built.
 

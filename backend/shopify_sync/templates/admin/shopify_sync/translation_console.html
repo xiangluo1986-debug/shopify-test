@@ -31,6 +31,9 @@
   {% if draft_error_message %}
     <p class="errornote">{{ draft_error_message }}</p>
   {% endif %}
+  {% if apply_plan_error_message %}
+    <p class="errornote">{{ apply_plan_error_message }}</p>
+  {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Safety status</h2>
@@ -42,6 +45,7 @@
         <tr><th>mutation_performed</th><td>{{ result.mutation_performed }}</td></tr>
         <tr><th>translations_register_called</th><td>{{ result.translations_register_called }}</td></tr>
         <tr><th>publish_performed</th><td>{{ result.publish_performed }}</td></tr>
+        <tr><th>apply_performed</th><td>{{ result.apply_performed }}</td></tr>
         <tr><th>real_apply_performed</th><td>{{ result.real_apply_performed }}</td></tr>
         <tr><th>rollback_performed</th><td>{{ result.rollback_performed }}</td></tr>
       </tbody>
@@ -123,6 +127,29 @@
 
   {% if draft_result %}
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Generate apply plan</h2>
+      <p><strong>Apply plan only / No Shopify write.</strong> This action rebuilds the trusted backend draft package, includes only eligible entries, and writes a local apply plan report for manual review.</p>
+      <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="generate_translation_apply_plan">
+        <div>
+          <label for="id_apply_plan_q">Product ID, title, or handle</label><br>
+          <input id="id_apply_plan_q" type="text" name="q" value="{{ draft_result.product_id }}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+        </div>
+        <div>
+          <label for="id_apply_plan_locale">Preview locale</label><br>
+          <select id="id_apply_plan_locale" name="locale">
+            {% for locale in supported_locales %}
+              <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="button">Generate apply plan (No Shopify write)</button>
+      </form>
+      <p>Only entries with <code>eligible_for_apply_plan=true</code>, <code>validation_status=draft_ready_for_manual_review</code>, and <code>seo_validation_status=seo_ready</code> can enter the plan. Existing and outdated translations are skipped.</p>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
       <h2>Draft package summary</h2>
       <table>
         <tbody>
@@ -171,6 +198,38 @@
 
     {% if draft_result.entries %}
       <div class="module" style="padding: 12px; margin-bottom: 16px;">
+        <h2>Eligible draft entries</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field</th>
+              <th>Source value</th>
+              <th>Proposed translation</th>
+              <th>Validation</th>
+              <th>SEO validation</th>
+              <th>Eligible</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in draft_result.entries %}
+              {% if entry.eligible_for_apply_plan %}
+                <tr>
+                  <td>{{ entry.locale }}</td>
+                  <td>{{ entry.field }}</td>
+                  <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.source_value }}</td>
+                  <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.draft_value }}</td>
+                  <td>{{ entry.validation_status }}</td>
+                  <td>{{ entry.seo_validation_status }}</td>
+                  <td>{{ entry.eligible_for_apply_plan }}</td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="module" style="padding: 12px; margin-bottom: 16px;">
         <h2>Draft and skipped entries</h2>
         <table>
           <thead>
@@ -200,6 +259,80 @@
                 <td>{{ entry.seo_notes|join:", " }}</td>
                 <td>{{ entry.eligible_for_apply_plan }}</td>
                 <td>{{ entry.skip_reason }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if apply_plan_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Apply plan summary</h2>
+      <table>
+        <tbody>
+          <tr><th>apply_plan_status</th><td>{{ apply_plan_result.apply_plan_status }}</td></tr>
+          <tr><th>product_id</th><td>{{ apply_plan_result.product_id }}</td></tr>
+          <tr><th>product_title</th><td>{{ apply_plan_result.product_title }}</td></tr>
+          <tr><th>entry_count</th><td>{{ apply_plan_result.entry_count }}</td></tr>
+          <tr><th>skipped_count</th><td>{{ apply_plan_result.skipped_count }}</td></tr>
+          <tr><th>target_locales</th><td>{{ apply_plan_result.target_locales|join:", " }}</td></tr>
+          <tr><th>requested_fields</th><td>{{ apply_plan_result.requested_fields|join:", " }}</td></tr>
+          <tr><th>JSON review report path</th><td>{{ apply_plan_json_report_path }}</td></tr>
+          <tr><th>HTML review report path</th><td>{{ apply_plan_html_report_path }}</td></tr>
+          <tr><th>blocking_conditions</th><td>{{ apply_plan_result.blocking_conditions|join:", " }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Apply plan no-write safety</h2>
+      <table>
+        <tbody>
+          <tr><th>apply_plan_only</th><td>{{ apply_plan_result.apply_plan_only }}</td></tr>
+          <tr><th>existing_translation_overwrite_allowed</th><td>{{ apply_plan_result.existing_translation_overwrite_allowed }}</td></tr>
+          <tr><th>outdated_translation_overwrite_allowed</th><td>{{ apply_plan_result.outdated_translation_overwrite_allowed }}</td></tr>
+          <tr><th>shopify_write_performed</th><td>{{ apply_plan_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ apply_plan_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ apply_plan_result.translations_register_called }}</td></tr>
+          <tr><th>publish_performed</th><td>{{ apply_plan_result.publish_performed }}</td></tr>
+          <tr><th>apply_performed</th><td>{{ apply_plan_result.apply_performed }}</td></tr>
+          <tr><th>real_apply_performed</th><td>{{ apply_plan_result.real_apply_performed }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ apply_plan_result.rollback_performed }}</td></tr>
+          <tr><th>no_new_shopify_writes_performed</th><td>{{ apply_plan_result.no_new_shopify_writes_performed }}</td></tr>
+          <tr><th>all_new_actions_no_write_confirmed</th><td>{{ apply_plan_result.all_new_actions_no_write_confirmed }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    {% if apply_plan_result.apply_plan_entries %}
+      <div class="module" style="padding: 12px; margin-bottom: 16px;">
+        <h2>Apply plan entries</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field</th>
+              <th>Source value</th>
+              <th>Proposed translation</th>
+              <th>Digest</th>
+              <th>Current translation state</th>
+              <th>Validation</th>
+              <th>SEO validation</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in apply_plan_result.apply_plan_entries %}
+              <tr>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }}</td>
+                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.source_value }}</td>
+                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.proposed_translation }}</td>
+                <td style="word-break: break-all;">{{ entry.digest }}</td>
+                <td>{{ entry.current_translation_state }}</td>
+                <td>{{ entry.validation_status }}</td>
+                <td>{{ entry.seo_validation_status }}</td>
               </tr>
             {% endfor %}
           </tbody>

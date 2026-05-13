@@ -62,6 +62,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_real_wr
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_execution_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_one_shot_locked_shell --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_ali_reviews_capability_discovery --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_candidate_scan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -1327,6 +1328,29 @@ This task must not call Shopify APIs, write Shopify data, call Shopify
 mutations, call `tagsAdd`, call `tagsRemove`, call Ali Reviews / Kudosi APIs,
 call Gmail APIs, or send email. Future Shopify tag write phases must start with
 a dry-run plan and require manual approval before any tag mutation is performed.
+
+`shopify_review_request_candidate_scan` is a Phase 1 read-only dry-run task. It
+queries recent Shopify orders and writes local candidate reports only:
+
+```text
+logs/shopify_review_request_candidate_scan.json
+logs/shopify_review_request_candidate_scan.html
+```
+
+The report must preserve exact tag matching for `Delivered` and `1: reveiw
+request`, treat `1: reveiw request` and `1: review request` as different tags,
+and treat half-width `:` / U+003A and full-width colon U+FF1A as different
+characters. It classifies orders into report buckets such as
+`ready_for_manual_ali_reviews_check`,
+`existing_manual_review_request_tag_present`,
+`delivered_but_ali_status_unknown`, `repeat_customer_trustpilot_candidate`,
+blocked buckets, and `needs_manual_review`.
+
+Phase 1 must mask customer emails in reports, must not output customer
+addresses or phone numbers, and must report ticket status as unknown unless a
+later phase adds a safe ticket-system check. It must not call Gmail APIs, send
+email, call Ali Reviews / Kudosi APIs, write Shopify data, call Shopify
+mutations, call `tagsAdd`, or call `tagsRemove`.
 
 ### `System.Speech` Is Unavailable
 
