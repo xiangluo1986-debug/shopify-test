@@ -1271,6 +1271,19 @@ The locked execution plan may show future `translationsRegister` plan details su
 
 This package must report `execution_plan_only=true`, `executor_locked=true`, `real_write_allowed=false`, `future_write_allowed=false`, `dangerous_ack_effective=false`, `manual_ack_required_for_future_write=true`, `future_phase_required=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Selected Product Locked Executor Shell
+
+Phase 15.7 adds a Translation Console action that rebuilds the trusted selected-product draft package, rebuilds the apply plan, rebuilds the final review package, rebuilds the real-write readiness package, rebuilds the locked execution plan, then creates a locked executor shell report:
+
+```text
+logs/shopify_translation_selected_product_locked_executor_shell.json
+logs/shopify_translation_selected_product_locked_executor_shell.html
+```
+
+The locked executor shell may record whether a manual ACK preview was entered, but it must not store the ACK value and must not make any ACK effective. It must never call Shopify APIs for writes, call mutations, call `translationsRegister`, publish, apply, real apply, rollback, overwrite existing translations, write the database, add migrations, expose tokens, or git push.
+
+This package must report `executor_shell_only=true`, `executor_locked=true`, `execution_plan_only=true`, `real_write_allowed=false`, `future_write_allowed=false`, `dangerous_ack_effective=false`, `manual_ack_required_for_future_write=true`, `future_phase_required=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration

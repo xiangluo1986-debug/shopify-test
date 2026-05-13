@@ -57,6 +57,11 @@ from .translation_locked_execution_plan import (
     LOCKED_EXECUTION_PLAN_JSON_PATH,
     build_selected_product_translation_locked_execution_plan,
 )
+from .translation_locked_executor import (
+    LOCKED_EXECUTOR_HTML_PATH,
+    LOCKED_EXECUTOR_JSON_PATH,
+    build_selected_product_translation_locked_executor_shell,
+)
 from .translation_real_write_readiness import (
     REAL_WRITE_READINESS_HTML_PATH,
     REAL_WRITE_READINESS_JSON_PATH,
@@ -533,12 +538,14 @@ def translation_console(request):
         and post_action == "generate_translation_real_write_readiness"
     )
     is_locked_execution_plan_post = post_action == "generate_translation_locked_execution_plan"
+    is_locked_executor_post = post_action == "generate_translation_locked_executor_shell"
     is_post_action = (
         is_draft_post
         or is_apply_plan_post
         or is_final_review_post
         or is_readiness_post
         or is_locked_execution_plan_post
+        or is_locked_executor_post
     )
     search_text = (request.POST.get("q") if is_post_action else request.GET.get("q", "")).strip()
     locale = ((request.POST.get("locale") if is_post_action else request.GET.get("locale", "ja")) or "ja").strip()
@@ -571,6 +578,8 @@ def translation_console(request):
     real_write_readiness_error_message = ""
     locked_execution_plan_result = None
     locked_execution_plan_error_message = ""
+    locked_executor_result = None
+    locked_executor_error_message = ""
 
     if search_text:
         try:
@@ -583,6 +592,7 @@ def translation_console(request):
                 or is_final_review_post
                 or is_readiness_post
                 or is_locked_execution_plan_post
+                or is_locked_executor_post
             ):
                 selected_product_id = _resolve_translation_console_product_id(installation, search_text, locale)
                 if selected_product_id:
@@ -604,6 +614,7 @@ def translation_console(request):
                         or is_final_review_post
                         or is_readiness_post
                         or is_locked_execution_plan_post
+                        or is_locked_executor_post
                     ):
                         apply_plan_result = build_selected_product_translation_apply_plan(draft_result)
                         if apply_plan_result.get("blocking_conditions"):
@@ -611,14 +622,19 @@ def translation_console(request):
                                 "Apply plan generation blocked: "
                                 + ", ".join(apply_plan_result.get("blocking_conditions") or [])
                             )
-                    if is_final_review_post or is_readiness_post or is_locked_execution_plan_post:
+                    if (
+                        is_final_review_post
+                        or is_readiness_post
+                        or is_locked_execution_plan_post
+                        or is_locked_executor_post
+                    ):
                         final_review_result = build_selected_product_translation_final_review(apply_plan_result)
                         if final_review_result.get("blocking_conditions"):
                             final_review_error_message = (
                                 "Final review generation blocked: "
                                 + ", ".join(final_review_result.get("blocking_conditions") or [])
                             )
-                    if is_readiness_post or is_locked_execution_plan_post:
+                    if is_readiness_post or is_locked_execution_plan_post or is_locked_executor_post:
                         real_write_readiness_result = (
                             build_selected_product_translation_real_write_readiness(final_review_result)
                         )
@@ -629,7 +645,7 @@ def translation_console(request):
                                     real_write_readiness_result.get("blocking_conditions") or []
                                 )
                             )
-                    if is_locked_execution_plan_post:
+                    if is_locked_execution_plan_post or is_locked_executor_post:
                         locked_execution_plan_result = (
                             build_selected_product_translation_locked_execution_plan(
                                 real_write_readiness_result
@@ -643,19 +659,47 @@ def translation_console(request):
                                     or []
                                 )
                             )
+                    if is_locked_executor_post:
+                        locked_executor_result = (
+                            build_selected_product_translation_locked_executor_shell(
+                                locked_execution_plan_result,
+                                ack_preview_text=request.POST.get("manual_ack_preview", ""),
+                            )
+                        )
+                        if locked_executor_result.get("blocking_conditions"):
+                            locked_executor_error_message = (
+                                "Locked executor shell generation blocked: "
+                                + ", ".join(
+                                    locked_executor_result.get("blocking_conditions") or []
+                                )
+                            )
                 else:
                     draft_error_message = "Select a single Shopify product before generating drafts."
-                    if is_apply_plan_post or is_readiness_post or is_locked_execution_plan_post:
+                    if (
+                        is_apply_plan_post
+                        or is_readiness_post
+                        or is_locked_execution_plan_post
+                        or is_locked_executor_post
+                    ):
                         apply_plan_error_message = "Select a single Shopify product before generating an apply plan."
-                    if is_final_review_post or is_readiness_post or is_locked_execution_plan_post:
+                    if (
+                        is_final_review_post
+                        or is_readiness_post
+                        or is_locked_execution_plan_post
+                        or is_locked_executor_post
+                    ):
                         final_review_error_message = "Select a single Shopify product before generating a final review."
-                    if is_readiness_post or is_locked_execution_plan_post:
+                    if is_readiness_post or is_locked_execution_plan_post or is_locked_executor_post:
                         real_write_readiness_error_message = (
                             "Select a single Shopify product before generating a real write readiness package."
                         )
-                    if is_locked_execution_plan_post:
+                    if is_locked_execution_plan_post or is_locked_executor_post:
                         locked_execution_plan_error_message = (
                             "Select a single Shopify product before generating a locked execution plan."
+                        )
+                    if is_locked_executor_post:
+                        locked_executor_error_message = (
+                            "Select a single Shopify product before generating a locked executor shell."
                         )
             else:
                 result.update(fetch_translation_console_data(installation, search_text, locale))
@@ -687,6 +731,8 @@ def translation_console(request):
             "readiness_error_message": real_write_readiness_error_message,
             "locked_execution_plan_result": locked_execution_plan_result,
             "locked_execution_plan_error_message": locked_execution_plan_error_message,
+            "locked_executor_result": locked_executor_result,
+            "locked_executor_error_message": locked_executor_error_message,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
             "draft_fields": TRANSLATION_DRAFT_FIELDS,
             "draft_json_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
@@ -701,6 +747,8 @@ def translation_console(request):
             "readiness_html_report_path": str(REAL_WRITE_READINESS_HTML_PATH),
             "locked_execution_plan_json_report_path": str(LOCKED_EXECUTION_PLAN_JSON_PATH),
             "locked_execution_plan_html_report_path": str(LOCKED_EXECUTION_PLAN_HTML_PATH),
+            "locked_executor_json_report_path": str(LOCKED_EXECUTOR_JSON_PATH),
+            "locked_executor_html_report_path": str(LOCKED_EXECUTOR_HTML_PATH),
         },
     )
 
