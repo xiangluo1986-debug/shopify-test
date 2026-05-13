@@ -37,6 +37,11 @@ from .translation_console import (
     ShopifyTranslationConsoleError,
     fetch_translation_console_data,
 )
+from .translation_drafts import (
+    DEFAULT_FIELDS as TRANSLATION_DRAFT_FIELDS,
+    DEFAULT_TARGET_LOCALES as TRANSLATION_DRAFT_TARGET_LOCALES,
+    generate_selected_product_missing_translation_draft_package,
+)
 
 
 SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_states"
@@ -499,8 +504,10 @@ def _user_has_shopify_sync_access(request):
 
 @staff_member_required
 def translation_console(request):
-    search_text = request.GET.get("q", "").strip()
-    locale = request.GET.get("locale", "ja").strip() or "ja"
+    is_draft_post = request.method == "POST" and request.POST.get("action") == "generate_missing_translation_drafts"
+    is_post_action = is_draft_post
+    search_text = (request.POST.get("q") if is_post_action else request.GET.get("q", "")).strip()
+    locale = ((request.POST.get("locale") if is_post_action else request.GET.get("locale", "ja")) or "ja").strip()
     shop_domain = "kidstoylover.myshopify.com"
     result = {
         "shopify_read_only": True,
@@ -519,11 +526,34 @@ def translation_console(request):
         "search_text": search_text,
     }
     error_message = ""
+    draft_result = None
+    draft_error_message = ""
 
     if search_text:
         try:
-            installation = ShopifyInstallation.objects.get(shop=shop_domain)
-            result.update(fetch_translation_console_data(installation, search_text, locale))
+            installation = ShopifyInstallation.objects.first()
+            if installation is None:
+                error_message = f"Shopify installation not found for {shop_domain}."
+            elif is_draft_post:
+                selected_product_id = _resolve_translation_console_product_id(installation, search_text, locale)
+                if selected_product_id:
+                    result.update(fetch_translation_console_data(installation, selected_product_id, locale))
+                if is_draft_post and selected_product_id:
+                    draft_result = generate_selected_product_missing_translation_draft_package(
+                        product_id=selected_product_id,
+                        target_locales=TRANSLATION_DRAFT_TARGET_LOCALES,
+                        fields=TRANSLATION_DRAFT_FIELDS,
+                        installation=installation,
+                    )
+                    if draft_result.get("blocking_conditions"):
+                        draft_error_message = (
+                            "Draft generation blocked: "
+                            + ", ".join(draft_result.get("blocking_conditions") or [])
+                        )
+                elif is_draft_post:
+                    draft_error_message = "Select a single Shopify product before generating drafts."
+            else:
+                result.update(fetch_translation_console_data(installation, search_text, locale))
         except ShopifyInstallation.DoesNotExist:
             error_message = f"Shopify installation not found for {shop_domain}."
         except (ShopifyTranslationConsoleError, requests.RequestException, ValueError) as exc:
@@ -540,8 +570,25 @@ def translation_console(request):
             "shop_domain": shop_domain,
             "result": result,
             "error_message": error_message,
+            "draft_result": draft_result,
+            "draft_error_message": draft_error_message,
+            "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
+            "draft_fields": TRANSLATION_DRAFT_FIELDS,
+            "draft_json_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
+            "draft_html_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.html",
         },
     )
+
+
+def _resolve_translation_console_product_id(installation, search_text, locale):
+    fetched = fetch_translation_console_data(installation, search_text, locale)
+    product = fetched.get("product") or {}
+    if product.get("id"):
+        return product["id"]
+    search_results = fetched.get("search_results") or []
+    if len(search_results) == 1 and search_results[0].get("id"):
+        return search_results[0]["id"]
+    return ""
 
 
 @login_required

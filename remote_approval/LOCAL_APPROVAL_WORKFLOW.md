@@ -63,6 +63,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_real_wr
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_one_shot_locked_shell --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_ali_reviews_capability_discovery --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
 ```
 
@@ -1221,19 +1222,6 @@ Google SEO checks add `seo_validation_status`, `seo_notes`, recommended min/max 
 
 The task writes only local JSON/HTML reports under `logs/`. It must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, update existing Shopify translations, write the database, add migrations, expose tokens, or git push. It must report `draft_package_only=true`, `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
-### Selected Product Translation Resource Discovery
-
-`shopify_translation_selected_product_resource_discovery` performs Phase 15.2A read-only discovery for one selected Shopify product and target locales `ja`, `de`, `fr`, `es`, and `it`. It may call Shopify read-only GraphQL through the Django helper to list product-level and nested translatable resources returned by Shopify, including product fields, option/variant-related resources, media/image alt resources, and metafields when available.
-
-The discovery report is informational only and writes local review files:
-
-```text
-logs/shopify_translation_selected_product_resource_discovery.json
-logs/shopify_translation_selected_product_resource_discovery.html
-```
-
-The task must not call OpenAI, generate translations, call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, update existing Shopify translations, write the database, add migrations, expose tokens, or git push. It must report `read_only_discovery_only=true`, `shopify_api_call_performed=true` only after a successful read-only query, `openai_call_performed=false`, `translation_generated=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
-
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration
@@ -1310,6 +1298,24 @@ This task must not call Gmail APIs, send email, call Shopify APIs, write Shopify
 data, call Shopify mutations, call `tagsAdd`, call `tagsRemove`, or call Ali
 Reviews / Kudosi APIs. Future email send phases must start with preview-only
 reports and require final human approval before any customer email is sent.
+
+`shopify_review_request_shopify_tag_permission_readiness` is a Phase 0.4
+docs-only task. It writes local reports only:
+
+```text
+logs/shopify_review_request_shopify_tag_permission_readiness.json
+logs/shopify_review_request_shopify_tag_permission_readiness.html
+```
+
+The report records required Shopify order/customer tag scopes, future
+`tagsAdd` / `tagsRemove` requirements, exact existing tags, future candidate
+tags, and `automation_decision_status=blocked_until_shopify_write_scopes_and_manual_approval_confirmed`.
+It must confirm full-field tag overwrites are not allowed.
+
+This task must not call Shopify APIs, write Shopify data, call Shopify
+mutations, call `tagsAdd`, call `tagsRemove`, call Ali Reviews / Kudosi APIs,
+call Gmail APIs, or send email. Future Shopify tag write phases must start with
+a dry-run plan and require manual approval before any tag mutation is performed.
 
 ### `System.Speech` Is Unavailable
 

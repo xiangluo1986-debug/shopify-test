@@ -104,6 +104,7 @@ python manage.py flush
 - Phase 0.1 may add a read-only Shopify order tag discovery report, but it must not add sending logic or write Shopify data.
 - Phase 0.2 is Ali Reviews / Kudosi capability discovery only: docs, support questions, dashboard checklist, and local reports.
 - Phase 0.3 is Gmail / Trustpilot send permission readiness only: docs, `.env.example` placeholders, template draft, and local reports.
+- Phase 0.4 is Shopify tag write permission readiness only: docs, planned tag names, scope checks, and local reports.
 - No Ali Reviews / Kudosi API call is allowed until official API documentation, authentication method, and token handling are confirmed.
 - No real Ali Reviews / Kudosi review request may be sent until send-by-order and sent-status API support are confirmed.
 - If Ali Reviews / Kudosi cannot confirm send/status API support, future automation must only produce Shopify candidate reports and may require manual sending in the Ali Reviews dashboard.
@@ -114,6 +115,9 @@ python manage.py flush
 - Use least-privilege Gmail scope `https://www.googleapis.com/auth/gmail.send` by default.
 - Never use the Gmail API to read inbox or message contents unless a future phase explicitly approves a Gmail read scope.
 - No Shopify `tagsAdd` or `tagsRemove` mutation is allowed until `write_orders` and `write_customers` scopes are confirmed for the relevant app.
+- No Shopify tag write may run until scopes are confirmed and a dry-run tag plan is manually approved.
+- Never update or overwrite the full Shopify `tags` field directly for review request automation.
+- Use Shopify GraphQL Admin API `tagsAdd` and `tagsRemove` only for any later approved tag write phase.
 - Phase 0.1 confirmed the exact existing Shopify order tag is `1: reveiw request`.
 - `Delivered` is also confirmed as an exact existing Shopify order tag.
 - Future review request automation must use exact string matching for Shopify tags.
@@ -122,6 +126,8 @@ python manage.py flush
 - Preserve the exact colon, spelling, spacing, and character width from Shopify tag values; do not normalize, correct, trim, translate, or rewrite tag strings.
 - Treat `1: reveiw request` and `1: review request` as different tags.
 - Treat half-width colon `:` / U+003A and full-width colon `：` / U+FF1A as different characters.
+- Never remove `Delivered`.
+- Never remove `1: reveiw request` until a later phase has confirmed Ali Reviews / Kudosi sent-status handling.
 - The first implementation phase must produce a dry-run report only.
 - No customer email may be sent during Phase 0 or Phase 1.
 - No Shopify write or mutation may be performed during Phase 0 or Phase 1.
@@ -226,7 +232,6 @@ python manage.py flush
 - Phase 15.1A draft quality refinement must keep `title` <= 65 chars, `meta_title` <= 60 chars, and `meta_description` <= 155 chars, may run at most two natural rewrite attempts for over-length drafts, must avoid CTA/shipping/origin claims and mechanical English phrases, and may mark `eligible_for_apply_plan=true` only for `draft_ready_for_manual_review` entries.
 - Phase 15.1B Google SEO checks must add per-draft `seo_validation_status`, `seo_notes`, recommended character ranges, core keyword/model/forbidden phrase checks, and may keep `eligible_for_apply_plan=true` only when both `validation_status=draft_ready_for_manual_review` and `seo_validation_status=seo_ready`.
 - Selected product missing translation draft package must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, overwrite existing translations, add migrations, expose tokens, or git push. Existing current translations must be skipped, outdated translations must be marked for manual review, and the task must report `draft_package_only=true`, `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
-- Phase 15.2A selected product translation resource discovery may call Shopify read-only GraphQL only to list product and nested translatable resources for one product across `ja`, `de`, `fr`, `es`, and `it`; it must not call OpenAI, generate translations, mutate Shopify, call `translationsRegister`, publish, apply, rollback, add migrations, expose tokens, or git push.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.

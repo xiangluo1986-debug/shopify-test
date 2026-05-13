@@ -3,7 +3,7 @@
 {% block content %}
 <div id="content-main">
   <h1>Shopify Product Translation Console</h1>
-  <p>This Phase 15.0 console is read-only. It does not translate, write, publish, apply, or rollback Shopify data.</p>
+  <p>This console is read-only for Shopify writes. Draft generation may call OpenAI, but it does not write, publish, apply, or rollback Shopify data.</p>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Fetch read-only product translation data</h2>
@@ -26,6 +26,10 @@
 
   {% if error_message %}
     <p class="errornote">{{ error_message }}</p>
+  {% endif %}
+
+  {% if draft_error_message %}
+    <p class="errornote">{{ draft_error_message }}</p>
   {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
@@ -92,6 +96,116 @@
         </tbody>
       </table>
     </div>
+  {% endif %}
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Generate missing translation drafts</h2>
+    <p><strong>Draft only / No Shopify write.</strong> This action checks existing translations, skips current translations, marks outdated translations for review, and generates local draft text only for missing entries.</p>
+    <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate_missing_translation_drafts">
+      <div>
+        <label for="id_draft_q">Product ID, title, or handle</label><br>
+        <input id="id_draft_q" type="text" name="q" value="{% if result.product.id %}{{ result.product.id }}{% else %}{{ search_text }}{% endif %}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+      </div>
+      <div>
+        <label for="id_draft_locale">Preview locale</label><br>
+        <select id="id_draft_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button">Generate draft package (Draft only / No Shopify write)</button>
+    </form>
+    <p>Fixed target locales: {{ draft_target_locales|join:", " }}. Fixed fields: {{ draft_fields|join:", " }}.</p>
+  </div>
+
+  {% if draft_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Draft package summary</h2>
+      <table>
+        <tbody>
+          <tr><th>draft_status</th><td>{{ draft_result.draft_status }}</td></tr>
+          <tr><th>product_id</th><td>{{ draft_result.product_id }}</td></tr>
+          <tr><th>product_title</th><td>{{ draft_result.product_title }}</td></tr>
+          <tr><th>target_locales</th><td>{{ draft_result.target_locales|join:", " }}</td></tr>
+          <tr><th>requested_fields</th><td>{{ draft_result.requested_fields|join:", " }}</td></tr>
+          <tr><th>generated_draft_count</th><td>{{ draft_result.generated_draft_count }}</td></tr>
+          <tr><th>draft_ready_count</th><td>{{ draft_result.draft_ready_count }}</td></tr>
+          <tr><th>draft_needs_manual_review_count</th><td>{{ draft_result.draft_needs_manual_review_count }}</td></tr>
+          <tr><th>eligible_apply_plan_count</th><td>{{ draft_result.eligible_apply_plan_count }}</td></tr>
+          <tr><th>seo_ready_count</th><td>{{ draft_result.seo_ready_count }}</td></tr>
+          <tr><th>seo_needs_manual_review_count</th><td>{{ draft_result.seo_needs_manual_review_count }}</td></tr>
+          <tr><th>skipped_existing_translation_count</th><td>{{ draft_result.skipped_existing_translation_count }}</td></tr>
+          <tr><th>skipped_outdated_translation_count</th><td>{{ draft_result.skipped_outdated_translation_count }}</td></tr>
+          <tr><th>blocking_conditions</th><td>{{ draft_result.blocking_conditions|join:", " }}</td></tr>
+          <tr><th>failure_type</th><td>{{ draft_result.failure_type }}</td></tr>
+          <tr><th>query_failure_type</th><td>{{ draft_result.query_failure_type }}</td></tr>
+          <tr><th>JSON review report path</th><td>{{ draft_json_report_path }}</td></tr>
+          <tr><th>HTML review report path</th><td>{{ draft_html_report_path }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Draft no-write safety</h2>
+      <table>
+        <tbody>
+          <tr><th>draft_package_only</th><td>{{ draft_result.draft_package_only }}</td></tr>
+          <tr><th>shopify_read_only</th><td>{{ draft_result.shopify_read_only }}</td></tr>
+          <tr><th>shopify_api_call_performed</th><td>{{ draft_result.shopify_api_call_performed }}</td></tr>
+          <tr><th>openai_call_performed</th><td>{{ draft_result.openai_call_performed }}</td></tr>
+          <tr><th>shopify_write_performed</th><td>{{ draft_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ draft_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ draft_result.translations_register_called }}</td></tr>
+          <tr><th>publish_performed</th><td>{{ draft_result.publish_performed }}</td></tr>
+          <tr><th>apply_performed</th><td>{{ draft_result.apply_performed }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ draft_result.rollback_performed }}</td></tr>
+          <tr><th>existing_translation_overwrite_allowed</th><td>{{ draft_result.existing_translation_overwrite_allowed }}</td></tr>
+          <tr><th>no_new_shopify_writes_performed</th><td>{{ draft_result.no_new_shopify_writes_performed }}</td></tr>
+          <tr><th>all_new_actions_no_write_confirmed</th><td>{{ draft_result.all_new_actions_no_write_confirmed }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    {% if draft_result.entries %}
+      <div class="module" style="padding: 12px; margin-bottom: 16px;">
+        <h2>Draft and skipped entries</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field</th>
+              <th>Source value</th>
+              <th>Proposed translation</th>
+              <th>Validation</th>
+              <th>Quality notes</th>
+              <th>SEO validation</th>
+              <th>SEO notes</th>
+              <th>Eligible</th>
+              <th>Skip reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in draft_result.entries %}
+              <tr>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }}</td>
+                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.source_value }}</td>
+                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.draft_value }}</td>
+                <td>{{ entry.validation_status }}</td>
+                <td>{{ entry.quality_notes|join:", " }}</td>
+                <td>{{ entry.seo_validation_status }}</td>
+                <td>{{ entry.seo_notes|join:", " }}</td>
+                <td>{{ entry.eligible_for_apply_plan }}</td>
+                <td>{{ entry.skip_reason }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
   {% endif %}
 
   {% if result.translatable_rows %}
