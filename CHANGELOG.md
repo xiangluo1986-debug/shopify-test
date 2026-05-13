@@ -2,6 +2,7 @@
 
 ## 2026-05-12
 
+- Shopify Order 顶部当前订单摘要新增“澳币结算金额” badge，按系统维护的 AUD/CNY 汇率将结算总成本 RMB 换算为 AUD。
 - 修正 Admin / Finance 可见的深圳仓利润收入公式：全深圳仓订单会将订单级额外收入（例如运费收入）计入深圳仓收入合计；混仓订单仍不自动归属订单级额外收入，避免误算 Sydney / 其它仓收入。
 - 简化 Shenzhen Warehouse 账号后台 UI：隐藏旧运费规则、旧国家默认运费、产品国家默认运费和成本历史等非日常左侧入口，收紧 Shopify Orders 右侧筛选和批量 actions，并隐藏深圳仓视图中的 Shopify Sync Dashboard 按钮。
 - 第三轮简化 Shopify Sync 左侧导航：所有角色左侧只保留 Shopify Orders、Settlement Batches、Shopify Products 和 Finance Exchange Rates；同时统一 Shopify Orders 右侧筛选为结算状态、国家和订单创建时间。

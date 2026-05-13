@@ -2126,6 +2126,11 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         totals = order_package_cost_totals(obj)
         cost_completed = shenzhen_item_costs_completed(obj)
         total_cost = f'{totals["total_cost"]} RMB' if cost_completed else "未完成"
+        settlement_cost_aud = "未完成"
+        if cost_completed:
+            rate_info = get_aud_to_rmb_rate()
+            rate = rate_info.get("rate")
+            settlement_cost_aud = f'{money(totals["total_cost"] / rate)} AUD' if rate and rate > 0 else "汇率未设置"
         profit_html = ""
         profit_warning_html = ""
         if not self.is_shenzhen_user(getattr(self, "_current_request", None)):
@@ -2195,6 +2200,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             "<span><strong>状态:</strong> {}</span>"
             "<span><strong>深圳仓产品行:</strong> {}</span>"
             "<span><strong>结算总成本:</strong> {}</span>"
+            "<span><strong>澳币结算金额:</strong> {}</span>"
             "{}"
             "{}"
             "<span><strong>Tracking:</strong> {}</span>"
@@ -2205,6 +2211,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             settlement_status_admin_label(obj.settlement_status),
             totals["items_count"],
             total_cost,
+            settlement_cost_aud,
             profit_html,
             profit_warning_html,
             obj.tracking_number or "-",
