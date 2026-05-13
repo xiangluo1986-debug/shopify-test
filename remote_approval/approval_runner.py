@@ -273,6 +273,7 @@ def _execute_selected_action(
         "shopify_translation_small_batch_real_write_gate_preflight",
         "shopify_translation_small_batch_real_write_execute",
         "shopify_translation_small_batch_post_write_audit",
+        "shopify_translation_next_batch_locked_dry_run_package",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
         "shopify_translation_multi_locale_dry_run",
@@ -907,6 +908,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_small_batch_real_write_gate_preflight",
         "shopify_translation_small_batch_real_write_execute",
         "shopify_translation_small_batch_post_write_audit",
+        "shopify_translation_next_batch_locked_dry_run_package",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
     }:
