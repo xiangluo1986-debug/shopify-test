@@ -269,6 +269,7 @@ def _execute_selected_action(
         "shopify_translation_selected_product_missing_translation_draft_package",
         "shopify_translation_selected_product_real_write_execute",
         "shopify_translation_first_real_write_completion_audit",
+        "shopify_translation_small_batch_locked_dry_run_package",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
         "shopify_translation_multi_locale_dry_run",
@@ -899,6 +900,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_csv_json_small_batch_manual_real_run_test_package",
         "shopify_translation_csv_json_small_batch_post_write_audit_package",
         "shopify_translation_selected_product_missing_translation_draft_package",
+        "shopify_translation_small_batch_locked_dry_run_package",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
     }:
