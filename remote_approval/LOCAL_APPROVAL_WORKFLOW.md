@@ -61,6 +61,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_final_h
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_runner_final_safe_shell --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_execution_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_one_shot_locked_shell --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_ali_reviews_capability_discovery --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
 ```
 
@@ -1219,6 +1220,19 @@ Google SEO checks add `seo_validation_status`, `seo_notes`, recommended min/max 
 
 The task writes only local JSON/HTML reports under `logs/`. It must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, update existing Shopify translations, write the database, add migrations, expose tokens, or git push. It must report `draft_package_only=true`, `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Selected Product Translation Resource Discovery
+
+`shopify_translation_selected_product_resource_discovery` performs Phase 15.2A read-only discovery for one selected Shopify product and target locales `ja`, `de`, `fr`, `es`, and `it`. It may call Shopify read-only GraphQL through the Django helper to list product-level and nested translatable resources returned by Shopify, including product fields, option/variant-related resources, media/image alt resources, and metafields when available.
+
+The discovery report is informational only and writes local review files:
+
+```text
+logs/shopify_translation_selected_product_resource_discovery.json
+logs/shopify_translation_selected_product_resource_discovery.html
+```
+
+The task must not call OpenAI, generate translations, call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, update existing Shopify translations, write the database, add migrations, expose tokens, or git push. It must report `read_only_discovery_only=true`, `shopify_api_call_performed=true` only after a successful read-only query, `openai_call_performed=false`, `translation_generated=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration
@@ -1256,6 +1270,27 @@ translate, or rewrite tag values, and must always recommend
 
 The tag discovery task must not call Shopify mutations, `tagsAdd`, `tagsRemove`,
 Ali Reviews / Kudosi APIs, Gmail APIs, or any email-sending path.
+
+`shopify_review_request_ali_reviews_capability_discovery` is a Phase 0.2
+docs-only task. It writes local reports only:
+
+```text
+logs/shopify_review_request_ali_reviews_capability_discovery.json
+logs/shopify_review_request_ali_reviews_capability_discovery.html
+```
+
+The report records the public API base URL `https://pub.kudosi.ai`, known public
+API capabilities, missing or unconfirmed send/status capabilities, dashboard
+pages to check, and support questions. It must keep
+`automation_decision_status=blocked_until_send_and_status_capabilities_confirmed`
+until Ali Reviews / Kudosi confirms whether order-specific review request send
+and sent-status APIs exist.
+
+This task must not call Ali Reviews / Kudosi APIs, Gmail APIs, Shopify APIs,
+Shopify mutations, `tagsAdd`, `tagsRemove`, or any email-sending path. If Ali
+Reviews / Kudosi cannot confirm send/status API support, future automation must
+only produce Shopify candidate reports and may require manual sending in the Ali
+Reviews dashboard.
 
 ### `System.Speech` Is Unavailable
 

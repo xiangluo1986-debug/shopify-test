@@ -72,6 +72,78 @@ Confirmed Phase 0.1 report facts:
   represented in the backend/API, because those automatic sends do not
   automatically remove the Shopify tag observed in the current manual workflow.
 
+#### Phase 0.2 Capability Discovery
+
+- [x] Public API documentation exists for Ali Reviews / Kudosi.
+- [x] Public API base URL documented as `https://pub.kudosi.ai`.
+- [ ] Confirm API key availability for the current merchant plan.
+- [ ] Confirm where API keys are created and how access can be scoped.
+- [ ] Do not store the API key in this checklist, reports, logs, `.env.example`,
+  or Git.
+
+Known public API capabilities to document in the Phase 0.2 report:
+
+- List Reviews.
+- React to a Review.
+- Product Ratings.
+- List Questions.
+- React to a Question.
+
+Missing or unconfirmed capabilities that block real automation:
+
+- Sending a review request email for a specific Shopify order.
+- Checking whether a review request email has already been sent for a Shopify
+  order.
+- Checking whether a customer already received a review request email.
+- Searching request history by Shopify order ID, order name, customer email, or
+  product ID.
+- Auto-request email scheduled, sent, opened, clicked, failed, or bounced
+  status.
+- Webhooks for review request sent or review submitted.
+- Exporting manual review request history.
+- Exporting auto-request history.
+- Documented API rate limits.
+
+Questions to ask Ali Reviews / Kudosi support:
+
+- Does Kudosi / Ali Reviews provide an API endpoint to send a review request
+  email for a specific Shopify order?
+- Does Kudosi / Ali Reviews provide an API endpoint to check whether a review
+  request email has already been sent for a Shopify order?
+- Can the API search by Shopify order ID, order name, customer email, or product
+  ID?
+- Does the API expose auto-request email status, scheduled status, sent status,
+  opened/clicked status, or failed status?
+- Is there a webhook for review request sent / review submitted?
+- Can manual review request history be exported?
+- Can auto-request history be exported?
+- Are API keys available in the current plan?
+- Are rate limits documented?
+
+Required Ali Reviews dashboard screenshots/pages to collect:
+
+- Auto-Request email settings page.
+- Auto-request rule timing after fulfillment.
+- Manual review request send screen.
+- Order-level or customer-level review request history.
+- Sent, scheduled, failed, opened, clicked, or bounced request-email status
+  page, if present.
+- Manual request history export page, if present.
+- Auto-request history export page, if present.
+- API key / developer settings page.
+- Rate limit or developer documentation page.
+
+Phase 0.2 automation decision:
+
+- `automation_decision_status=blocked_until_send_and_status_capabilities_confirmed`.
+- Do not call Ali Reviews / Kudosi APIs during Phase 0.2.
+- Do not send any review request during Phase 0.2.
+- If send/status API support cannot be confirmed, future automation must only
+  produce Shopify candidate reports and may require manual sending inside the
+  Ali Reviews dashboard.
+- Never assume Shopify tag `1: reveiw request` means Ali Reviews / Kudosi has
+  sent or has not sent the email.
+
 ### Shopify Admin API Tag Permissions
 
 - [ ] Confirm the app has the required `write_orders` scope before any order tag

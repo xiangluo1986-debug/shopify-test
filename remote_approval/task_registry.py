@@ -3,6 +3,9 @@ from typing import Callable, Dict, List
 from remote_approval.tasks.django_check_task import run_django_check_task
 from remote_approval.tasks.demo_task import run_demo_task
 from remote_approval.tasks.git_safety_check_task import run_git_safety_check_task
+from remote_approval.tasks.shopify_review_request_ali_reviews_capability_discovery_task import (
+    run_shopify_review_request_ali_reviews_capability_discovery_task,
+)
 from remote_approval.tasks.shopify_review_request_tag_discovery_task import (
     run_shopify_review_request_tag_discovery_task,
 )
@@ -123,6 +126,9 @@ from remote_approval.tasks.shopify_translation_csv_json_small_batch_post_write_a
 from remote_approval.tasks.shopify_translation_selected_product_missing_translation_draft_package_task import (
     run_shopify_translation_selected_product_missing_translation_draft_package_task,
 )
+from remote_approval.tasks.shopify_translation_selected_product_resource_discovery_task import (
+    run_shopify_translation_selected_product_resource_discovery_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -139,6 +145,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "demo": run_demo_task,
     "django_check": run_django_check_task,
     "git_safety_check": run_git_safety_check_task,
+    "shopify_review_request_ali_reviews_capability_discovery": (
+        run_shopify_review_request_ali_reviews_capability_discovery_task
+    ),
     "shopify_review_request_tag_discovery": run_shopify_review_request_tag_discovery_task,
     "shopify_translation_batch_apply_command_generate": run_shopify_translation_batch_apply_command_generate_task,
     "shopify_translation_batch_apply_command_validate": run_shopify_translation_batch_apply_command_validate_task,
@@ -234,6 +243,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_translation_selected_product_missing_translation_draft_package": (
         run_shopify_translation_selected_product_missing_translation_draft_package_task
     ),
+    "shopify_translation_selected_product_resource_discovery": (
+        run_shopify_translation_selected_product_resource_discovery_task
+    ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
 }
@@ -257,6 +269,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/git_safety_check_review.json",
+    },
+    "shopify_review_request_ali_reviews_capability_discovery": {
+        "description": "Generate a docs-only Ali Reviews / Kudosi capability discovery report.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_ali_reviews_capability_discovery.json",
     },
     "shopify_review_request_tag_discovery": {
         "description": "Read-only Shopify order tag discovery for review request automation preparation.",
@@ -509,6 +527,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify query plus OpenAI draft generation",
         "review_file_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
+    },
+    "shopify_translation_selected_product_resource_discovery": {
+        "description": "Discover selected product and nested Shopify translation resources without writes or OpenAI.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify query",
+        "review_file_path": "logs/shopify_translation_selected_product_resource_discovery.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
