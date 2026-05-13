@@ -249,6 +249,8 @@ def _one_draft_result(
         "raw_email_lookup_docker_command_reached": False,
         "raw_email_lookup_django_shell_reached": False,
         "raw_email_lookup_shopify_api_call_performed": False,
+        "successful_fallback_query_label": "",
+        "raw_email_lookup_graphql_error_diagnostics": [],
         "privacy_assertion_passed": True,
         "raw_email_leak_risk_detected": False,
     }
@@ -257,6 +259,17 @@ def _one_draft_result(
         return result
     if not candidates or not selected_candidate:
         result["one_draft_status"] = "blocked_no_trustpilot_draft_candidate"
+        return result
+    raw_lookup = _protected_runtime_raw_email_lookup(selected_candidate)
+    _apply_raw_lookup_report(result, raw_lookup)
+    raw_recipient = raw_lookup.get("_raw_email_for_runtime_only", "")
+    if not raw_recipient:
+        result["one_draft_status"] = "blocked_missing_raw_email_for_gmail_draft"
+        return result
+    if _raw_email_leak_risk_detected(raw_recipient, selected_candidate):
+        result["one_draft_status"] = "blocked_raw_email_leak_risk"
+        result["privacy_assertion_passed"] = False
+        result["raw_email_leak_risk_detected"] = True
         return result
     if not gates["create_drafts_enabled"] or not gates["ack_valid"]:
         return result
@@ -271,17 +284,6 @@ def _one_draft_result(
         return result
     if not gmail_env["gmail_compose_scope_present"]:
         result["one_draft_status"] = "blocked_missing_gmail_compose_scope"
-        return result
-    raw_lookup = _protected_runtime_raw_email_lookup(selected_candidate)
-    _apply_raw_lookup_report(result, raw_lookup)
-    raw_recipient = raw_lookup.get("_raw_email_for_runtime_only", "")
-    if not raw_recipient:
-        result["one_draft_status"] = "blocked_missing_raw_email_for_gmail_draft"
-        return result
-    if _raw_email_leak_risk_detected(raw_recipient, selected_candidate):
-        result["one_draft_status"] = "blocked_raw_email_leak_risk"
-        result["privacy_assertion_passed"] = False
-        result["raw_email_leak_risk_detected"] = True
         return result
 
     try:
@@ -310,6 +312,10 @@ def _apply_raw_lookup_report(result: dict, raw_lookup: dict) -> None:
     result["raw_email_lookup_shopify_api_call_performed"] = bool(
         raw_lookup.get("raw_email_lookup_shopify_api_call_performed")
     )
+    result["successful_fallback_query_label"] = _safe_text(raw_lookup.get("successful_fallback_query_label", ""))
+    result["raw_email_lookup_graphql_error_diagnostics"] = raw_lookup.get(
+        "raw_email_lookup_graphql_error_diagnostics", []
+    )
 
 
 def _protected_runtime_raw_email_lookup(selected_candidate: dict) -> dict:
@@ -321,6 +327,8 @@ def _protected_runtime_raw_email_lookup(selected_candidate: dict) -> dict:
         "raw_email_lookup_docker_command_reached": False,
         "raw_email_lookup_django_shell_reached": False,
         "raw_email_lookup_shopify_api_call_performed": False,
+        "successful_fallback_query_label": "",
+        "raw_email_lookup_graphql_error_diagnostics": [],
         "_raw_email_for_runtime_only": "",
     }
     order_id_or_gid = _safe_text(selected_candidate.get("order_id_or_gid", ""))
@@ -365,6 +373,10 @@ def _protected_runtime_raw_email_lookup(selected_candidate: dict) -> dict:
     if parsed:
         lookup["raw_email_lookup_django_shell_reached"] = bool(parsed.get("django_shell_reached"))
         lookup["raw_email_lookup_shopify_api_call_performed"] = bool(parsed.get("shopify_api_call_performed"))
+        lookup["successful_fallback_query_label"] = _safe_text(parsed.get("successful_fallback_query_label", ""))
+        lookup["raw_email_lookup_graphql_error_diagnostics"] = _safe_attempt_diagnostics(
+            parsed.get("fallback_query_attempts", [])
+        )
     if completed.returncode != 0:
         lookup["raw_email_lookup_error_sanitized"] = _sanitize_text(
             (parsed or {}).get("error_sanitized", "protected runtime lookup command failed")
@@ -385,6 +397,31 @@ def _protected_runtime_raw_email_lookup(selected_candidate: dict) -> dict:
         parsed.get("error_sanitized") or "protected runtime lookup returned no usable customer email"
     )
     return lookup
+
+
+def _safe_attempt_diagnostics(attempts) -> list[dict]:
+    safe_attempts = []
+    for attempt in attempts or []:
+        if not isinstance(attempt, dict):
+            continue
+        safe_attempts.append(
+            {
+                "label": _safe_text(attempt.get("label", "")),
+                "http_status": attempt.get("http_status"),
+                "graphql_error_count": int(attempt.get("graphql_error_count") or 0),
+                "query_succeeded": bool(attempt.get("query_succeeded")),
+                "order_match_found": bool(attempt.get("order_match_found")),
+                "email_found": bool(attempt.get("email_found")),
+                "email_source": _safe_text(attempt.get("email_source", "")),
+                "errors_sanitized": [
+                    _sanitize_text(item)
+                    for item in (attempt.get("errors_sanitized") or [])
+                    if isinstance(item, str)
+                ][:3],
+                "failure_type": _safe_text(attempt.get("failure_type", "")),
+            }
+        )
+    return safe_attempts[:12]
 
 
 def _parse_protected_lookup_stdout(stdout: str) -> dict:
@@ -419,6 +456,8 @@ result = {
     "raw_email_available": False,
     "raw_email_source": "",
     "raw_email": "",
+    "successful_fallback_query_label": "",
+    "fallback_query_attempts": [],
     "error_sanitized": "",
 }
 
@@ -442,20 +481,83 @@ def selected_email(order):
             return value.lower(), source
     return "", ""
 
-def request_graphql(endpoint, headers, query, variables):
+def sanitize_errors(errors):
+    sanitized = []
+    for error in errors[:3]:
+        if isinstance(error, dict):
+            message = error.get("message") or "GraphQL error"
+        else:
+            message = str(error or "GraphQL error")
+        sanitized.append(sanitize(message)[:300])
+    return sanitized
+
+def request_graphql(label, endpoint, headers, query, variables):
+    attempt = {
+        "label": label,
+        "http_status": None,
+        "graphql_error_count": 0,
+        "errors_sanitized": [],
+        "query_succeeded": False,
+        "order_match_found": False,
+        "email_found": False,
+        "email_source": "",
+        "failure_type": "",
+    }
     response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers, timeout=30)
     result["shopify_api_call_performed"] = True
+    attempt["http_status"] = response.status_code
     if response.status_code >= 400:
-        result["error_sanitized"] = "Shopify protected raw email lookup failed with HTTP status " + str(response.status_code)
-        print(json.dumps(result, ensure_ascii=True))
-        raise SystemExit(1)
-    data = response.json()
+        attempt["failure_type"] = "http_error"
+        result["fallback_query_attempts"].append(attempt)
+        return None, attempt
+    try:
+        data = response.json()
+    except ValueError:
+        attempt["failure_type"] = "non_json_response"
+        result["fallback_query_attempts"].append(attempt)
+        return None, attempt
     errors = data.get("errors") or []
     if errors:
-        result["error_sanitized"] = "Shopify protected raw email lookup returned GraphQL errors."
-        print(json.dumps(result, ensure_ascii=True))
-        raise SystemExit(1)
-    return data.get("data") or {}
+        attempt["graphql_error_count"] = len(errors)
+        attempt["errors_sanitized"] = sanitize_errors(errors)
+        result["fallback_query_attempts"].append(attempt)
+        return None, attempt
+    attempt["query_succeeded"] = True
+    return data.get("data") or {}, attempt
+
+def orders_from_data(data, kind, expected_id, expected_name):
+    if kind == "node":
+        node = data.get("node") or {}
+        if node:
+            return [node]
+        return []
+    edges = (((data.get("orders") or {}).get("edges")) or [])
+    nodes = [edge.get("node") or {} for edge in edges]
+    if expected_name:
+        exact = [node for node in nodes if node.get("name") == expected_name]
+        if exact:
+            return exact
+    if expected_id:
+        exact = [node for node in nodes if node.get("id") == expected_id]
+        if exact:
+            return exact
+    return nodes
+
+def try_query(label, endpoint, headers, query, variables, kind):
+    data, attempt = request_graphql(label, endpoint, headers, query, variables)
+    if data is None:
+        return None, ""
+    orders = orders_from_data(data, kind, order_id_or_gid, order_name)
+    order = orders[0] if orders else None
+    attempt["order_match_found"] = bool(order)
+    if order:
+        raw_email, source = selected_email(order)
+        attempt["email_found"] = bool(raw_email)
+        attempt["email_source"] = source or ""
+        result["fallback_query_attempts"].append(attempt)
+        return order, raw_email
+    result["fallback_query_attempts"].append(attempt)
+    return None, ""
 
 try:
     installation = ShopifyInstallation.objects.get(shop=shop)
@@ -470,38 +572,85 @@ try:
     endpoint = "https://" + installation.shop + "/admin/api/" + api_version + "/graphql.json"
     token_header = "X-Shopify-" + "Access-Token"
     headers = {token_header: token_value, "Content-Type": "application/json"}
-    order = None
-    order_fragment = """
-      id
-      name
-      email
-      contactEmail
-      customer { id email firstName lastName defaultEmailAddress { emailAddress } }
-    """
+    query_attempts = []
+    if order_name:
+        query_attempts.extend([
+            (
+                "name_order_email",
+                "query ProtectedOrderNameEmail($query: String!) { orders(first: 10, query: $query) { edges { node { id name email } } } }",
+                {"query": "name:" + order_name},
+                "orders",
+            ),
+            (
+                "name_customer_email",
+                "query ProtectedOrderNameCustomerEmail($query: String!) { orders(first: 10, query: $query) { edges { node { id name customer { id email firstName lastName } } } } }",
+                {"query": "name:" + order_name},
+                "orders",
+            ),
+            (
+                "name_contact_email",
+                "query ProtectedOrderNameContactEmail($query: String!) { orders(first: 10, query: $query) { edges { node { id name contactEmail } } } }",
+                {"query": "name:" + order_name},
+                "orders",
+            ),
+            (
+                "name_customer_default_email_address",
+                "query ProtectedOrderNameCustomerDefaultEmail($query: String!) { orders(first: 10, query: $query) { edges { node { id name customer { id defaultEmailAddress { emailAddress } } } } } }",
+                {"query": "name:" + order_name},
+                "orders",
+            ),
+        ])
     if order_id_or_gid.startswith("gid://shopify/Order/"):
-        query = "query ProtectedOrderEmailById($id: ID!) { node(id: $id) { ... on Order { " + order_fragment + " } } }"
-        data = request_graphql(endpoint, headers, query, {"id": order_id_or_gid})
-        node = data.get("node") or {}
-        if node.get("id") == order_id_or_gid:
-            order = node
-    if not order and order_name:
-        query = "query ProtectedOrderEmailByName($query: String!) { orders(first: 10, query: $query, sortKey: PROCESSED_AT, reverse: true) { edges { node { " + order_fragment + " } } } }"
-        data = request_graphql(endpoint, headers, query, {"query": "name:" + order_name})
-        edges = (((data.get("orders") or {}).get("edges")) or [])
-        nodes = [edge.get("node") or {} for edge in edges]
-        exact = [node for node in nodes if node.get("name") == order_name]
-        order = exact[0] if exact else (nodes[0] if nodes else None)
-    if not order:
+        query_attempts.extend([
+            (
+                "id_order_email",
+                "query ProtectedOrderIdEmail($id: ID!) { node(id: $id) { ... on Order { id name email } } }",
+                {"id": order_id_or_gid},
+                "node",
+            ),
+            (
+                "id_customer_email",
+                "query ProtectedOrderIdCustomerEmail($id: ID!) { node(id: $id) { ... on Order { id name customer { id email firstName lastName } } } }",
+                {"id": order_id_or_gid},
+                "node",
+            ),
+            (
+                "id_contact_email",
+                "query ProtectedOrderIdContactEmail($id: ID!) { node(id: $id) { ... on Order { id name contactEmail } } }",
+                {"id": order_id_or_gid},
+                "node",
+            ),
+            (
+                "id_customer_default_email_address",
+                "query ProtectedOrderIdCustomerDefaultEmail($id: ID!) { node(id: $id) { ... on Order { id name customer { id defaultEmailAddress { emailAddress } } } } }",
+                {"id": order_id_or_gid},
+                "node",
+            ),
+        ])
+
+    for label, query, variables, kind in query_attempts:
+        order, raw_email = try_query(label, endpoint, headers, query, variables, kind)
+        if raw_email:
+            result["raw_email_available"] = True
+            result["raw_email_source"] = "protected_runtime_lookup"
+            result["successful_fallback_query_label"] = label
+            result["raw_email"] = raw_email
+            print(json.dumps(result, ensure_ascii=True))
+            raise SystemExit(0)
+
+    if not query_attempts:
+        result["error_sanitized"] = "missing stable order identifier for protected runtime lookup"
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(0)
+    if not any(attempt.get("query_succeeded") for attempt in result["fallback_query_attempts"]):
+        result["error_sanitized"] = "all protected raw email fallback queries failed"
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(0)
+    if not any(attempt.get("order_match_found") for attempt in result["fallback_query_attempts"]):
         result["error_sanitized"] = "protected runtime lookup found no matching order"
         print(json.dumps(result, ensure_ascii=True))
         raise SystemExit(0)
-
-    raw_email, source = selected_email(order)
-    result["raw_email_available"] = bool(raw_email)
-    result["raw_email_source"] = source or "none"
-    result["raw_email"] = raw_email
-    if not raw_email:
-        result["error_sanitized"] = "matching order had no usable customer email"
+    result["error_sanitized"] = "matching order had no usable customer email from protected fallback fields"
     print(json.dumps(result, ensure_ascii=True))
 except ShopifyInstallation.DoesNotExist:
     result["error_sanitized"] = "Shopify installation was not found for the configured shop."
@@ -582,8 +731,8 @@ def _build_payload(
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "3.7",
-        "mode": "protected-raw-email-source-one-draft-locked-runner",
+        "phase": "3.9",
+        "mode": "protected-raw-email-lookup-fallback-validation",
         "command_label": COMMAND_LABEL,
         "one_draft_status": draft_result["one_draft_status"],
         "success": draft_result["one_draft_status"]
@@ -630,6 +779,8 @@ def _build_payload(
         "raw_email_lookup_docker_command_reached": draft_result["raw_email_lookup_docker_command_reached"],
         "raw_email_lookup_django_shell_reached": draft_result["raw_email_lookup_django_shell_reached"],
         "raw_email_lookup_shopify_api_call_performed": draft_result["raw_email_lookup_shopify_api_call_performed"],
+        "successful_fallback_query_label": draft_result["successful_fallback_query_label"],
+        "raw_email_lookup_graphql_error_diagnostics": draft_result["raw_email_lookup_graphql_error_diagnostics"],
         "raw_email_report_storage_allowed": False,
         "privacy_assertion_passed": draft_result["privacy_assertion_passed"],
         "raw_email_leak_risk_detected": draft_result["raw_email_leak_risk_detected"],
@@ -718,6 +869,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "raw_email_lookup_attempted": payload["raw_email_lookup_attempted"],
         "raw_email_available": payload["raw_email_available"],
         "raw_email_source": payload["raw_email_source"],
+        "successful_fallback_query_label": payload["successful_fallback_query_label"],
         "privacy_assertion_passed": payload["privacy_assertion_passed"],
         "raw_email_leak_risk_detected": payload["raw_email_leak_risk_detected"],
         "gmail_token_refresh_attempted": payload["gmail_token_refresh_attempted"],
@@ -793,6 +945,7 @@ def _render_html_report(payload: dict) -> str:
   <p>Protected raw email lookup attempted: <strong>{escape(str(payload["raw_email_lookup_attempted"]))}</strong></p>
   <p>Raw email available to runtime: <strong>{escape(str(payload["raw_email_available"]))}</strong></p>
   <p>Raw email source: <code>{escape(str(payload["raw_email_source"]))}</code></p>
+  <p>Successful fallback query: <code>{escape(str(payload["successful_fallback_query_label"]))}</code></p>
   <p>Privacy assertion passed: <strong>{escape(str(payload["privacy_assertion_passed"]))}</strong></p>
   <p>Gmail draft create attempted: <strong>{escape(str(payload["gmail_draft_create_attempted"]))}</strong></p>
   <p>Gmail drafts created: <strong>{escape(str(payload["gmail_drafts_created_count"]))}</strong></p>
@@ -850,12 +1003,13 @@ def _has_existing_trustpilot_tag(row: dict) -> bool:
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
-        "Shopify review request Phase 3.7 protected raw email one-draft locked runner finished.\n"
+        "Shopify review request Phase 3.9 protected raw email fallback lookup validation finished.\n"
         f"Status: {payload.get('one_draft_status')}\n"
         f"Candidates seen: {payload.get('candidate_count_seen')}\n"
         f"Selected candidates: {payload.get('selected_candidate_count')}\n"
         f"Protected raw email lookup attempted: {payload.get('raw_email_lookup_attempted')}\n"
         f"Raw email available to runtime: {payload.get('raw_email_available')}\n"
+        f"Successful fallback query: {payload.get('successful_fallback_query_label')}\n"
         f"Gmail drafts created: {payload.get('gmail_drafts_created_count')}\n"
         "Safety: no Shopify API call, no Shopify writes, no tagsAdd/tagsRemove, no Kudosi API call, no Gmail send, and no email sending.\n"
         f"JSON report: {json_path}\n"
