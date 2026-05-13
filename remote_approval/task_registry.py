@@ -12,6 +12,9 @@ from remote_approval.tasks.shopify_review_request_candidate_scan_task import (
 from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
     run_shopify_review_request_gmail_readiness_package_task,
 )
+from remote_approval.tasks.shopify_review_request_gmail_oauth_setup_helper_task import (
+    run_shopify_review_request_gmail_oauth_setup_helper_task,
+)
 from remote_approval.tasks.shopify_review_request_kudosi_api_403_diagnostics_task import (
     run_shopify_review_request_kudosi_api_403_diagnostics_task,
 )
@@ -183,6 +186,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_candidate_scan": run_shopify_review_request_candidate_scan_task,
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
+    "shopify_review_request_gmail_oauth_setup_helper": run_shopify_review_request_gmail_oauth_setup_helper_task,
     "shopify_review_request_kudosi_api_403_diagnostics": run_shopify_review_request_kudosi_api_403_diagnostics_task,
     "shopify_review_request_kudosi_api_capability_probe": run_shopify_review_request_kudosi_api_capability_probe_task,
     "shopify_review_request_manual_action_csv_export": run_shopify_review_request_manual_action_csv_export_task,
@@ -341,6 +345,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_gmail_readiness_package.json",
+    },
+    "shopify_review_request_gmail_oauth_setup_helper": {
+        "description": "Generate a no-secret Gmail OAuth setup helper package for draft-only Trustpilot invitations.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_gmail_oauth_setup_helper.json",
     },
     "shopify_review_request_kudosi_api_403_diagnostics": {
         "description": "Generate read-only Kudosi / Ali Reviews HTTP 403 diagnostics without exposing secrets.",
