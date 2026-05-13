@@ -49,6 +49,9 @@
   {% if real_write_executor_error_message %}
     <p class="errornote">{{ real_write_executor_error_message }}</p>
   {% endif %}
+  {% if manual_action_package_error_message %}
+    <p class="errornote">{{ manual_action_package_error_message }}</p>
+  {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Safety status</h2>
@@ -575,6 +578,29 @@
     </form>
   </div>
 
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Generate real write manual action package</h2>
+    <p><strong>Manual action package only / No Shopify write.</strong> This action rebuilds the full trusted backend chain through the real write executor dry-run, then creates the final manual action package with payload preview, command preview, readback plan, and rollback policy.</p>
+    <p><strong>This package does not call Shopify, does not call translationsRegister, does not publish, apply, or rollback.</strong></p>
+    <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate_translation_real_write_manual_action_package">
+      <div>
+        <label for="id_manual_action_q">Product ID, title, or handle</label><br>
+        <input id="id_manual_action_q" type="text" name="q" value="{% if result.product.id %}{{ result.product.id }}{% elif real_write_executor_result.product_id %}{{ real_write_executor_result.product_id }}{% elif locked_executor_result.product_id %}{{ locked_executor_result.product_id }}{% elif locked_execution_plan_result.product_id %}{{ locked_execution_plan_result.product_id }}{% elif final_review_result.product_id %}{{ final_review_result.product_id }}{% elif apply_plan_result.product_id %}{{ apply_plan_result.product_id }}{% elif draft_result.product_id %}{{ draft_result.product_id }}{% else %}{{ search_text }}{% endif %}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+      </div>
+      <div>
+        <label for="id_manual_action_locale">Preview locale</label><br>
+        <select id="id_manual_action_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button" name="action" value="generate_translation_real_write_manual_action_package">Generate real write manual action package (No Shopify write)</button>
+    </form>
+  </div>
+
   {% if readiness_result %}
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
       <h2>Real write readiness summary</h2>
@@ -995,6 +1021,140 @@
                 <td>{{ entry.real_write_entry_status }}</td>
                 <td>{{ entry.would_write }}</td>
                 <td>{{ entry.write_performed }}</td>
+                <td>{{ entry.blocking_reasons|join:", " }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if manual_action_package_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Manual action package summary</h2>
+      <p><strong>This is a manual action package only. It does not write to Shopify, call translationsRegister, publish, apply, or rollback.</strong></p>
+      <table>
+        <tbody>
+          <tr><th>package_status</th><td>{{ manual_action_package_result.package_status }}</td></tr>
+          <tr><th>mode</th><td>{{ manual_action_package_result.mode }}</td></tr>
+          <tr><th>product_id</th><td>{{ manual_action_package_result.product_id }}</td></tr>
+          <tr><th>product_title</th><td>{{ manual_action_package_result.product_title }}</td></tr>
+          <tr><th>entry_count</th><td>{{ manual_action_package_result.entry_count }}</td></tr>
+          <tr><th>blocked_entry_count</th><td>{{ manual_action_package_result.blocked_entry_count }}</td></tr>
+          <tr><th>target_locales</th><td>{{ manual_action_package_result.target_locales|join:", " }}</td></tr>
+          <tr><th>requested_fields</th><td>{{ manual_action_package_result.requested_fields|join:", " }}</td></tr>
+          <tr><th>manual_ack_required</th><td>{{ manual_action_package_result.manual_ack_required }}</td></tr>
+          <tr><th>manual_ack_phrase_required</th><td>{{ manual_action_package_result.manual_ack_phrase_required }}</td></tr>
+          <tr><th>manual_ack_effective</th><td>{{ manual_action_package_result.manual_ack_effective }}</td></tr>
+          <tr><th>real_write_allowed</th><td>{{ manual_action_package_result.real_write_allowed }}</td></tr>
+          <tr><th>future_write_allowed</th><td>{{ manual_action_package_result.future_write_allowed }}</td></tr>
+          <tr><th>real_write_executor_report_path</th><td>{{ manual_action_package_result.real_write_executor_report_path }}</td></tr>
+          <tr><th>manual_action_package_report_path</th><td>{{ manual_action_package_json_report_path }}</td></tr>
+          <tr><th>blocking_conditions</th><td>{{ manual_action_package_result.blocking_conditions|join:", " }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Manual action package safety</h2>
+      <table>
+        <tbody>
+          <tr><th>shopify_write_performed</th><td>{{ manual_action_package_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ manual_action_package_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ manual_action_package_result.translations_register_called }}</td></tr>
+          <tr><th>publish_performed</th><td>{{ manual_action_package_result.publish_performed }}</td></tr>
+          <tr><th>apply_performed</th><td>{{ manual_action_package_result.apply_performed }}</td></tr>
+          <tr><th>real_apply_performed</th><td>{{ manual_action_package_result.real_apply_performed }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ manual_action_package_result.rollback_performed }}</td></tr>
+          <tr><th>existing_translation_overwrite_allowed</th><td>{{ manual_action_package_result.existing_translation_overwrite_allowed }}</td></tr>
+          <tr><th>outdated_translation_overwrite_allowed</th><td>{{ manual_action_package_result.outdated_translation_overwrite_allowed }}</td></tr>
+          <tr><th>no_new_shopify_writes_performed</th><td>{{ manual_action_package_result.no_new_shopify_writes_performed }}</td></tr>
+          <tr><th>all_new_actions_no_write_confirmed</th><td>{{ manual_action_package_result.all_new_actions_no_write_confirmed }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Planned translationsRegister payload preview</h2>
+      <table>
+        <tbody>
+          <tr><th>planned_mutation_name</th><td>{{ manual_action_package_result.planned_mutation_name }}</td></tr>
+          <tr><th>planned_resource_id</th><td>{{ manual_action_package_result.planned_resource_id }}</td></tr>
+          <tr><th>planned_translation_inputs_count</th><td>{{ manual_action_package_result.planned_translation_inputs_count }}</td></tr>
+          <tr><th>planned_translation_inputs_preview</th><td style="white-space: pre-wrap;">{{ manual_action_package_result.planned_translation_inputs_preview }}</td></tr>
+          <tr><th>planned_graphql_variables_preview</th><td style="white-space: pre-wrap;">{{ manual_action_package_result.planned_graphql_variables_preview }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Manual ACK phrase</h2>
+      <p><code>{{ manual_action_package_result.manual_ack_phrase_required }}</code></p>
+      <h2>Future PowerShell command preview</h2>
+      <pre style="white-space: pre-wrap;">{% for command in manual_action_package_result.future_powershell_command_preview %}{{ command }}
+{% endfor %}</pre>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Readback verification plan</h2>
+      <ul>
+        {% for item in manual_action_package_result.readback_verify_plan %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      <h2>Rollback policy</h2>
+      <ul>
+        {% for item in manual_action_package_result.rollback_plan %}
+          <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {% if manual_action_package_result.manual_action_entries %}
+      <div class="module" style="padding: 12px; margin-bottom: 16px;">
+        <h2>Manual action entries</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Product ID</th>
+              <th>Locale</th>
+              <th>Field</th>
+              <th>Digest</th>
+              <th>Source value</th>
+              <th>Proposed translation</th>
+              <th>Current translation state</th>
+              <th>Planned mutation</th>
+              <th>Planned resource ID</th>
+              <th>Planned locale</th>
+              <th>Planned key</th>
+              <th>Planned value</th>
+              <th>Planned digest</th>
+              <th>Would write</th>
+              <th>Write performed</th>
+              <th>Manual action status</th>
+              <th>Blocking reasons</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in manual_action_package_result.manual_action_entries %}
+              <tr>
+                <td>{{ entry.product_id }}</td>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }}</td>
+                <td style="word-break: break-all;">{{ entry.digest }}</td>
+                <td style="max-width: 300px; white-space: pre-wrap;">{{ entry.source_value }}</td>
+                <td style="max-width: 300px; white-space: pre-wrap;">{{ entry.proposed_translation }}</td>
+                <td>{{ entry.current_translation_state }}</td>
+                <td>{{ entry.planned_mutation_name }}</td>
+                <td>{{ entry.planned_resource_id }}</td>
+                <td>{{ entry.planned_locale }}</td>
+                <td>{{ entry.planned_key }}</td>
+                <td style="max-width: 300px; white-space: pre-wrap;">{{ entry.planned_value }}</td>
+                <td style="word-break: break-all;">{{ entry.planned_translatable_content_digest }}</td>
+                <td>{{ entry.would_write }}</td>
+                <td>{{ entry.write_performed }}</td>
+                <td>{{ entry.manual_action_entry_status }}</td>
                 <td>{{ entry.blocking_reasons|join:", " }}</td>
               </tr>
             {% endfor %}

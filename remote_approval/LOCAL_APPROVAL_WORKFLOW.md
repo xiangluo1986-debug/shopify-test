@@ -1297,6 +1297,47 @@ The executor dry-run package is a future real-run gate only. It must not perform
 
 The package may mark entries as `would_write=true` only in dry-run when the selected product scope matches, `entry_count > 0`, `blocked_entry_count=0`, locales are limited to `ja`, `de`, `fr`, `es`, and `it`, fields are limited to `title`, `meta_title`, and `meta_description`, every entry has source/proposed values and digest, no existing/current translation is present, no outdated translation is present, and no blocking conditions exist. Even when the manual ACK preview phrase is entered, it must report `real_write_executor_only=true`, `dry_run_only=true`, `real_write_allowed=false`, `future_write_allowed=false`, `manual_ack_required=true`, `dangerous_ack_effective=false`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Selected Product Real Write Manual Action Package
+
+Phase 16.1 adds a Translation Console action that rebuilds the trusted selected-product draft package, rebuilds the apply plan, rebuilds the final review package, rebuilds the real-write readiness package, rebuilds the locked execution plan, rebuilds the locked executor shell, rebuilds the real-write executor dry-run package, then creates a manual action package:
+
+```text
+logs/shopify_translation_selected_product_real_write_manual_action_package.json
+logs/shopify_translation_selected_product_real_write_manual_action_package.html
+```
+
+The manual action package is the final no-write package before a future separate real write phase. It may show planned `translationsRegister` variables, future PowerShell command preview, readback verification plan, and rollback approval plan. It must not call Shopify APIs, call mutations, call `translationsRegister`, publish, apply, real apply, rollback, overwrite existing translations, execute commands, read `.env`, expose tokens, write the database, add migrations, or git push.
+
+The package must block when the executor dry-run is not ready, `entry_count=0`, `blocked_entry_count>0`, selected product scope mismatches, locale or field falls outside the requested scope, digest or proposed translation is missing, existing/current translation is present, outdated translation is present, prior blocking conditions exist, or any prior no-write safety flag indicates a write/mutation/register/publish/apply/rollback. It must report `manual_ack_required=true`, `manual_ack_effective=false`, `real_write_allowed=false`, `future_write_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
+### Translation Console Manual Action Smoke Test
+
+`scripts/smoke_test_translation_console_manual_action_package.py` provides a one-command smoke test for the Translation Console chain. The default `--static-only` mode runs on the Windows host and does not call Shopify, OpenAI, Docker, or Django.
+
+For live dry-run validation, run through the Docker web container so the Django project dependencies are available:
+
+```powershell
+python scripts\smoke_test_translation_console_manual_action_package.py --live-dry-run --use-docker
+```
+
+Equivalent manual Docker command:
+
+```powershell
+docker compose exec -T web python manage.py smoke_test_translation_console_manual_action_package --live-dry-run
+```
+
+The wrapper intentionally calls the Django management command rather than a container `scripts/` path because the web container mounts the Django app and `manage.py`, while host-only scripts may not be present inside `/app/scripts`.
+
+If host Python lacks Django and `--use-docker` is not supplied, the script must fail gracefully with `failure_type=missing_django_on_host`, keep `no_write_confirmed=true`, and write the JSON/HTML smoke-test report instead of raising a traceback. Live dry-run remains no-write: it may perform the approved read-only/product-draft chain, but must not call Shopify mutations, call `translationsRegister`, publish, apply, real apply, rollback, overwrite translations, or expose secrets.
+
+Before live smoke validation, the recommended basic checks are:
+
+```powershell
+python scripts\validate_translation_console_phase.py
+python scripts\smoke_test_translation_console_manual_action_package.py --live-dry-run --use-docker
+docker compose exec -T web python manage.py check
+```
+
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration
