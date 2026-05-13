@@ -39,6 +39,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_draft_package
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_draft_create_locked_test_task import (
     run_shopify_review_request_trustpilot_gmail_draft_create_locked_test_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_draft_content_update_pre_send_task import (
+    run_shopify_review_request_trustpilot_gmail_draft_content_update_pre_send_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task import (
     run_shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task,
 )
@@ -245,6 +248,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_draft_create_locked_test": (
         run_shopify_review_request_trustpilot_gmail_draft_create_locked_test_task
+    ),
+    "shopify_review_request_trustpilot_gmail_draft_content_update_pre_send": (
+        run_shopify_review_request_trustpilot_gmail_draft_content_update_pre_send_task
     ),
     "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight": (
         run_shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task
@@ -489,6 +495,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "optional Gmail drafts.create only behind explicit env and ack gates",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_draft_create_locked_test.json",
+    },
+    "shopify_review_request_trustpilot_gmail_draft_content_update_pre_send": {
+        "description": "Verify and if needed update the existing Trustpilot Gmail draft content before any send.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "Gmail drafts.get/drafts.update only; no send",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_draft_content_update_pre_send.json",
     },
     "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight": {
         "description": "Check Gmail OAuth readiness and prepare a locked one-draft Trustpilot preflight.",
