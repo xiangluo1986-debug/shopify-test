@@ -1366,7 +1366,7 @@ mutations, call `tagsAdd`, call `tagsRemove`, call Ali Reviews / Kudosi APIs,
 call Gmail APIs, or send email. Future Shopify tag write phases must start with
 a dry-run plan and require manual approval before any tag mutation is performed.
 
-`shopify_review_request_candidate_scan` is a Phase 1 read-only dry-run task. It
+`shopify_review_request_candidate_scan` is a Phase 1 / Phase 1.1 read-only dry-run task. It
 queries recent Shopify orders and writes local candidate reports only:
 
 ```text
@@ -1383,11 +1383,27 @@ characters. It classifies orders into report buckets such as
 `delivered_but_ali_status_unknown`, `repeat_customer_trustpilot_candidate`,
 blocked buckets, and `needs_manual_review`.
 
-Phase 1 must mask customer emails in reports, must not output customer
-addresses or phone numbers, and must report ticket status as unknown unless a
-later phase adds a safe ticket-system check. It must not call Gmail APIs, send
-email, call Ali Reviews / Kudosi APIs, write Shopify data, call Shopify
-mutations, call `tagsAdd`, or call `tagsRemove`.
+Phase 1.1 adds a read-only support ticket / risk filter and should report
+`scanner_version=phase_1_1_ticket_filter` with ticket diagnostics such as
+`ticket_status_check`, `ticket_query_performed`, `ticket_matches_found_count`,
+`orders_with_ticket_match_count`, and `orders_blocked_by_ticket_count`.
+
+Run the Phase 1.1 scanner with:
+
+```powershell
+python remote_approval_runner.py --task shopify_review_request_candidate_scan --approval local
+```
+
+The ticket filter may match local tickets by Shopify order name, local
+`order_no`, Shopify order ID token, or customer email in memory. Reports must
+mask customer emails, must not output customer addresses or phone numbers, and
+must not output ticket body, ticket comments, or full raw email. Blocking or
+uncertain ticket status must route the order/customer to a blocked or
+manual-review bucket, not a ready-to-send bucket.
+
+The scanner must not call Gmail APIs, send email, call Ali Reviews / Kudosi
+APIs, write Shopify data, call Shopify mutations, call `tagsAdd`, or call
+`tagsRemove`.
 
 ### `System.Speech` Is Unavailable
 

@@ -106,7 +106,9 @@ python manage.py flush
 - Phase 0.3 is Gmail / Trustpilot send permission readiness only: docs, `.env.example` placeholders, template draft, and local reports.
 - Phase 0.4 is Shopify tag write permission readiness only: docs, planned tag names, scope checks, and local reports.
 - Phase 1 candidate scanning is read-only, dry-run, and report-only. It may query recent Shopify orders for candidate classification, but must not send email, call Gmail, call Ali Reviews / Kudosi, write Shopify, run Shopify mutations, or modify tags.
-- Phase 1 reports must mask customer emails, must not output customer addresses or phone numbers, and must classify ticket status as unknown unless a later phase adds a safe ticket-system check.
+- Phase 1.1 adds a read-only support ticket / risk filter before any future send or tag action. Review request automation must filter unresolved tickets, refund/return risks, shipping or delivery issues, complaints, disputes, and chargebacks before any customer-facing or Shopify-writing workflow.
+- Phase 1.1 ticket matching may use raw email only in memory. Reports must mask customer emails and must not output ticket body, ticket comments, customer addresses, phone numbers, or full raw emails.
+- Blocking or uncertain ticket status must move the order/customer to a blocked or manual-review bucket, not a ready-to-send bucket.
 - No Ali Reviews / Kudosi API call is allowed until official API documentation, authentication method, and token handling are confirmed.
 - No real Ali Reviews / Kudosi review request may be sent until send-by-order and sent-status API support are confirmed.
 - If Ali Reviews / Kudosi cannot confirm send/status API support, future automation must only produce Shopify candidate reports and may require manual sending in the Ali Reviews dashboard.

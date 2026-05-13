@@ -40,6 +40,9 @@
   {% if readiness_error_message %}
     <p class="errornote">{{ readiness_error_message }}</p>
   {% endif %}
+  {% if locked_execution_plan_error_message %}
+    <p class="errornote">{{ locked_execution_plan_error_message }}</p>
+  {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Safety status</h2>
@@ -489,6 +492,29 @@
     {% endif %}
   {% endif %}
 
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Generate locked real write execution plan</h2>
+    <p><strong>Locked execution plan only / No Shopify write.</strong> This action rebuilds the trusted backend draft package, apply plan, final review, and readiness package, then creates a locked plan for a future separate write phase.</p>
+    <p><strong>This is a locked execution plan only. It does not write to Shopify. Real writes require a separate future phase and explicit manual ACK.</strong></p>
+    <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate_translation_locked_execution_plan">
+      <div>
+        <label for="id_locked_execution_plan_q">Product ID, title, or handle</label><br>
+        <input id="id_locked_execution_plan_q" type="text" name="q" value="{% if result.product.id %}{{ result.product.id }}{% elif final_review_result.product_id %}{{ final_review_result.product_id }}{% elif apply_plan_result.product_id %}{{ apply_plan_result.product_id }}{% elif draft_result.product_id %}{{ draft_result.product_id }}{% else %}{{ search_text }}{% endif %}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+      </div>
+      <div>
+        <label for="id_locked_execution_plan_locale">Preview locale</label><br>
+        <select id="id_locked_execution_plan_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button" name="action" value="generate_translation_locked_execution_plan">Generate locked real write execution plan (No Shopify write)</button>
+    </form>
+  </div>
+
   {% if readiness_result %}
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
       <h2>Real write readiness summary</h2>
@@ -575,6 +601,118 @@
                 <td>{{ entry.current_translation_state }}</td>
                 <td>{{ entry.final_review_status }}</td>
                 <td>{{ entry.readiness_entry_status }}</td>
+                <td>{{ entry.blocking_reasons|join:", " }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if locked_execution_plan_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Locked execution plan summary</h2>
+      <p><strong>This is a locked execution plan only. It does not write to Shopify. Real writes require a separate future phase and explicit manual ACK.</strong></p>
+      <table>
+        <tbody>
+          <tr><th>execution_plan_status</th><td>{{ locked_execution_plan_result.execution_plan_status }}</td></tr>
+          <tr><th>product_id</th><td>{{ locked_execution_plan_result.product_id }}</td></tr>
+          <tr><th>product_title</th><td>{{ locked_execution_plan_result.product_title }}</td></tr>
+          <tr><th>entry_count</th><td>{{ locked_execution_plan_result.entry_count }}</td></tr>
+          <tr><th>blocked_entry_count</th><td>{{ locked_execution_plan_result.blocked_entry_count }}</td></tr>
+          <tr><th>target_locales</th><td>{{ locked_execution_plan_result.target_locales|join:", " }}</td></tr>
+          <tr><th>requested_fields</th><td>{{ locked_execution_plan_result.requested_fields|join:", " }}</td></tr>
+          <tr><th>readiness_report_path</th><td>{{ locked_execution_plan_result.readiness_report_path }}</td></tr>
+          <tr><th>execution_plan_report_path</th><td>{{ locked_execution_plan_json_report_path }}</td></tr>
+          <tr><th>executor_locked</th><td>{{ locked_execution_plan_result.executor_locked }}</td></tr>
+          <tr><th>real_write_allowed</th><td>{{ locked_execution_plan_result.real_write_allowed }}</td></tr>
+          <tr><th>future_write_allowed</th><td>{{ locked_execution_plan_result.future_write_allowed }}</td></tr>
+          <tr><th>dangerous_ack_effective</th><td>{{ locked_execution_plan_result.dangerous_ack_effective }}</td></tr>
+          <tr><th>manual_ack_required_for_future_write</th><td>{{ locked_execution_plan_result.manual_ack_required_for_future_write }}</td></tr>
+          <tr><th>future_phase_required</th><td>{{ locked_execution_plan_result.future_phase_required }}</td></tr>
+          <tr><th>blocking_conditions</th><td>{{ locked_execution_plan_result.blocking_conditions|join:", " }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Locked execution plan blocking conditions</h2>
+      <table>
+        <tbody>
+          <tr><th>blocking_conditions</th><td>{{ locked_execution_plan_result.blocking_conditions|join:", " }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Locked execution plan safety</h2>
+      <table>
+        <tbody>
+          <tr><th>execution_plan_only</th><td>{{ locked_execution_plan_result.execution_plan_only }}</td></tr>
+          <tr><th>executor_locked</th><td>{{ locked_execution_plan_result.executor_locked }}</td></tr>
+          <tr><th>real_write_allowed</th><td>{{ locked_execution_plan_result.real_write_allowed }}</td></tr>
+          <tr><th>future_write_allowed</th><td>{{ locked_execution_plan_result.future_write_allowed }}</td></tr>
+          <tr><th>dangerous_ack_effective</th><td>{{ locked_execution_plan_result.dangerous_ack_effective }}</td></tr>
+          <tr><th>manual_ack_required_for_future_write</th><td>{{ locked_execution_plan_result.manual_ack_required_for_future_write }}</td></tr>
+          <tr><th>future_phase_required</th><td>{{ locked_execution_plan_result.future_phase_required }}</td></tr>
+          <tr><th>shopify_write_performed</th><td>{{ locked_execution_plan_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ locked_execution_plan_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ locked_execution_plan_result.translations_register_called }}</td></tr>
+          <tr><th>publish_performed</th><td>{{ locked_execution_plan_result.publish_performed }}</td></tr>
+          <tr><th>apply_performed</th><td>{{ locked_execution_plan_result.apply_performed }}</td></tr>
+          <tr><th>real_apply_performed</th><td>{{ locked_execution_plan_result.real_apply_performed }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ locked_execution_plan_result.rollback_performed }}</td></tr>
+          <tr><th>existing_translation_overwrite_allowed</th><td>{{ locked_execution_plan_result.existing_translation_overwrite_allowed }}</td></tr>
+          <tr><th>outdated_translation_overwrite_allowed</th><td>{{ locked_execution_plan_result.outdated_translation_overwrite_allowed }}</td></tr>
+          <tr><th>no_new_shopify_writes_performed</th><td>{{ locked_execution_plan_result.no_new_shopify_writes_performed }}</td></tr>
+          <tr><th>all_new_actions_no_write_confirmed</th><td>{{ locked_execution_plan_result.all_new_actions_no_write_confirmed }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    {% if locked_execution_plan_result.locked_execution_plan_entries %}
+      <div class="module" style="padding: 12px; margin-bottom: 16px;">
+        <h2>Locked execution plan entries</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Product ID</th>
+              <th>Locale</th>
+              <th>Field</th>
+              <th>Digest</th>
+              <th>Source value</th>
+              <th>Proposed translation</th>
+              <th>Current translation state</th>
+              <th>Readiness status</th>
+              <th>Planned mutation</th>
+              <th>Planned resource ID</th>
+              <th>Planned digest</th>
+              <th>Planned locale</th>
+              <th>Planned key</th>
+              <th>Planned value</th>
+              <th>Execution entry status</th>
+              <th>Blocking reasons</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in locked_execution_plan_result.locked_execution_plan_entries %}
+              <tr>
+                <td>{{ entry.product_id }}</td>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }}</td>
+                <td style="word-break: break-all;">{{ entry.digest }}</td>
+                <td style="max-width: 300px; white-space: pre-wrap;">{{ entry.source_value }}</td>
+                <td style="max-width: 300px; white-space: pre-wrap;">{{ entry.proposed_translation }}</td>
+                <td>{{ entry.current_translation_state }}</td>
+                <td>{{ entry.readiness_entry_status }}</td>
+                <td>{{ entry.planned_mutation_name }}</td>
+                <td>{{ entry.planned_resource_id }}</td>
+                <td style="word-break: break-all;">{{ entry.planned_translatable_content_digest }}</td>
+                <td>{{ entry.planned_locale }}</td>
+                <td>{{ entry.planned_key }}</td>
+                <td style="max-width: 300px; white-space: pre-wrap;">{{ entry.planned_value }}</td>
+                <td>{{ entry.execution_entry_status }}</td>
                 <td>{{ entry.blocking_reasons|join:", " }}</td>
               </tr>
             {% endfor %}

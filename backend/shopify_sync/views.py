@@ -52,6 +52,11 @@ from .translation_final_review import (
     FINAL_REVIEW_JSON_PATH,
     build_selected_product_translation_final_review,
 )
+from .translation_locked_execution_plan import (
+    LOCKED_EXECUTION_PLAN_HTML_PATH,
+    LOCKED_EXECUTION_PLAN_JSON_PATH,
+    build_selected_product_translation_locked_execution_plan,
+)
 from .translation_real_write_readiness import (
     REAL_WRITE_READINESS_HTML_PATH,
     REAL_WRITE_READINESS_JSON_PATH,
@@ -527,7 +532,14 @@ def translation_console(request):
         request.method == "POST"
         and post_action == "generate_translation_real_write_readiness"
     )
-    is_post_action = is_draft_post or is_apply_plan_post or is_final_review_post or is_readiness_post
+    is_locked_execution_plan_post = post_action == "generate_translation_locked_execution_plan"
+    is_post_action = (
+        is_draft_post
+        or is_apply_plan_post
+        or is_final_review_post
+        or is_readiness_post
+        or is_locked_execution_plan_post
+    )
     search_text = (request.POST.get("q") if is_post_action else request.GET.get("q", "")).strip()
     locale = ((request.POST.get("locale") if is_post_action else request.GET.get("locale", "ja")) or "ja").strip()
     shop_domain = "kidstoylover.myshopify.com"
@@ -557,13 +569,21 @@ def translation_console(request):
     final_review_error_message = ""
     real_write_readiness_result = None
     real_write_readiness_error_message = ""
+    locked_execution_plan_result = None
+    locked_execution_plan_error_message = ""
 
     if search_text:
         try:
             installation = ShopifyInstallation.objects.first()
             if installation is None:
                 error_message = f"Shopify installation not found for {shop_domain}."
-            elif is_draft_post or is_apply_plan_post or is_final_review_post or is_readiness_post:
+            elif (
+                is_draft_post
+                or is_apply_plan_post
+                or is_final_review_post
+                or is_readiness_post
+                or is_locked_execution_plan_post
+            ):
                 selected_product_id = _resolve_translation_console_product_id(installation, search_text, locale)
                 if selected_product_id:
                     result.update(fetch_translation_console_data(installation, selected_product_id, locale))
@@ -579,21 +599,26 @@ def translation_console(request):
                             "Draft generation blocked: "
                             + ", ".join(draft_result.get("blocking_conditions") or [])
                         )
-                    if is_apply_plan_post or is_final_review_post or is_readiness_post:
+                    if (
+                        is_apply_plan_post
+                        or is_final_review_post
+                        or is_readiness_post
+                        or is_locked_execution_plan_post
+                    ):
                         apply_plan_result = build_selected_product_translation_apply_plan(draft_result)
                         if apply_plan_result.get("blocking_conditions"):
                             apply_plan_error_message = (
                                 "Apply plan generation blocked: "
                                 + ", ".join(apply_plan_result.get("blocking_conditions") or [])
                             )
-                    if is_final_review_post or is_readiness_post:
+                    if is_final_review_post or is_readiness_post or is_locked_execution_plan_post:
                         final_review_result = build_selected_product_translation_final_review(apply_plan_result)
                         if final_review_result.get("blocking_conditions"):
                             final_review_error_message = (
                                 "Final review generation blocked: "
                                 + ", ".join(final_review_result.get("blocking_conditions") or [])
                             )
-                    if is_readiness_post:
+                    if is_readiness_post or is_locked_execution_plan_post:
                         real_write_readiness_result = (
                             build_selected_product_translation_real_write_readiness(final_review_result)
                         )
@@ -604,15 +629,33 @@ def translation_console(request):
                                     real_write_readiness_result.get("blocking_conditions") or []
                                 )
                             )
+                    if is_locked_execution_plan_post:
+                        locked_execution_plan_result = (
+                            build_selected_product_translation_locked_execution_plan(
+                                real_write_readiness_result
+                            )
+                        )
+                        if locked_execution_plan_result.get("blocking_conditions"):
+                            locked_execution_plan_error_message = (
+                                "Locked execution plan generation blocked: "
+                                + ", ".join(
+                                    locked_execution_plan_result.get("blocking_conditions")
+                                    or []
+                                )
+                            )
                 else:
                     draft_error_message = "Select a single Shopify product before generating drafts."
-                    if is_apply_plan_post or is_readiness_post:
+                    if is_apply_plan_post or is_readiness_post or is_locked_execution_plan_post:
                         apply_plan_error_message = "Select a single Shopify product before generating an apply plan."
-                    if is_final_review_post or is_readiness_post:
+                    if is_final_review_post or is_readiness_post or is_locked_execution_plan_post:
                         final_review_error_message = "Select a single Shopify product before generating a final review."
-                    if is_readiness_post:
+                    if is_readiness_post or is_locked_execution_plan_post:
                         real_write_readiness_error_message = (
                             "Select a single Shopify product before generating a real write readiness package."
+                        )
+                    if is_locked_execution_plan_post:
+                        locked_execution_plan_error_message = (
+                            "Select a single Shopify product before generating a locked execution plan."
                         )
             else:
                 result.update(fetch_translation_console_data(installation, search_text, locale))
@@ -642,6 +685,8 @@ def translation_console(request):
             "real_write_readiness_error_message": real_write_readiness_error_message,
             "readiness_result": real_write_readiness_result,
             "readiness_error_message": real_write_readiness_error_message,
+            "locked_execution_plan_result": locked_execution_plan_result,
+            "locked_execution_plan_error_message": locked_execution_plan_error_message,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
             "draft_fields": TRANSLATION_DRAFT_FIELDS,
             "draft_json_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
@@ -654,6 +699,8 @@ def translation_console(request):
             "real_write_readiness_html_report_path": str(REAL_WRITE_READINESS_HTML_PATH),
             "readiness_json_report_path": str(REAL_WRITE_READINESS_JSON_PATH),
             "readiness_html_report_path": str(REAL_WRITE_READINESS_HTML_PATH),
+            "locked_execution_plan_json_report_path": str(LOCKED_EXECUTION_PLAN_JSON_PATH),
+            "locked_execution_plan_html_report_path": str(LOCKED_EXECUTION_PLAN_HTML_PATH),
         },
     )
 
