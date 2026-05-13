@@ -6,6 +6,9 @@ from remote_approval.tasks.git_safety_check_task import run_git_safety_check_tas
 from remote_approval.tasks.shopify_review_request_ali_reviews_capability_discovery_task import (
     run_shopify_review_request_ali_reviews_capability_discovery_task,
 )
+from remote_approval.tasks.shopify_review_request_candidate_scan_task import (
+    run_shopify_review_request_candidate_scan_task,
+)
 from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
     run_shopify_review_request_gmail_readiness_package_task,
 )
@@ -151,6 +154,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_ali_reviews_capability_discovery": (
         run_shopify_review_request_ali_reviews_capability_discovery_task
     ),
+    "shopify_review_request_candidate_scan": run_shopify_review_request_candidate_scan_task,
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
     "shopify_review_request_shopify_tag_permission_readiness": (
         run_shopify_review_request_shopify_tag_permission_readiness_task
@@ -279,6 +283,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_ali_reviews_capability_discovery.json",
+    },
+    "shopify_review_request_candidate_scan": {
+        "description": "Run a read-only Shopify review request candidate scan and local dry-run report.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify order query",
+        "review_file_path": "logs/shopify_review_request_candidate_scan.json",
     },
     "shopify_review_request_gmail_readiness_package": {
         "description": "Generate a docs-only Gmail send permission readiness package for review requests.",
