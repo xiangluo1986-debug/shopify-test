@@ -48,6 +48,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_first_draft_a
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task import (
     run_shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner_task import (
+    run_shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task import (
     run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task,
 )
@@ -239,6 +242,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_one_draft_locked_runner": (
         run_shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task
+    ),
+    "shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner": (
+        run_shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner_task
     ),
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": (
         run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task
@@ -477,6 +483,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "optional Gmail drafts.create only behind explicit env and ack gates",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_locked_runner.json",
+    },
+    "shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner": {
+        "description": "Validate locked gates for a future at-most-one Trustpilot Gmail draft send without sending.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; dry-run only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner.json",
     },
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": {
         "description": "Generate a no-send/no-write Trustpilot Gmail draft send and Shopify tag design package.",
