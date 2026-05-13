@@ -147,6 +147,9 @@ from remote_approval.tasks.shopify_translation_csv_json_small_batch_post_write_a
 from remote_approval.tasks.shopify_translation_selected_product_missing_translation_draft_package_task import (
     run_shopify_translation_selected_product_missing_translation_draft_package_task,
 )
+from remote_approval.tasks.shopify_translation_selected_product_real_write_execute_task import (
+    run_shopify_translation_selected_product_real_write_execute_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -269,6 +272,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_selected_product_missing_translation_draft_package": (
         run_shopify_translation_selected_product_missing_translation_draft_package_task
+    ),
+    "shopify_translation_selected_product_real_write_execute": (
+        run_shopify_translation_selected_product_real_write_execute_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -593,6 +599,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify query plus OpenAI draft generation",
         "review_file_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
+    },
+    "shopify_translation_selected_product_real_write_execute": {
+        "description": "Dry-run or execute the selected product translation real write with strict ACK, scope, digest, and readback verification gates.",
+        "allowed_modes": ["dry-run", "real-run", "execute-real-write"],
+        "write_risk": "high outside dry-run",
+        "review_file_path": "logs/shopify_translation_selected_product_real_write_execute.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
