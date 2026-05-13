@@ -34,6 +34,9 @@
   {% if apply_plan_error_message %}
     <p class="errornote">{{ apply_plan_error_message }}</p>
   {% endif %}
+  {% if final_review_error_message %}
+    <p class="errornote">{{ final_review_error_message }}</p>
+  {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Safety status</h2>
@@ -269,6 +272,28 @@
 
   {% if apply_plan_result %}
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Generate final review package</h2>
+      <p><strong>Final review only / No Shopify write.</strong> This is the final no-write review gate. Real Shopify writes require a separate future phase and explicit manual ACK.</p>
+      <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="generate_translation_final_review">
+        <div>
+          <label for="id_final_review_q">Product ID, title, or handle</label><br>
+          <input id="id_final_review_q" type="text" name="q" value="{{ apply_plan_result.product_id }}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+        </div>
+        <div>
+          <label for="id_final_review_locale">Preview locale</label><br>
+          <select id="id_final_review_locale" name="locale">
+            {% for locale in supported_locales %}
+              <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="button">Generate final review package (No Shopify write)</button>
+      </form>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
       <h2>Apply plan summary</h2>
       <table>
         <tbody>
@@ -333,6 +358,103 @@
                 <td>{{ entry.current_translation_state }}</td>
                 <td>{{ entry.validation_status }}</td>
                 <td>{{ entry.seo_validation_status }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  {% if final_review_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Final review summary</h2>
+      <p><strong>This is the final no-write review gate. Real Shopify writes require a separate future phase and explicit manual ACK.</strong></p>
+      <table>
+        <tbody>
+          <tr><th>final_review_status</th><td>{{ final_review_result.final_review_status }}</td></tr>
+          <tr><th>product_id</th><td>{{ final_review_result.product_id }}</td></tr>
+          <tr><th>product_title</th><td>{{ final_review_result.product_title }}</td></tr>
+          <tr><th>entry_count</th><td>{{ final_review_result.entry_count }}</td></tr>
+          <tr><th>skipped_count</th><td>{{ final_review_result.skipped_count }}</td></tr>
+          <tr><th>rejected_count</th><td>{{ final_review_result.rejected_count }}</td></tr>
+          <tr><th>target_locales</th><td>{{ final_review_result.target_locales|join:", " }}</td></tr>
+          <tr><th>requested_fields</th><td>{{ final_review_result.requested_fields|join:", " }}</td></tr>
+          <tr><th>apply_plan_report_path</th><td>{{ final_review_result.apply_plan_report_path }}</td></tr>
+          <tr><th>final_review_report_path</th><td>{{ final_review_json_report_path }}</td></tr>
+          <tr><th>blocking_conditions</th><td>{{ final_review_result.blocking_conditions|join:", " }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Final gate no-write safety</h2>
+      <table>
+        <tbody>
+          <tr><th>final_review_only</th><td>{{ final_review_result.final_review_only }}</td></tr>
+          <tr><th>apply_plan_only</th><td>{{ final_review_result.apply_plan_only }}</td></tr>
+          <tr><th>shopify_write_performed</th><td>{{ final_review_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ final_review_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ final_review_result.translations_register_called }}</td></tr>
+          <tr><th>publish_performed</th><td>{{ final_review_result.publish_performed }}</td></tr>
+          <tr><th>apply_performed</th><td>{{ final_review_result.apply_performed }}</td></tr>
+          <tr><th>real_apply_performed</th><td>{{ final_review_result.real_apply_performed }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ final_review_result.rollback_performed }}</td></tr>
+          <tr><th>existing_translation_overwrite_allowed</th><td>{{ final_review_result.existing_translation_overwrite_allowed }}</td></tr>
+          <tr><th>outdated_translation_overwrite_allowed</th><td>{{ final_review_result.outdated_translation_overwrite_allowed }}</td></tr>
+          <tr><th>no_new_shopify_writes_performed</th><td>{{ final_review_result.no_new_shopify_writes_performed }}</td></tr>
+          <tr><th>all_new_actions_no_write_confirmed</th><td>{{ final_review_result.all_new_actions_no_write_confirmed }}</td></tr>
+          <tr><th>manual_ack_required_for_future_write</th><td>{{ final_review_result.manual_ack_required_for_future_write }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Skipped / rejected summary</h2>
+      <table>
+        <tbody>
+          <tr><th>already_translated</th><td>{{ final_review_result.skipped_rejected_summary.already_translated }}</td></tr>
+          <tr><th>outdated_translation</th><td>{{ final_review_result.skipped_rejected_summary.outdated_translation }}</td></tr>
+          <tr><th>draft_needs_manual_review</th><td>{{ final_review_result.skipped_rejected_summary.draft_needs_manual_review }}</td></tr>
+          <tr><th>seo_needs_manual_review</th><td>{{ final_review_result.skipped_rejected_summary.seo_needs_manual_review }}</td></tr>
+          <tr><th>missing_digest</th><td>{{ final_review_result.skipped_rejected_summary.missing_digest }}</td></tr>
+          <tr><th>missing_value</th><td>{{ final_review_result.skipped_rejected_summary.missing_value }}</td></tr>
+          <tr><th>unsupported_field</th><td>{{ final_review_result.skipped_rejected_summary.unsupported_field }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    {% if final_review_result.final_review_entries %}
+      <div class="module" style="padding: 12px; margin-bottom: 16px;">
+        <h2>Final review entries</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field</th>
+              <th>Source value</th>
+              <th>Proposed translation</th>
+              <th>Digest</th>
+              <th>Current translation state</th>
+              <th>Validation</th>
+              <th>SEO validation</th>
+              <th>Risk flags</th>
+              <th>Final review status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in final_review_result.final_review_entries %}
+              <tr>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }}</td>
+                <td style="max-width: 320px; white-space: pre-wrap;">{{ entry.source_value }}</td>
+                <td style="max-width: 320px; white-space: pre-wrap;">{{ entry.proposed_translation }}</td>
+                <td style="word-break: break-all;">{{ entry.digest }}</td>
+                <td>{{ entry.current_translation_state }}</td>
+                <td>{{ entry.validation_status }}</td>
+                <td>{{ entry.seo_validation_status }}</td>
+                <td>{{ entry.risk_flags|join:", " }}</td>
+                <td>{{ entry.final_review_status }}</td>
               </tr>
             {% endfor %}
           </tbody>

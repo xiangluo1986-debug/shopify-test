@@ -1234,6 +1234,17 @@ logs/shopify_translation_selected_product_apply_plan_package.html
 
 The apply plan may include only entries with `eligible_for_apply_plan=true`, `validation_status=draft_ready_for_manual_review`, `seo_validation_status=seo_ready`, no existing current translation, and no outdated translation. Existing translations, outdated translations, drafts needing manual review, and SEO-needs-review drafts must be skipped. This phase is plan-only and must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, overwrite existing translations, write the database, add migrations, expose tokens, or git push. It must report `apply_plan_only=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Selected Product Translation Final Review Package
+
+Phase 15.4 adds a Translation Console action that rebuilds the trusted selected-product draft package, rebuilds the apply plan, then creates the final no-write review package:
+
+```text
+logs/shopify_translation_selected_product_final_review_package.json
+logs/shopify_translation_selected_product_final_review_package.html
+```
+
+The final review package is the last manual-review gate before any future separate write phase. It must not perform Shopify writes or call Shopify mutations, `translationsRegister`, publish, apply, rollback, overwrite existing translations, write the database, add migrations, expose tokens, or git push. It must reject or flag missing digests, missing proposed values, unsupported fields, existing translations, outdated translations, drafts needing manual review, and SEO-needs-review entries. It must report `final_review_only=true`, `apply_plan_only=true`, `manual_ack_required_for_future_write=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, and `no_new_shopify_writes_performed=true`.
+
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration
