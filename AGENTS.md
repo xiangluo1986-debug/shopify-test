@@ -98,6 +98,18 @@ python manage.py flush
 - Handle Shopify `429 Too Many Requests` by respecting `Retry-After` and retrying with a bounded limit.
 - For Shopify orders, preserve logic around `tags`, `line_items`, `note`, `note_attributes`, and `total_tip_received`.
 
+## Shopify Review Request Automation Rules
+
+- Phase 0 is integration preparation only: documentation, `.env.example` placeholders, checklist updates, and local safety notes.
+- No Ali Reviews / Kudosi API call is allowed until official API documentation, authentication method, and token handling are confirmed.
+- No Gmail sending is allowed until Gmail OAuth and send permission for `info@kidstoylover.com` are confirmed.
+- No Shopify `tagsAdd` or `tagsRemove` mutation is allowed until `write_orders` and `write_customers` scopes are confirmed for the relevant app.
+- The first implementation phase must produce a dry-run report only.
+- No customer email may be sent during Phase 0 or Phase 1.
+- No Shopify write or mutation may be performed during Phase 0 or Phase 1.
+- Do not store real Ali Reviews / Kudosi tokens, Gmail OAuth credentials, Shopify tokens, Trustpilot private links, or other secrets in docs, logs, `.env.example`, or Git.
+- Ticket system review-request filtering rules must be documented and reviewed before any customer-facing or Shopify-writing workflow is built.
+
 ## Shopify Product Translation Rules
 
 - Existing translation entry point: `backend/shopify_sync/management/commands/translate_shopify_product.py`.
@@ -192,6 +204,10 @@ python manage.py flush
 - CSV/JSON small batch post-write audit package must not call Shopify APIs, call mutations, call `translationsRegister`, perform readback, perform rollback, publish, apply, update, write the database, or git push. It may preserve source real-run facts only when the execute report is a successful `plan_source=csv_json` real-run, but the audit task itself must report `audit_package_only=true`, `shopify_api_call_performed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `readback_performed=false`, `rollback_performed=false`, `publish_performed=false`, `real_apply_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 - Shopify Product Translation Console Phase 15.0 is read-only and may expose a staff-only admin page at `/admin/shopify_sync/translation-console/` for product lookup and translatable field inspection.
 - Shopify Product Translation Console must not call OpenAI, generate translations, call mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, write the database, add migrations, auto-scan the store, or expose access tokens. It may call read-only Shopify GraphQL queries for one product or a maximum 5-product search and must report `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, and `rollback_performed=false`.
+- Selected product missing translation draft package Phase 15.1 may call read-only Shopify GraphQL queries for one selected product and may call OpenAI only to create local draft translations for missing `title`, `meta_title`, and `meta_description` entries across `ja`, `de`, `fr`, `es`, and `it`.
+- Phase 15.1A draft quality refinement must keep `title` <= 65 chars, `meta_title` <= 60 chars, and `meta_description` <= 155 chars, may run at most two natural rewrite attempts for over-length drafts, must avoid CTA/shipping/origin claims and mechanical English phrases, and may mark `eligible_for_apply_plan=true` only for `draft_ready_for_manual_review` entries.
+- Phase 15.1B Google SEO checks must add per-draft `seo_validation_status`, `seo_notes`, recommended character ranges, core keyword/model/forbidden phrase checks, and may keep `eligible_for_apply_plan=true` only when both `validation_status=draft_ready_for_manual_review` and `seo_validation_status=seo_ready`.
+- Selected product missing translation draft package must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, overwrite existing translations, add migrations, expose tokens, or git push. Existing current translations must be skipped, outdated translations must be marked for manual review, and the task must report `draft_package_only=true`, `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 - Before any formal Shopify translation write, generate and review a `--review-file` output unless the user explicitly confirms an equivalent manual review.
 - Use `--dry-run` for preview runs and include the payload preview in the review.
 - Formal Shopify translation writes require explicit user confirmation after review.

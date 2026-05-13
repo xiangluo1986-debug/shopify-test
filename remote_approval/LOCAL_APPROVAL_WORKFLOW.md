@@ -16,11 +16,16 @@ Telegram approval code is still present for future use, but local approval is th
 - Future Shenzhen settlement check tasks.
 - Low-risk validation after Codex edits code.
 - Review-file generation and local audit workflows.
+- Review request automation integration preparation, checklists, and future dry-run report-only tasks.
 
 ## Poor Fits
 
 - Arbitrary command execution.
 - Shopify writes or translation publishing.
+- Review request customer email sending.
+- Shopify review request tag writes such as `tagsAdd` or `tagsRemove`.
+- Ali Reviews / Kudosi API calls before API docs and token handling are confirmed.
+- Gmail API send calls before OAuth and send permission are confirmed.
 - Bulk database modifications.
 - `git push`, `git reset`, or `git restore`.
 - Refunds, order cancellations, bulk price edits, or inventory edits.
@@ -1200,6 +1205,37 @@ Phase 15.0 adds a staff-only internal admin page:
 The page can read one Shopify product by GID / numeric product ID or perform a limited read-only product search, with at most 5 search results. It displays product basics, `translatableResource` content keys, source values, digests, and existing translations for a selected locale (`ja`, `de`, `fr`, `es`, or `it`).
 
 This page is read-only. It must not call OpenAI, generate translations, call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, write the database, add migrations, or expose Shopify access tokens. It must keep visible safety flags such as `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, and `rollback_performed=false`.
+
+### Selected Product Missing Translation Draft Package
+
+`shopify_translation_selected_product_missing_translation_draft_package` reads a single selected Shopify product through read-only `translatableResource` queries and checks existing translations for `ja`, `de`, `fr`, `es`, and `it`. The first allowed fields are `title`, `meta_title`, and `meta_description`; `body_html`, handles, images, variants, collections, pages, blogs, theme text, navigation, metafields, and metaobjects remain out of scope.
+
+The task may call OpenAI only to generate local draft text for missing translations. It must skip empty source values, skip existing current translations, and mark outdated existing translations as manual-review-only instead of overwriting them. If `OPENAI_API_KEY` is unavailable and missing translations require draft generation, the task must block with `blocked_missing_openai_api_key`.
+
+Draft quality rules keep `title` at 65 characters or fewer, `meta_title` at 60 characters or fewer, and `meta_description` at 155 characters or fewer. Over-length drafts may receive at most two natural rewrite attempts and must never be crudely truncated. Drafts that remain over-length, include forbidden CTA/shipping/origin claims, or contain mechanical English phrases such as `RC Plane Clevis` must be marked `draft_needs_manual_review` with `eligible_for_apply_plan=false`; only `draft_ready_for_manual_review` entries may set `eligible_for_apply_plan=true`.
+
+Google SEO checks add `seo_validation_status`, `seo_notes`, recommended min/max character ranges, core keyword/model/forbidden phrase indicators, and SEO eligibility for each draft entry. `title` should be 25-65 characters, `meta_title` 30-60 characters, and `meta_description` 80-155 characters. `eligible_for_apply_plan=true` is allowed only when the draft is `draft_ready_for_manual_review` and `seo_validation_status=seo_ready`; too-short SEO copy, missing core keywords, forbidden phrases, duplicate title/meta_title text, or keyword stuffing must require manual review.
+
+The task writes only local JSON/HTML reports under `logs/`. It must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, update existing Shopify translations, write the database, add migrations, expose tokens, or git push. It must report `draft_package_only=true`, `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
+### Shopify Review Request Automation Preparation
+
+Phase 0 review request automation work is documentation and configuration
+preparation only. The checklist lives at:
+
+```text
+remote_approval/review_request_integration_checklist.md
+```
+
+The `.env.example` review request section must contain placeholders only. Do
+not add real Ali Reviews / Kudosi tokens, Gmail OAuth credentials, Shopify
+tokens, Trustpilot private links, or other secrets.
+
+Any future review request task must start as a dry-run report-only task. Phase 0
+and Phase 1 must not send customer email, call the Gmail API, call the Ali
+Reviews / Kudosi API, call Shopify `tagsAdd` / `tagsRemove`, write Shopify data,
+write the database, or git push. Shopify tag mutations require a later separate
+write phase after `write_orders` and `write_customers` scopes are confirmed.
 
 ### `System.Speech` Is Unavailable
 
