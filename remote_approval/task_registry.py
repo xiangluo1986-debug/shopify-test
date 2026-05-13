@@ -63,6 +63,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_sen
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness_task import (
     run_shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_repeat_customer_guard_task import (
+    run_shopify_review_request_trustpilot_gmail_repeat_customer_guard_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task import (
     run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task,
 )
@@ -216,6 +219,9 @@ from remote_approval.tasks.shopify_translation_next_batch_post_write_audit_task 
 from remote_approval.tasks.shopify_translation_remaining_title_batch_locked_dry_run_package_task import (
     run_shopify_translation_remaining_title_batch_locked_dry_run_package_task,
 )
+from remote_approval.tasks.shopify_translation_remaining_title_batch_real_write_execute_task import (
+    run_shopify_translation_remaining_title_batch_real_write_execute_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -275,6 +281,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness": (
         run_shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness_task
+    ),
+    "shopify_review_request_trustpilot_gmail_repeat_customer_guard": (
+        run_shopify_review_request_trustpilot_gmail_repeat_customer_guard_task
     ),
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": (
         run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task
@@ -405,6 +414,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_remaining_title_batch_locked_dry_run_package": (
         run_shopify_translation_remaining_title_batch_locked_dry_run_package_task
+    ),
+    "shopify_translation_remaining_title_batch_real_write_execute": (
+        run_shopify_translation_remaining_title_batch_real_write_execute_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -549,6 +561,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness.json",
+    },
+    "shopify_review_request_trustpilot_gmail_repeat_customer_guard": {
+        "description": "Run a read-only repeat-customer guard before any Trustpilot Gmail real send.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify lookup only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_repeat_customer_guard.json",
     },
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": {
         "description": "Generate a no-send/no-write Trustpilot Gmail draft send and Shopify tag design package.",
@@ -867,6 +885,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify query plus OpenAI dry-run package generation",
         "review_file_path": "logs/shopify_translation_remaining_title_batch_locked_dry_run_package.json",
+    },
+    "shopify_translation_remaining_title_batch_real_write_execute": {
+        "description": "Dry-run or execute the locked selected-product remaining title translation write with strict ACK, scope, digest, SEO, and readback gates.",
+        "allowed_modes": ["dry-run", "real-run", "execute-real-write"],
+        "write_risk": "high outside dry-run",
+        "review_file_path": "logs/shopify_translation_remaining_title_batch_real_write_execute.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
