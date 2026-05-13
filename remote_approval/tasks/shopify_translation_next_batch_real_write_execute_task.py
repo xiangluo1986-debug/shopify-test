@@ -194,6 +194,36 @@ def _settings_blocking_conditions(settings: dict) -> list[str]:
     return _unique(conditions)
 
 
+def _target_key(locale: str, field: str) -> str:
+    return f"{locale}:{field}"
+
+
+def _target_keys_from_targets(targets: list[dict]) -> list[str]:
+    return [
+        _target_key(str(target.get("locale", "")), str(target.get("field", "")))
+        for target in targets
+        if target.get("locale") and target.get("field")
+    ]
+
+
+def _requested_target_keys(settings: dict) -> list[str]:
+    parsed_targets = (
+        settings.get("env_next_batch_targets")
+        or _parse_targets(settings.get("requested_next_batch_targets") or LOCKED_TARGET_LABEL)
+        or LOCKED_TARGETS
+    )
+    return _target_keys_from_targets(parsed_targets)
+
+
+def _selected_target_keys(entries: list[dict]) -> list[str]:
+    return _target_keys_from_targets(
+        [
+            {"locale": entry.get("locale", ""), "field": entry.get("field", "")}
+            for entry in entries
+        ]
+    )
+
+
 def _build_payload(
     settings: dict,
     locked_report: dict,
@@ -226,6 +256,20 @@ def _build_payload(
         if not audit_status:
             audit_status = "next_batch_real_write_audit_not_run_dry_run" if dry_run else "next_batch_real_write_audit_not_run"
 
+    selected_entries = list(docker_result.get("next_batch_selected_entries") or [])
+    requested_target_keys = list(
+        docker_result.get("next_batch_requested_target_keys")
+        or _requested_target_keys(settings)
+    )
+    selected_target_keys = list(
+        docker_result.get("next_batch_selected_target_keys")
+        or _selected_target_keys(selected_entries)
+    )
+    missing_target_keys = list(docker_result.get("next_batch_missing_target_keys") or [])
+    missing_target_diagnostics = list(
+        docker_result.get("next_batch_missing_target_diagnostics") or []
+    )
+
     payload = {
         "phase": PHASE,
         "task": TASK_NAME,
@@ -240,6 +284,10 @@ def _build_payload(
         "product_id": settings["product_id"],
         "next_batch_only": bool(settings.get("next_batch_only")),
         "requested_next_batch_targets": settings["requested_next_batch_targets"],
+        "next_batch_requested_target_keys": requested_target_keys,
+        "next_batch_selected_target_keys": selected_target_keys,
+        "next_batch_missing_target_keys": missing_target_keys,
+        "next_batch_missing_target_diagnostics": missing_target_diagnostics,
         "max_entries": int(settings.get("max_entries") or 0),
         "source_locked_dry_run_report_path": str(LOCKED_DRY_RUN_REPORT_PATH),
         "source_locked_dry_run_report_exists": bool(locked_diag.get("file_exists")),
@@ -250,7 +298,7 @@ def _build_payload(
             locked_report.get("locked_next_batch_ready") is True
             and not locked_conditions
         ),
-        "next_batch_selected_entries": docker_result.get("next_batch_selected_entries", []),
+        "next_batch_selected_entries": selected_entries,
         "next_batch_selected_count": int(docker_result.get("next_batch_selected_count") or 0),
         "translations_register_payload_count": int(
             docker_result.get("translations_register_payload_count") or 0
@@ -447,11 +495,119 @@ def entry_matches_target(entry, target):
         and entry.get("would_write")
     )
 
+def scan_entry_matches_target(entry, target):
+    return (
+        entry.get("locale") == target.get("locale")
+        and (entry.get("field") == target.get("field") or entry.get("key") == target.get("field"))
+    )
+
+def target_key(locale, field):
+    return str(locale or "") + ":" + str(field or "")
+
+def target_key_for_target(target):
+    return target_key(target.get("locale", ""), target.get("field", ""))
+
+def target_key_for_entry(entry):
+    return target_key(entry.get("locale", ""), entry.get("field") or entry.get("key", ""))
+
+def first_scan_entry(entries, target):
+    for entry in entries:
+        if scan_entry_matches_target(entry, target):
+            return entry
+    return {{}}
+
 def locked_digest(locale, field):
     for entry in settings.get("locked_target_entries") or []:
         if entry.get("locale") == locale and entry.get("field") == field:
             return entry.get("digest", "")
     return ""
+
+def locked_entry(locale, field):
+    for entry in settings.get("locked_target_entries") or []:
+        if entry.get("locale") == locale and entry.get("field") == field:
+            return entry
+    return {{}}
+
+def missing_target_diagnostic(target, scan_entries, readback_entries):
+    scan_entry = first_scan_entry(scan_entries, target)
+    readback_entry = first_scan_entry(readback_entries, target)
+    locked = locked_entry(target.get("locale"), target.get("field"))
+    planned_value = (
+        scan_entry.get("planned_value")
+        or scan_entry.get("proposed_translation")
+        or readback_entry.get("planned_value")
+        or readback_entry.get("proposed_translation")
+        or ""
+    )
+    proposed_value_chars = len(planned_value) if planned_value else int(locked.get("proposed_value_chars") or 0)
+    state = {{}}
+    state.update(scan_entry.get("current_translation_state") or {{}})
+    state.update(readback_entry.get("pre_existing_translation_state") or {{}})
+    current_translation_present = bool(
+        state.get("existing_translation_present")
+        or state.get("current_translation_present")
+    )
+    current_translation_outdated = (
+        state.get("existing_translation_outdated") is True
+        or state.get("current_translation_outdated") is True
+    )
+    locked_report_digest = locked.get("digest", "")
+    current_scan_digest = (
+        scan_entry.get("digest")
+        or readback_entry.get("pre_write_digest")
+        or readback_entry.get("digest")
+        or ""
+    )
+    digest_matches = bool(
+        locked_report_digest
+        and current_scan_digest
+        and locked_report_digest == current_scan_digest
+    )
+    blocking_reasons = []
+    blocking_reasons.extend(scan_entry.get("blocking_reasons") or [])
+    blocking_reasons.extend(readback_entry.get("blocking_reasons") or [])
+    warning = seo_warning(target.get("field", ""), proposed_value_chars)
+    if warning:
+        blocking_reasons.append(warning)
+    if current_translation_present:
+        blocking_reasons.append("current_translation_present")
+    if current_translation_outdated:
+        blocking_reasons.append("current_translation_outdated")
+    if current_scan_digest and locked_report_digest and current_scan_digest != locked_report_digest:
+        blocking_reasons.append("next_batch_digest_changed")
+    found_in_current_scan = bool(scan_entry)
+    would_write = bool(scan_entry.get("would_write")) if found_in_current_scan else False
+    if current_translation_present:
+        exclusion_reason = "current_translation_present"
+    elif current_translation_outdated:
+        exclusion_reason = "current_translation_outdated"
+    elif not found_in_current_scan:
+        exclusion_reason = "not_found_in_manual_action_entries"
+    elif not digest_matches:
+        exclusion_reason = "digest_changed"
+    elif warning:
+        exclusion_reason = "seo_warning"
+    elif not would_write:
+        exclusion_reason = "would_write_false"
+    else:
+        exclusion_reason = "not_selected"
+    return {{
+        "locale": target.get("locale", ""),
+        "field": target.get("field", ""),
+        "found_in_current_scan": found_in_current_scan,
+        "current_translation_present": current_translation_present,
+        "current_translation_outdated": current_translation_outdated,
+        "digest_matches": digest_matches,
+        "seo_warning": warning,
+        "would_write": would_write,
+        "blocking_conditions": _unique(blocking_reasons),
+        "skipped_reason": exclusion_reason,
+        "exclusion_reason": exclusion_reason,
+        "locked_report_entry_found": bool(locked),
+        "locked_report_digest": locked_report_digest,
+        "current_scan_digest": current_scan_digest,
+        "proposed_value_chars": proposed_value_chars,
+    }}
 
 result = {{
     "success": False,
@@ -460,6 +616,10 @@ result = {{
     "blocking_conditions": [],
     "next_batch_selected_entries": [],
     "next_batch_selected_count": 0,
+    "next_batch_requested_target_keys": [target_key_for_target(target) for target in LOCKED_TARGETS],
+    "next_batch_selected_target_keys": [],
+    "next_batch_missing_target_keys": [],
+    "next_batch_missing_target_diagnostics": [],
     "translations_register_payload_count": 0,
     "write_attempted_count": 0,
     "write_succeeded_count": 0,
@@ -495,14 +655,49 @@ else:
         blocking.append("manual_action_package_not_ready")
     entries = _manual_entries(manual)
     selected = []
+    missing_targets = []
     for target in LOCKED_TARGETS:
         candidates = [entry for entry in entries if entry_matches_target(entry, target)]
         if len(candidates) == 0:
             blocking.append("next_batch_target_missing")
+            missing_targets.append(target)
         elif len(candidates) > 1:
             blocking.append("next_batch_target_not_unique")
         else:
             selected.append(candidates[0])
+    if missing_targets:
+        missing_readback_entries = []
+        for target in missing_targets:
+            locked = locked_entry(target.get("locale"), target.get("field"))
+            missing_readback_entries.append({{
+                "product_id": product_id,
+                "locale": target.get("locale", ""),
+                "field": target.get("field", ""),
+                "key": target.get("field", ""),
+                "digest": locked.get("digest", ""),
+                "planned_value": "",
+                "proposed_translation": "",
+                "would_write": False,
+                "blocking_reasons": [],
+            }})
+        missing_precheck = _pre_write_readback(
+            installation,
+            product_id,
+            LOCKED_TARGET_LOCALES,
+            missing_readback_entries,
+        )
+        result["shopify_api_call_performed"] = bool(missing_precheck.get("performed"))
+        result["next_batch_missing_target_diagnostics"] = [
+            missing_target_diagnostic(
+                target,
+                entries,
+                missing_precheck.get("entries") or [],
+            )
+            for target in missing_targets
+        ]
+        result["next_batch_missing_target_keys"] = [
+            target_key_for_target(target) for target in missing_targets
+        ]
     if len(selected) != LOCKED_MAX_ENTRIES:
         blocking.append("next_batch_selected_count_not_two")
 
@@ -597,6 +792,9 @@ else:
 
     result["blocking_conditions"] = _unique(blocking)
     result["next_batch_selected_entries"] = [safe_entry(entry) for entry in selected]
+    result["next_batch_selected_target_keys"] = [
+        target_key_for_entry(entry) for entry in selected
+    ]
     result["next_batch_selected_count"] = selected_count
     result["translations_register_payload_count"] = payload_count
     if settings.get("dry_run") is True:
@@ -716,6 +914,10 @@ def _post_write_check_command() -> str:
         "rollback_performed",
         "blocking_conditions",
         "requested_next_batch_targets",
+        "next_batch_requested_target_keys",
+        "next_batch_selected_target_keys",
+        "next_batch_missing_target_keys",
+        "next_batch_missing_target_diagnostics",
         "next_batch_selected_count",
     ]
     keys_literal = repr(keys)
@@ -753,6 +955,9 @@ def _render_html(payload: dict) -> str:
             ("Dry Run", "dry_run"),
             ("Product ID", "product_id"),
             ("Requested Targets", "requested_next_batch_targets"),
+            ("Requested Target Keys", "next_batch_requested_target_keys"),
+            ("Selected Target Keys", "next_batch_selected_target_keys"),
+            ("Missing Target Keys", "next_batch_missing_target_keys"),
             ("Selected Count", "next_batch_selected_count"),
             ("Payload Count", "translations_register_payload_count"),
             ("Manual Next Step Allowed", "manual_next_batch_real_write_allowed_next_step"),
@@ -788,6 +993,25 @@ def _render_html(payload: dict) -> str:
         "</tr>"
         for entry in payload.get("next_batch_selected_entries", [])
     )
+    missing_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(str(item.get('locale', '')))}</td>"
+        f"<td>{escape(str(item.get('field', '')))}</td>"
+        f"<td>{escape(str(item.get('found_in_current_scan', '')))}</td>"
+        f"<td>{escape(str(item.get('current_translation_present', '')))}</td>"
+        f"<td>{escape(str(item.get('current_translation_outdated', '')))}</td>"
+        f"<td>{escape(str(item.get('digest_matches', '')))}</td>"
+        f"<td>{escape(str(item.get('seo_warning', '')))}</td>"
+        f"<td>{escape(str(item.get('would_write', '')))}</td>"
+        f"<td>{escape(str(item.get('locked_report_entry_found', '')))}</td>"
+        f"<td>{escape(str(item.get('locked_report_digest', '')))}</td>"
+        f"<td>{escape(str(item.get('current_scan_digest', '')))}</td>"
+        f"<td>{escape(str(item.get('proposed_value_chars', '')))}</td>"
+        f"<td>{escape(str(item.get('exclusion_reason', '')))}</td>"
+        f"<td>{escape(json.dumps(item.get('blocking_conditions', []), ensure_ascii=False))}</td>"
+        "</tr>"
+        for item in payload.get("next_batch_missing_target_diagnostics", [])
+    )
     command_rows = "\n".join(
         f"<li><code>{escape(line)}</code></li>"
         for line in payload.get("next_batch_real_write_command_powershell", [])
@@ -806,6 +1030,11 @@ def _render_html(payload: dict) -> str:
   <table border="1" cellspacing="0" cellpadding="6">
     <thead><tr><th>Locale</th><th>Field</th><th>Key</th><th>Digest</th><th>Pre-Write Digest</th><th>Chars</th><th>SEO Warning</th><th>Would Write</th><th>Write Performed</th><th>Verified</th><th>Blocking Conditions</th></tr></thead>
     <tbody>{entry_rows}</tbody>
+  </table>
+  <h2>Missing Target Diagnostics</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Locale</th><th>Field</th><th>Found In Current Scan</th><th>Current Translation Present</th><th>Current Translation Outdated</th><th>Digest Matches</th><th>SEO Warning</th><th>Would Write</th><th>Locked Entry Found</th><th>Locked Digest</th><th>Current Digest</th><th>Chars</th><th>Exclusion Reason</th><th>Blocking Conditions</th></tr></thead>
+    <tbody>{missing_rows}</tbody>
   </table>
   <h2>Future Real-Write Command Preview</h2>
   <p>Do not run this in Phase 16.8 validation. It is a preview for a later explicit manual real-run.</p>
@@ -830,6 +1059,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"- execution_status: {payload.get('execution_status')}\n"
         f"- audit_status: {payload.get('audit_status')}\n"
         f"- dry_run: {payload.get('dry_run')}\n"
+        f"- next_batch_missing_target_keys: {payload.get('next_batch_missing_target_keys')}\n"
         f"- next_batch_selected_count: {payload.get('next_batch_selected_count')}\n"
         f"- translations_register_payload_count: {payload.get('translations_register_payload_count')}\n"
         f"- manual_next_batch_real_write_allowed_next_step: {payload.get('manual_next_batch_real_write_allowed_next_step')}\n"
