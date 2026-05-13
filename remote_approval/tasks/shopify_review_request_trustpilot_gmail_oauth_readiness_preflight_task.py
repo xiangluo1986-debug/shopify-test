@@ -1,0 +1,583 @@
+import base64
+import json
+import os
+import re
+import time
+from email.mime.text import MIMEText
+from html import escape
+from pathlib import Path
+
+from remote_approval.utils import LOG_DIR, utc_now_iso
+
+
+TASK_NAME = "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight"
+COMMAND_LABEL = "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight"
+
+PHASE_3_2_SOURCE_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_draft_create_locked_test.json"
+PHASE_3_1_SOURCE_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_draft_package.json"
+REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight.json"
+REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight.html"
+
+CREATE_DRAFTS_ENV = "TRUSTPILOT_GMAIL_CREATE_DRAFTS"
+ACK_ENV = "TRUSTPILOT_GMAIL_DRAFT_CREATE_LOCKED_TEST_ACK"
+ACK_VALUE = "YES_I_APPROVE_ONE_GMAIL_DRAFT_CREATION"
+
+GMAIL_SEND_FROM = "info@kidstoylover.com"
+GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
+TRUSTPILOT_TAG = "1: trustpilot"
+SUBJECT = "Thank You for Your Support \u2013 We\u2019d Love Your Feedback!"
+BODY_TEMPLATE = (
+    "Dear {first_name},\n\n"
+    "Thank you so much for your continued support and for choosing us again \u2014 it truly means a lot to our team.\n\n"
+    "If you have a moment, we would greatly appreciate it if you could leave a quick review of your experience with us. "
+    "Your feedback not only helps us improve, but also helps other customers feel confident in choosing us too.\n\n"
+    "You can share your thoughts here:\n"
+    "https://www.trustpilot.com/evaluate/www.kidstoylover.com\n\n"
+    "Thanks again for being a valued customer. If there's anything else we can assist you with, please don\u2019t hesitate "
+    "to let us know.\n\n"
+    "Kind Regards,\n"
+    "Xiang"
+)
+
+EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+SENSITIVE_TEXT_RE = re.compile(
+    r"(?i)(shpat_[A-Za-z0-9_]+|x-shopify-access-token|authorization|access[_\s-]?token|refresh[_\s-]?token|api[_\s-]?key|password|secret|bearer\s+[A-Za-z0-9._-]+)"
+)
+
+
+def run_shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task(mode: str) -> dict:
+    if mode != "dry-run":
+        raise ValueError(f"{TASK_NAME} only supports dry-run mode.")
+
+    started = time.time()
+    source_report, source_error, source_path = _load_source_report()
+    source_ready = _source_ready(source_report, source_error)
+    candidates = _candidate_rows(source_report) if source_ready else []
+    selected_candidate = _select_candidate(candidates)
+    gmail_readiness = _gmail_readiness()
+    create_enabled = os.environ.get(CREATE_DRAFTS_ENV, "").strip() == "1"
+    ack_valid = os.environ.get(ACK_ENV, "").strip() == ACK_VALUE
+    preflight_result = _preflight_result(
+        source_ready=source_ready,
+        source_error=source_error,
+        selected_candidate=selected_candidate,
+        gmail_readiness=gmail_readiness,
+        create_enabled=create_enabled,
+        ack_valid=ack_valid,
+    )
+    payload = _build_payload(
+        source_report=source_report,
+        source_error=source_error,
+        source_path=source_path,
+        source_ready=source_ready,
+        candidates=candidates,
+        selected_candidate=selected_candidate,
+        gmail_readiness=gmail_readiness,
+        create_enabled=create_enabled,
+        ack_valid=ack_valid,
+        preflight_result=preflight_result,
+        duration_seconds=round(time.time() - started, 3),
+    )
+    json_path = _write_json_report(payload)
+    html_path = _write_html_report(payload)
+    return _task_result(payload, json_path, html_path)
+
+
+def _load_source_report() -> tuple[dict, str, Path]:
+    for path in (PHASE_3_2_SOURCE_PATH, PHASE_3_1_SOURCE_PATH):
+        if not path.exists():
+            continue
+        try:
+            return json.loads(path.read_text(encoding="utf-8")), "", path
+        except json.JSONDecodeError as exc:
+            return {}, _sanitize_text(f"trustpilot_draft_source_json_parse_error: {exc}"), path
+    return {}, "blocked_missing_trustpilot_draft_source_report", PHASE_3_2_SOURCE_PATH
+
+
+def _source_ready(source_report: dict, source_error: str) -> bool:
+    if source_error:
+        return False
+    task_name = source_report.get("task_name")
+    if task_name == "shopify_review_request_trustpilot_gmail_draft_create_locked_test":
+        return str(source_report.get("phase")) == "3.2" and source_report.get("success") is True
+    if task_name == "shopify_review_request_trustpilot_gmail_draft_package":
+        return (
+            str(source_report.get("phase")) == "3.1"
+            and source_report.get("draft_package_status") == "local_draft_package_only"
+            and source_report.get("success") is True
+        )
+    return False
+
+
+def _candidate_rows(source_report: dict) -> list[dict]:
+    task_name = source_report.get("task_name")
+    if task_name == "shopify_review_request_trustpilot_gmail_draft_create_locked_test":
+        preview = source_report.get("selected_draft_preview") if isinstance(source_report.get("selected_draft_preview"), dict) else {}
+        if not preview:
+            return []
+        return [
+            {
+                "order_name": _safe_text(source_report.get("selected_order_name", preview.get("order_name", ""))),
+                "order_id_or_gid": _safe_text(preview.get("order_id_or_gid", "")),
+                "masked_email": _safe_masked_email(source_report.get("selected_masked_email", preview.get("masked_email", ""))),
+                "first_name_used": _safe_text(preview.get("first_name_used", "there")) or "there",
+                "local_draft_body_preview": _safe_text(preview.get("body", "")) or BODY_TEMPLATE.format(first_name="there"),
+                "subject": _safe_text(source_report.get("subject", SUBJECT)) or SUBJECT,
+                "planned_tag_after_future_send": TRUSTPILOT_TAG,
+            }
+        ]
+    rows = []
+    for row in source_report.get("draft_candidates") or []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("blocked_reason") or row.get("gmail_draft_created") is True:
+            continue
+        rows.append(row)
+    return rows
+
+
+def _select_candidate(candidates: list[dict]) -> dict:
+    return candidates[0] if candidates else {}
+
+
+def _gmail_readiness() -> dict:
+    send_from = os.environ.get("GMAIL_SEND_FROM", "").strip()
+    scopes = _split_scopes(os.environ.get("GOOGLE_GMAIL_SCOPES", ""))
+    client_id_present = bool(os.environ.get("GOOGLE_GMAIL_CLIENT_ID", "").strip())
+    client_secret_present = bool(os.environ.get("GOOGLE_GMAIL_CLIENT_SECRET", "").strip())
+    refresh_token_present = bool(os.environ.get("GOOGLE_GMAIL_REFRESH_TOKEN", "").strip())
+    scopes_present = bool(scopes)
+    compose_scope_present = GMAIL_COMPOSE_SCOPE in scopes
+    sender_matches = send_from == GMAIL_SEND_FROM
+    missing = []
+    if not sender_matches:
+        missing.append("GMAIL_SEND_FROM")
+    if not client_id_present:
+        missing.append("GOOGLE_GMAIL_CLIENT_ID")
+    if not client_secret_present:
+        missing.append("GOOGLE_GMAIL_CLIENT_SECRET")
+    if not refresh_token_present:
+        missing.append("GOOGLE_GMAIL_REFRESH_TOKEN")
+    if not scopes_present or not compose_scope_present:
+        missing.append("GOOGLE_GMAIL_SCOPES")
+    return {
+        "gmail_client_id_present": client_id_present,
+        "gmail_client_secret_present": client_secret_present,
+        "gmail_refresh_token_present": refresh_token_present,
+        "gmail_scopes_present": scopes_present,
+        "gmail_compose_scope_present": compose_scope_present,
+        "gmail_sender_matches_expected": sender_matches,
+        "gmail_oauth_present": not missing,
+        "missing_env_vars": missing,
+        "scopes": scopes,
+        "env_source_policy": "process_environment_only_dotenv_not_read",
+    }
+
+
+def _preflight_result(
+    source_ready: bool,
+    source_error: str,
+    selected_candidate: dict,
+    gmail_readiness: dict,
+    create_enabled: bool,
+    ack_valid: bool,
+) -> dict:
+    result = {
+        "preflight_status": "gmail_oauth_readiness_checked_no_draft_created",
+        "gmail_oauth_token_refresh_attempted": False,
+        "gmail_oauth_token_refresh_succeeded": False,
+        "gmail_oauth_error_type": "",
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_drafts_created_count": 0,
+        "gmail_draft_id": "",
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "error_sanitized": "",
+    }
+    if source_error or not source_ready:
+        result["preflight_status"] = "blocked_missing_trustpilot_draft_source_report"
+        return result
+    if not selected_candidate:
+        result["preflight_status"] = "blocked_no_trustpilot_draft_candidate"
+        return result
+    if not create_enabled or not ack_valid:
+        return result
+    if not gmail_readiness["gmail_oauth_present"]:
+        result["preflight_status"] = "blocked_missing_gmail_oauth"
+        return result
+    raw_recipient = _raw_recipient_for_gmail(selected_candidate)
+    if not raw_recipient:
+        result["preflight_status"] = "blocked_missing_raw_email_for_gmail_draft"
+        return result
+    try:
+        service = _build_gmail_service()
+        result["gmail_api_call_performed"] = True
+        result["gmail_draft_create_attempted"] = True
+        response = _create_gmail_draft(service, raw_recipient, selected_candidate)
+        result["gmail_draft_created"] = True
+        result["gmail_drafts_created_count"] = 1
+        result["gmail_draft_id"] = _safe_text(response.get("id", ""))
+        result["preflight_status"] = "gmail_one_draft_created_preflight"
+    except Exception as exc:  # pragma: no cover - only used behind explicit Gmail gates.
+        result["preflight_status"] = "blocked_gmail_draft_create_failed"
+        result["error_sanitized"] = _sanitize_text(str(exc))
+    return result
+
+
+def _build_gmail_service():
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    scopes = _split_scopes(os.environ.get("GOOGLE_GMAIL_SCOPES", "")) or [GMAIL_COMPOSE_SCOPE]
+    credentials = Credentials(
+        token=None,
+        refresh_token=os.environ.get("GOOGLE_GMAIL_REFRESH_TOKEN", "").strip(),
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=os.environ.get("GOOGLE_GMAIL_CLIENT_ID", "").strip(),
+        client_secret=os.environ.get("GOOGLE_GMAIL_CLIENT_SECRET", "").strip(),
+        scopes=scopes,
+    )
+    return build("gmail", "v1", credentials=credentials, cache_discovery=False)
+
+
+def _create_gmail_draft(service, recipient_email: str, selected_candidate: dict) -> dict:
+    body = _body_for_candidate(selected_candidate)
+    message = MIMEText(body, "plain", "utf-8")
+    message["to"] = recipient_email
+    message["from"] = GMAIL_SEND_FROM
+    message["subject"] = SUBJECT
+    raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+    return service.users().drafts().create(userId="me", body={"message": {"raw": raw_message}}).execute()
+
+
+def _build_payload(
+    source_report: dict,
+    source_error: str,
+    source_path: Path,
+    source_ready: bool,
+    candidates: list[dict],
+    selected_candidate: dict,
+    gmail_readiness: dict,
+    create_enabled: bool,
+    ack_valid: bool,
+    preflight_result: dict,
+    duration_seconds: float,
+) -> dict:
+    selected_preview = _selected_preview(selected_candidate)
+    safety = _safety_summary(preflight_result)
+    payload = {
+        "timestamp": utc_now_iso(),
+        "task": TASK_NAME,
+        "task_name": TASK_NAME,
+        "phase": "3.3",
+        "mode": "gmail-oauth-readiness-one-draft-preflight",
+        "command_label": COMMAND_LABEL,
+        "preflight_status": preflight_result["preflight_status"],
+        "success": preflight_result["preflight_status"]
+        in {
+            "gmail_oauth_readiness_checked_no_draft_created",
+            "blocked_missing_gmail_oauth",
+            "blocked_missing_raw_email_for_gmail_draft",
+            "gmail_one_draft_created_preflight",
+        },
+        "source_report_used": {
+            "path": str(source_path),
+            "present": not bool(source_error),
+            "task_name": source_report.get("task_name", ""),
+            "phase": source_report.get("phase", ""),
+            "ready": source_ready,
+            "error_sanitized": _sanitize_text(source_error),
+        },
+        "candidate_count_seen": len(candidates),
+        "selected_candidate_count": 1 if selected_candidate else 0,
+        "selected_order_name": selected_preview["order_name"],
+        "selected_masked_email": selected_preview["masked_email"],
+        "gmail_sender_planned": GMAIL_SEND_FROM,
+        "gmail_client_id_present": gmail_readiness["gmail_client_id_present"],
+        "gmail_client_secret_present": gmail_readiness["gmail_client_secret_present"],
+        "gmail_refresh_token_present": gmail_readiness["gmail_refresh_token_present"],
+        "gmail_scopes_present": gmail_readiness["gmail_scopes_present"],
+        "gmail_compose_scope_present": gmail_readiness["gmail_compose_scope_present"],
+        "gmail_sender_matches_expected": gmail_readiness["gmail_sender_matches_expected"],
+        "gmail_missing_env_vars": gmail_readiness["missing_env_vars"],
+        "gmail_env_source_policy": gmail_readiness["env_source_policy"],
+        "gmail_oauth_token_refresh_attempted": preflight_result["gmail_oauth_token_refresh_attempted"],
+        "gmail_oauth_token_refresh_succeeded": preflight_result["gmail_oauth_token_refresh_succeeded"],
+        "gmail_oauth_error_type": preflight_result["gmail_oauth_error_type"],
+        "gmail_draft_creation_ack_valid": ack_valid,
+        "gmail_create_drafts_enabled": create_enabled,
+        "gmail_draft_create_attempted": preflight_result["gmail_draft_create_attempted"],
+        "gmail_drafts_created_count": preflight_result["gmail_drafts_created_count"],
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "email_sent": False,
+        "planned_future_tag_after_send": TRUSTPILOT_TAG,
+        "tag_change_performed": False,
+        "subject": SUBJECT,
+        "trustpilot_link": TRUSTPILOT_LINK,
+        "selected_draft_preview": selected_preview,
+        "html_path": str(REPORT_HTML_PATH),
+        "json_path": str(REPORT_JSON_PATH),
+        "safe_output_policy": {
+            "masked_email_only": True,
+            "raw_email_output": False,
+            "phone_output": False,
+            "address_output": False,
+            "ticket_body_output": False,
+            "ticket_comments_output": False,
+            "private_customer_notes_output": False,
+            "secrets_output": False,
+        },
+        "safety_summary": safety,
+        **safety,
+        "no_shopify_writes_performed": True,
+        "no_new_shopify_writes_performed": True,
+        "all_new_actions_no_write_confirmed": True,
+        "logs_committed": False,
+        "detected_issue_summary": _issue_summary(preflight_result["preflight_status"], gmail_readiness, len(candidates)),
+        "duration_seconds": duration_seconds,
+        "json_trustpilot_gmail_oauth_readiness_preflight_path": str(REPORT_JSON_PATH),
+        "html_trustpilot_gmail_oauth_readiness_preflight_path": str(REPORT_HTML_PATH),
+    }
+    if preflight_result["gmail_draft_created"] and preflight_result["gmail_draft_id"]:
+        payload["gmail_draft_id"] = preflight_result["gmail_draft_id"]
+    if preflight_result["error_sanitized"]:
+        payload["gmail_error_sanitized"] = preflight_result["error_sanitized"]
+    return payload
+
+
+def _safety_summary(preflight_result: dict) -> dict:
+    return {
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "tagsAdd_performed": False,
+        "tagsRemove_performed": False,
+        "kudosi_api_call_performed": False,
+        "kudosi_write_api_call_performed": False,
+        "kudosi_review_request_send_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "gmail_api_call_performed": bool(preflight_result["gmail_api_call_performed"]),
+        "gmail_draft_created": bool(preflight_result["gmail_draft_created"]),
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+    }
+
+
+def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
+    result = {
+        "task_type": TASK_NAME,
+        "success": payload["success"],
+        "exit_code": 0 if payload["success"] else 1,
+        "command_label": COMMAND_LABEL,
+        "review_path": str(json_path),
+        "json_trustpilot_gmail_oauth_readiness_preflight_path": str(json_path),
+        "html_trustpilot_gmail_oauth_readiness_preflight_path": str(html_path),
+        "preflight_status": payload["preflight_status"],
+        "candidate_count_seen": payload["candidate_count_seen"],
+        "selected_candidate_count": payload["selected_candidate_count"],
+        "selected_order_name": payload["selected_order_name"],
+        "selected_masked_email": payload["selected_masked_email"],
+        "gmail_sender_planned": payload["gmail_sender_planned"],
+        "gmail_client_id_present": payload["gmail_client_id_present"],
+        "gmail_client_secret_present": payload["gmail_client_secret_present"],
+        "gmail_refresh_token_present": payload["gmail_refresh_token_present"],
+        "gmail_scopes_present": payload["gmail_scopes_present"],
+        "gmail_compose_scope_present": payload["gmail_compose_scope_present"],
+        "gmail_sender_matches_expected": payload["gmail_sender_matches_expected"],
+        "gmail_oauth_token_refresh_attempted": payload["gmail_oauth_token_refresh_attempted"],
+        "gmail_oauth_token_refresh_succeeded": payload["gmail_oauth_token_refresh_succeeded"],
+        "gmail_draft_creation_ack_valid": payload["gmail_draft_creation_ack_valid"],
+        "gmail_draft_create_attempted": payload["gmail_draft_create_attempted"],
+        "gmail_drafts_created_count": payload["gmail_drafts_created_count"],
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "kudosi_api_call_performed": False,
+        "kudosi_write_api_call_performed": False,
+        "kudosi_review_request_send_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "gmail_api_call_performed": payload["gmail_api_call_performed"],
+        "gmail_draft_created": payload["gmail_draft_created"],
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "detected_issue_summary": payload["detected_issue_summary"],
+        "approval_message": _approval_message(payload, json_path, html_path),
+    }
+    if "gmail_draft_id" in payload:
+        result["gmail_draft_id"] = payload["gmail_draft_id"]
+    return result
+
+
+def _write_json_report(payload: dict) -> Path:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with REPORT_JSON_PATH.open("w", encoding="utf-8") as report_file:
+        json.dump(payload, report_file, ensure_ascii=False, indent=2)
+        report_file.write("\n")
+    return REPORT_JSON_PATH
+
+
+def _write_html_report(payload: dict) -> Path:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    REPORT_HTML_PATH.write_text(_render_html_report(payload), encoding="utf-8")
+    return REPORT_HTML_PATH
+
+
+def _render_html_report(payload: dict) -> str:
+    readiness_rows = "\n".join(
+        f"<tr><th>{escape(key)}</th><td>{escape(str(payload[key]))}</td></tr>"
+        for key in [
+            "gmail_client_id_present",
+            "gmail_client_secret_present",
+            "gmail_refresh_token_present",
+            "gmail_scopes_present",
+            "gmail_compose_scope_present",
+            "gmail_sender_matches_expected",
+            "gmail_oauth_token_refresh_attempted",
+            "gmail_oauth_token_refresh_succeeded",
+        ]
+    )
+    missing = ", ".join(escape(item) for item in payload["gmail_missing_env_vars"]) or "None"
+    safety_rows = "\n".join(
+        f"<tr><th>{escape(str(key))}</th><td>{escape(str(value))}</td></tr>"
+        for key, value in payload["safety_summary"].items()
+    )
+    preview = payload["selected_draft_preview"]
+    body = escape(preview["body"]).replace("\n", "<br>")
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Trustpilot Gmail OAuth Readiness Preflight</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; color: #1f2933; }}
+    code {{ background: #f5f7fa; padding: 1px 4px; }}
+    table {{ border-collapse: collapse; margin: 8px 0 24px; width: 100%; }}
+    th, td {{ border: 1px solid #d9e2ec; padding: 8px; text-align: left; vertical-align: top; }}
+    th {{ background: #f0f4f8; }}
+    .warning {{ border-left: 4px solid #c2410c; background: #fff7ed; padding: 10px 12px; }}
+  </style>
+</head>
+<body>
+  <h1>Trustpilot Gmail OAuth Readiness Preflight</h1>
+  <p class="warning">Phase 3.3 is no-send by default. No Gmail send was performed. No Shopify tag write was performed. No Trustpilot tag was added.</p>
+  <p>Status: <strong>{escape(str(payload["preflight_status"]))}</strong></p>
+  <p>Selected order: <code>{escape(payload["selected_order_name"])}</code></p>
+  <p>Selected masked email: <code>{escape(payload["selected_masked_email"])}</code></p>
+  <p>Missing env vars: {missing}</p>
+  <h2>Gmail Readiness</h2>
+  <table><tbody>{readiness_rows}</tbody></table>
+  <h2>Draft Preview</h2>
+  <p>Subject: <strong>{escape(payload["subject"])}</strong></p>
+  <p>{body}</p>
+  <h2>Safety</h2>
+  <table><tbody>{safety_rows}</tbody></table>
+  <p><strong>NOT PERFORMED:</strong> no Gmail drafts.send, no Gmail messages.send, no email send, no Shopify tag write, no Kudosi call.</p>
+</body>
+</html>"""
+
+
+def _selected_preview(selected_candidate: dict) -> dict:
+    if not selected_candidate:
+        return {"order_name": "", "order_id_or_gid": "", "masked_email": "", "first_name_used": "there", "body": BODY_TEMPLATE.format(first_name="there")}
+    first_name = _safe_text(selected_candidate.get("first_name_used", "")).strip() or "there"
+    body = _safe_text(selected_candidate.get("local_draft_body_preview", "")) or BODY_TEMPLATE.format(first_name=first_name)
+    return {
+        "order_name": _safe_text(selected_candidate.get("order_name", "")),
+        "order_id_or_gid": _safe_text(selected_candidate.get("order_id_or_gid", "")),
+        "masked_email": _safe_masked_email(selected_candidate.get("masked_email", "")),
+        "first_name_used": first_name,
+        "body": body,
+        "planned_future_tag_after_send": TRUSTPILOT_TAG,
+        "tag_change_performed": False,
+    }
+
+
+def _body_for_candidate(selected_candidate: dict) -> str:
+    first_name = _safe_text(selected_candidate.get("first_name_used", "")).strip() or "there"
+    return BODY_TEMPLATE.format(first_name=first_name)
+
+
+def _raw_recipient_for_gmail(selected_candidate: dict) -> str:
+    for key in ("recipient_email", "raw_email", "email"):
+        value = selected_candidate.get(key)
+        if isinstance(value, str):
+            value = value.strip()
+            if "***" not in value and EMAIL_RE.fullmatch(value):
+                return value
+    return ""
+
+
+def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
+    return (
+        "Shopify review request Phase 3.3 Trustpilot Gmail OAuth readiness preflight finished.\n"
+        f"Status: {payload.get('preflight_status')}\n"
+        f"Candidates seen: {payload.get('candidate_count_seen')}\n"
+        f"Selected candidates: {payload.get('selected_candidate_count')}\n"
+        f"Gmail drafts created: {payload.get('gmail_drafts_created_count')}\n"
+        "Safety: no Shopify API call, no Shopify writes, no tagsAdd/tagsRemove, no Kudosi API call, no Gmail send, and no email sending.\n"
+        f"JSON report: {json_path}\n"
+        f"HTML report: {html_path}\n\n"
+        "Choose next step:\n"
+        "1 = keep review files\n"
+        "SHOW_LOG = show recent log summary\n"
+        "0 = stop"
+    )
+
+
+def _issue_summary(status: str, gmail_readiness: dict, candidate_count: int) -> str:
+    if status == "gmail_oauth_readiness_checked_no_draft_created":
+        return f"Gmail OAuth readiness checked for {candidate_count} candidates; no draft was created because explicit draft gates were not both enabled."
+    if status == "blocked_missing_gmail_oauth":
+        return "Gmail draft preflight blocked because one or more OAuth readiness variables are missing or gmail.compose scope is not configured."
+    if status == "blocked_missing_raw_email_for_gmail_draft":
+        return "Gmail draft preflight blocked before Gmail because the source report contains only masked email."
+    if status == "gmail_one_draft_created_preflight":
+        return "Exactly one Gmail draft was created with drafts.create; no send method was called."
+    if not gmail_readiness["gmail_oauth_present"]:
+        return "Gmail OAuth readiness has missing variables, but no draft was requested."
+    return f"Gmail OAuth readiness preflight status: {status}."
+
+
+def _safe_masked_email(value: str) -> str:
+    text = _safe_text(value)
+    if not text or "@" not in text:
+        return ""
+    if "***" in text:
+        return text
+    return EMAIL_RE.sub(lambda match: _mask_email(match.group(0).lower()), text)
+
+
+def _mask_email(email: str) -> str:
+    if not email or "@" not in email:
+        return ""
+    local, domain = email.split("@", 1)
+    return f"{local[:1] or '*'}***@{domain}"
+
+
+def _safe_text(value) -> str:
+    text = str(value or "")
+    text = text.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+    return _sanitize_text(text)
+
+
+def _sanitize_text(text: str) -> str:
+    redacted = SENSITIVE_TEXT_RE.sub("[redacted]", text or "")
+    return EMAIL_RE.sub(lambda match: _mask_email(match.group(0).lower()), redacted)
+
+
+def _split_scopes(value: str) -> list[str]:
+    return [item.strip() for item in value.split() if item.strip()]
