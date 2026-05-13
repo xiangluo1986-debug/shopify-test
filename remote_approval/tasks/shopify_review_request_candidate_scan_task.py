@@ -44,6 +44,7 @@ BUCKETS = [
     "delivered_but_ali_status_unknown",
     "repeat_customer_trustpilot_candidate",
     "blocked_cancelled",
+    "blocked_returned_package",
     "blocked_refunded_or_partially_refunded",
     "blocked_no_email",
     "blocked_shipping_or_delivery_issue",
@@ -813,6 +814,7 @@ def _classify_order(order: dict, repeat_counts: dict[str, int]) -> dict:
     ticket_risk_categories = set(ticket.get("ticket_risk_categories") or [])
     cancelled = _is_cancelled(order)
     refunded = _has_any(order, ("refund", "refunded", "chargeback", "dispute"))
+    returned_package = _has_returned_package_tag(tags)
     shipping_issue = _has_any(order, ("shipping issue", "delivery issue", "failed delivery", "undeliverable", "lost", "return", "returned", "rma", "damaged"))
     repeat = _is_repeat(customer_id, email, repeat_counts)
     buckets = []
@@ -829,6 +831,9 @@ def _classify_order(order: dict, repeat_counts: dict[str, int]) -> dict:
     if refunded:
         buckets.append("blocked_refunded_or_partially_refunded")
         reasons.append("Order appears refunded, partially refunded, disputed, or chargeback-related.")
+    if returned_package:
+        buckets.append("blocked_returned_package")
+        reasons.append("Order tags indicate return/returned package; Delivered does not override this block.")
     if shipping_issue:
         buckets.append("blocked_shipping_or_delivery_issue")
         reasons.append("Order tags or status indicate possible shipping, return, or delivery issue.")
@@ -936,6 +941,7 @@ def _compact_order(order: dict) -> dict:
 def _primary_bucket(buckets: list[str]) -> str:
     priority = [
         "blocked_cancelled",
+        "blocked_returned_package",
         "blocked_refunded_or_partially_refunded",
         "blocked_shipping_or_delivery_issue",
         "blocked_has_open_ticket",
@@ -972,6 +978,15 @@ def _has_any(order: dict, indicators: tuple[str, ...]) -> bool:
         ]
     ).lower()
     return any(indicator in text for indicator in indicators)
+
+
+def _has_returned_package_tag(tags: list[str]) -> bool:
+    for tag in tags:
+        normalized = re.sub(r"[\s_-]+", " ", str(tag or "").strip().lower())
+        compact = normalized.replace(" ", "")
+        if "return" in compact or "returned" in compact:
+            return True
+    return False
 
 
 def _normalize_email(email: str | None) -> str:

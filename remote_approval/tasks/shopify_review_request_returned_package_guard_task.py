@@ -8,22 +8,24 @@ from pathlib import Path
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
-TASK_NAME = "shopify_review_request_trustpilot_gmail_repeat_customer_guard"
-COMMAND_LABEL = "shopify_review_request_trustpilot_gmail_repeat_customer_guard"
+TASK_NAME = "shopify_review_request_returned_package_guard"
+COMMAND_LABEL = "shopify_review_request_returned_package_guard"
 
 SOURCE_PRE_SEND_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_draft_content_update_pre_send.json"
 SOURCE_READINESS_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness.json"
 SOURCE_PREFLIGHT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight.json"
-REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_repeat_customer_guard.json"
-REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_repeat_customer_guard.html"
+REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_returned_package_guard.json"
+REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_returned_package_guard.html"
 
-PASS_STATUS = "repeat_customer_guard_passed"
+PASS_STATUS = "returned_package_guard_passed"
+BLOCKED_RETURN_STATUS = "blocked_returned_package_tag_detected"
 EXPECTED_PRE_SEND_STATUS = "trustpilot_gmail_draft_content_ready_for_send"
 EXPECTED_READINESS_STATUS = "trustpilot_gmail_one_draft_real_send_ready_for_manual_execution"
 EXPECTED_PREFLIGHT_STATUS = "trustpilot_gmail_one_draft_send_final_preflight_ready"
 EXPECTED_ORDER_NAME = "#22621"
 EXPECTED_MASKED_EMAIL = "m***@gmail.com"
 EXPECTED_DRAFT_ID_PARTIAL = "r-22...3521"
+EXACT_DELIVERED_TAG = "Delivered"
 SHOP_DOMAIN = "kidstoylover.myshopify.com"
 SHOPIFY_API_VERSION = "2026-01"
 PROTECTED_LOOKUP_TIMEOUT_SECONDS = 120
@@ -40,7 +42,7 @@ SECRET_VALUE_PATTERNS = [
 ]
 
 
-def run_shopify_review_request_trustpilot_gmail_repeat_customer_guard_task(mode: str) -> dict:
+def run_shopify_review_request_returned_package_guard_task(mode: str) -> dict:
     if mode != "dry-run":
         raise ValueError(f"{TASK_NAME} only supports dry-run mode.")
 
@@ -58,14 +60,16 @@ def run_shopify_review_request_trustpilot_gmail_repeat_customer_guard_task(mode:
         "readiness": readiness_error,
         "preflight": preflight_error,
     }
-    base_conditions = _source_blocking_conditions(source_reports, source_errors)
-    lookup = _repeat_customer_lookup(base_conditions)
+    offline_tests = _offline_return_tag_tests()
+    base_conditions = _source_blocking_conditions(source_reports, source_errors, offline_tests)
+    lookup = _returned_package_lookup(base_conditions)
     blocking_conditions = base_conditions + _guard_blocking_conditions(lookup) if not base_conditions else base_conditions
     status = blocking_conditions[0]["status"] if blocking_conditions else PASS_STATUS
     payload = _build_payload(
         source_reports=source_reports,
         source_errors=source_errors,
         lookup=lookup,
+        offline_tests=offline_tests,
         blocking_conditions=blocking_conditions,
         status=status,
         duration_seconds=round(time.time() - started, 3),
@@ -84,38 +88,39 @@ def _read_json_report(path: Path, missing_status: str) -> tuple[dict, str]:
         return {}, _sanitize_text(f"{missing_status}: source JSON parse failed: {exc}")
 
 
-def _source_blocking_conditions(source_reports: dict, source_errors: dict) -> list[dict]:
+def _source_blocking_conditions(source_reports: dict, source_errors: dict, offline_tests: dict) -> list[dict]:
     conditions = []
     if source_errors["pre_send"]:
-        conditions.append({"status": "blocked_missing_pre_send_report", "detail": source_errors["pre_send"]})
+        conditions.append({"status": "blocked_missing_selected_order", "detail": source_errors["pre_send"]})
     if source_errors["readiness"]:
-        conditions.append({"status": "blocked_missing_real_run_readiness_report", "detail": source_errors["readiness"]})
+        conditions.append({"status": "blocked_missing_selected_order", "detail": source_errors["readiness"]})
     if source_errors["preflight"]:
-        conditions.append({"status": "blocked_missing_final_preflight_report", "detail": source_errors["preflight"]})
+        conditions.append({"status": "blocked_missing_selected_order", "detail": source_errors["preflight"]})
     if conditions:
         return conditions
     if source_reports["pre_send"].get("draft_content_pre_send_status") != EXPECTED_PRE_SEND_STATUS:
-        conditions.append({"status": "blocked_missing_pre_send_report", "detail": "Phase 3.16C pre-send content report is not ready."})
+        conditions.append({"status": "blocked_missing_selected_order", "detail": "Phase 3.16C pre-send report is not ready."})
     if source_reports["readiness"].get("real_run_readiness_status") != EXPECTED_READINESS_STATUS:
-        conditions.append({"status": "blocked_missing_real_run_readiness_report", "detail": "Phase 3.16B readiness report is not ready."})
+        conditions.append({"status": "blocked_missing_selected_order", "detail": "Phase 3.16B readiness report is not ready."})
     if source_reports["preflight"].get("final_preflight_status") != EXPECTED_PREFLIGHT_STATUS:
-        conditions.append({"status": "blocked_missing_final_preflight_report", "detail": "Phase 3.15 final preflight is not ready."})
+        conditions.append({"status": "blocked_missing_selected_order", "detail": "Phase 3.15 final preflight is not ready."})
     for label, report in source_reports.items():
         if _safe_text(report.get("selected_order_name", "")) != EXPECTED_ORDER_NAME:
-            conditions.append({"status": "blocked_selected_order_mismatch", "detail": f"{label} selected_order_name mismatch."})
+            conditions.append({"status": "blocked_missing_selected_order", "detail": f"{label} selected_order_name mismatch."})
         if _safe_text(report.get("selected_masked_email", "")) != EXPECTED_MASKED_EMAIL:
             conditions.append({"status": "blocked_unmasked_email_detected", "detail": f"{label} selected_masked_email mismatch."})
-        partial = _safe_text(report.get("source_gmail_draft_id_partial", ""))
-        if partial != EXPECTED_DRAFT_ID_PARTIAL:
-            conditions.append({"status": "blocked_selected_order_mismatch", "detail": f"{label} draft id partial mismatch."})
+        if _safe_text(report.get("source_gmail_draft_id_partial", "")) != EXPECTED_DRAFT_ID_PARTIAL:
+            conditions.append({"status": "blocked_missing_selected_order", "detail": f"{label} Gmail draft id partial mismatch."})
         if any(report.get(flag) is True for flag in ("gmail_drafts_send_called", "gmail_messages_send_called", "gmail_send_performed", "email_sent")):
-            conditions.append({"status": "blocked_pre_send_send_flag_detected", "detail": f"{label} send flag is true."})
+            conditions.append({"status": "blocked_return_guard_not_confirmed", "detail": f"{label} send flag is true."})
         if any(report.get(flag) is True for flag in ("shopify_write_performed", "mutation_performed", "tags_add_performed", "tags_remove_performed")):
-            conditions.append({"status": "blocked_shopify_write_flag_detected", "detail": f"{label} write/tag flag is true."})
+            conditions.append({"status": "blocked_return_guard_not_confirmed", "detail": f"{label} write/tag flag is true."})
+    if not offline_tests["all_passed"]:
+        conditions.append({"status": "blocked_return_guard_not_confirmed", "detail": "offline return tag matching tests failed."})
     return conditions
 
 
-def _repeat_customer_lookup(base_conditions: list[dict]) -> dict:
+def _returned_package_lookup(base_conditions: list[dict]) -> dict:
     lookup = {
         "shopify_api_call_performed": False,
         "read_only_shopify_lookup_performed": False,
@@ -123,14 +128,12 @@ def _repeat_customer_lookup(base_conditions: list[dict]) -> dict:
         "django_shell_reached": False,
         "shopify_installation_found": False,
         "shopify_credentials_found": False,
-        "raw_email_available": False,
-        "raw_email_source": "",
-        "customer_id_available": False,
-        "repeat_customer_confirmed": False,
-        "valid_order_count_for_customer": 0,
-        "matched_order_count_for_customer": 0,
-        "first_order_customer": False,
+        "selected_order_found": False,
         "successful_lookup_label": "",
+        "return_tag_detected": False,
+        "matched_return_tags_masked_or_names": [],
+        "delivered_tag_present": False,
+        "tag_count": 0,
         "lookup_error_sanitized": "",
     }
     if base_conditions:
@@ -145,7 +148,7 @@ def _repeat_customer_lookup(base_conditions: list[dict]) -> dict:
         "manage.py",
         "shell",
         "-c",
-        _repeat_customer_lookup_script(EXPECTED_ORDER_NAME),
+        _returned_package_lookup_script(EXPECTED_ORDER_NAME),
     ]
     try:
         completed = subprocess.run(
@@ -157,7 +160,7 @@ def _repeat_customer_lookup(base_conditions: list[dict]) -> dict:
         )
         lookup["docker_command_reached"] = True
     except subprocess.TimeoutExpired:
-        lookup["lookup_error_sanitized"] = f"repeat customer lookup timed out after {PROTECTED_LOOKUP_TIMEOUT_SECONDS} seconds"
+        lookup["lookup_error_sanitized"] = f"returned package guard lookup timed out after {PROTECTED_LOOKUP_TIMEOUT_SECONDS} seconds"
         return lookup
     except (FileNotFoundError, PermissionError) as exc:
         lookup["lookup_error_sanitized"] = _sanitize_text(str(exc))
@@ -169,21 +172,21 @@ def _repeat_customer_lookup(base_conditions: list[dict]) -> dict:
         lookup["shopify_credentials_found"] = bool(parsed.get("shopify_credentials_found"))
         lookup["shopify_api_call_performed"] = bool(parsed.get("shopify_api_call_performed"))
         lookup["read_only_shopify_lookup_performed"] = bool(parsed.get("shopify_api_call_performed"))
-        lookup["raw_email_available"] = bool(parsed.get("raw_email_available"))
-        lookup["raw_email_source"] = _safe_text(parsed.get("raw_email_source", ""))
-        lookup["customer_id_available"] = bool(parsed.get("customer_id_available"))
-        lookup["repeat_customer_confirmed"] = bool(parsed.get("repeat_customer_confirmed"))
-        lookup["valid_order_count_for_customer"] = int(parsed.get("valid_order_count_for_customer") or 0)
-        lookup["matched_order_count_for_customer"] = int(parsed.get("matched_order_count_for_customer") or 0)
-        lookup["first_order_customer"] = bool(parsed.get("first_order_customer"))
+        lookup["selected_order_found"] = bool(parsed.get("selected_order_found"))
         lookup["successful_lookup_label"] = _safe_text(parsed.get("successful_lookup_label", ""))
+        lookup["return_tag_detected"] = bool(parsed.get("return_tag_detected"))
+        lookup["matched_return_tags_masked_or_names"] = [
+            _safe_text(tag) for tag in parsed.get("matched_return_tags_masked_or_names", [])
+        ]
+        lookup["delivered_tag_present"] = bool(parsed.get("delivered_tag_present"))
+        lookup["tag_count"] = int(parsed.get("tag_count") or 0)
         lookup["lookup_error_sanitized"] = _sanitize_text(parsed.get("error_sanitized", ""))
     if completed.returncode != 0 and not lookup["lookup_error_sanitized"]:
-        lookup["lookup_error_sanitized"] = _sanitize_text(completed.stderr or completed.stdout or "repeat customer lookup failed")
+        lookup["lookup_error_sanitized"] = _sanitize_text(completed.stderr or completed.stdout or "returned package guard lookup failed")
     return lookup
 
 
-def _repeat_customer_lookup_script(order_name: str) -> str:
+def _returned_package_lookup_script(order_name: str) -> str:
     template = r'''
 import json
 import re
@@ -194,20 +197,17 @@ shop = __SHOP_LITERAL__
 api_version = __API_VERSION_LITERAL__
 order_name = __ORDER_NAME_LITERAL__
 email_re = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
-risk_tag_re = re.compile(r"(?i)(refund|return|cancel|chargeback|dispute|shipping[_ -]?issue|failed[_ -]?delivery)")
 result = {
     "django_shell_reached": True,
     "shopify_installation_found": False,
     "shopify_credentials_found": False,
     "shopify_api_call_performed": False,
-    "raw_email_available": False,
-    "raw_email_source": "",
-    "customer_id_available": False,
-    "repeat_customer_confirmed": False,
-    "valid_order_count_for_customer": 0,
-    "matched_order_count_for_customer": 0,
-    "first_order_customer": False,
+    "selected_order_found": False,
     "successful_lookup_label": "",
+    "return_tag_detected": False,
+    "matched_return_tags_masked_or_names": [],
+    "delivered_tag_present": False,
+    "tag_count": 0,
     "error_sanitized": "",
 }
 
@@ -216,32 +216,22 @@ def sanitize(text):
     text = re.sub(r"(?i)(shpat_[A-Za-z0-9_]+|x-shopify-access-token|authorization|access[_\s-]?token|refresh[_\s-]?token|api[_\s-]?key|password|secret|bearer\s+[A-Za-z0-9._-]+)", "[redacted]", text)
     return email_re.sub("[masked-email]", text)
 
-def selected_email(order):
-    candidates = [
-        ("email", order.get("email")),
-        ("contactEmail", order.get("contactEmail")),
-        ("contact_email", order.get("contact_email")),
-    ]
-    for source, value in candidates:
-        value = str(value or "").strip()
-        if value and email_re.fullmatch(value):
-            return value.lower(), source
-    return "", ""
+def normalize_tag(tag):
+    text = str(tag or "").strip().lower()
+    text = re.sub(r"[\s_-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
-def is_valid_order(order):
-    if order.get("cancelledAt") or order.get("cancelled_at"):
-        return False
-    financial = str(order.get("displayFinancialStatus") or order.get("financial_status") or "").lower()
-    if financial in {"refunded", "partially_refunded", "voided"}:
-        return False
-    if order.get("test") is True:
-        return False
-    tags = order.get("tags") or []
-    if isinstance(tags, str):
-        tags = [item.strip() for item in tags.split(",") if item.strip()]
-    if any(risk_tag_re.search(str(tag or "")) for tag in tags):
-        return False
-    return True
+def is_return_tag(tag):
+    normalized = normalize_tag(tag)
+    compact = normalized.replace(" ", "")
+    return "return" in compact or "returned" in compact
+
+def normalize_tags(raw_tags):
+    if isinstance(raw_tags, list):
+        return [str(tag).strip() for tag in raw_tags if str(tag).strip()]
+    if isinstance(raw_tags, str):
+        return [item.strip() for item in raw_tags.split(",") if item.strip()]
+    return []
 
 def request_graphql(endpoint, headers, query, variables, label):
     response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers, timeout=30)
@@ -289,58 +279,34 @@ try:
     endpoint = rest_base + "/graphql.json"
     token_header = "X-Shopify-" + "Access-Token"
     headers = {token_header: token_value, "Content-Type": "application/json"}
-    order_query = "query RepeatGuardOrderByName($query: String!) { orders(first: 10, query: $query) { edges { node { id name email contactEmail cancelledAt displayFinancialStatus tags test } } } }"
-    selected_orders = request_graphql(endpoint, headers, order_query, {"query": "name:" + order_name}, "graphql_selected_order_by_name")
+    query = "query ReturnedPackageGuardOrderByName($query: String!) { orders(first: 10, query: $query) { edges { node { id name tags } } } }"
+    selected_orders = request_graphql(endpoint, headers, query, {"query": "name:" + order_name}, "graphql_order_tags_by_name")
     selected_order = next((order for order in selected_orders if order.get("name") == order_name), selected_orders[0] if selected_orders else {})
-    raw_email, raw_email_source = selected_email(selected_order)
-    if not raw_email:
-        selected_rest_orders = rest_orders(
+    if not selected_order:
+        rest_selected = rest_orders(
             rest_base,
             headers,
-            {
-                "status": "any",
-                "limit": 10,
-                "fields": "id,name,email,contact_email,cancelled_at,financial_status,tags,test",
-                "name": order_name,
-            },
-            "rest_selected_order_by_name",
+            {"status": "any", "limit": 10, "fields": "id,name,tags", "name": order_name},
+            "rest_order_tags_by_name",
         )
-        selected_order = next((order for order in selected_rest_orders if order.get("name") == order_name), selected_rest_orders[0] if selected_rest_orders else {})
-        raw_email, raw_email_source = selected_email(selected_order)
-    if not raw_email:
-        result["error_sanitized"] = "selected order email was unavailable for repeat guard."
+        selected_order = next((order for order in rest_selected if order.get("name") == order_name), rest_selected[0] if rest_selected else {})
+    if not selected_order:
+        result["error_sanitized"] = "selected order was unavailable for returned package guard."
         print(json.dumps(result, ensure_ascii=True))
         raise SystemExit(1)
-    result["raw_email_available"] = True
-    result["raw_email_source"] = raw_email_source
-
-    matched_orders = request_graphql(
-        endpoint,
-        headers,
-        "query RepeatGuardOrdersByEmail($query: String!) { orders(first: 50, query: $query) { edges { node { id name email contactEmail cancelledAt displayFinancialStatus tags test } } } }",
-        {"query": "email:" + raw_email},
-        "graphql_orders_by_email",
-    )
-    if not matched_orders:
-        rest_params = {
-            "status": "any",
-            "limit": 50,
-            "fields": "id,name,email,contact_email,cancelled_at,financial_status,tags,test",
-            "email": raw_email,
-        }
-        matched_orders = rest_orders(rest_base, headers, rest_params, "rest_orders_by_email")
-    exact_orders = []
-    for order in matched_orders:
-        order_email, _source = selected_email(order)
-        if order_email == raw_email:
-            exact_orders.append(order)
-    result["matched_order_count_for_customer"] = len(exact_orders)
-    valid_orders = [order for order in exact_orders if is_valid_order(order)]
-    result["valid_order_count_for_customer"] = len(valid_orders)
-    result["repeat_customer_confirmed"] = len(valid_orders) >= 2
-    result["first_order_customer"] = len(valid_orders) == 1
+    result["selected_order_found"] = True
+    tags = normalize_tags(selected_order.get("tags") or [])
+    result["tag_count"] = len(tags)
+    result["delivered_tag_present"] = "Delivered" in tags
+    matched = [tag for tag in tags if is_return_tag(tag)]
+    result["matched_return_tags_masked_or_names"] = [sanitize(tag) for tag in matched]
+    result["return_tag_detected"] = bool(matched)
     print(json.dumps(result, ensure_ascii=True))
-    raise SystemExit(0 if result["repeat_customer_confirmed"] else 1)
+    raise SystemExit(0)
+except ShopifyInstallation.DoesNotExist:
+    result["error_sanitized"] = "Shopify installation was not found for the configured shop."
+    print(json.dumps(result, ensure_ascii=True))
+    raise SystemExit(1)
 except Exception as exc:
     result["error_sanitized"] = sanitize(str(exc))[:300]
     print(json.dumps(result, ensure_ascii=True))
@@ -367,53 +333,54 @@ def _parse_protected_lookup_stdout(stdout: str) -> dict:
 def _guard_blocking_conditions(lookup: dict) -> list[dict]:
     if not lookup["shopify_api_call_performed"]:
         return [{"status": "blocked_shopify_read_lookup_failed", "detail": lookup["lookup_error_sanitized"] or "read-only Shopify lookup did not run."}]
-    if not lookup["raw_email_available"]:
-        return [{"status": "blocked_repeat_customer_not_confirmed", "detail": "protected email was unavailable for repeat-customer guard."}]
-    if lookup["valid_order_count_for_customer"] >= 2 and lookup["repeat_customer_confirmed"]:
-        return []
-    if lookup["valid_order_count_for_customer"] == 1:
-        return [{"status": "blocked_first_order_customer", "detail": "Only one valid order was found for this customer/email."}]
-    return [{"status": "blocked_repeat_customer_not_confirmed", "detail": lookup["lookup_error_sanitized"] or "repeat customer could not be confirmed."}]
+    if not lookup["selected_order_found"]:
+        return [{"status": "blocked_missing_selected_order", "detail": lookup["lookup_error_sanitized"] or "selected order was not found."}]
+    if lookup["return_tag_detected"]:
+        return [{"status": BLOCKED_RETURN_STATUS, "detail": "Return/returned package tag was detected; Delivered does not override this block."}]
+    return []
 
 
 def _build_payload(
     source_reports: dict,
     source_errors: dict,
     lookup: dict,
+    offline_tests: dict,
     blocking_conditions: list[dict],
     status: str,
     duration_seconds: float,
 ) -> dict:
+    guard_passed = status == PASS_STATUS
     safety = _safety_summary(lookup)
-    repeat_confirmed = status == PASS_STATUS
-    first_order = status == "blocked_first_order_customer"
     payload = {
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "3.16D",
-        "mode": "read-only-repeat-customer-guard",
+        "phase": "3.16E",
+        "mode": "read-only-returned-package-tag-guard",
         "command_label": COMMAND_LABEL,
-        "repeat_customer_guard_status": status,
-        "success": repeat_confirmed,
+        "return_guard_status": status,
+        "success": guard_passed,
         "selected_order_name": EXPECTED_ORDER_NAME,
         "selected_masked_email": EXPECTED_MASKED_EMAIL,
         "source_gmail_draft_id_partial": EXPECTED_DRAFT_ID_PARTIAL,
         "source_pre_send_status": _safe_text(source_reports["pre_send"].get("draft_content_pre_send_status", "")),
         "source_readiness_status": _safe_text(source_reports["readiness"].get("real_run_readiness_status", "")),
         "source_final_preflight_status": _safe_text(source_reports["preflight"].get("final_preflight_status", "")),
-        "repeat_customer_confirmed": repeat_confirmed,
-        "valid_order_count_for_customer": lookup["valid_order_count_for_customer"],
-        "matched_order_count_for_customer": lookup["matched_order_count_for_customer"],
-        "first_order_customer": first_order,
-        "future_trustpilot_send_allowed": repeat_confirmed,
-        "return_guard_also_required_for_future_send": True,
-        "first_order_should_use_ali_reviews_path": not repeat_confirmed,
-        "raw_email_report_storage_allowed": False,
-        "raw_email_available_to_runtime": lookup["raw_email_available"],
-        "raw_email_source": lookup["raw_email_source"],
+        "return_tag_detected": bool(lookup["return_tag_detected"]),
+        "matched_return_tags_masked_or_names": lookup["matched_return_tags_masked_or_names"],
+        "delivered_tag_present": bool(lookup["delivered_tag_present"]),
+        "delivered_does_not_override_return_block": True,
+        "future_tracking_api_upgrade_note": True,
+        "review_request_allowed": guard_passed,
+        "trustpilot_send_allowed": guard_passed,
+        "ali_reviews_send_allowed": guard_passed,
+        "kudosi_send_allowed": guard_passed,
+        "manual_review_request_allowed": guard_passed,
+        "selected_order_found": bool(lookup["selected_order_found"]),
+        "tag_count": int(lookup["tag_count"]),
         "successful_lookup_label": lookup["successful_lookup_label"],
         "lookup_error_sanitized": lookup["lookup_error_sanitized"],
+        "offline_return_tag_tests": offline_tests,
         "source_reports_used": {
             "pre_send_json_path": str(SOURCE_PRE_SEND_JSON_PATH),
             "readiness_json_path": str(SOURCE_READINESS_JSON_PATH),
@@ -424,14 +391,14 @@ def _build_payload(
         "blocking_condition_count": len(blocking_conditions),
         "json_path": str(REPORT_JSON_PATH),
         "html_path": str(REPORT_HTML_PATH),
-        "json_trustpilot_gmail_repeat_customer_guard_path": str(REPORT_JSON_PATH),
-        "html_trustpilot_gmail_repeat_customer_guard_path": str(REPORT_HTML_PATH),
+        "json_returned_package_guard_path": str(REPORT_JSON_PATH),
+        "html_returned_package_guard_path": str(REPORT_HTML_PATH),
         "logs_committed": False,
         "privacy_assertion_passed": True,
         "raw_email_leak_risk_detected": False,
         "safety_summary": safety,
         **safety,
-        "detected_issue_summary": _issue_summary(status, lookup["valid_order_count_for_customer"]),
+        "detected_issue_summary": _issue_summary(status, lookup),
         "duration_seconds": duration_seconds,
     }
     return _apply_self_privacy_assertion(payload)
@@ -453,6 +420,8 @@ def _safety_summary(lookup: dict) -> dict:
         "tagsAdd_performed": False,
         "tagsRemove_performed": False,
         "kudosi_api_call_performed": False,
+        "kudosi_write_api_call_performed": False,
+        "kudosi_review_request_send_performed": False,
         "ali_reviews_api_call_performed": False,
     }
 
@@ -464,16 +433,20 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "exit_code": 0 if payload["success"] else 1,
         "command_label": COMMAND_LABEL,
         "review_path": str(json_path),
-        "json_trustpilot_gmail_repeat_customer_guard_path": str(json_path),
-        "html_trustpilot_gmail_repeat_customer_guard_path": str(html_path),
-        "repeat_customer_guard_status": payload["repeat_customer_guard_status"],
+        "json_returned_package_guard_path": str(json_path),
+        "html_returned_package_guard_path": str(html_path),
+        "return_guard_status": payload["return_guard_status"],
         "selected_order_name": payload["selected_order_name"],
         "selected_masked_email": payload["selected_masked_email"],
         "source_gmail_draft_id_partial": payload["source_gmail_draft_id_partial"],
-        "repeat_customer_confirmed": payload["repeat_customer_confirmed"],
-        "valid_order_count_for_customer": payload["valid_order_count_for_customer"],
-        "first_order_customer": payload["first_order_customer"],
-        "future_trustpilot_send_allowed": payload["future_trustpilot_send_allowed"],
+        "return_tag_detected": payload["return_tag_detected"],
+        "matched_return_tags_masked_or_names": payload["matched_return_tags_masked_or_names"],
+        "review_request_allowed": payload["review_request_allowed"],
+        "trustpilot_send_allowed": payload["trustpilot_send_allowed"],
+        "ali_reviews_send_allowed": payload["ali_reviews_send_allowed"],
+        "kudosi_send_allowed": payload["kudosi_send_allowed"],
+        "manual_review_request_allowed": payload["manual_review_request_allowed"],
+        "delivered_tag_present": payload["delivered_tag_present"],
         "blocking_condition_count": payload["blocking_condition_count"],
         "blocking_conditions": payload["blocking_conditions"],
         **payload["safety_summary"],
@@ -505,11 +478,12 @@ def _render_html_report(payload: dict) -> str:
         f"<tr><th>{escape(str(key))}</th><td>{escape(str(value))}</td></tr>"
         for key, value in payload["safety_summary"].items()
     )
+    matched = ", ".join(f"<code>{escape(tag)}</code>" for tag in payload["matched_return_tags_masked_or_names"]) or "None"
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Trustpilot Gmail Repeat Customer Guard</title>
+  <title>Review Request Returned Package Guard</title>
   <style>
     body {{ font-family: Arial, sans-serif; margin: 24px; color: #1f2933; }}
     code {{ background: #f5f7fa; padding: 1px 4px; }}
@@ -520,16 +494,18 @@ def _render_html_report(payload: dict) -> str:
   </style>
 </head>
 <body>
-  <h1>Trustpilot Gmail Repeat Customer Guard</h1>
-  <p class="warning">Phase 3.16D is read/report-only. It does not send Gmail, write Shopify tags, or call Kudosi/Ali Reviews.</p>
-  <p>Status: <strong>{escape(payload["repeat_customer_guard_status"])}</strong></p>
+  <h1>Review Request Returned Package Guard</h1>
+  <p class="warning">Phase 3.16E is read/report-only. It does not send Gmail, write Shopify tags, or call Kudosi/Ali Reviews.</p>
+  <p>Status: <strong>{escape(payload["return_guard_status"])}</strong></p>
   <p>Selected order: <code>{escape(payload["selected_order_name"])}</code></p>
   <p>Selected masked email: <code>{escape(payload["selected_masked_email"])}</code></p>
   <p>Source Gmail draft id partial: <code>{escape(payload["source_gmail_draft_id_partial"])}</code></p>
-  <p>Repeat customer confirmed: <strong>{escape(str(payload["repeat_customer_confirmed"]))}</strong></p>
-  <p>Valid order count for customer/email: <strong>{escape(str(payload["valid_order_count_for_customer"]))}</strong></p>
-  <p>Future Trustpilot send allowed: <strong>{escape(str(payload["future_trustpilot_send_allowed"]))}</strong></p>
-  <p>Return/returned package guard also required before send: <strong>{escape(str(payload["return_guard_also_required_for_future_send"]))}</strong></p>
+  <p>Return tag detected: <strong>{escape(str(payload["return_tag_detected"]))}</strong></p>
+  <p>Matched return tags: {matched}</p>
+  <p>Delivered tag present: <strong>{escape(str(payload["delivered_tag_present"]))}</strong></p>
+  <p>Delivered overrides return block: <strong>False</strong></p>
+  <p>Review request allowed by this guard: <strong>{escape(str(payload["review_request_allowed"]))}</strong></p>
+  <p>Trustpilot send allowed by this guard: <strong>{escape(str(payload["trustpilot_send_allowed"]))}</strong></p>
   <h2>Blocking Conditions</h2>
   <table><thead><tr><th>Status</th><th>Detail</th></tr></thead><tbody>{blocking_rows}</tbody></table>
   <h2>Safety Flags</h2>
@@ -538,18 +514,59 @@ def _render_html_report(payload: dict) -> str:
 </html>"""
 
 
+def _offline_return_tag_tests() -> dict:
+    cases = [
+        {"name": "returned_exact", "tags": ["Returned"], "expected_block": True},
+        {"name": "return_to_warehouse", "tags": ["return to warehouse"], "expected_block": True},
+        {"name": "delivered_plus_returned", "tags": ["Delivered", "Returned"], "expected_block": True},
+        {"name": "delivered_only", "tags": ["Delivered"], "expected_block": False},
+    ]
+    results = []
+    for case in cases:
+        matched = [tag for tag in case["tags"] if _is_return_tag(tag)]
+        blocked = bool(matched)
+        results.append(
+            {
+                "name": case["name"],
+                "expected_block": case["expected_block"],
+                "actual_block": blocked,
+                "passed": blocked == case["expected_block"],
+            }
+        )
+    return {
+        "all_passed": all(item["passed"] for item in results),
+        "cases": results,
+    }
+
+
+def _is_return_tag(tag: str) -> bool:
+    normalized = _normalize_return_tag_text(tag)
+    compact = normalized.replace(" ", "")
+    return "return" in compact or "returned" in compact
+
+
+def _normalize_return_tag_text(tag: str) -> str:
+    text = str(tag or "").strip().lower()
+    text = re.sub(r"[\s_-]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def _apply_self_privacy_assertion(payload: dict) -> dict:
     text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     self_scan = _privacy_scan_text(text)
     payload["self_privacy_scan"] = self_scan
     if self_scan["raw_customer_email_count"] or self_scan["token_secret_bearer_pattern_count"]:
-        payload["repeat_customer_guard_status"] = "blocked_privacy_scan_failed"
+        payload["return_guard_status"] = "blocked_privacy_scan_failed"
         payload["success"] = False
-        payload["future_trustpilot_send_allowed"] = False
+        payload["review_request_allowed"] = False
+        payload["trustpilot_send_allowed"] = False
+        payload["ali_reviews_send_allowed"] = False
+        payload["kudosi_send_allowed"] = False
+        payload["manual_review_request_allowed"] = False
         payload["privacy_assertion_passed"] = False
         payload["raw_email_leak_risk_detected"] = bool(self_scan["raw_customer_email_count"])
         payload["blocking_conditions"].append(
-            {"status": "blocked_privacy_scan_failed", "detail": "repeat customer guard self privacy scan failed."}
+            {"status": "blocked_privacy_scan_failed", "detail": "returned package guard self privacy scan failed."}
         )
         payload["blocking_condition_count"] = len(payload["blocking_conditions"])
     return payload
@@ -587,23 +604,23 @@ def _mask_email(email: str) -> str:
     return f"{local[:1] or '*'}***@{domain}"
 
 
-def _issue_summary(status: str, valid_order_count: int) -> str:
+def _issue_summary(status: str, lookup: dict) -> str:
     if status == PASS_STATUS:
-        return f"Repeat customer guard passed with {valid_order_count} valid orders; future Trustpilot send remains gated."
-    if status == "blocked_first_order_customer":
-        return "Repeat customer guard blocked because this appears to be a first-order customer; route to Ali Reviews/Kudosi path later."
-    return f"Repeat customer guard blocked with status {status}."
+        return "Returned package guard passed; no return/returned tag was found on the selected order."
+    if status == BLOCKED_RETURN_STATUS:
+        return "Returned package guard blocked all review requests because a return/returned tag was found."
+    return f"Returned package guard blocked with status {status}: {_safe_text(lookup.get('lookup_error_sanitized', ''))}"
 
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
-        "Shopify review request Phase 3.16D Trustpilot Gmail repeat-customer guard finished.\n"
-        f"Status: {payload.get('repeat_customer_guard_status')}\n"
+        "Shopify review request Phase 3.16E returned package guard finished.\n"
+        f"Status: {payload.get('return_guard_status')}\n"
         f"Selected order: {payload.get('selected_order_name')}\n"
         f"Selected masked email: {payload.get('selected_masked_email')}\n"
-        f"Repeat customer confirmed: {payload.get('repeat_customer_confirmed')}\n"
-        f"Valid order count: {payload.get('valid_order_count_for_customer')}\n"
-        f"Future Trustpilot send allowed: {payload.get('future_trustpilot_send_allowed')}\n"
+        f"Return tag detected: {payload.get('return_tag_detected')}\n"
+        f"Review request allowed: {payload.get('review_request_allowed')}\n"
+        f"Trustpilot send allowed: {payload.get('trustpilot_send_allowed')}\n"
         f"Blocking conditions: {payload.get('blocking_condition_count')}\n"
         "Safety: no Gmail send, no Shopify writes, no tagsAdd/tagsRemove, no Kudosi/Ali Reviews call.\n"
         f"JSON report: {json_path}\n"

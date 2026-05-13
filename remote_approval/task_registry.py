@@ -27,6 +27,9 @@ from remote_approval.tasks.shopify_review_request_manual_action_package_task imp
 from remote_approval.tasks.shopify_review_request_manual_action_csv_export_task import (
     run_shopify_review_request_manual_action_csv_export_task,
 )
+from remote_approval.tasks.shopify_review_request_returned_package_guard_task import (
+    run_shopify_review_request_returned_package_guard_task,
+)
 from remote_approval.tasks.shopify_review_request_shopify_tag_permission_readiness_task import (
     run_shopify_review_request_shopify_tag_permission_readiness_task,
 )
@@ -251,6 +254,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_kudosi_api_capability_probe": run_shopify_review_request_kudosi_api_capability_probe_task,
     "shopify_review_request_manual_action_csv_export": run_shopify_review_request_manual_action_csv_export_task,
     "shopify_review_request_manual_action_package": run_shopify_review_request_manual_action_package_task,
+    "shopify_review_request_returned_package_guard": run_shopify_review_request_returned_package_guard_task,
     "shopify_review_request_shopify_tag_permission_readiness": (
         run_shopify_review_request_shopify_tag_permission_readiness_task
     ),
@@ -495,6 +499,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_manual_action_package.json",
+    },
+    "shopify_review_request_returned_package_guard": {
+        "description": "Run a read-only return/returned package tag guard before any review request send path.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify lookup only",
+        "review_file_path": "logs/shopify_review_request_returned_package_guard.json",
     },
     "shopify_review_request_shopify_tag_permission_readiness": {
         "description": "Generate a docs-only Shopify tag write permission readiness package.",

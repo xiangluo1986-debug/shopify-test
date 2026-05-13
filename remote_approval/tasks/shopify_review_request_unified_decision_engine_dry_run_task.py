@@ -25,6 +25,7 @@ GMAIL_SENDER_PLANNED = "info@kidstoylover.com"
 TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 
 DECISION_BUCKETS = [
+    "blocked_returned_package",
     "blocked_no_email",
     "blocked_refund_or_cancelled",
     "blocked_ticket_risk",
@@ -202,12 +203,15 @@ def _decision_row(order: dict) -> dict:
     has_refund_or_cancelled = _has_bucket(order, {"blocked_cancelled", "blocked_refunded_or_partially_refunded"})
     has_ticket_risk = _has_ticket_risk(order)
     has_trustpilot_tag = any(_normalize_tag(alias) in normalized_tags for alias in TRUSTPILOT_TAG_ALIASES)
+    has_returned_package_tag = _has_returned_package_tag(tags)
     has_review_sent = ALI_REVIEW_SENT_TAG in tag_set
     has_historical_manual = HISTORICAL_ALI_MANUAL_TAG in tag_set
     has_ali_pending = ALI_REVIEW_PENDING_TAG in tag_set
     has_delivered = "Delivered" in tag_set
 
-    if has_no_email:
+    if has_returned_package_tag:
+        decision = "blocked_returned_package"
+    elif has_no_email:
         decision = "blocked_no_email"
     elif has_refund_or_cancelled:
         decision = "blocked_refund_or_cancelled"
@@ -272,6 +276,7 @@ def _tags_summary(tags: list[str]) -> dict:
             for tag in tags
             if tag in {HISTORICAL_ALI_MANUAL_TAG, ALI_REVIEW_PENDING_TAG, ALI_REVIEW_SENT_TAG}
             or _normalize_tag(tag) in {_normalize_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}
+            or _has_returned_package_tag([tag])
         ],
     }
 
@@ -302,6 +307,7 @@ def _risk_summary(order: dict) -> dict:
 def _planned_next_action(decision: str) -> str:
     actions = {
         "blocked_no_email": "Do not send; no usable email.",
+        "blocked_returned_package": "Do not send any review request; return/returned package tag indicates return-to-warehouse risk.",
         "blocked_refund_or_cancelled": "Do not send; refund, partial refund, dispute, or cancellation risk.",
         "blocked_ticket_risk": "Do not send; ticket/risk case requires resolution first.",
         "trustpilot_gmail_candidate_dry_run": "Dry-run only: future Gmail Trustpilot invitation preview; no email sent.",
@@ -509,6 +515,15 @@ def _issue_summary(status: str, counts: dict, source_errors: dict) -> str:
 
 def _normalize_tag(tag: str) -> str:
     return str(tag or "").strip().lower()
+
+
+def _has_returned_package_tag(tags: list[str]) -> bool:
+    for tag in tags:
+        normalized = re.sub(r"[\s_-]+", " ", str(tag or "").strip().lower())
+        compact = normalized.replace(" ", "")
+        if "return" in compact or "returned" in compact:
+            return True
+    return False
 
 
 def _safe_masked_email(value: str) -> str:

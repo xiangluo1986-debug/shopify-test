@@ -25,6 +25,7 @@ ACTION_SECTIONS = [
     "repeat_customer_trustpilot_candidates",
     "blocked_by_ticket",
     "blocked_no_email",
+    "blocked_returned_package",
     "blocked_refunded_or_partially_refunded",
     "existing_review_request_tag_present",
     "needs_manual_review",
@@ -132,6 +133,8 @@ def _sections_for_order(order: dict) -> list[str]:
         sections.append("blocked_by_ticket")
     if "blocked_no_email" in buckets:
         sections.append("blocked_no_email")
+    if "blocked_returned_package" in buckets:
+        sections.append("blocked_returned_package")
     if "blocked_refunded_or_partially_refunded" in buckets:
         sections.append("blocked_refunded_or_partially_refunded")
     if "existing_manual_review_request_tag_present" in buckets:
@@ -205,6 +208,7 @@ def _suggested_action(section: str) -> str:
         ),
         "blocked_by_ticket": "Do not request a review; inspect the local ticket before any future action.",
         "blocked_no_email": "Do not request a review; no customer email is available in the scanned order data.",
+        "blocked_returned_package": "Do not request a review; return/returned package tag blocks all review request paths.",
         "blocked_refunded_or_partially_refunded": "Do not request a review; refund/dispute signal requires manual review.",
         "existing_review_request_tag_present": (
             "Leave the existing exact Shopify tag unchanged and check Ali Reviews / Kudosi manually if needed."
