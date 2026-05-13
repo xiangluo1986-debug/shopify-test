@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 
@@ -8,27 +9,26 @@ CONFIGURED_FIELDS = ["title", "meta_title", "meta_description"]
 
 MODULE_PATH = Path(__file__).resolve()
 PROJECT_ROOT = MODULE_PATH.parents[2]
+ENV_LOG_DIR = "SHOPIFY_TRANSLATION_WORKFLOW_LOG_DIR"
 REPORT_FILENAMES = [
     "shopify_translation_remaining_title_batch_post_write_audit.json",
     "shopify_translation_next_batch_post_write_audit.json",
     "shopify_translation_small_batch_post_write_audit.json",
     "shopify_translation_selected_product_real_write_execute.json",
 ]
-LOG_DIR_CANDIDATES = [
-    Path.cwd() / "logs",
-    PROJECT_ROOT / "logs",
-    MODULE_PATH.parents[1] / "logs",
+STATIC_LOG_DIR_CANDIDATES = [
+    ("cwd_logs", Path.cwd() / "logs"),
+    ("project_root_logs", PROJECT_ROOT / "logs"),
+    ("backend_logs", MODULE_PATH.parents[1] / "logs"),
+    ("app_logs", Path("/app/logs")),
+    ("workflow_logs_mount", Path("/app/workflow_logs")),
 ]
-AUDIT_REPORT_CANDIDATES = [
-    path
-    for log_dir in LOG_DIR_CANDIDATES
-    for path in (log_dir / filename for filename in REPORT_FILENAMES)
-]
+AUDIT_REPORT_CANDIDATES = []
 
 
 def load_translation_workflow_status(product_id: str) -> dict:
     selected_product_id = (product_id or "").strip() or DEFAULT_SELECTED_PRODUCT_ID
-    report, report_path, warnings = _load_latest_report()
+    report, report_path, report_source, warnings = _load_latest_report()
     workflow_status = _workflow_status_from_report(report)
 
     return {
@@ -41,6 +41,7 @@ def load_translation_workflow_status(product_id: str) -> dict:
             "duplicate_write_protection_status", ""
         ),
         "latest_audit_report_path": _relative_report_path(report_path),
+        "latest_audit_report_source": report_source,
         "latest_audit_generated_at": report.get("generated_at", ""),
         "read_only": True,
         "shopify_write_performed": False,
@@ -51,9 +52,10 @@ def load_translation_workflow_status(product_id: str) -> dict:
     }
 
 
-def _load_latest_report() -> tuple[dict, Path | None, list[str]]:
+def _load_latest_report() -> tuple[dict, Path | None, str, list[str]]:
     warnings = []
-    for path in _unique_paths(AUDIT_REPORT_CANDIDATES):
+    candidate_paths = _audit_report_candidates()
+    for path, source in candidate_paths:
         if not path.exists():
             continue
         try:
@@ -62,11 +64,38 @@ def _load_latest_report() -> tuple[dict, Path | None, list[str]]:
             warnings.append(f"{path.name}: {exc.__class__.__name__}")
             continue
         if isinstance(data, dict):
-            return data, path, warnings
+            return data, path, source, warnings
         warnings.append(f"{path.name}: not_a_json_object")
     if not warnings:
-        warnings.append("no_translation_workflow_audit_report_found")
-    return {}, None, warnings
+        searched = ", ".join(
+            _relative_report_path(path.parent) or str(path.parent)
+            for path, _source in candidate_paths[:8]
+        )
+        warnings.append(
+            "no_translation_workflow_audit_report_found_in_container_visible_paths"
+        )
+        if searched:
+            warnings.append(f"searched_paths={searched}")
+    return {}, None, "", warnings
+
+
+def _audit_report_candidates() -> list[tuple[Path, str]]:
+    if AUDIT_REPORT_CANDIDATES:
+        return _unique_path_records(
+            (Path(path), "custom_candidate") for path in AUDIT_REPORT_CANDIDATES
+        )
+
+    log_dirs = []
+    env_log_dir = (os.getenv(ENV_LOG_DIR) or "").strip()
+    if env_log_dir:
+        log_dirs.append(("env_log_dir", Path(env_log_dir)))
+    log_dirs.extend(STATIC_LOG_DIR_CANDIDATES)
+
+    candidates = []
+    for source, log_dir in log_dirs:
+        for filename in REPORT_FILENAMES:
+            candidates.append((log_dir / filename, source))
+    return _unique_path_records(candidates)
 
 
 def _workflow_status_from_report(report: dict) -> str:
@@ -120,6 +149,18 @@ def _relative_report_path(path: Path | None) -> str:
         except ValueError:
             continue
     return str(path)
+
+
+def _unique_path_records(records) -> list[tuple[Path, str]]:
+    seen = set()
+    unique = []
+    for path, source in records:
+        resolved = str(path)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique.append((path, source))
+    return unique
 
 
 def _unique_paths(paths) -> list[Path]:
