@@ -1222,6 +1222,17 @@ Google SEO checks add `seo_validation_status`, `seo_notes`, recommended min/max 
 
 The task writes only local JSON/HTML reports under `logs/`. It must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, update existing Shopify translations, write the database, add migrations, expose tokens, or git push. It must report `draft_package_only=true`, `shopify_read_only=true`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Selected Product Translation Apply Plan Package
+
+Phase 15.3 adds a Translation Console action that rebuilds the trusted selected-product draft package on the backend, filters only entries eligible for apply planning, and writes local apply-plan review reports:
+
+```text
+logs/shopify_translation_selected_product_apply_plan_package.json
+logs/shopify_translation_selected_product_apply_plan_package.html
+```
+
+The apply plan may include only entries with `eligible_for_apply_plan=true`, `validation_status=draft_ready_for_manual_review`, `seo_validation_status=seo_ready`, no existing current translation, and no outdated translation. Existing translations, outdated translations, drafts needing manual review, and SEO-needs-review drafts must be skipped. This phase is plan-only and must not call Shopify mutations, call `translationsRegister`, write Shopify, publish, apply, rollback, overwrite existing translations, write the database, add migrations, expose tokens, or git push. It must report `apply_plan_only=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration

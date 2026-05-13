@@ -157,6 +157,60 @@ Phase 0.2 automation decision:
 - [ ] Confirm rollback/manual correction expectations for any future tag write
   phase.
 
+#### Phase 0.4 Shopify Tag Write Readiness
+
+Required Shopify scopes for order tags:
+
+- `read_orders`
+- `write_orders`
+
+Required Shopify scopes for customer tags:
+
+- `read_customers`
+- `write_customers`
+
+Required future GraphQL Admin API mutations:
+
+- `tagsAdd`
+- `tagsRemove`
+
+Tag-write safety rules:
+
+- [ ] Phase 0.4 must not call Shopify APIs.
+- [ ] Phase 0.4 must not write Shopify data.
+- [ ] Phase 0.4 must not run `tagsAdd`.
+- [ ] Phase 0.4 must not run `tagsRemove`.
+- [ ] Never overwrite the full Shopify `tags` field directly.
+- [ ] Use `tagsAdd` and `tagsRemove` only in a later explicitly approved write
+  phase.
+- [ ] Preserve exact tag strings and use exact string matching.
+- [ ] Existing exact review request tag: `1: reveiw request`.
+- [ ] Existing exact delivered tag: `Delivered`.
+- [ ] Do not remove existing tag `1: reveiw request` in Phase 0.4.
+- [ ] Do not remove `Delivered` in Phase 0.4 or later automation.
+- [ ] Do not remove `1: reveiw request` until a later phase has confirmed Ali
+  Reviews / Kudosi sent-status handling.
+
+Future candidate tags for a later dry-run plan only:
+
+- `review_request_ali_sent`
+- `review_request_ali_already_sent`
+- `review_request_ali_failed`
+- `trustpilot_request_sent`
+- `review_request_blocked`
+- `review_request_no_email`
+- `review_request_has_ticket`
+- `review_request_refunded`
+- `review_request_cancelled`
+- `review_request_shipping_issue`
+
+Phase 0.4 automation decision:
+
+- `automation_decision_status=blocked_until_shopify_write_scopes_and_manual_approval_confirmed`.
+- Future tag writes require confirmed Shopify scopes, exact target resources, a
+  dry-run plan, and manual approval.
+- Phase 0.4 is report-only and does not authorize any Shopify tag write.
+
 ### Gmail API Send Permission
 
 - [ ] Confirm Gmail OAuth is configured for `info@kidstoylover.com`.
