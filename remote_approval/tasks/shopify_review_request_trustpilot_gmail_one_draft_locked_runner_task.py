@@ -2,12 +2,13 @@ import base64
 import json
 import os
 import re
+import subprocess
 import time
 from email.mime.text import MIMEText
 from html import escape
 from pathlib import Path
 
-from remote_approval.utils import LOG_DIR, utc_now_iso
+from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 
 TASK_NAME = "shopify_review_request_trustpilot_gmail_one_draft_locked_runner"
@@ -29,6 +30,9 @@ GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 TRUSTPILOT_TAG = "1: trustpilot"
 TRUSTPILOT_TAG_ALIASES = ["1: trustpilot", "1: trustpoilt"]
+SHOP_DOMAIN = "kidstoylover.myshopify.com"
+SHOPIFY_API_VERSION = "2026-01"
+PROTECTED_LOOKUP_TIMEOUT_SECONDS = 120
 SUBJECT = "Thank You for Your Support \u2013 We\u2019d Love Your Feedback!"
 BODY_TEMPLATE = (
     "Dear {first_name},\n\n"
@@ -47,6 +51,7 @@ EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SENSITIVE_TEXT_RE = re.compile(
     r"(?i)(shpat_[A-Za-z0-9_]+|x-shopify-access-token|authorization|access[_\s-]?token|refresh[_\s-]?token|api[_\s-]?key|password|secret|bearer\s+[A-Za-z0-9._-]+)"
 )
+ALLOWED_REPORT_EMAILS = {GMAIL_SEND_FROM.lower()}
 
 
 def run_shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task(mode: str) -> dict:
@@ -237,6 +242,15 @@ def _one_draft_result(
         "gmail_send_performed": False,
         "email_sent": False,
         "error_sanitized": "",
+        "raw_email_lookup_attempted": False,
+        "raw_email_available": False,
+        "raw_email_source": "not_attempted_without_ack",
+        "raw_email_lookup_error_sanitized": "",
+        "raw_email_lookup_docker_command_reached": False,
+        "raw_email_lookup_django_shell_reached": False,
+        "raw_email_lookup_shopify_api_call_performed": False,
+        "privacy_assertion_passed": True,
+        "raw_email_leak_risk_detected": False,
     }
     if source_error or not source_ready:
         result["one_draft_status"] = "blocked_missing_trustpilot_draft_source_report"
@@ -258,9 +272,16 @@ def _one_draft_result(
     if not gmail_env["gmail_compose_scope_present"]:
         result["one_draft_status"] = "blocked_missing_gmail_compose_scope"
         return result
-    raw_recipient = _raw_recipient_for_gmail(selected_candidate)
+    raw_lookup = _protected_runtime_raw_email_lookup(selected_candidate)
+    _apply_raw_lookup_report(result, raw_lookup)
+    raw_recipient = raw_lookup.get("_raw_email_for_runtime_only", "")
     if not raw_recipient:
         result["one_draft_status"] = "blocked_missing_raw_email_for_gmail_draft"
+        return result
+    if _raw_email_leak_risk_detected(raw_recipient, selected_candidate):
+        result["one_draft_status"] = "blocked_raw_email_leak_risk"
+        result["privacy_assertion_passed"] = False
+        result["raw_email_leak_risk_detected"] = True
         return result
 
     try:
@@ -277,6 +298,235 @@ def _one_draft_result(
             result["one_draft_status"] = "blocked_gmail_draft_create_failed"
         result["error_sanitized"] = _sanitize_text(str(exc))
     return result
+
+
+def _apply_raw_lookup_report(result: dict, raw_lookup: dict) -> None:
+    result["raw_email_lookup_attempted"] = bool(raw_lookup.get("raw_email_lookup_attempted"))
+    result["raw_email_available"] = bool(raw_lookup.get("raw_email_available"))
+    result["raw_email_source"] = _safe_text(raw_lookup.get("raw_email_source", "protected_runtime_lookup"))
+    result["raw_email_lookup_error_sanitized"] = _sanitize_text(raw_lookup.get("raw_email_lookup_error_sanitized", ""))
+    result["raw_email_lookup_docker_command_reached"] = bool(raw_lookup.get("raw_email_lookup_docker_command_reached"))
+    result["raw_email_lookup_django_shell_reached"] = bool(raw_lookup.get("raw_email_lookup_django_shell_reached"))
+    result["raw_email_lookup_shopify_api_call_performed"] = bool(
+        raw_lookup.get("raw_email_lookup_shopify_api_call_performed")
+    )
+
+
+def _protected_runtime_raw_email_lookup(selected_candidate: dict) -> dict:
+    lookup = {
+        "raw_email_lookup_attempted": True,
+        "raw_email_available": False,
+        "raw_email_source": "protected_runtime_lookup",
+        "raw_email_lookup_error_sanitized": "",
+        "raw_email_lookup_docker_command_reached": False,
+        "raw_email_lookup_django_shell_reached": False,
+        "raw_email_lookup_shopify_api_call_performed": False,
+        "_raw_email_for_runtime_only": "",
+    }
+    order_id_or_gid = _safe_text(selected_candidate.get("order_id_or_gid", ""))
+    order_name = _safe_text(selected_candidate.get("order_name", ""))
+    if not order_id_or_gid and not order_name:
+        lookup["raw_email_lookup_error_sanitized"] = "missing_stable_order_identifier_for_protected_lookup"
+        return lookup
+
+    command = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "web",
+        "python",
+        "manage.py",
+        "shell",
+        "-c",
+        _protected_raw_email_lookup_script(order_id_or_gid, order_name),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            text=True,
+            capture_output=True,
+            timeout=PROTECTED_LOOKUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+        lookup["raw_email_lookup_docker_command_reached"] = True
+    except subprocess.TimeoutExpired:
+        lookup["raw_email_lookup_error_sanitized"] = f"protected lookup timed out after {PROTECTED_LOOKUP_TIMEOUT_SECONDS} seconds"
+        return lookup
+    except FileNotFoundError as exc:
+        lookup["raw_email_lookup_error_sanitized"] = _sanitize_text(str(exc))
+        return lookup
+    except PermissionError as exc:
+        lookup["raw_email_lookup_error_sanitized"] = _sanitize_text(str(exc))
+        return lookup
+
+    parsed = _parse_protected_lookup_stdout(completed.stdout)
+    if parsed:
+        lookup["raw_email_lookup_django_shell_reached"] = bool(parsed.get("django_shell_reached"))
+        lookup["raw_email_lookup_shopify_api_call_performed"] = bool(parsed.get("shopify_api_call_performed"))
+    if completed.returncode != 0:
+        lookup["raw_email_lookup_error_sanitized"] = _sanitize_text(
+            (parsed or {}).get("error_sanitized", "protected runtime lookup command failed")
+        )
+        return lookup
+    if not parsed:
+        lookup["raw_email_lookup_error_sanitized"] = "protected runtime lookup did not return parseable JSON"
+        return lookup
+
+    raw_email = str(parsed.get("raw_email") or "").strip()
+    if raw_email and "***" not in raw_email and EMAIL_RE.fullmatch(raw_email):
+        lookup["raw_email_available"] = True
+        lookup["_raw_email_for_runtime_only"] = raw_email
+        lookup["raw_email_source"] = "protected_runtime_lookup"
+        return lookup
+
+    lookup["raw_email_lookup_error_sanitized"] = _sanitize_text(
+        parsed.get("error_sanitized") or "protected runtime lookup returned no usable customer email"
+    )
+    return lookup
+
+
+def _parse_protected_lookup_stdout(stdout: str) -> dict:
+    for line in reversed((stdout or "").splitlines()):
+        stripped = line.strip()
+        if not stripped.startswith("{") or not stripped.endswith("}"):
+            continue
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+    return {}
+
+
+def _protected_raw_email_lookup_script(order_id_or_gid: str, order_name: str) -> str:
+    template = r'''
+import json
+import re
+import requests
+from shopify_sync.models import ShopifyInstallation
+
+shop = __SHOP_LITERAL__
+api_version = __API_VERSION_LITERAL__
+order_id_or_gid = __ORDER_ID_LITERAL__
+order_name = __ORDER_NAME_LITERAL__
+email_re = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+result = {
+    "django_shell_reached": True,
+    "shopify_installation_found": False,
+    "shopify_credentials_found": False,
+    "shopify_api_call_performed": False,
+    "raw_email_available": False,
+    "raw_email_source": "",
+    "raw_email": "",
+    "error_sanitized": "",
+}
+
+def sanitize(text):
+    text = str(text or "")
+    text = re.sub(r"(?i)(shpat_[A-Za-z0-9_]+|x-shopify-access-token|authorization|access[_\s-]?token|refresh[_\s-]?token|api[_\s-]?key|password|secret|bearer\s+[A-Za-z0-9._-]+)", "[redacted]", text)
+    return email_re.sub("[masked-email]", text)
+
+def selected_email(order):
+    customer = order.get("customer") or {}
+    default_email_address = customer.get("defaultEmailAddress") or {}
+    candidates = [
+        ("email", order.get("email")),
+        ("customer.email", customer.get("email")),
+        ("customer.defaultEmailAddress.emailAddress", default_email_address.get("emailAddress")),
+        ("contactEmail", order.get("contactEmail")),
+    ]
+    for source, value in candidates:
+        value = str(value or "").strip()
+        if value and email_re.fullmatch(value):
+            return value.lower(), source
+    return "", ""
+
+def request_graphql(endpoint, headers, query, variables):
+    response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers, timeout=30)
+    result["shopify_api_call_performed"] = True
+    if response.status_code >= 400:
+        result["error_sanitized"] = "Shopify protected raw email lookup failed with HTTP status " + str(response.status_code)
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    data = response.json()
+    errors = data.get("errors") or []
+    if errors:
+        result["error_sanitized"] = "Shopify protected raw email lookup returned GraphQL errors."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    return data.get("data") or {}
+
+try:
+    installation = ShopifyInstallation.objects.get(shop=shop)
+    result["shopify_installation_found"] = True
+    token_value = getattr(installation, "access_" + "token")
+    result["shopify_credentials_found"] = bool(token_value)
+    if not token_value:
+        result["error_sanitized"] = "Shopify installation exists, but the access token is empty."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+
+    endpoint = "https://" + installation.shop + "/admin/api/" + api_version + "/graphql.json"
+    token_header = "X-Shopify-" + "Access-Token"
+    headers = {token_header: token_value, "Content-Type": "application/json"}
+    order = None
+    order_fragment = """
+      id
+      name
+      email
+      contactEmail
+      customer { id email firstName lastName defaultEmailAddress { emailAddress } }
+    """
+    if order_id_or_gid.startswith("gid://shopify/Order/"):
+        query = "query ProtectedOrderEmailById($id: ID!) { node(id: $id) { ... on Order { " + order_fragment + " } } }"
+        data = request_graphql(endpoint, headers, query, {"id": order_id_or_gid})
+        node = data.get("node") or {}
+        if node.get("id") == order_id_or_gid:
+            order = node
+    if not order and order_name:
+        query = "query ProtectedOrderEmailByName($query: String!) { orders(first: 10, query: $query, sortKey: PROCESSED_AT, reverse: true) { edges { node { " + order_fragment + " } } } }"
+        data = request_graphql(endpoint, headers, query, {"query": "name:" + order_name})
+        edges = (((data.get("orders") or {}).get("edges")) or [])
+        nodes = [edge.get("node") or {} for edge in edges]
+        exact = [node for node in nodes if node.get("name") == order_name]
+        order = exact[0] if exact else (nodes[0] if nodes else None)
+    if not order:
+        result["error_sanitized"] = "protected runtime lookup found no matching order"
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(0)
+
+    raw_email, source = selected_email(order)
+    result["raw_email_available"] = bool(raw_email)
+    result["raw_email_source"] = source or "none"
+    result["raw_email"] = raw_email
+    if not raw_email:
+        result["error_sanitized"] = "matching order had no usable customer email"
+    print(json.dumps(result, ensure_ascii=True))
+except ShopifyInstallation.DoesNotExist:
+    result["error_sanitized"] = "Shopify installation was not found for the configured shop."
+    print(json.dumps(result, ensure_ascii=True))
+    raise SystemExit(1)
+except Exception as exc:
+    result["error_sanitized"] = sanitize(type(exc).__name__ + ": " + str(exc))
+    print(json.dumps(result, ensure_ascii=True))
+    raise SystemExit(1)
+'''
+    return (
+        template.replace("__SHOP_LITERAL__", json.dumps(SHOP_DOMAIN))
+        .replace("__API_VERSION_LITERAL__", json.dumps(SHOPIFY_API_VERSION))
+        .replace("__ORDER_ID_LITERAL__", json.dumps(order_id_or_gid))
+        .replace("__ORDER_NAME_LITERAL__", json.dumps(order_name))
+    )
+
+
+def _raw_email_leak_risk_detected(raw_email: str, selected_candidate: dict) -> bool:
+    if not raw_email:
+        return False
+    raw_lower = raw_email.lower()
+    candidate_text = json.dumps(selected_candidate, ensure_ascii=False).lower()
+    preview_text = json.dumps(_selected_preview(selected_candidate), ensure_ascii=False).lower()
+    return raw_lower in candidate_text or raw_lower in preview_text
 
 
 def _build_gmail_service(gmail_env: dict, result: dict):
@@ -332,8 +582,8 @@ def _build_payload(
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "3.5",
-        "mode": "trustpilot-gmail-one-draft-locked-runner",
+        "phase": "3.7",
+        "mode": "protected-raw-email-source-one-draft-locked-runner",
         "command_label": COMMAND_LABEL,
         "one_draft_status": draft_result["one_draft_status"],
         "success": draft_result["one_draft_status"]
@@ -343,6 +593,7 @@ def _build_payload(
             "blocked_missing_gmail_compose_scope",
             "blocked_sender_mismatch",
             "blocked_missing_raw_email_for_gmail_draft",
+            "blocked_raw_email_leak_risk",
             "gmail_one_draft_created_locked_runner",
         },
         "source_report_used": {
@@ -356,6 +607,7 @@ def _build_payload(
         "candidate_count_seen": len(candidates),
         "selected_candidate_count": 1 if selected_candidate else 0,
         "selected_order_name": selected_preview["order_name"],
+        "selected_order_id_or_gid": selected_preview["order_id_or_gid"],
         "selected_masked_email": selected_preview["masked_email"],
         "gmail_sender_planned": GMAIL_SEND_FROM,
         "gmail_scope_configured": gmail_env["gmail_scope_configured"],
@@ -370,6 +622,17 @@ def _build_payload(
         "gmail_oauth_error_type": draft_result["gmail_oauth_error_type"],
         "gmail_draft_create_attempted": draft_result["gmail_draft_create_attempted"],
         "gmail_drafts_created_count": draft_result["gmail_drafts_created_count"],
+        "protected_raw_email_source_design": "runtime_lookup_only_no_report_persistence",
+        "raw_email_lookup_attempted": draft_result["raw_email_lookup_attempted"],
+        "raw_email_available": draft_result["raw_email_available"],
+        "raw_email_source": draft_result["raw_email_source"],
+        "raw_email_lookup_error_sanitized": draft_result["raw_email_lookup_error_sanitized"],
+        "raw_email_lookup_docker_command_reached": draft_result["raw_email_lookup_docker_command_reached"],
+        "raw_email_lookup_django_shell_reached": draft_result["raw_email_lookup_django_shell_reached"],
+        "raw_email_lookup_shopify_api_call_performed": draft_result["raw_email_lookup_shopify_api_call_performed"],
+        "raw_email_report_storage_allowed": False,
+        "privacy_assertion_passed": draft_result["privacy_assertion_passed"],
+        "raw_email_leak_risk_detected": draft_result["raw_email_leak_risk_detected"],
         "gmail_drafts_send_called": False,
         "gmail_messages_send_called": False,
         "gmail_send_performed": False,
@@ -402,6 +665,7 @@ def _build_payload(
         "json_trustpilot_gmail_one_draft_locked_runner_path": str(REPORT_JSON_PATH),
         "html_trustpilot_gmail_one_draft_locked_runner_path": str(REPORT_HTML_PATH),
     }
+    _apply_report_privacy_assertion(payload)
     if draft_result["gmail_draft_created"] and draft_result["gmail_draft_id"]:
         payload["gmail_draft_id"] = draft_result["gmail_draft_id"]
     if draft_result["error_sanitized"]:
@@ -411,7 +675,8 @@ def _build_payload(
 
 def _safety_summary(draft_result: dict) -> dict:
     return {
-        "shopify_api_call_performed": False,
+        "shopify_api_call_performed": bool(draft_result["raw_email_lookup_shopify_api_call_performed"]),
+        "read_only_shopify_raw_email_lookup_performed": bool(draft_result["raw_email_lookup_shopify_api_call_performed"]),
         "shopify_write_performed": False,
         "mutation_performed": False,
         "tags_add_performed": False,
@@ -450,11 +715,17 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "gmail_compose_scope_present": payload["gmail_compose_scope_present"],
         "ack_valid": payload["ack_valid"],
         "gmail_oauth_present": payload["gmail_oauth_present"],
+        "raw_email_lookup_attempted": payload["raw_email_lookup_attempted"],
+        "raw_email_available": payload["raw_email_available"],
+        "raw_email_source": payload["raw_email_source"],
+        "privacy_assertion_passed": payload["privacy_assertion_passed"],
+        "raw_email_leak_risk_detected": payload["raw_email_leak_risk_detected"],
         "gmail_token_refresh_attempted": payload["gmail_token_refresh_attempted"],
         "gmail_token_refresh_succeeded": payload["gmail_token_refresh_succeeded"],
         "gmail_draft_create_attempted": payload["gmail_draft_create_attempted"],
         "gmail_drafts_created_count": payload["gmail_drafts_created_count"],
-        "shopify_api_call_performed": False,
+        "shopify_api_call_performed": payload["shopify_api_call_performed"],
+        "read_only_shopify_raw_email_lookup_performed": payload["read_only_shopify_raw_email_lookup_performed"],
         "shopify_write_performed": False,
         "mutation_performed": False,
         "tags_add_performed": False,
@@ -517,7 +788,12 @@ def _render_html_report(payload: dict) -> str:
   <p class="warning">Phase 3.5 is locked to at most one Gmail drafts.create call. No Gmail send was performed. No Shopify tag write was performed. No Trustpilot tag was added.</p>
   <p>Status: <strong>{escape(str(payload["one_draft_status"]))}</strong></p>
   <p>Selected order: <code>{escape(payload["selected_order_name"])}</code></p>
+  <p>Selected order ID: <code>{escape(payload["selected_order_id_or_gid"])}</code></p>
   <p>Selected masked email: <code>{escape(payload["selected_masked_email"])}</code></p>
+  <p>Protected raw email lookup attempted: <strong>{escape(str(payload["raw_email_lookup_attempted"]))}</strong></p>
+  <p>Raw email available to runtime: <strong>{escape(str(payload["raw_email_available"]))}</strong></p>
+  <p>Raw email source: <code>{escape(str(payload["raw_email_source"]))}</code></p>
+  <p>Privacy assertion passed: <strong>{escape(str(payload["privacy_assertion_passed"]))}</strong></p>
   <p>Gmail draft create attempted: <strong>{escape(str(payload["gmail_draft_create_attempted"]))}</strong></p>
   <p>Gmail drafts created: <strong>{escape(str(payload["gmail_drafts_created_count"]))}</strong></p>
   <h2>Draft Preview</h2>
@@ -574,10 +850,12 @@ def _has_existing_trustpilot_tag(row: dict) -> bool:
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
-        "Shopify review request Phase 3.5 Trustpilot Gmail one-draft locked runner finished.\n"
+        "Shopify review request Phase 3.7 protected raw email one-draft locked runner finished.\n"
         f"Status: {payload.get('one_draft_status')}\n"
         f"Candidates seen: {payload.get('candidate_count_seen')}\n"
         f"Selected candidates: {payload.get('selected_candidate_count')}\n"
+        f"Protected raw email lookup attempted: {payload.get('raw_email_lookup_attempted')}\n"
+        f"Raw email available to runtime: {payload.get('raw_email_available')}\n"
         f"Gmail drafts created: {payload.get('gmail_drafts_created_count')}\n"
         "Safety: no Shopify API call, no Shopify writes, no tagsAdd/tagsRemove, no Kudosi API call, no Gmail send, and no email sending.\n"
         f"JSON report: {json_path}\n"
@@ -591,12 +869,40 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
 
 def _issue_summary(status: str, candidate_count: int) -> str:
     if status == "dry_run_one_gmail_draft_not_created":
-        return f"One-draft locked runner inspected {candidate_count} candidates and did not call Gmail because the hard ACK gates were not all enabled."
+        return f"Protected raw email one-draft runner inspected {candidate_count} candidates and did not call Gmail because the hard ACK gates were not all enabled."
     if status == "blocked_missing_raw_email_for_gmail_draft":
-        return "One-draft locked runner blocked before Gmail because source reports contain only masked email."
+        return "One-draft locked runner blocked before Gmail because protected runtime raw email lookup did not return a usable recipient."
+    if status == "blocked_raw_email_leak_risk":
+        return "One-draft locked runner blocked before Gmail because the privacy assertion detected raw-email leak risk."
     if status == "gmail_one_draft_created_locked_runner":
         return "Exactly one Gmail draft was created with drafts.create; no send method was called."
     return f"One-draft locked runner status: {status}."
+
+
+def _apply_report_privacy_assertion(payload: dict) -> None:
+    findings = _report_unmasked_email_findings(payload)
+    payload["report_privacy_scan_performed"] = True
+    payload["report_privacy_unmasked_customer_email_findings"] = findings
+    if not findings:
+        return
+    payload["one_draft_status"] = "blocked_raw_email_leak_risk"
+    payload["success"] = True
+    payload["privacy_assertion_passed"] = False
+    payload["raw_email_leak_risk_detected"] = True
+    payload["detected_issue_summary"] = _issue_summary("blocked_raw_email_leak_risk", payload.get("candidate_count_seen", 0))
+
+
+def _report_unmasked_email_findings(payload: dict) -> list[str]:
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    findings = []
+    for match in EMAIL_RE.finditer(text):
+        email = match.group(0).lower()
+        if email in ALLOWED_REPORT_EMAILS:
+            continue
+        if "***" in email:
+            continue
+        findings.append(_mask_email(email))
+    return sorted(set(findings))
 
 
 def _safe_masked_email(value: str) -> str:
