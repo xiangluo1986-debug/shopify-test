@@ -42,6 +42,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_draft_create_
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task import (
     run_shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_first_draft_audit_task import (
+    run_shopify_review_request_trustpilot_gmail_first_draft_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task import (
     run_shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task,
 )
@@ -227,6 +230,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight": (
         run_shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task
+    ),
+    "shopify_review_request_trustpilot_gmail_first_draft_audit": (
+        run_shopify_review_request_trustpilot_gmail_first_draft_audit_task
     ),
     "shopify_review_request_trustpilot_gmail_one_draft_locked_runner": (
         run_shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task
@@ -453,6 +459,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "optional Gmail drafts.create only behind explicit env and ack gates",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_oauth_readiness_preflight.json",
+    },
+    "shopify_review_request_trustpilot_gmail_first_draft_audit": {
+        "description": "Audit the first Trustpilot Gmail draft creation report without calling Gmail or Shopify.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_first_draft_audit.json",
     },
     "shopify_review_request_trustpilot_gmail_one_draft_locked_runner": {
         "description": "Run a locked at-most-one Trustpilot Gmail draft creation runner.",
