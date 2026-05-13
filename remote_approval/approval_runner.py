@@ -214,6 +214,7 @@ def _execute_selected_action(
     if result.get("task_type") in {
         "django_check",
         "shopify_review_request_ali_reviews_capability_discovery",
+        "shopify_review_request_gmail_readiness_package",
         "shopify_review_request_tag_discovery",
         "shopify_translation_dry_run",
         "shopify_translation_batch_apply_command_generate",
@@ -581,6 +582,14 @@ def _summarize_task_result(result: dict) -> str:
         "missing_or_unconfirmed_capability_count",
         "support_question_count",
         "automation_decision_status",
+        "json_gmail_readiness_package_path",
+        "html_gmail_readiness_package_path",
+        "gmail_send_from",
+        "required_scope",
+        "required_env_var_count",
+        "missing_env_var_count",
+        "trustpilot_review_link_configured",
+        "gmail_send_allowed",
         "json_tag_discovery_path",
         "html_tag_discovery_path",
         "json_selected_product_resource_discovery_path",
@@ -686,6 +695,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         return ["Y/1 generate review file", "2 run simulated test write", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
     if task in {
         "shopify_review_request_ali_reviews_capability_discovery",
+        "shopify_review_request_gmail_readiness_package",
         "shopify_review_request_tag_discovery",
         "shopify_translation_multi_locale_dry_run",
         "shopify_translation_batch_multi_locale_dry_run",

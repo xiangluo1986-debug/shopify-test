@@ -103,11 +103,16 @@ python manage.py flush
 - Phase 0 is integration preparation only: documentation, `.env.example` placeholders, checklist updates, and local safety notes.
 - Phase 0.1 may add a read-only Shopify order tag discovery report, but it must not add sending logic or write Shopify data.
 - Phase 0.2 is Ali Reviews / Kudosi capability discovery only: docs, support questions, dashboard checklist, and local reports.
+- Phase 0.3 is Gmail / Trustpilot send permission readiness only: docs, `.env.example` placeholders, template draft, and local reports.
 - No Ali Reviews / Kudosi API call is allowed until official API documentation, authentication method, and token handling are confirmed.
 - No real Ali Reviews / Kudosi review request may be sent until send-by-order and sent-status API support are confirmed.
 - If Ali Reviews / Kudosi cannot confirm send/status API support, future automation must only produce Shopify candidate reports and may require manual sending in the Ali Reviews dashboard.
 - Never assume Shopify tag `1: reveiw request` means Ali Reviews / Kudosi has sent or has not sent the email; send/status must be confirmed from Ali Reviews / Kudosi before any action.
 - No Gmail sending is allowed until Gmail OAuth and send permission for `info@kidstoylover.com` are confirmed.
+- Gmail / Trustpilot automation must start with preview-only reports; no email may be sent during readiness or template phases.
+- No email may be sent unless Gmail OAuth is configured, the sender is verified or authorized to send as `info@kidstoylover.com`, the customer is selected as repeat/high-value and not blocked by tickets/refunds/shipping issues, and final human approval is present.
+- Use least-privilege Gmail scope `https://www.googleapis.com/auth/gmail.send` by default.
+- Never use the Gmail API to read inbox or message contents unless a future phase explicitly approves a Gmail read scope.
 - No Shopify `tagsAdd` or `tagsRemove` mutation is allowed until `write_orders` and `write_customers` scopes are confirmed for the relevant app.
 - Phase 0.1 confirmed the exact existing Shopify order tag is `1: reveiw request`.
 - `Delivered` is also confirmed as an exact existing Shopify order tag.

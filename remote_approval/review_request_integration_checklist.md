@@ -166,6 +166,70 @@ Phase 0.2 automation decision:
 - [ ] Confirm test mode can render email previews without sending.
 - [ ] Confirm future send logic requires a separate manual approval gate.
 
+#### Phase 0.3 Gmail Readiness
+
+- [ ] Gmail sending account: `info@kidstoylover.com`.
+- [ ] Gmail API must be enabled in Google Cloud.
+- [ ] OAuth client ID is required and must be stored only in local secret
+  configuration, not in Git.
+- [ ] OAuth client secret is required and must be stored only in local secret
+  configuration, not in Git.
+- [ ] Gmail refresh token is required and must be stored only in local secret
+  configuration, not in Git.
+- [ ] Minimum Gmail scope:
+  `https://www.googleapis.com/auth/gmail.send`.
+- [ ] Do not use broad Gmail scope unless a later phase explicitly proves it is
+  needed: `https://mail.google.com/`.
+- [ ] Sending identity must match or be authorized to send as
+  `info@kidstoylover.com`.
+- [ ] Trustpilot review link must be configured before preview generation.
+- [ ] No real email sending is allowed until a dry-run preview report is
+  generated, reviewed, and manually approved.
+- [ ] Never use Gmail API read scopes or inbox/message reads unless a future
+  phase explicitly approves them.
+
+Required local environment placeholders:
+
+- `GMAIL_SEND_FROM=info@kidstoylover.com`
+- `GOOGLE_GMAIL_CLIENT_ID=`
+- `GOOGLE_GMAIL_CLIENT_SECRET=`
+- `GOOGLE_GMAIL_REFRESH_TOKEN=`
+- `GOOGLE_GMAIL_SCOPES=https://www.googleapis.com/auth/gmail.send`
+- `TRUSTPILOT_REVIEW_LINK=`
+
+Initial Trustpilot email template draft for review only:
+
+```text
+Subject:
+Thank you for your support
+
+Body:
+Hi {{ first_name }},
+
+Thank you again for your recent order from Kidstoylover.
+
+We really appreciate your continued support. If you have a moment, it would mean a lot to us if you could share your experience on Trustpilot:
+
+{{ trustpilot_review_link }}
+
+Your feedback helps other RC hobby customers feel more confident when choosing from our store.
+
+Thank you again for supporting Kidstoylover.
+
+Kind regards,
+Xiang
+Kidstoylover
+```
+
+Phase 0.3 automation decision:
+
+- `automation_decision_status=blocked_until_gmail_oauth_and_template_confirmed`.
+- Do not call Gmail APIs during Phase 0.3.
+- Do not send any email during Phase 0.3.
+- Future send phases must require customer eligibility checks for
+  repeat/high-value status and ticket/refund/shipping issue suppression before
+  final human approval.
+
 ### Trustpilot Review Link
 
 - [ ] Confirm the official Trustpilot review invitation/review link.

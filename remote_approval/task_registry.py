@@ -6,6 +6,9 @@ from remote_approval.tasks.git_safety_check_task import run_git_safety_check_tas
 from remote_approval.tasks.shopify_review_request_ali_reviews_capability_discovery_task import (
     run_shopify_review_request_ali_reviews_capability_discovery_task,
 )
+from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
+    run_shopify_review_request_gmail_readiness_package_task,
+)
 from remote_approval.tasks.shopify_review_request_tag_discovery_task import (
     run_shopify_review_request_tag_discovery_task,
 )
@@ -148,6 +151,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_ali_reviews_capability_discovery": (
         run_shopify_review_request_ali_reviews_capability_discovery_task
     ),
+    "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
     "shopify_review_request_tag_discovery": run_shopify_review_request_tag_discovery_task,
     "shopify_translation_batch_apply_command_generate": run_shopify_translation_batch_apply_command_generate_task,
     "shopify_translation_batch_apply_command_validate": run_shopify_translation_batch_apply_command_validate_task,
@@ -275,6 +279,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_ali_reviews_capability_discovery.json",
+    },
+    "shopify_review_request_gmail_readiness_package": {
+        "description": "Generate a docs-only Gmail send permission readiness package for review requests.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_gmail_readiness_package.json",
     },
     "shopify_review_request_tag_discovery": {
         "description": "Read-only Shopify order tag discovery for review request automation preparation.",

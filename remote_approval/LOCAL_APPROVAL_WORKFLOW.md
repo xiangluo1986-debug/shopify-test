@@ -62,6 +62,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_real_wr
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_execution_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_one_shot_locked_shell --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_ali_reviews_capability_discovery --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
 ```
 
@@ -1291,6 +1292,24 @@ Shopify mutations, `tagsAdd`, `tagsRemove`, or any email-sending path. If Ali
 Reviews / Kudosi cannot confirm send/status API support, future automation must
 only produce Shopify candidate reports and may require manual sending in the Ali
 Reviews dashboard.
+
+`shopify_review_request_gmail_readiness_package` is a Phase 0.3 docs-only task.
+It writes local reports only:
+
+```text
+logs/shopify_review_request_gmail_readiness_package.json
+logs/shopify_review_request_gmail_readiness_package.html
+```
+
+The report records Gmail send readiness for `info@kidstoylover.com`, required
+OAuth environment variable names, the least-privilege Gmail send scope
+`https://www.googleapis.com/auth/gmail.send`, Trustpilot review link readiness,
+and `automation_decision_status=blocked_until_gmail_oauth_and_template_confirmed`.
+
+This task must not call Gmail APIs, send email, call Shopify APIs, write Shopify
+data, call Shopify mutations, call `tagsAdd`, call `tagsRemove`, or call Ali
+Reviews / Kudosi APIs. Future email send phases must start with preview-only
+reports and require final human approval before any customer email is sent.
 
 ### `System.Speech` Is Unavailable
 
