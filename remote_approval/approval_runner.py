@@ -213,6 +213,7 @@ def _execute_selected_action(
         return "stop", "Task stopped. No follow-up action executed.", "stopped"
     if result.get("task_type") in {
         "django_check",
+        "shopify_review_request_tag_discovery",
         "shopify_translation_dry_run",
         "shopify_translation_batch_apply_command_generate",
         "shopify_translation_batch_apply_command_validate",
@@ -571,6 +572,17 @@ def _summarize_task_result(result: dict) -> str:
         "html_csv_json_small_batch_post_write_audit_package_path",
         "json_selected_product_missing_translation_draft_package_path",
         "html_selected_product_missing_translation_draft_package_path",
+        "json_tag_discovery_path",
+        "html_tag_discovery_path",
+        "discovery_status",
+        "orders_queried",
+        "candidate_tag_count",
+        "exact_tag_strings",
+        "tags_add_performed",
+        "tags_remove_performed",
+        "ali_reviews_api_call_performed",
+        "gmail_api_call_performed",
+        "email_sent",
         "draft_status",
         "generated_draft_count",
         "draft_ready_count",
@@ -655,6 +667,7 @@ def _next_allowed_actions(task: str) -> list[str]:
     if task == "demo":
         return ["Y/1 generate review file", "2 run simulated test write", "N/0 stop", "P pause", "SHOW_LOG", "SUMMARY"]
     if task in {
+        "shopify_review_request_tag_discovery",
         "shopify_translation_multi_locale_dry_run",
         "shopify_translation_batch_multi_locale_dry_run",
         "shopify_translation_batch_apply_command_generate",

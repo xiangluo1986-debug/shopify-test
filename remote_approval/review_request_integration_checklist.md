@@ -17,6 +17,44 @@ that could contact external services.
 
 ## Required External Integrations
 
+### Shopify Order Tag Discovery
+
+- [x] Run the first review-request task as a read-only Shopify order tag
+  discovery report before building any automation.
+- [x] Query recent Shopify orders read-only and collect exact raw tag strings
+  containing `review`, `reveiw`, `request`, or `Delivered`.
+- [x] Confirm the exact Shopify API value for the screenshot-observed candidate
+  tag: `1: reveiw request`.
+- [x] Confirm the colon in `1: reveiw request` is half-width `:` / U+003A
+  COLON, not full-width `：` / U+FF1A FULLWIDTH COLON.
+- [x] Confirm the spelling is `reveiw`, not `review`.
+- [x] Confirm `Delivered` also exists as an exact order tag.
+- [x] Preserve the exact colon, spelling, spacing, and character width returned
+  by Shopify; do not normalize, correct, trim, translate, or rewrite tag values.
+- [x] Treat `1: reveiw request` and `1: review request` as separate tags.
+- [x] Treat half-width colon `:` / U+003A and full-width colon `：` / U+FF1A
+  as separate characters.
+- [x] Include Unicode code points for candidate tags, especially tags containing
+  `:` or `：`.
+- [x] Count how many orders contain each candidate tag and include example order
+  names/IDs for human review.
+- [x] Use recommendation `use_exact_shopify_api_value_only` in the report.
+- [x] Keep `shopify_review_request_tag_discovery` read-only: no Shopify
+  mutation, no `tagsAdd`, no `tagsRemove`, no customer email, no Ali Reviews /
+  Kudosi API call, and no Gmail API call.
+
+Confirmed Phase 0.1 report facts:
+
+- Orders queried: 100.
+- Candidate tag count: 2.
+- Candidate tags found: `1: reveiw request` and `Delivered`.
+- Safety confirmed: read-only Shopify query only; no Shopify writes, no
+  `tagsAdd`, no `tagsRemove`, no Ali Reviews / Kudosi API call, no Gmail API
+  call, and no email sending.
+- Future automation must use exact string matching and the exact Shopify API
+  tag value `1: reveiw request` unless a later read-only discovery report proves
+  the merchant changed the tag.
+
 ### Ali Reviews / Kudosi API
 
 - [ ] Confirm whether the integration is Ali Reviews, Kudosi, or both.
@@ -28,6 +66,11 @@ that could contact external services.
   later explicitly approved phase.
 - [ ] Confirm rate limits, retry rules, and error response format.
 - [ ] Confirm sandbox/test capability or a safe non-production testing path.
+- [ ] Confirm how to check whether Ali Reviews / Kudosi has already sent a
+  review request email for an order before any future send/tag action.
+- [ ] Confirm how Ali Reviews automatic email rules based on order age are
+  represented in the backend/API, because those automatic sends do not
+  automatically remove the Shopify tag observed in the current manual workflow.
 
 ### Shopify Admin API Tag Permissions
 
@@ -67,6 +110,9 @@ that could contact external services.
 - [ ] Define duplicate prevention rules.
 - [ ] Define suppression rules for refunds, complaints, replacements, returns,
   chargebacks, privacy requests, and manual opt-outs.
+- [ ] Confirm how Shopify `Delivered` tags map to ticket/order eligibility.
+- [ ] Confirm that Ali Reviews / Kudosi delivery detection is not trusted as the
+  sole delivery status source.
 - [ ] Confirm report fields needed for human review before any send/write phase.
 
 ## Phase 0 Outputs
@@ -76,6 +122,8 @@ that could contact external services.
 - [ ] Project safety rules block external calls and writes during Phase 0.
 - [ ] Local approval workflow documentation describes review request preparation
   as docs/config/report-only work.
+- [ ] Read-only tag discovery report task is available:
+  `shopify_review_request_tag_discovery`.
 - [ ] Git status has been reviewed before any later commit request.
 
 ## Future Phase Gate Notes

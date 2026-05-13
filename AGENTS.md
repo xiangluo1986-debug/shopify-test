@@ -101,9 +101,18 @@ python manage.py flush
 ## Shopify Review Request Automation Rules
 
 - Phase 0 is integration preparation only: documentation, `.env.example` placeholders, checklist updates, and local safety notes.
+- Phase 0.1 may add a read-only Shopify order tag discovery report, but it must not add sending logic or write Shopify data.
 - No Ali Reviews / Kudosi API call is allowed until official API documentation, authentication method, and token handling are confirmed.
 - No Gmail sending is allowed until Gmail OAuth and send permission for `info@kidstoylover.com` are confirmed.
 - No Shopify `tagsAdd` or `tagsRemove` mutation is allowed until `write_orders` and `write_customers` scopes are confirmed for the relevant app.
+- Phase 0.1 confirmed the exact existing Shopify order tag is `1: reveiw request`.
+- `Delivered` is also confirmed as an exact existing Shopify order tag.
+- Future review request automation must use exact string matching for Shopify tags.
+- Never hard-code `1: review request` as the review request tag.
+- First read real Shopify order tags through a read-only discovery report and use only the exact tag string returned by the Shopify API.
+- Preserve the exact colon, spelling, spacing, and character width from Shopify tag values; do not normalize, correct, trim, translate, or rewrite tag strings.
+- Treat `1: reveiw request` and `1: review request` as different tags.
+- Treat half-width colon `:` / U+003A and full-width colon `：` / U+FF1A as different characters.
 - The first implementation phase must produce a dry-run report only.
 - No customer email may be sent during Phase 0 or Phase 1.
 - No Shopify write or mutation may be performed during Phase 0 or Phase 1.

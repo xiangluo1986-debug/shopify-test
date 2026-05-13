@@ -3,6 +3,9 @@ from typing import Callable, Dict, List
 from remote_approval.tasks.django_check_task import run_django_check_task
 from remote_approval.tasks.demo_task import run_demo_task
 from remote_approval.tasks.git_safety_check_task import run_git_safety_check_task
+from remote_approval.tasks.shopify_review_request_tag_discovery_task import (
+    run_shopify_review_request_tag_discovery_task,
+)
 from remote_approval.tasks.shopify_translation_batch_apply_plan_task import (
     run_shopify_translation_batch_apply_plan_task,
 )
@@ -136,6 +139,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "demo": run_demo_task,
     "django_check": run_django_check_task,
     "git_safety_check": run_git_safety_check_task,
+    "shopify_review_request_tag_discovery": run_shopify_review_request_tag_discovery_task,
     "shopify_translation_batch_apply_command_generate": run_shopify_translation_batch_apply_command_generate_task,
     "shopify_translation_batch_apply_command_validate": run_shopify_translation_batch_apply_command_validate_task,
     "shopify_translation_batch_apply_execution_approval_validate": (
@@ -253,6 +257,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/git_safety_check_review.json",
+    },
+    "shopify_review_request_tag_discovery": {
+        "description": "Read-only Shopify order tag discovery for review request automation preparation.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify order tag query",
+        "review_file_path": "logs/shopify_review_request_tag_discovery.json",
     },
     "shopify_translation_dry_run": {
         "description": "Run fixed Shopify product translation preview for one configured test product.",

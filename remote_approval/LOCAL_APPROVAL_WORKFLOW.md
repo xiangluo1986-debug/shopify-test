@@ -61,6 +61,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_final_h
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_runner_final_safe_shell --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_execution_plan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_one_shot_locked_shell --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -1236,6 +1237,25 @@ and Phase 1 must not send customer email, call the Gmail API, call the Ali
 Reviews / Kudosi API, call Shopify `tagsAdd` / `tagsRemove`, write Shopify data,
 write the database, or git push. Shopify tag mutations require a later separate
 write phase after `write_orders` and `write_customers` scopes are confirmed.
+
+`shopify_review_request_tag_discovery` is a Phase 0.1 read-only task. It queries
+recent Shopify order tags and writes:
+
+```text
+logs/shopify_review_request_tag_discovery.json
+logs/shopify_review_request_tag_discovery.html
+```
+
+The report must preserve exact tag strings from Shopify and include Unicode code
+points, half-width/full-width colon detection, spelling detection for `review`
+versus `reveiw`, order counts, and example order names/IDs. Treat `1: reveiw
+request` and `1: review request` as different tags. Treat `:` / U+003A and `：`
+/ U+FF1A as different characters. The task must not normalize, correct, trim,
+translate, or rewrite tag values, and must always recommend
+`use_exact_shopify_api_value_only`.
+
+The tag discovery task must not call Shopify mutations, `tagsAdd`, `tagsRemove`,
+Ali Reviews / Kudosi APIs, Gmail APIs, or any email-sending path.
 
 ### `System.Speech` Is Unavailable
 
