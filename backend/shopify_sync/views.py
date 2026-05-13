@@ -545,7 +545,15 @@ def _user_has_shopify_sync_access(request):
 @staff_member_required
 def translation_console(request):
     post_action = (request.POST.get("action") or "").strip() if request.method == "POST" else ""
-    is_draft_post = post_action == "generate_missing_translation_drafts"
+    is_refresh_status_post = post_action == "refresh_status"
+    is_locked_package_placeholder_post = post_action == "generate_locked_package_dry_run_placeholder"
+    is_status_only_safe_action_post = (
+        is_refresh_status_post or is_locked_package_placeholder_post
+    )
+    is_draft_post = post_action in {
+        "generate_missing_translation_drafts",
+        "generate_draft_dry_run",
+    }
     is_apply_plan_post = post_action == "generate_translation_apply_plan"
     is_final_review_post = post_action == "generate_translation_final_review"
     is_readiness_post = (
@@ -567,9 +575,12 @@ def translation_console(request):
         or is_locked_executor_post
         or is_real_write_executor_post
         or is_real_write_manual_action_package_post
+        or is_status_only_safe_action_post
     )
-    search_text = (request.POST.get("q") if is_post_action else request.GET.get("q", "")).strip()
-    locale = ((request.POST.get("locale") if is_post_action else request.GET.get("locale", "ja")) or "ja").strip()
+    raw_search_text = request.POST.get("q", "") if is_post_action else request.GET.get("q", "")
+    raw_locale = request.POST.get("locale", "ja") if is_post_action else request.GET.get("locale", "ja")
+    search_text = (raw_search_text or "").strip()
+    locale = ((raw_locale or "ja") or "ja").strip()
     shop_domain = "kidstoylover.myshopify.com"
     result = {
         "shopify_read_only": True,
@@ -605,13 +616,14 @@ def translation_console(request):
     real_write_executor_error_message = ""
     manual_action_package_result = None
     manual_action_package_error_message = ""
+    safe_action_result = None
     workflow_product_id = (
         search_text
         if search_text.startswith("gid://shopify/Product/")
         else TRANSLATION_WORKFLOW_DEFAULT_PRODUCT_ID
     )
 
-    if search_text:
+    if search_text and not is_status_only_safe_action_post:
         try:
             installation = ShopifyInstallation.objects.first()
             if installation is None:
@@ -641,6 +653,28 @@ def translation_console(request):
                         draft_error_message = (
                             "Draft generation blocked: "
                             + ", ".join(draft_result.get("blocking_conditions") or [])
+                        )
+                    if post_action == "generate_draft_dry_run":
+                        safe_action_result = _translation_console_safe_action_result(
+                            action=post_action,
+                            action_status=(
+                                "draft_dry_run_blocked"
+                                if draft_result.get("blocking_conditions")
+                                else "draft_dry_run_completed"
+                            ),
+                            message=(
+                                "Draft dry-run completed without Shopify writes."
+                                if not draft_result.get("blocking_conditions")
+                                else "Draft dry-run stayed no-write but has blocking conditions."
+                            ),
+                            summary={
+                                "product_id": draft_result.get("product_id", ""),
+                                "product_title": draft_result.get("product_title", ""),
+                                "draft_entry_count": draft_result.get("draft_entry_count"),
+                                "skipped_entry_count": draft_result.get("skipped_entry_count"),
+                                "blocking_conditions": draft_result.get("blocking_conditions")
+                                or [],
+                            },
                         )
                     if (
                         is_apply_plan_post
@@ -757,6 +791,13 @@ def translation_console(request):
                             )
                 else:
                     draft_error_message = "Select a single Shopify product before generating drafts."
+                    if post_action == "generate_draft_dry_run":
+                        safe_action_result = _translation_console_safe_action_result(
+                            action=post_action,
+                            action_status="draft_dry_run_blocked",
+                            message="Select a single Shopify product before generating a draft dry-run package.",
+                            summary={"blocking_conditions": ["missing_selected_product"]},
+                        )
                     if (
                         is_apply_plan_post
                         or is_readiness_post
@@ -821,6 +862,49 @@ def translation_console(request):
             error_message = f"Read-only Shopify query failed: {exc.__class__.__name__}"
 
     workflow_status = load_translation_workflow_status(workflow_product_id)
+    if is_refresh_status_post:
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status="workflow_status_refreshed",
+            message="Workflow status refreshed from local audit reports only.",
+            summary={
+                "workflow_status": workflow_status.get("workflow_status"),
+                "latest_audit_report_filename": workflow_status.get(
+                    "latest_audit_report_filename"
+                ),
+                "latest_audit_report_source": workflow_status.get(
+                    "latest_audit_report_source"
+                ),
+                "workflow_status_loaded_at": workflow_status.get(
+                    "workflow_status_loaded_at"
+                ),
+            },
+        )
+    elif is_locked_package_placeholder_post:
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status="locked_package_dry_run_placeholder",
+            message=(
+                "Locked package generation from the Safe Actions panel is read-only "
+                "and remains a placeholder in this phase."
+            ),
+            summary={
+                "workflow_status": workflow_status.get("workflow_status"),
+                "placeholder": True,
+                "future_phase_required": True,
+            },
+        )
+    elif post_action == "generate_draft_dry_run" and safe_action_result is None:
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status="draft_dry_run_blocked",
+            message=(
+                draft_error_message
+                or error_message
+                or "Select a single Shopify product before generating a draft dry-run package."
+            ),
+            summary={"blocking_conditions": ["missing_or_unavailable_selected_product"]},
+        )
 
     return render(
         request,
@@ -833,6 +917,7 @@ def translation_console(request):
             "shop_domain": shop_domain,
             "result": result,
             "workflow_status": workflow_status,
+            "safe_action_result": safe_action_result,
             "error_message": error_message,
             "draft_result": draft_result,
             "draft_error_message": draft_error_message,
@@ -886,6 +971,29 @@ def _resolve_translation_console_product_id(installation, search_text, locale):
     if len(search_results) == 1 and search_results[0].get("id"):
         return search_results[0]["id"]
     return ""
+
+
+def _translation_console_safe_action_result(
+    action: str,
+    action_status: str,
+    message: str,
+    summary: dict | None = None,
+):
+    return {
+        "action": action,
+        "action_status": action_status,
+        "message": message,
+        "summary": summary or {},
+        "read_only": True,
+        "no_write_from_page": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "rollback_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "real_apply_performed": False,
+    }
 
 
 @login_required

@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -41,8 +42,13 @@ def load_translation_workflow_status(product_id: str) -> dict:
             "duplicate_write_protection_status", ""
         ),
         "latest_audit_report_path": _relative_report_path(report_path),
+        "latest_audit_report_filename": report_path.name if report_path else "",
+        "latest_audit_report_available": bool(report_path),
         "latest_audit_report_source": report_source,
         "latest_audit_generated_at": report.get("generated_at", ""),
+        "workflow_status_loaded_at": datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
         "read_only": True,
         "shopify_write_performed": False,
         "mutation_performed": False,

@@ -17,8 +17,10 @@
         <tr><th>Remaining eligible count</th><td>{{ workflow_status.remaining_eligible_count }}</td></tr>
         <tr><th>Duplicate write protection status</th><td>{{ workflow_status.duplicate_write_protection_status }}</td></tr>
         <tr><th>Last audit report path</th><td>{{ workflow_status.latest_audit_report_path }}</td></tr>
+        <tr><th>Last audit report filename</th><td>{{ workflow_status.latest_audit_report_filename }}</td></tr>
         <tr><th>Last audit report source</th><td>{{ workflow_status.latest_audit_report_source }}</td></tr>
         <tr><th>Last audit generated time</th><td>{{ workflow_status.latest_audit_generated_at }}</td></tr>
+        <tr><th>Workflow status loaded at</th><td>{{ workflow_status.workflow_status_loaded_at }}</td></tr>
         <tr><th>Safety badge</th><td>READ ONLY / NO WRITE FROM THIS PAGE</td></tr>
         <tr><th>read_only</th><td>{{ workflow_status.read_only }}</td></tr>
         <tr><th>shopify_write_performed</th><td>{{ workflow_status.shopify_write_performed }}</td></tr>
@@ -29,6 +31,75 @@
       </tbody>
     </table>
   </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Safe Actions</h2>
+    <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> These actions cannot run Shopify writes, mutations, rollback, or real apply flows.</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="refresh_status">
+        <input type="hidden" name="q" value="{{ workflow_status.product_id }}">
+        <input type="hidden" name="locale" value="{{ selected_locale }}">
+        <button type="submit" class="button">Refresh workflow status</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="generate_draft_dry_run">
+        <input type="hidden" name="q" value="{{ workflow_status.product_id }}">
+        <input type="hidden" name="locale" value="{{ selected_locale }}">
+        <button type="submit" class="button">Generate draft package dry-run</button>
+      </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="generate_locked_package_dry_run_placeholder">
+        <input type="hidden" name="q" value="{{ workflow_status.product_id }}">
+        <input type="hidden" name="locale" value="{{ selected_locale }}">
+        <button type="submit" class="button">Generate locked package dry-run</button>
+      </form>
+    </div>
+    <table>
+      <tbody>
+        <tr><th>Latest audit report</th><td>{% if workflow_status.latest_audit_report_filename %}{{ workflow_status.latest_audit_report_filename }}{% else %}No audit report found{% endif %}</td></tr>
+        <tr><th>Latest audit report source</th><td>{{ workflow_status.latest_audit_report_source }}</td></tr>
+        <tr><th>Latest audit display path</th><td>{{ workflow_status.latest_audit_report_path }}</td></tr>
+        <tr><th>Locked package generation</th><td>Read-only placeholder in this panel. Use the existing no-write locked-package flow for full report generation.</td></tr>
+        <tr><th>Real write execution</th><td>No real write action is available from this panel.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  {% if safe_action_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Safe action result</h2>
+      <p>{{ safe_action_result.message }}</p>
+      <table>
+        <tbody>
+          <tr><th>action</th><td>{{ safe_action_result.action }}</td></tr>
+          <tr><th>action_status</th><td>{{ safe_action_result.action_status }}</td></tr>
+          <tr><th>read_only</th><td>{{ safe_action_result.read_only }}</td></tr>
+          <tr><th>no_write_from_page</th><td>{{ safe_action_result.no_write_from_page }}</td></tr>
+          <tr><th>shopify_write_performed</th><td>{{ safe_action_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ safe_action_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ safe_action_result.translations_register_called }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ safe_action_result.rollback_performed }}</td></tr>
+          <tr><th>publish_performed</th><td>{{ safe_action_result.publish_performed }}</td></tr>
+          <tr><th>apply_performed</th><td>{{ safe_action_result.apply_performed }}</td></tr>
+          <tr><th>real_apply_performed</th><td>{{ safe_action_result.real_apply_performed }}</td></tr>
+        </tbody>
+      </table>
+      {% if safe_action_result.summary %}
+        <h3>Summary</h3>
+        <table>
+          <tbody>
+            {% for key, value in safe_action_result.summary.items %}
+              <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </div>
+  {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Fetch read-only product translation data</h2>
