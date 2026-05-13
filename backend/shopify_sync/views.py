@@ -78,6 +78,10 @@ from .translation_real_write_manual_action_package import (
     REAL_WRITE_MANUAL_ACTION_JSON_PATH,
     build_selected_product_translation_real_write_manual_action_package,
 )
+from .translation_workflow_status import (
+    DEFAULT_SELECTED_PRODUCT_ID as TRANSLATION_WORKFLOW_DEFAULT_PRODUCT_ID,
+    load_translation_workflow_status,
+)
 
 
 SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_states"
@@ -601,6 +605,11 @@ def translation_console(request):
     real_write_executor_error_message = ""
     manual_action_package_result = None
     manual_action_package_error_message = ""
+    workflow_product_id = (
+        search_text
+        if search_text.startswith("gid://shopify/Product/")
+        else TRANSLATION_WORKFLOW_DEFAULT_PRODUCT_ID
+    )
 
     if search_text:
         try:
@@ -619,6 +628,7 @@ def translation_console(request):
             ):
                 selected_product_id = _resolve_translation_console_product_id(installation, search_text, locale)
                 if selected_product_id:
+                    workflow_product_id = selected_product_id
                     result.update(fetch_translation_console_data(installation, selected_product_id, locale))
                 if selected_product_id:
                     draft_result = generate_selected_product_missing_translation_draft_package(
@@ -802,10 +812,15 @@ def translation_console(request):
                         )
             else:
                 result.update(fetch_translation_console_data(installation, search_text, locale))
+                product = result.get("product") or {}
+                if product.get("id"):
+                    workflow_product_id = product["id"]
         except ShopifyInstallation.DoesNotExist:
             error_message = f"Shopify installation not found for {shop_domain}."
         except (ShopifyTranslationConsoleError, requests.RequestException, ValueError) as exc:
             error_message = f"Read-only Shopify query failed: {exc.__class__.__name__}"
+
+    workflow_status = load_translation_workflow_status(workflow_product_id)
 
     return render(
         request,
@@ -817,6 +832,7 @@ def translation_console(request):
             "supported_locales": SUPPORTED_TRANSLATION_LOCALES,
             "shop_domain": shop_domain,
             "result": result,
+            "workflow_status": workflow_status,
             "error_message": error_message,
             "draft_result": draft_result,
             "draft_error_message": draft_error_message,
