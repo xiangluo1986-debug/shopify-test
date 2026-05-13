@@ -177,6 +177,9 @@ from remote_approval.tasks.shopify_translation_small_batch_locked_dry_run_packag
 from remote_approval.tasks.shopify_translation_small_batch_real_write_gate_preflight_task import (
     run_shopify_translation_small_batch_real_write_gate_preflight_task,
 )
+from remote_approval.tasks.shopify_translation_small_batch_real_write_execute_task import (
+    run_shopify_translation_small_batch_real_write_execute_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -215,6 +218,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_oauth_readiness_preflight": (
         run_shopify_review_request_trustpilot_gmail_oauth_readiness_preflight_task
+    ),
+    "shopify_review_request_trustpilot_gmail_one_draft_locked_runner": (
+        run_shopify_review_request_trustpilot_gmail_one_draft_locked_runner_task
     ),
     "shopify_review_request_unified_decision_engine_dry_run": (
         run_shopify_review_request_unified_decision_engine_dry_run_task
@@ -324,6 +330,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_small_batch_real_write_gate_preflight": (
         run_shopify_translation_small_batch_real_write_gate_preflight_task
+    ),
+    "shopify_translation_small_batch_real_write_execute": (
+        run_shopify_translation_small_batch_real_write_execute_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -708,6 +717,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify query plus OpenAI dry-run package generation",
         "review_file_path": "logs/shopify_translation_small_batch_real_write_gate_preflight.json",
+    },
+    "shopify_translation_small_batch_real_write_execute": {
+        "description": "Dry-run or execute the locked selected-product small batch translation write with strict ACK, scope, digest, and readback gates.",
+        "allowed_modes": ["dry-run", "real-run", "execute-real-write"],
+        "write_risk": "high outside dry-run",
+        "review_file_path": "logs/shopify_translation_small_batch_real_write_execute.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
