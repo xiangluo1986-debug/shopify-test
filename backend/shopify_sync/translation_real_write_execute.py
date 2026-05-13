@@ -28,7 +28,7 @@ from .translation_real_write_readiness import (
 
 
 TASK_NAME = "shopify_translation_selected_product_real_write_execute"
-PHASE = "16.2"
+PHASE = "16.2B"
 DEFAULT_PRODUCT_ID = "gid://shopify/Product/7655686799427"
 DEFAULT_TARGET_LOCALES = ["ja", "de", "fr", "es", "it"]
 DEFAULT_FIELDS = ["title", "meta_title", "meta_description"]
@@ -58,21 +58,41 @@ def execute_selected_product_translation_real_write(settings):
         installation, product_id, target_locales, requested_fields
     )
     _attach_manual_package(payload, manual_package)
-    payload["blocking_conditions"].extend(_env_blocking_conditions(payload, settings))
     payload["blocking_conditions"].extend(_manual_package_blocking_conditions(manual_package))
 
     entries = _manual_entries(manual_package)
-    precheck = _pre_write_readback(installation, product_id, target_locales, entries)
+    real_run_requested = mode in REAL_RUN_MODES and not dry_run
+    entries = _apply_single_entry_gate(payload, settings, entries, real_run_requested)
+    payload["blocking_conditions"].extend(_env_blocking_conditions(payload, settings))
+
+    precheck = _pre_write_readback(
+        installation,
+        product_id,
+        target_locales,
+        entries,
+        single_entry_active=payload.get("single_entry_active", False),
+        requested_locale=payload.get("requested_locale", ""),
+        requested_field=payload.get("requested_field", ""),
+    )
     payload["pre_write_readback_performed"] = precheck["performed"]
+    payload["pre_write_readback_checked"] = precheck["performed"]
     payload["pre_write_digest_verified"] = precheck["all_digest_verified"]
     payload["shopify_api_call_performed"] = precheck["performed"]
     payload["entries"] = precheck["entries"]
     payload["blocking_conditions"].extend(precheck["blocking_conditions"])
+    _attach_single_entry_precheck_summary(payload)
+    _attach_single_entry_empty_candidate_precheck_summary(payload, precheck.get("target_state") or {})
+    payload["blocking_conditions"].extend(payload.get("single_entry_blocking_conditions") or [])
 
     payload["would_write_count"] = sum(1 for entry in payload["entries"] if entry.get("would_write"))
-    real_run_requested = mode in REAL_RUN_MODES and not dry_run
     payload["real_run_requested"] = bool(real_run_requested)
-    payload["real_write_allowed"] = bool(real_run_requested and not payload["blocking_conditions"])
+    payload["translations_register_payload_count"] = payload["would_write_count"]
+    payload["real_write_allowed"] = bool(
+        real_run_requested
+        and payload.get("single_entry_selected")
+        and payload["would_write_count"] == 1
+        and not payload["blocking_conditions"]
+    )
 
     mutation_result = _empty_mutation_result()
     if payload["real_write_allowed"]:
@@ -85,7 +105,9 @@ def execute_selected_product_translation_real_write(settings):
 
         postcheck = _post_write_readback(installation, product_id, target_locales, payload["entries"])
         payload["post_write_readback_performed"] = postcheck["performed"]
+        payload["post_write_readback_checked"] = postcheck["performed"]
         payload["post_write_verified"] = postcheck["all_verified"]
+        payload["post_write_readback_matches"] = postcheck["all_verified"]
         payload["verified_count"] = postcheck["verified_count"]
         payload["entries"] = postcheck["entries"]
         payload["shopify_api_call_performed"] = True
@@ -148,21 +170,36 @@ def _empty_payload(settings, mode, dry_run, product_id, target_locales, requeste
         "future_write_allowed": False,
         "manual_ack_required": True,
         "manual_ack_phrase_required": ACK_VALUE,
+        "single_entry_only": bool(settings.get("single_entry_only")),
+        "single_entry_active": False,
+        "requested_locale": settings.get("requested_locale", ""),
+        "requested_field": settings.get("requested_field", ""),
+        "manual_action_package_entry_count": 0,
+        "single_entry_candidate_count": 0,
+        "single_entry_selected": False,
+        "single_entry_blocking_conditions": [],
         "target_locales": target_locales,
         "requested_fields": requested_fields,
         "locked_executor_report_path": "logs/shopify_translation_selected_product_locked_executor_shell.json",
         "real_write_executor_report_path": "logs/shopify_translation_selected_product_real_write_execute.json",
         "manual_action_package_status": "",
         "manual_action_package_report_path": "",
+        "pre_write_readback_checked": False,
         "pre_write_readback_performed": False,
+        "pre_write_existing_current_translation": False,
+        "pre_write_existing_outdated_translation": False,
+        "pre_write_digest": "",
         "pre_write_digest_verified": False,
+        "translations_register_payload_count": 0,
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "mutation_performed": False,
         "translations_register_called": False,
         "translations_register_user_errors": [],
         "post_write_readback_performed": False,
+        "post_write_readback_checked": False,
         "post_write_verified": False,
+        "post_write_readback_matches": False,
         "rollback_required": False,
         "rollback_approval_required": False,
         "rollback_performed": False,
@@ -186,6 +223,7 @@ def _attach_manual_package(payload, manual_package):
     )
     payload["product_title"] = manual_package.get("product_title", "")
     payload["entry_count"] = int(manual_package.get("entry_count") or 0)
+    payload["manual_action_package_entry_count"] = int(manual_package.get("entry_count") or 0)
     payload["blocked_entry_count"] = int(manual_package.get("blocked_entry_count") or 0)
     payload["target_locales"] = list(manual_package.get("target_locales") or [])
     payload["requested_fields"] = list(manual_package.get("requested_fields") or [])
@@ -198,6 +236,8 @@ def _env_blocking_conditions(payload, settings):
     env_max_entries = settings.get("env_max_entries")
     env_locales = settings.get("env_locales") or []
     env_fields = settings.get("env_fields") or []
+    requested_locale = settings.get("requested_locale", "")
+    requested_field = settings.get("requested_field", "")
     if real_run_requested:
         if not settings.get("ack_matches"):
             reasons.append("blocked_missing_or_invalid_real_write_ack")
@@ -205,15 +245,28 @@ def _env_blocking_conditions(payload, settings):
             reasons.append("blocked_missing_real_write_product_id")
         elif env_product_id != DEFAULT_PRODUCT_ID:
             reasons.append("blocked_product_id_mismatch")
+        if not settings.get("single_entry_only"):
+            reasons.append("single_entry_only_not_enabled")
         if env_max_entries is None:
             reasons.append("blocked_missing_real_write_max_entries")
-        elif int(env_max_entries) != int(payload.get("entry_count") or 0):
-            reasons.append("blocked_max_entries_mismatch")
+        elif int(env_max_entries) != 1:
+            reasons.append("single_entry_max_entries_not_one")
+        if not requested_locale or requested_locale not in ALLOWED_LOCALES:
+            reasons.append("single_entry_locale_missing_or_invalid")
+        if not requested_field or requested_field not in ALLOWED_FIELDS:
+            reasons.append("single_entry_field_missing_or_invalid")
     elif env_product_id and env_product_id != DEFAULT_PRODUCT_ID:
         reasons.append("blocked_product_id_mismatch")
 
-    if env_max_entries is not None and int(env_max_entries) != int(payload.get("entry_count") or 0):
+    if payload.get("single_entry_active"):
+        if env_max_entries is not None and int(env_max_entries) != 1:
+            reasons.append("single_entry_max_entries_not_one")
+    elif env_max_entries is not None and int(env_max_entries) != int(payload.get("entry_count") or 0):
         reasons.append("blocked_max_entries_mismatch")
+    if requested_locale and requested_locale not in ALLOWED_LOCALES:
+        reasons.append("single_entry_locale_missing_or_invalid")
+    if requested_field and requested_field not in ALLOWED_FIELDS:
+        reasons.append("single_entry_field_missing_or_invalid")
     if env_locales and sorted(env_locales) != sorted(payload.get("target_locales") or []):
         reasons.append("blocked_locale_scope_mismatch")
     if env_fields and sorted(env_fields) != sorted(payload.get("requested_fields") or []):
@@ -228,7 +281,7 @@ def _manual_package_blocking_conditions(manual_package):
     if int(manual_package.get("entry_count") or 0) <= 0:
         reasons.append("blocked_entry_count_zero")
     if int(manual_package.get("blocked_entry_count") or 0) > 0:
-        reasons.append("blocked_manual_action_package_blocked_entries")
+        reasons.append("manual_action_package_has_blocked_entries")
     if manual_package.get("blocking_conditions"):
         reasons.append("blocked_manual_action_package_has_blocking_conditions")
     for key, expected in {
@@ -250,18 +303,22 @@ def _manual_package_blocking_conditions(manual_package):
 def _manual_entries(manual_package):
     entries = []
     for item in manual_package.get("manual_action_entries", []):
+        planned_value = item.get("planned_value") or item.get("proposed_translation", "")
+        planned_key = item.get("planned_key") or item.get("field", "")
         entries.append(
             {
                 "product_id": item.get("product_id", ""),
                 "locale": item.get("locale", ""),
                 "field": item.get("field", ""),
-                "key": item.get("planned_key") or item.get("field", ""),
+                "key": planned_key,
+                "resource_key": planned_key,
+                "translatable_content_key": planned_key,
                 "digest": item.get("digest", ""),
                 "source_value": item.get("source_value", ""),
-                "planned_value": item.get("planned_value")
-                or item.get("proposed_translation", ""),
+                "planned_value": planned_value,
                 "proposed_translation": item.get("proposed_translation")
                 or item.get("planned_value", ""),
+                "proposed_value_chars": len(planned_value),
                 "planned_resource_id": item.get("planned_resource_id", ""),
                 "current_translation_state": item.get("current_translation_state", {}),
                 "write_input": {},
@@ -277,7 +334,67 @@ def _manual_entries(manual_package):
     return entries
 
 
-def _pre_write_readback(installation, product_id, target_locales, entries):
+def _apply_single_entry_gate(payload, settings, entries, real_run_requested):
+    requested_locale = settings.get("requested_locale", "")
+    requested_field = settings.get("requested_field", "")
+    single_entry_active = bool(
+        real_run_requested
+        or settings.get("single_entry_only")
+        or requested_locale
+        or requested_field
+    )
+    payload["single_entry_active"] = single_entry_active
+    payload["single_entry_only"] = bool(settings.get("single_entry_only"))
+    payload["requested_locale"] = requested_locale
+    payload["requested_field"] = requested_field
+    payload["single_entry_blocking_conditions"] = []
+    if not single_entry_active:
+        payload["single_entry_candidate_count"] = 0
+        payload["single_entry_selected"] = False
+        return entries
+
+    reasons = []
+    if real_run_requested and not settings.get("single_entry_only"):
+        reasons.append("single_entry_only_not_enabled")
+    if real_run_requested and settings.get("env_max_entries") != 1:
+        reasons.append("single_entry_max_entries_not_one")
+    if not requested_locale or requested_locale not in ALLOWED_LOCALES:
+        reasons.append("single_entry_locale_missing_or_invalid")
+    if not requested_field or requested_field not in ALLOWED_FIELDS:
+        reasons.append("single_entry_field_missing_or_invalid")
+
+    candidates = [
+        entry
+        for entry in entries
+        if entry.get("locale") == requested_locale
+        and (entry.get("field") == requested_field or entry.get("key") == requested_field)
+        and entry.get("would_write")
+    ]
+    payload["single_entry_candidate_count"] = len(candidates)
+    if requested_locale in ALLOWED_LOCALES and requested_field in ALLOWED_FIELDS:
+        if len(candidates) == 0:
+            reasons.append("single_entry_target_not_found")
+        elif len(candidates) > 1:
+            reasons.append("single_entry_target_not_unique")
+    selected_entries = candidates if len(candidates) == 1 else []
+    if len(selected_entries) != 1:
+        reasons.append("single_entry_count_not_one")
+    payload["single_entry_selected"] = len(selected_entries) == 1 and not reasons
+    payload["single_entry_blocking_conditions"] = _unique(reasons)
+    payload["blocking_conditions"].extend(payload["single_entry_blocking_conditions"])
+    payload["entry_count"] = len(selected_entries)
+    return selected_entries
+
+
+def _pre_write_readback(
+    installation,
+    product_id,
+    target_locales,
+    entries,
+    single_entry_active=False,
+    requested_locale="",
+    requested_field="",
+):
     by_locale = {}
     blocking_conditions = []
     for locale in target_locales:
@@ -286,6 +403,23 @@ def _pre_write_readback(installation, product_id, target_locales, entries):
         except Exception:
             blocking_conditions.append("blocked_pre_write_readback_failed")
             by_locale[locale] = {}
+
+    target_state = {}
+    if single_entry_active and not entries and requested_locale and requested_field:
+        row = _row_for_key(by_locale.get(requested_locale) or {}, requested_field)
+        if row:
+            existing_present = bool(row.get("has_translation"))
+            outdated = row.get("translation_outdated") is True
+            target_state = {
+                "digest": row.get("digest", ""),
+                "existing_translation_present": existing_present,
+                "existing_translation_value": row.get("translation_value", ""),
+                "existing_translation_outdated": outdated,
+            }
+            if existing_present:
+                blocking_conditions.append("single_entry_existing_current_translation")
+            if outdated:
+                blocking_conditions.append("single_entry_existing_outdated_translation")
 
     checked_entries = []
     for entry in entries:
@@ -326,8 +460,12 @@ def _pre_write_readback(installation, product_id, target_locales, entries):
             item["blocking_reasons"].append("pre_write_digest_mismatch")
         if existing_present:
             item["blocking_reasons"].append("pre_write_existing_translation_present")
+            if single_entry_active:
+                item["blocking_reasons"].append("single_entry_existing_current_translation")
         if outdated:
             item["blocking_reasons"].append("pre_write_outdated_translation_present")
+            if single_entry_active:
+                item["blocking_reasons"].append("single_entry_existing_outdated_translation")
         item["blocking_reasons"] = _unique(item["blocking_reasons"])
         item["would_write"] = bool(item.get("would_write")) and not item["blocking_reasons"]
         if item["blocking_reasons"]:
@@ -339,8 +477,51 @@ def _pre_write_readback(installation, product_id, target_locales, entries):
         "all_digest_verified": bool(checked_entries)
         and all(entry.get("digest_matches") for entry in checked_entries),
         "entries": checked_entries,
+        "target_state": target_state,
         "blocking_conditions": _unique(blocking_conditions),
     }
+
+
+def _attach_single_entry_precheck_summary(payload):
+    if not payload.get("single_entry_active") or not payload.get("entries"):
+        return
+    entry = payload["entries"][0]
+    state = entry.get("pre_existing_translation_state") or {}
+    payload["pre_write_existing_current_translation"] = bool(
+        state.get("existing_translation_present")
+    )
+    payload["pre_write_existing_outdated_translation"] = bool(
+        state.get("existing_translation_outdated")
+    )
+    payload["pre_write_digest"] = entry.get("pre_write_digest", "")
+    single_reasons = [
+        reason
+        for reason in entry.get("blocking_reasons", [])
+        if str(reason).startswith("single_entry_")
+    ]
+    payload["single_entry_blocking_conditions"] = _unique(
+        list(payload.get("single_entry_blocking_conditions") or []) + single_reasons
+    )
+
+
+def _attach_single_entry_empty_candidate_precheck_summary(payload, target_state):
+    if not payload.get("single_entry_active") or payload.get("entries") or not target_state:
+        return
+    payload["pre_write_existing_current_translation"] = bool(
+        target_state.get("existing_translation_present")
+    )
+    payload["pre_write_existing_outdated_translation"] = bool(
+        target_state.get("existing_translation_outdated")
+    )
+    payload["pre_write_digest"] = target_state.get("digest", "")
+    reasons = []
+    if target_state.get("existing_translation_present"):
+        reasons.append("single_entry_existing_current_translation")
+    if target_state.get("existing_translation_outdated"):
+        reasons.append("single_entry_existing_outdated_translation")
+    payload["single_entry_blocking_conditions"] = _unique(
+        list(payload.get("single_entry_blocking_conditions") or []) + reasons
+    )
 
 
 def _translations_register(installation, product_id, entries):
@@ -416,6 +597,9 @@ def _attach_mutation_result(payload, mutation_result):
     payload["mutation_performed"] = called
     payload["shopify_write_performed"] = called
     payload["real_apply_performed"] = called and not mutation_result.get("user_errors")
+    payload["translations_register_payload_count"] = sum(
+        1 for entry in payload.get("entries", []) if entry.get("would_write")
+    )
     payload["translations_register_user_errors"] = mutation_result.get("user_errors") or []
     payload["user_errors_count"] = len(payload["translations_register_user_errors"])
     for entry in payload["entries"]:
@@ -475,8 +659,12 @@ def _status(payload, dry_run, mutation_called):
     if payload.get("blocking_conditions") and not mutation_called:
         return "blocked_real_write_preconditions_failed"
     if mutation_called and payload.get("post_write_verified"):
+        if payload.get("single_entry_active"):
+            return "single_entry_real_write_succeeded_and_verified"
         return "real_write_completed_and_verified"
     if mutation_called:
+        if payload.get("single_entry_active"):
+            return "single_entry_real_write_failed_or_unverified"
         return "real_write_failed_needs_manual_review"
     return "blocked_real_write_preconditions_failed"
 
@@ -500,8 +688,54 @@ def _finalize(payload):
             and not payload.get("rollback_required")
         )
     )
+    payload["entries"] = [
+        _report_entry(entry)
+        for entry in payload.get("entries", [])
+        if entry.get("would_write")
+    ]
+    payload["would_write_count"] = len(payload["entries"])
+    if payload.get("single_entry_active"):
+        payload["single_entry_selected"] = (
+            payload.get("single_entry_candidate_count") == 1
+            and len(payload["entries"]) == 1
+            and not payload.get("single_entry_blocking_conditions")
+        )
     payload["generated_at"] = _utc_now()
     return payload
+
+
+def _report_entry(entry):
+    key = entry.get("key") or entry.get("field", "")
+    planned_value = entry.get("planned_value") or entry.get("proposed_translation", "")
+    blocking_reasons = _unique(entry.get("blocking_reasons") or [])
+    return {
+        "product_id": entry.get("product_id", ""),
+        "locale": entry.get("locale", ""),
+        "field": entry.get("field", ""),
+        "key": key,
+        "resource_key": entry.get("resource_key") or key,
+        "translatable_content_key": entry.get("translatable_content_key") or key,
+        "digest": entry.get("digest", ""),
+        "pre_write_digest": entry.get("pre_write_digest", ""),
+        "digest_matches": bool(entry.get("digest_matches")),
+        "proposed_value_chars": len(planned_value),
+        "blocked": bool(blocking_reasons),
+        "blocking_conditions": blocking_reasons,
+        "would_write": bool(entry.get("would_write")),
+        "write_performed": bool(entry.get("write_performed")),
+        "verified": bool(entry.get("verified")),
+        "pre_existing_translation_present": bool(
+            (entry.get("pre_existing_translation_state") or {}).get(
+                "existing_translation_present"
+            )
+        ),
+        "pre_existing_translation_outdated": bool(
+            (entry.get("pre_existing_translation_state") or {}).get(
+                "existing_translation_outdated"
+            )
+        ),
+        "post_write_outdated": entry.get("post_write_outdated"),
+    }
 
 
 def _utc_now():

@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import subprocess
@@ -10,6 +11,7 @@ from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 TASK_NAME = "shopify_translation_selected_product_real_write_execute"
 COMMAND_LABEL = TASK_NAME
+PHASE = "16.2B"
 JSON_REPORT_PATH = LOG_DIR / "shopify_translation_selected_product_real_write_execute.json"
 HTML_REPORT_PATH = LOG_DIR / "shopify_translation_selected_product_real_write_execute.html"
 SMOKE_JSON_REPORT_PATH = LOG_DIR / "translation_console_manual_action_smoke_test.json"
@@ -22,6 +24,9 @@ MAX_ENTRIES_ENV = "SHOPIFY_TRANSLATION_REAL_WRITE_MAX_ENTRIES"
 LOCALES_ENV = "SHOPIFY_TRANSLATION_REAL_WRITE_LOCALES"
 FIELDS_ENV = "SHOPIFY_TRANSLATION_REAL_WRITE_FIELDS"
 DRY_RUN_ENV = "SHOPIFY_TRANSLATION_REAL_WRITE_DRY_RUN"
+SINGLE_ENTRY_ONLY_ENV = "SHOPIFY_TRANSLATION_REAL_WRITE_SINGLE_ENTRY_ONLY"
+SINGLE_ENTRY_LOCALE_ENV = "SHOPIFY_TRANSLATION_REAL_WRITE_LOCALE"
+SINGLE_ENTRY_FIELD_ENV = "SHOPIFY_TRANSLATION_REAL_WRITE_FIELD"
 
 DEFAULT_PRODUCT_ID = "gid://shopify/Product/7655686799427"
 DEFAULT_TARGET_LOCALES = ["ja", "de", "fr", "es", "it"]
@@ -54,6 +59,7 @@ def run_shopify_translation_selected_product_real_write_execute_task(mode: str) 
     html_path = _write_html_report(payload)
     success = payload.get("execution_status") in {
         "dry_run_real_write_not_executed",
+        "single_entry_real_write_succeeded_and_verified",
         "real_write_completed_and_verified",
     } and not payload.get("blocking_conditions")
 
@@ -65,13 +71,18 @@ def run_shopify_translation_selected_product_real_write_execute_task(mode: str) 
         "review_path": str(json_path),
         "json_real_write_execute_path": str(json_path),
         "html_real_write_execute_path": str(html_path),
-        "phase": "16.2",
+        "phase": PHASE,
         "execution_status": payload.get("execution_status", ""),
         "mode": payload.get("mode", ""),
         "dry_run": payload.get("dry_run", True),
         "product_id": payload.get("product_id", ""),
         "entry_count": payload.get("entry_count", 0),
         "would_write_count": payload.get("would_write_count", 0),
+        "single_entry_only": payload.get("single_entry_only", False),
+        "requested_locale": payload.get("requested_locale", ""),
+        "requested_field": payload.get("requested_field", ""),
+        "single_entry_candidate_count": payload.get("single_entry_candidate_count", 0),
+        "single_entry_selected": payload.get("single_entry_selected", False),
         "verified_count": payload.get("verified_count", 0),
         "ack_present": payload.get("ack_present", False),
         "ack_matches": payload.get("ack_matches", False),
@@ -110,6 +121,10 @@ def _read_settings(mode: str) -> dict:
         "env_max_entries": _parse_int(os.environ.get(MAX_ENTRIES_ENV, "").strip()),
         "env_locales": _split_csv(os.environ.get(LOCALES_ENV, "")),
         "env_fields": _split_csv(os.environ.get(FIELDS_ENV, "")),
+        "single_entry_only": os.environ.get(SINGLE_ENTRY_ONLY_ENV, "").strip() == "1",
+        "single_entry_only_raw": os.environ.get(SINGLE_ENTRY_ONLY_ENV, "").strip(),
+        "requested_locale": os.environ.get(SINGLE_ENTRY_LOCALE_ENV, "").strip(),
+        "requested_field": os.environ.get(SINGLE_ENTRY_FIELD_ENV, "").strip(),
         "target_locales": _split_csv(os.environ.get(LOCALES_ENV, "")) or DEFAULT_TARGET_LOCALES,
         "requested_fields": _split_csv(os.environ.get(FIELDS_ENV, "")) or DEFAULT_FIELDS,
     }
@@ -117,8 +132,16 @@ def _read_settings(mode: str) -> dict:
 
 def _run_execute_helper_in_docker(settings: dict) -> dict:
     if settings.get("dry_run", True):
-        return _run_dry_run_via_manual_action_smoke(settings)
+        return _run_real_write_helper_in_docker(settings)
     return _run_real_write_helper_in_docker(settings)
+
+
+def _single_entry_dry_run_requested(settings: dict) -> bool:
+    return bool(
+        settings.get("single_entry_only")
+        or settings.get("requested_locale")
+        or settings.get("requested_field")
+    )
 
 
 def _run_dry_run_via_manual_action_smoke(settings: dict) -> dict:
@@ -193,15 +216,7 @@ def _run_dry_run_via_manual_action_smoke(settings: dict) -> dict:
 
 
 def _run_real_write_helper_in_docker(settings: dict) -> dict:
-    script = f"""
-import json
-
-from shopify_sync.translation_real_write_execute import execute_selected_product_translation_real_write
-
-settings = {json.dumps(settings, ensure_ascii=True)}
-result = execute_selected_product_translation_real_write(settings)
-print(json.dumps(result, ensure_ascii=False))
-"""
+    script = _build_real_write_shell_script(settings)
     command = ["docker", "compose", "exec", "-T", "web", "python", "manage.py", "shell", "-c", script]
     try:
         completed = subprocess.run(
@@ -256,6 +271,21 @@ print(json.dumps(result, ensure_ascii=False))
     parsed["docker_stderr_tail"] = _tail(stderr)
     parsed["docker_command"] = _command_for_report(command)
     return parsed
+
+
+def _build_real_write_shell_script(settings: dict) -> str:
+    settings_json_b64 = _settings_json_b64(settings)
+    return f"""
+import base64
+import json
+
+from shopify_sync.translation_real_write_execute import execute_selected_product_translation_real_write
+
+settings_json = base64.b64decode({settings_json_b64!r}).decode("utf-8")
+settings = json.loads(settings_json)
+result = execute_selected_product_translation_real_write(settings)
+print(json.dumps(result, ensure_ascii=False))
+"""
 
 
 def _build_dry_run_payload_from_manual_package(
@@ -315,7 +345,7 @@ def _build_dry_run_payload_from_manual_package(
     )
     report_path = smoke_payload.get("json_report_path") or str(SMOKE_JSON_REPORT_PATH)
     return {
-        "phase": "16.2",
+        "phase": PHASE,
         "task": TASK_NAME,
         "task_name": TASK_NAME,
         "mode": "dry-run",
@@ -336,6 +366,12 @@ def _build_dry_run_payload_from_manual_package(
         "future_write_allowed": False,
         "manual_ack_required": True,
         "manual_ack_phrase_required": ACK_VALUE,
+        "single_entry_only": bool(settings.get("single_entry_only")),
+        "requested_locale": settings.get("requested_locale", ""),
+        "requested_field": settings.get("requested_field", ""),
+        "single_entry_candidate_count": 0,
+        "single_entry_selected": False,
+        "single_entry_blocking_conditions": [],
         "target_locales": list(manual_report.get("target_locales") or smoke_payload.get("target_locales") or DEFAULT_TARGET_LOCALES),
         "requested_fields": list(manual_report.get("requested_fields") or smoke_payload.get("requested_fields") or smoke_payload.get("fields") or DEFAULT_FIELDS),
         "locked_executor_report_path": "logs/shopify_translation_selected_product_locked_executor_shell.json",
@@ -349,15 +385,22 @@ def _build_dry_run_payload_from_manual_package(
         "smoke_test_report_path": report_path,
         "smoke_test_json_exists": True if manual_action_package_source == "docker_stdout_json" else bool(smoke_diag.get("file_exists")),
         "smoke_test_json_error": smoke_diag.get("error", ""),
+        "pre_write_readback_checked": False,
         "pre_write_readback_performed": False,
+        "pre_write_existing_current_translation": False,
+        "pre_write_existing_outdated_translation": False,
+        "pre_write_digest": "",
         "pre_write_digest_verified": False,
+        "translations_register_payload_count": 0,
         "shopify_api_call_performed": bool(smoke_payload.get("no_write_confirmed")),
         "shopify_write_performed": False,
         "mutation_performed": False,
         "translations_register_called": False,
         "translations_register_user_errors": [],
         "post_write_readback_performed": False,
+        "post_write_readback_checked": False,
         "post_write_verified": False,
+        "post_write_readback_matches": False,
         "rollback_required": False,
         "rollback_approval_required": False,
         "rollback_performed": False,
@@ -385,33 +428,32 @@ def _build_dry_run_payload_from_manual_package(
 
 
 def _entry_from_manual_action_entry(entry):
+    key = entry.get("planned_key") or entry.get("field", "")
+    planned_value = entry.get("planned_value") or entry.get("proposed_translation", "")
+    blocking_reasons = list(entry.get("blocking_reasons") or [])
     return {
         "product_id": entry.get("product_id", ""),
         "locale": entry.get("locale", ""),
         "field": entry.get("field", ""),
-        "key": entry.get("planned_key") or entry.get("field", ""),
+        "key": key,
+        "resource_key": key,
+        "translatable_content_key": key,
         "digest": entry.get("digest", ""),
         "pre_write_digest": "",
         "digest_matches": False,
-        "source_value": entry.get("source_value", ""),
-        "planned_value": entry.get("planned_value") or entry.get("proposed_translation", ""),
-        "proposed_translation": entry.get("proposed_translation") or entry.get("planned_value", ""),
+        "proposed_value_chars": len(planned_value),
+        "blocked": bool(blocking_reasons),
         "pre_existing_translation_state": entry.get("current_translation_state", {}),
         "pre_existing_translation_value": "",
         "pre_outdated": None,
-        "write_input": {
-            "locale": entry.get("planned_locale") or entry.get("locale", ""),
-            "key": entry.get("planned_key") or entry.get("field", ""),
-            "value": entry.get("planned_value") or entry.get("proposed_translation", ""),
-            "translatableContentDigest": entry.get("planned_translatable_content_digest") or entry.get("digest", ""),
-        },
         "write_performed": False,
         "mutation_user_error": None,
         "post_write_value": "",
         "post_write_outdated": None,
         "verified": False,
         "would_write": bool(entry.get("would_write")),
-        "blocking_reasons": list(entry.get("blocking_reasons") or []),
+        "blocking_reasons": blocking_reasons,
+        "blocking_conditions": blocking_reasons,
     }
 
 
@@ -461,7 +503,7 @@ def _docker_failure(
     manual_action_diag = manual_action_diag or {}
     smoke_diag = smoke_diag or {}
     return {
-        "phase": "16.2",
+        "phase": PHASE,
         "task": TASK_NAME,
         "task_name": TASK_NAME,
         "mode": "dry-run" if settings.get("dry_run") else settings.get("mode", "dry-run"),
@@ -481,8 +523,19 @@ def _docker_failure(
         "future_write_allowed": False,
         "manual_ack_required": True,
         "manual_ack_phrase_required": ACK_VALUE,
+        "single_entry_only": bool(settings.get("single_entry_only")),
+        "requested_locale": settings.get("requested_locale", ""),
+        "requested_field": settings.get("requested_field", ""),
+        "single_entry_candidate_count": 0,
+        "single_entry_selected": False,
+        "single_entry_blocking_conditions": [],
+        "pre_write_readback_checked": False,
         "pre_write_readback_performed": False,
+        "pre_write_existing_current_translation": False,
+        "pre_write_existing_outdated_translation": False,
+        "pre_write_digest": "",
         "pre_write_digest_verified": False,
+        "translations_register_payload_count": 0,
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "mutation_performed": False,
@@ -496,7 +549,9 @@ def _docker_failure(
         "smoke_test_json_exists": bool(smoke_diag.get("file_exists", False)),
         "smoke_test_json_error": smoke_diag.get("error", ""),
         "post_write_readback_performed": False,
+        "post_write_readback_checked": False,
         "post_write_verified": False,
+        "post_write_readback_matches": False,
         "rollback_required": bool(real_run_requested),
         "rollback_approval_required": bool(real_run_requested),
         "rollback_performed": False,
@@ -523,7 +578,7 @@ def _docker_failure(
 
 def _build_payload(settings: dict, result: dict, duration_seconds: float) -> dict:
     payload = dict(result or {})
-    payload.setdefault("phase", "16.2")
+    payload.setdefault("phase", PHASE)
     payload.setdefault("task", TASK_NAME)
     payload.setdefault("task_name", TASK_NAME)
     payload.setdefault("mode", "dry-run" if settings.get("dry_run") else settings.get("mode", "dry-run"))
@@ -546,6 +601,19 @@ def _build_payload(settings: dict, result: dict, duration_seconds: float) -> dic
     payload.setdefault("manual_action_package_json_exists", MANUAL_ACTION_JSON_REPORT_PATH.exists())
     payload.setdefault("manual_action_package_json_error", "")
     payload.setdefault("host_report_file_exists", MANUAL_ACTION_JSON_REPORT_PATH.exists())
+    payload.setdefault("single_entry_only", bool(settings.get("single_entry_only")))
+    payload.setdefault("requested_locale", settings.get("requested_locale", ""))
+    payload.setdefault("requested_field", settings.get("requested_field", ""))
+    payload.setdefault("single_entry_candidate_count", 0)
+    payload.setdefault("single_entry_selected", False)
+    payload.setdefault("single_entry_blocking_conditions", [])
+    payload.setdefault("pre_write_readback_checked", payload.get("pre_write_readback_performed", False))
+    payload.setdefault("pre_write_existing_current_translation", False)
+    payload.setdefault("pre_write_existing_outdated_translation", False)
+    payload.setdefault("pre_write_digest", "")
+    payload.setdefault("translations_register_payload_count", 0)
+    payload.setdefault("post_write_readback_checked", payload.get("post_write_readback_performed", False))
+    payload.setdefault("post_write_readback_matches", payload.get("post_write_verified", False))
     payload.update(
         {
             "timestamp": utc_now_iso(),
@@ -554,8 +622,11 @@ def _build_payload(settings: dict, result: dict, duration_seconds: float) -> dic
             "required_env": {
                 ACK_ENV: ACK_VALUE,
                 PRODUCT_ID_ENV: DEFAULT_PRODUCT_ID,
-                MAX_ENTRIES_ENV: "must equal regenerated manual action package entry_count",
+                MAX_ENTRIES_ENV: "1 required for the single-entry real-run branch",
                 DRY_RUN_ENV: "0 required for any real-run branch",
+                SINGLE_ENTRY_ONLY_ENV: "1 required for any real-run branch",
+                SINGLE_ENTRY_LOCALE_ENV: ",".join(DEFAULT_TARGET_LOCALES),
+                SINGLE_ENTRY_FIELD_ENV: ",".join(DEFAULT_FIELDS),
             },
             "optional_env": {
                 LOCALES_ENV: ",".join(DEFAULT_TARGET_LOCALES),
@@ -569,6 +640,10 @@ def _build_payload(settings: dict, result: dict, duration_seconds: float) -> dic
                 "dry_run_env_value": settings.get("dry_run_env_value"),
                 "locales_env": settings.get("env_locales"),
                 "fields_env": settings.get("env_fields"),
+                "single_entry_only_env_value": settings.get("single_entry_only_raw"),
+                "single_entry_only": bool(settings.get("single_entry_only")),
+                "requested_locale": settings.get("requested_locale"),
+                "requested_field": settings.get("requested_field"),
             },
             "duration_seconds": duration_seconds,
             "rollback_performed": False,
@@ -614,6 +689,12 @@ def _render_html(payload: dict) -> str:
             ("ACK Matches", "ack_matches"),
             ("Real Run Requested", "real_run_requested"),
             ("Real Write Allowed", "real_write_allowed"),
+            ("Single Entry Only", "single_entry_only"),
+            ("Requested Locale", "requested_locale"),
+            ("Requested Field", "requested_field"),
+            ("Single Entry Candidate Count", "single_entry_candidate_count"),
+            ("Single Entry Selected", "single_entry_selected"),
+            ("Single Entry Blocking Conditions", "single_entry_blocking_conditions"),
             ("Failure Type", "failure_type"),
             ("Docker Command", "docker_command"),
             ("Docker Return Code", "docker_return_code"),
@@ -633,13 +714,20 @@ def _render_html(payload: dict) -> str:
     safety_rows = "\n".join(
         _row(label, payload.get(key))
         for label, key in [
+            ("Pre-write Readback Checked", "pre_write_readback_checked"),
             ("Pre-write Readback Performed", "pre_write_readback_performed"),
+            ("Pre-write Existing Current Translation", "pre_write_existing_current_translation"),
+            ("Pre-write Existing Outdated Translation", "pre_write_existing_outdated_translation"),
+            ("Pre-write Digest", "pre_write_digest"),
             ("Pre-write Digest Verified", "pre_write_digest_verified"),
+            ("translationsRegister Payload Count", "translations_register_payload_count"),
             ("Shopify Write Performed", "shopify_write_performed"),
             ("Mutation Performed", "mutation_performed"),
             ("translationsRegister Called", "translations_register_called"),
+            ("Post-write Readback Checked", "post_write_readback_checked"),
             ("Post-write Readback Performed", "post_write_readback_performed"),
             ("Post-write Verified", "post_write_verified"),
+            ("Post-write Readback Matches", "post_write_readback_matches"),
             ("Rollback Required", "rollback_required"),
             ("Rollback Approval Required", "rollback_approval_required"),
             ("Rollback Performed", "rollback_performed"),
@@ -650,11 +738,13 @@ def _render_html(payload: dict) -> str:
     entry_rows = "\n".join(
         f"<tr><td>{escape(str(entry.get('locale', '')))}</td>"
         f"<td>{escape(str(entry.get('field') or entry.get('key', '')))}</td>"
+        f"<td>{escape(str(entry.get('key', '')))}</td>"
         f"<td>{escape(str(entry.get('digest', '')))}</td>"
-        f"<td>{escape(str(entry.get('planned_value', '')))}</td>"
+        f"<td>{escape(str(entry.get('proposed_value_chars', '')))}</td>"
+        f"<td>{escape(str(entry.get('blocked', False)))}</td>"
         f"<td>{escape(str(entry.get('write_performed', False)))}</td>"
         f"<td>{escape(str(entry.get('verified', False)))}</td>"
-        f"<td>{escape(str(entry.get('blocking_reasons', [])))}</td></tr>"
+        f"<td>{escape(str(entry.get('blocking_conditions') or entry.get('blocking_reasons', [])))}</td></tr>"
         for entry in payload.get("entries", [])
     )
     return f"""<!doctype html>
@@ -662,14 +752,14 @@ def _render_html(payload: dict) -> str:
 <head><meta charset="utf-8"><title>Selected Product Translation Real Write Execute</title></head>
 <body>
   <h1>Selected Product Translation Real Write Execute</h1>
-  <p>Phase 16.2. Dry-run is the default. Real writes require exact environment ACK, exact product scope, matching entry count, pre-write digest verification, and post-write readback. Rollback is never automatic.</p>
+  <p>Phase 16.2B. Dry-run is the default. Real writes require exact environment ACK, exact product scope, single-entry targeting, pre-write digest verification, and post-write readback. Rollback is never automatic.</p>
   <h2>Summary</h2>
   <table border="1" cellspacing="0" cellpadding="6"><tbody>{summary_rows}</tbody></table>
   <h2>Safety</h2>
   <table border="1" cellspacing="0" cellpadding="6"><tbody>{safety_rows}</tbody></table>
   <h2>Entries</h2>
   <table border="1" cellspacing="0" cellpadding="6">
-    <thead><tr><th>Locale</th><th>Field</th><th>Digest</th><th>Planned Value</th><th>Write Performed</th><th>Verified</th><th>Blocking Reasons</th></tr></thead>
+    <thead><tr><th>Locale</th><th>Field</th><th>Key</th><th>Digest</th><th>Proposed Value Chars</th><th>Blocked</th><th>Write Performed</th><th>Verified</th><th>Blocking Conditions</th></tr></thead>
     <tbody>{entry_rows}</tbody>
   </table>
 </body>
@@ -679,13 +769,18 @@ def _render_html(payload: dict) -> str:
 
 def _build_approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
-        "Phase 16.2 selected product translation real write execute package generated.\n"
+        "Phase 16.2B selected product translation real write execute package generated.\n"
         f"- execution_status: {payload.get('execution_status')}\n"
         f"- mode: {payload.get('mode')}\n"
         f"- dry_run: {payload.get('dry_run')}\n"
         f"- product_id: {payload.get('product_id')}\n"
         f"- entry_count: {payload.get('entry_count')}\n"
         f"- would_write_count: {payload.get('would_write_count')}\n"
+        f"- single_entry_only: {payload.get('single_entry_only')}\n"
+        f"- requested_locale: {payload.get('requested_locale')}\n"
+        f"- requested_field: {payload.get('requested_field')}\n"
+        f"- single_entry_candidate_count: {payload.get('single_entry_candidate_count')}\n"
+        f"- single_entry_selected: {payload.get('single_entry_selected')}\n"
         f"- verified_count: {payload.get('verified_count')}\n"
         f"- real_write_allowed: {payload.get('real_write_allowed')}\n"
         f"- shopify_write_performed: {payload.get('shopify_write_performed')}\n"
@@ -728,6 +823,11 @@ def _parse_json_from_stdout(stdout: str) -> dict:
             last_obj = obj
             last_end = absolute_end
     return last_obj
+
+
+def _settings_json_b64(settings: dict) -> str:
+    settings_json = json.dumps(settings or {}, ensure_ascii=False)
+    return base64.b64encode(settings_json.encode("utf-8")).decode("ascii")
 
 
 def _decode_bytes(value: bytes) -> str:
