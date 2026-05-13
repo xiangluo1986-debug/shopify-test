@@ -57,6 +57,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_sen
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_execute_task import (
     run_shopify_review_request_trustpilot_gmail_one_draft_send_execute_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness_task import (
+    run_shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task import (
     run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task,
 )
@@ -260,6 +263,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_one_draft_send_execute": (
         run_shopify_review_request_trustpilot_gmail_one_draft_send_execute_task
+    ),
+    "shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness": (
+        run_shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness_task
     ),
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": (
         run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task
@@ -519,6 +525,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "Gmail drafts.send only when all explicit real-send gates are enabled",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_execute.json",
+    },
+    "shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness": {
+        "description": "Generate the no-send operator readiness package for a future one-draft Trustpilot Gmail real send.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_real_run_readiness.json",
     },
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": {
         "description": "Generate a no-send/no-write Trustpilot Gmail draft send and Shopify tag design package.",
