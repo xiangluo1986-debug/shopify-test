@@ -1245,6 +1245,19 @@ logs/shopify_translation_selected_product_final_review_package.html
 
 The final review package is the last manual-review gate before any future separate write phase. It must not perform Shopify writes or call Shopify mutations, `translationsRegister`, publish, apply, rollback, overwrite existing translations, write the database, add migrations, expose tokens, or git push. It must reject or flag missing digests, missing proposed values, unsupported fields, existing translations, outdated translations, drafts needing manual review, and SEO-needs-review entries. It must report `final_review_only=true`, `apply_plan_only=true`, `manual_ack_required_for_future_write=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, and `no_new_shopify_writes_performed=true`.
 
+### Selected Product Real Write Readiness Package
+
+Phase 15.5 adds a Translation Console action that rebuilds the trusted selected-product draft package, rebuilds the apply plan, rebuilds the final review package, then creates a no-write real-write readiness package:
+
+```text
+logs/shopify_translation_selected_product_real_write_readiness_package.json
+logs/shopify_translation_selected_product_real_write_readiness_package.html
+```
+
+The readiness package only checks whether a future separate write phase could be prepared for manual ACK. It must not perform Shopify writes or call Shopify mutations, `translationsRegister`, publish, apply, rollback, overwrite existing translations, write the database, add migrations, expose tokens, or git push. It must verify the final review status is ready, `entry_count > 0`, every entry is `ready_for_final_manual_review`, every entry has a digest, locale, field, source value, and proposed translation, locales are limited to `ja`, `de`, `fr`, `es`, and `it`, fields are limited to `title`, `meta_title`, and `meta_description`, and no existing or outdated translations are being overwritten.
+
+Even when readiness passes, the package must keep real writes disabled. It must report `readiness_package_only=true`, `final_review_only=true`, `future_write_allowed=false`, `manual_ack_required_for_future_write=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration
