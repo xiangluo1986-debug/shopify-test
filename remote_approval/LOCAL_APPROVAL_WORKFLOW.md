@@ -1284,6 +1284,19 @@ The locked executor shell may record whether a manual ACK preview was entered, b
 
 This package must report `executor_shell_only=true`, `executor_locked=true`, `execution_plan_only=true`, `real_write_allowed=false`, `future_write_allowed=false`, `dangerous_ack_effective=false`, `manual_ack_required_for_future_write=true`, `future_phase_required=true`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
 
+### Selected Product Real Write Executor Dry Run
+
+Phase 16.0 adds a Translation Console action that rebuilds the trusted selected-product draft package, rebuilds the apply plan, rebuilds the final review package, rebuilds the real-write readiness package, rebuilds the locked execution plan, rebuilds the locked executor shell, then creates a real-write executor dry-run package:
+
+```text
+logs/shopify_translation_selected_product_real_write_executor.json
+logs/shopify_translation_selected_product_real_write_executor.html
+```
+
+The executor dry-run package is a future real-run gate only. It must not perform Shopify writes, call mutations, call `translationsRegister`, publish, apply, real apply, rollback, overwrite existing translations, write the database, add migrations, expose tokens, or git push. It must require a non-empty Shopify-provided digest for every candidate entry and must never generate a digest locally.
+
+The package may mark entries as `would_write=true` only in dry-run when the selected product scope matches, `entry_count > 0`, `blocked_entry_count=0`, locales are limited to `ja`, `de`, `fr`, `es`, and `it`, fields are limited to `title`, `meta_title`, and `meta_description`, every entry has source/proposed values and digest, no existing/current translation is present, no outdated translation is present, and no blocking conditions exist. Even when the manual ACK preview phrase is entered, it must report `real_write_executor_only=true`, `dry_run_only=true`, `real_write_allowed=false`, `future_write_allowed=false`, `manual_ack_required=true`, `dangerous_ack_effective=false`, `existing_translation_overwrite_allowed=false`, `outdated_translation_overwrite_allowed=false`, `shopify_write_performed=false`, `mutation_performed=false`, `translations_register_called=false`, `publish_performed=false`, `apply_performed=false`, `real_apply_performed=false`, `rollback_performed=false`, `no_new_shopify_writes_performed=true`, and `all_new_actions_no_write_confirmed=true`.
+
 ### Shopify Review Request Automation Preparation
 
 Phase 0 review request automation work is documentation and configuration

@@ -157,6 +157,7 @@ def _executor_entry(entry):
         "digest": entry.get("digest", ""),
         "source_value": entry.get("source_value", ""),
         "proposed_translation": entry.get("proposed_translation", ""),
+        "current_translation_state": entry.get("current_translation_state", {}),
         "planned_mutation_name": entry.get("planned_mutation_name", ""),
         "planned_resource_id": entry.get("planned_resource_id", ""),
         "planned_locale": entry.get("planned_locale", ""),
@@ -200,6 +201,11 @@ def _entry_blocking_reasons(entry):
     ]:
         if not str(entry.get(key) or "").strip():
             reasons.append(f"missing_{key}")
+    state = entry.get("current_translation_state") or {}
+    if state.get("existing_translation_present"):
+        reasons.append("existing_translation_present")
+    if state.get("existing_translation_outdated") is True:
+        reasons.append("outdated_translation_present")
     if entry.get("shopify_write_performed") is not False:
         reasons.append("source_entry_shopify_write_not_false")
     if entry.get("mutation_performed") is not False:
