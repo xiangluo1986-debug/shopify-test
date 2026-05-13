@@ -30,6 +30,9 @@ from remote_approval.tasks.shopify_review_request_shopify_tag_permission_readine
 from remote_approval.tasks.shopify_review_request_tag_discovery_task import (
     run_shopify_review_request_tag_discovery_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_draft_package_task import (
+    run_shopify_review_request_trustpilot_gmail_draft_package_task,
+)
 from remote_approval.tasks.shopify_review_request_unified_decision_engine_dry_run_task import (
     run_shopify_review_request_unified_decision_engine_dry_run_task,
 )
@@ -182,6 +185,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
         run_shopify_review_request_shopify_tag_permission_readiness_task
     ),
     "shopify_review_request_tag_discovery": run_shopify_review_request_tag_discovery_task,
+    "shopify_review_request_trustpilot_gmail_draft_package": (
+        run_shopify_review_request_trustpilot_gmail_draft_package_task
+    ),
     "shopify_review_request_unified_decision_engine_dry_run": (
         run_shopify_review_request_unified_decision_engine_dry_run_task
     ),
@@ -359,6 +365,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify order tag query",
         "review_file_path": "logs/shopify_review_request_tag_discovery.json",
+    },
+    "shopify_review_request_trustpilot_gmail_draft_package": {
+        "description": "Generate a no-send Trustpilot Gmail draft package from the Phase 3.0 decision report.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none by default; optional Gmail drafts.create only behind explicit env gate",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_draft_package.json",
     },
     "shopify_review_request_unified_decision_engine_dry_run": {
         "description": "Generate a unified no-write review request decision report from local Phase 1 reports.",
