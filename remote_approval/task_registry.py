@@ -12,6 +12,9 @@ from remote_approval.tasks.shopify_review_request_candidate_scan_task import (
 from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
     run_shopify_review_request_gmail_readiness_package_task,
 )
+from remote_approval.tasks.shopify_review_request_manual_action_package_task import (
+    run_shopify_review_request_manual_action_package_task,
+)
 from remote_approval.tasks.shopify_review_request_shopify_tag_permission_readiness_task import (
     run_shopify_review_request_shopify_tag_permission_readiness_task,
 )
@@ -156,6 +159,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_candidate_scan": run_shopify_review_request_candidate_scan_task,
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
+    "shopify_review_request_manual_action_package": run_shopify_review_request_manual_action_package_task,
     "shopify_review_request_shopify_tag_permission_readiness": (
         run_shopify_review_request_shopify_tag_permission_readiness_task
     ),
@@ -295,6 +299,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_gmail_readiness_package.json",
+    },
+    "shopify_review_request_manual_action_package": {
+        "description": "Generate a no-write manual action package from the Phase 1.1 review request scan.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_manual_action_package.json",
     },
     "shopify_review_request_shopify_tag_permission_readiness": {
         "description": "Generate a docs-only Shopify tag write permission readiness package.",
