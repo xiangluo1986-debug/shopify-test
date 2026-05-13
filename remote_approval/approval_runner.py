@@ -620,6 +620,10 @@ def _summarize_task_result(result: dict) -> str:
         "html_remaining_title_batch_real_write_execute_path",
         "remaining_title_selected_count",
         "manual_remaining_title_batch_real_write_allowed_next_step",
+        "json_remaining_title_batch_post_write_audit_path",
+        "html_remaining_title_batch_post_write_audit_path",
+        "remaining_title_completion_status",
+        "selected_product_seo_fields_completion_status",
         "json_selected_product_missing_translation_draft_package_path",
         "html_selected_product_missing_translation_draft_package_path",
         "json_ali_reviews_capability_discovery_path",
@@ -974,6 +978,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_next_batch_post_write_audit",
         "shopify_translation_remaining_title_batch_locked_dry_run_package",
         "shopify_translation_remaining_title_batch_real_write_execute",
+        "shopify_translation_remaining_title_batch_post_write_audit",
         "shopify_translation_single_field_apply_sandbox_design",
         "shopify_translation_single_field_apply_sandbox_runner",
     }:
