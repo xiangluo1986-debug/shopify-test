@@ -37,6 +37,9 @@ ALLOWED_FIELDS = set(DEFAULT_FIELDS)
 ACK_VALUE = "I_APPROVE_SELECTED_PRODUCT_TRANSLATION_REAL_WRITE"
 REAL_RUN_MODES = {"real-run", "execute-real-write"}
 MUTATION_NAME = "translationsRegister"
+FIRST_REAL_WRITE_LOCALE = "de"
+FIRST_REAL_WRITE_FIELD = "meta_title"
+FIRST_REAL_WRITE_MAX_ENTRIES = 1
 
 
 def execute_selected_product_translation_real_write(settings):
@@ -91,6 +94,15 @@ def execute_selected_product_translation_real_write(settings):
         real_run_requested
         and payload.get("single_entry_selected")
         and payload["would_write_count"] == 1
+        and payload.get("single_entry_only")
+        and _first_real_write_target_matches(payload)
+        and payload.get("pre_write_readback_checked")
+        and not payload.get("pre_write_existing_current_translation")
+        and not payload.get("pre_write_existing_outdated_translation")
+        and payload.get("translations_register_payload_count") == 1
+        and payload.get("validation_status") == "passed"
+        and payload.get("manual_action_package_status") == PACKAGE_READY_STATUS
+        and payload.get("no_write_confirmed") is True
         and not payload["blocking_conditions"]
     )
 
@@ -170,6 +182,17 @@ def _empty_payload(settings, mode, dry_run, product_id, target_locales, requeste
         "future_write_allowed": False,
         "manual_ack_required": True,
         "manual_ack_phrase_required": ACK_VALUE,
+        "validation_status": "failed",
+        "no_write_confirmed": False,
+        "preflight_status": "single_entry_real_write_preflight_not_requested",
+        "manual_real_write_allowed_next_step": False,
+        "real_write_next_command_preview": [],
+        "real_write_target_product_id": DEFAULT_PRODUCT_ID,
+        "real_write_target_locale": FIRST_REAL_WRITE_LOCALE,
+        "real_write_target_field": FIRST_REAL_WRITE_FIELD,
+        "real_write_target_max_entries": FIRST_REAL_WRITE_MAX_ENTRIES,
+        "first_real_write_target_mismatch": False,
+        "preflight_warnings": [],
         "single_entry_only": bool(settings.get("single_entry_only")),
         "single_entry_active": False,
         "requested_locale": settings.get("requested_locale", ""),
@@ -198,6 +221,7 @@ def _empty_payload(settings, mode, dry_run, product_id, target_locales, requeste
         "translations_register_user_errors": [],
         "post_write_readback_performed": False,
         "post_write_readback_checked": False,
+        "post_write_readback_required": True,
         "post_write_verified": False,
         "post_write_readback_matches": False,
         "rollback_required": False,
@@ -227,6 +251,22 @@ def _attach_manual_package(payload, manual_package):
     payload["blocked_entry_count"] = int(manual_package.get("blocked_entry_count") or 0)
     payload["target_locales"] = list(manual_package.get("target_locales") or [])
     payload["requested_fields"] = list(manual_package.get("requested_fields") or [])
+    no_write_confirmed = bool(
+        manual_package.get("no_new_shopify_writes_performed") is True
+        and manual_package.get("all_new_actions_no_write_confirmed") is True
+        and manual_package.get("shopify_write_performed") is False
+        and manual_package.get("mutation_performed") is False
+        and manual_package.get("translations_register_called") is False
+    )
+    payload["no_write_confirmed"] = no_write_confirmed
+    payload["validation_status"] = (
+        "passed"
+        if manual_package.get("package_status") == PACKAGE_READY_STATUS
+        and int(manual_package.get("blocked_entry_count") or 0) == 0
+        and not manual_package.get("blocking_conditions")
+        and no_write_confirmed
+        else "failed"
+    )
 
 
 def _env_blocking_conditions(payload, settings):
@@ -255,6 +295,8 @@ def _env_blocking_conditions(payload, settings):
             reasons.append("single_entry_locale_missing_or_invalid")
         if not requested_field or requested_field not in ALLOWED_FIELDS:
             reasons.append("single_entry_field_missing_or_invalid")
+        if requested_locale != FIRST_REAL_WRITE_LOCALE or requested_field != FIRST_REAL_WRITE_FIELD:
+            reasons.append("first_real_write_target_mismatch")
     elif env_product_id and env_product_id != DEFAULT_PRODUCT_ID:
         reasons.append("blocked_product_id_mismatch")
 
@@ -658,6 +700,10 @@ def _status(payload, dry_run, mutation_called):
         return "dry_run_real_write_not_executed"
     if payload.get("blocking_conditions") and not mutation_called:
         return "blocked_real_write_preconditions_failed"
+    if mutation_called and payload.get("blocking_conditions"):
+        if payload.get("single_entry_active"):
+            return "single_entry_real_write_failed_or_unverified"
+        return "real_write_failed_needs_manual_review"
     if mutation_called and payload.get("post_write_verified"):
         if payload.get("single_entry_active"):
             return "single_entry_real_write_succeeded_and_verified"
@@ -700,8 +746,86 @@ def _finalize(payload):
             and len(payload["entries"]) == 1
             and not payload.get("single_entry_blocking_conditions")
         )
+    _attach_preflight_result(payload)
     payload["generated_at"] = _utc_now()
     return payload
+
+
+def _attach_preflight_result(payload):
+    payload["real_write_target_product_id"] = DEFAULT_PRODUCT_ID
+    payload["real_write_target_locale"] = FIRST_REAL_WRITE_LOCALE
+    payload["real_write_target_field"] = FIRST_REAL_WRITE_FIELD
+    payload["real_write_target_max_entries"] = FIRST_REAL_WRITE_MAX_ENTRIES
+    payload["post_write_readback_required"] = True
+    payload["real_write_next_command_preview"] = _real_write_next_command_preview()
+    mismatch = bool(
+        payload.get("single_entry_active")
+        and not _first_real_write_target_matches(payload)
+    )
+    payload["first_real_write_target_mismatch"] = mismatch
+    warnings = list(payload.get("preflight_warnings") or [])
+    if mismatch and "first_real_write_target_mismatch" not in payload.get("blocking_conditions", []):
+        warnings.append("first_real_write_target_mismatch")
+    payload["preflight_warnings"] = _unique(warnings)
+
+    ready = bool(
+        payload.get("dry_run") is True
+        and payload.get("single_entry_active")
+        and payload.get("single_entry_only") is True
+        and _first_real_write_target_matches(payload)
+        and payload.get("single_entry_candidate_count") == 1
+        and payload.get("single_entry_selected") is True
+        and payload.get("entry_count") == 1
+        and payload.get("would_write_count") == 1
+        and payload.get("pre_write_readback_checked") is True
+        and payload.get("pre_write_existing_current_translation") is False
+        and payload.get("pre_write_existing_outdated_translation") is False
+        and bool(payload.get("pre_write_digest"))
+        and payload.get("translations_register_payload_count") == 1
+        and payload.get("validation_status") == "passed"
+        and payload.get("manual_action_package_status") == PACKAGE_READY_STATUS
+        and payload.get("no_write_confirmed") is True
+        and not payload.get("blocking_conditions")
+    )
+    payload["manual_real_write_allowed_next_step"] = ready
+    if ready:
+        payload["preflight_status"] = "single_entry_real_write_preflight_ready"
+    elif not payload.get("single_entry_active"):
+        payload["preflight_status"] = "single_entry_real_write_preflight_not_requested"
+    elif payload.get("blocking_conditions"):
+        payload["preflight_status"] = "single_entry_real_write_preflight_blocked"
+    elif mismatch:
+        payload["preflight_status"] = "single_entry_real_write_preflight_target_mismatch"
+    else:
+        payload["preflight_status"] = "single_entry_real_write_preflight_not_ready"
+
+
+def _first_real_write_target_matches(payload):
+    return bool(
+        payload.get("product_id") == DEFAULT_PRODUCT_ID
+        and payload.get("requested_locale") == FIRST_REAL_WRITE_LOCALE
+        and payload.get("requested_field") == FIRST_REAL_WRITE_FIELD
+    )
+
+
+def _real_write_next_command_preview():
+    return [
+        '$env:SHOPIFY_TRANSLATION_REAL_WRITE_ACK="I_APPROVE_SELECTED_PRODUCT_TRANSLATION_REAL_WRITE"',
+        '$env:SHOPIFY_TRANSLATION_REAL_WRITE_PRODUCT_ID="gid://shopify/Product/7655686799427"',
+        '$env:SHOPIFY_TRANSLATION_REAL_WRITE_MAX_ENTRIES="1"',
+        '$env:SHOPIFY_TRANSLATION_REAL_WRITE_DRY_RUN="0"',
+        '$env:SHOPIFY_TRANSLATION_REAL_WRITE_SINGLE_ENTRY_ONLY="1"',
+        '$env:SHOPIFY_TRANSLATION_REAL_WRITE_LOCALE="de"',
+        '$env:SHOPIFY_TRANSLATION_REAL_WRITE_FIELD="meta_title"',
+        "python remote_approval_runner.py --task shopify_translation_selected_product_real_write_execute --mode real-run --approval local",
+        "Remove-Item Env:SHOPIFY_TRANSLATION_REAL_WRITE_ACK",
+        "Remove-Item Env:SHOPIFY_TRANSLATION_REAL_WRITE_PRODUCT_ID",
+        "Remove-Item Env:SHOPIFY_TRANSLATION_REAL_WRITE_MAX_ENTRIES",
+        "Remove-Item Env:SHOPIFY_TRANSLATION_REAL_WRITE_DRY_RUN",
+        "Remove-Item Env:SHOPIFY_TRANSLATION_REAL_WRITE_SINGLE_ENTRY_ONLY",
+        "Remove-Item Env:SHOPIFY_TRANSLATION_REAL_WRITE_LOCALE",
+        "Remove-Item Env:SHOPIFY_TRANSLATION_REAL_WRITE_FIELD",
+    ]
 
 
 def _report_entry(entry):

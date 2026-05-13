@@ -83,6 +83,8 @@ def run_shopify_translation_selected_product_real_write_execute_task(mode: str) 
         "requested_field": payload.get("requested_field", ""),
         "single_entry_candidate_count": payload.get("single_entry_candidate_count", 0),
         "single_entry_selected": payload.get("single_entry_selected", False),
+        "preflight_status": payload.get("preflight_status", ""),
+        "manual_real_write_allowed_next_step": payload.get("manual_real_write_allowed_next_step", False),
         "verified_count": payload.get("verified_count", 0),
         "ack_present": payload.get("ack_present", False),
         "ack_matches": payload.get("ack_matches", False),
@@ -366,6 +368,17 @@ def _build_dry_run_payload_from_manual_package(
         "future_write_allowed": False,
         "manual_ack_required": True,
         "manual_ack_phrase_required": ACK_VALUE,
+        "validation_status": "",
+        "no_write_confirmed": False,
+        "preflight_status": "single_entry_real_write_preflight_not_requested",
+        "manual_real_write_allowed_next_step": False,
+        "real_write_next_command_preview": [],
+        "real_write_target_product_id": DEFAULT_PRODUCT_ID,
+        "real_write_target_locale": "de",
+        "real_write_target_field": "meta_title",
+        "real_write_target_max_entries": 1,
+        "first_real_write_target_mismatch": False,
+        "preflight_warnings": [],
         "single_entry_only": bool(settings.get("single_entry_only")),
         "requested_locale": settings.get("requested_locale", ""),
         "requested_field": settings.get("requested_field", ""),
@@ -523,6 +536,17 @@ def _docker_failure(
         "future_write_allowed": False,
         "manual_ack_required": True,
         "manual_ack_phrase_required": ACK_VALUE,
+        "validation_status": "",
+        "no_write_confirmed": False,
+        "preflight_status": "single_entry_real_write_preflight_not_requested",
+        "manual_real_write_allowed_next_step": False,
+        "real_write_next_command_preview": [],
+        "real_write_target_product_id": DEFAULT_PRODUCT_ID,
+        "real_write_target_locale": "de",
+        "real_write_target_field": "meta_title",
+        "real_write_target_max_entries": 1,
+        "first_real_write_target_mismatch": False,
+        "preflight_warnings": [],
         "single_entry_only": bool(settings.get("single_entry_only")),
         "requested_locale": settings.get("requested_locale", ""),
         "requested_field": settings.get("requested_field", ""),
@@ -607,6 +631,17 @@ def _build_payload(settings: dict, result: dict, duration_seconds: float) -> dic
     payload.setdefault("single_entry_candidate_count", 0)
     payload.setdefault("single_entry_selected", False)
     payload.setdefault("single_entry_blocking_conditions", [])
+    payload.setdefault("validation_status", "")
+    payload.setdefault("no_write_confirmed", False)
+    payload.setdefault("preflight_status", "single_entry_real_write_preflight_not_requested")
+    payload.setdefault("manual_real_write_allowed_next_step", False)
+    payload.setdefault("real_write_next_command_preview", [])
+    payload.setdefault("real_write_target_product_id", DEFAULT_PRODUCT_ID)
+    payload.setdefault("real_write_target_locale", "de")
+    payload.setdefault("real_write_target_field", "meta_title")
+    payload.setdefault("real_write_target_max_entries", 1)
+    payload.setdefault("first_real_write_target_mismatch", False)
+    payload.setdefault("preflight_warnings", [])
     payload.setdefault("pre_write_readback_checked", payload.get("pre_write_readback_performed", False))
     payload.setdefault("pre_write_existing_current_translation", False)
     payload.setdefault("pre_write_existing_outdated_translation", False)
@@ -689,6 +724,17 @@ def _render_html(payload: dict) -> str:
             ("ACK Matches", "ack_matches"),
             ("Real Run Requested", "real_run_requested"),
             ("Real Write Allowed", "real_write_allowed"),
+            ("Validation Status", "validation_status"),
+            ("No Write Confirmed", "no_write_confirmed"),
+            ("Preflight Status", "preflight_status"),
+            ("Manual Real Write Allowed Next Step", "manual_real_write_allowed_next_step"),
+            ("Real Write Target Product ID", "real_write_target_product_id"),
+            ("Real Write Target Locale", "real_write_target_locale"),
+            ("Real Write Target Field", "real_write_target_field"),
+            ("Real Write Target Max Entries", "real_write_target_max_entries"),
+            ("First Real Write Target Mismatch", "first_real_write_target_mismatch"),
+            ("Preflight Warnings", "preflight_warnings"),
+            ("Real Write Next Command Preview", "real_write_next_command_preview"),
             ("Single Entry Only", "single_entry_only"),
             ("Requested Locale", "requested_locale"),
             ("Requested Field", "requested_field"),
@@ -781,6 +827,8 @@ def _build_approval_message(payload: dict, json_path: Path, html_path: Path) -> 
         f"- requested_field: {payload.get('requested_field')}\n"
         f"- single_entry_candidate_count: {payload.get('single_entry_candidate_count')}\n"
         f"- single_entry_selected: {payload.get('single_entry_selected')}\n"
+        f"- preflight_status: {payload.get('preflight_status')}\n"
+        f"- manual_real_write_allowed_next_step: {payload.get('manual_real_write_allowed_next_step')}\n"
         f"- verified_count: {payload.get('verified_count')}\n"
         f"- real_write_allowed: {payload.get('real_write_allowed')}\n"
         f"- shopify_write_performed: {payload.get('shopify_write_performed')}\n"
