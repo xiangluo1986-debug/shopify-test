@@ -22,6 +22,22 @@ DOCKER_TIMEOUT_SECONDS = 180
 EXACT_REVIEW_REQUEST_TAG = "1: reveiw request"
 EXACT_DELIVERED_TAG = "Delivered"
 EMAIL_SOURCES = ["email", "customer.email", "customer.defaultEmailAddress.emailAddress", "contactEmail"]
+TICKET_BLOCKING_STATUSES = [
+    "new",
+    "in_progress",
+    "reopened",
+    "open",
+    "pending",
+    "waiting_customer",
+    "unresolved",
+    "complaint",
+    "refund_request",
+    "return_request",
+    "shipping_issue",
+    "dispute",
+    "chargeback",
+]
+TICKET_WARNING_STATUSES = ["resolved", "closed", "done", "finished"]
 BUCKETS = [
     "ready_for_manual_ali_reviews_check",
     "existing_manual_review_request_tag_present",
@@ -31,6 +47,11 @@ BUCKETS = [
     "blocked_refunded_or_partially_refunded",
     "blocked_no_email",
     "blocked_shipping_or_delivery_issue",
+    "blocked_has_open_ticket",
+    "blocked_has_refund_ticket",
+    "blocked_has_shipping_issue_ticket",
+    "blocked_has_complaint_ticket",
+    "ticket_status_unknown_needs_manual_review",
     "needs_manual_review",
 ]
 SENSITIVE_TEXT_RE = re.compile(
@@ -70,7 +91,8 @@ def run_shopify_review_request_candidate_scan_task(mode: str) -> dict:
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "1",
+        "phase": "1.1",
+        "scanner_version": "phase_1_1_ticket_filter",
         "mode": "dry-run-read-only-candidate-scan",
         "command_label": COMMAND_LABEL,
         "shop_domain": SHOP_DOMAIN,
@@ -79,7 +101,16 @@ def run_shopify_review_request_candidate_scan_task(mode: str) -> dict:
         "orders_queried": int(query_result.get("orders_queried") or 0),
         "exact_existing_review_request_tag": EXACT_REVIEW_REQUEST_TAG,
         "exact_existing_delivered_tag": EXACT_DELIVERED_TAG,
-        "ticket_status_check": "not_implemented_in_phase_1",
+        "ticket_status_check": query_result.get("ticket_status_check", "blocked_ticket_filter_error"),
+        "ticket_model_detected": bool(query_result.get("ticket_model_detected")),
+        "ticket_query_performed": bool(query_result.get("ticket_query_performed")),
+        "ticket_matches_found_count": int(query_result.get("ticket_matches_found_count") or 0),
+        "orders_with_ticket_match_count": int(query_result.get("orders_with_ticket_match_count") or 0),
+        "orders_blocked_by_ticket_count": int(query_result.get("orders_blocked_by_ticket_count") or 0),
+        "ticket_blocking_statuses": query_result.get("ticket_blocking_statuses", TICKET_BLOCKING_STATUSES),
+        "ticket_warning_statuses": query_result.get("ticket_warning_statuses", TICKET_WARNING_STATUSES),
+        "ticket_filter_error_sanitized": _sanitize_text(query_result.get("ticket_filter_error_sanitized", "")),
+        "ticket_filter_summary": query_result.get("ticket_filter_summary", {}),
         "ali_reviews_sent_status_check": "not_implemented_in_phase_1",
         "report_status": report_status,
         "success": success,
@@ -149,6 +180,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "review_path": str(json_path),
         "json_candidate_scan_path": str(json_path),
         "html_candidate_scan_path": str(html_path),
+        "scanner_version": payload["scanner_version"],
         "report_status": payload["report_status"],
         "orders_queried": payload["orders_queried"],
         "classification_counts": counts,
@@ -177,6 +209,14 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "exact_existing_review_request_tag": EXACT_REVIEW_REQUEST_TAG,
         "exact_existing_delivered_tag": EXACT_DELIVERED_TAG,
         "ticket_status_check": payload["ticket_status_check"],
+        "ticket_model_detected": payload["ticket_model_detected"],
+        "ticket_query_performed": payload["ticket_query_performed"],
+        "ticket_matches_found_count": payload["ticket_matches_found_count"],
+        "orders_with_ticket_match_count": payload["orders_with_ticket_match_count"],
+        "orders_blocked_by_ticket_count": payload["orders_blocked_by_ticket_count"],
+        "ticket_blocking_statuses": payload["ticket_blocking_statuses"],
+        "ticket_warning_statuses": payload["ticket_warning_statuses"],
+        "ticket_filter_error_sanitized": payload["ticket_filter_error_sanitized"],
         "shopify_api_call_performed": payload["shopify_api_call_performed"],
         "read_only_shopify_query_performed": payload["read_only_shopify_query_performed"],
         "shopify_query_type": payload["shopify_query_type"],
@@ -281,12 +321,15 @@ def _django_shell_script() -> str:
     template = r'''
 import json
 import requests
+from django.apps import apps
 from shopify_sync.models import ShopifyInstallation
 
 shop = __SHOP_LITERAL__
 api_version = __API_VERSION_LITERAL__
 order_limit = __ORDER_LIMIT_LITERAL__
 email_sources = __EMAIL_SOURCES_LITERAL__
+ticket_blocking_statuses = __TICKET_BLOCKING_STATUSES_LITERAL__
+ticket_warning_statuses = __TICKET_WARNING_STATUSES_LITERAL__
 queries = [
     ("email", """
 query CandidateScanOrderEmail($first: Int!) {
@@ -369,6 +412,16 @@ result = {
     "query_attempts": [],
     "query_warning_summary": "",
     "email_field_sources_attempted": email_sources,
+    "ticket_status_check": "model_not_found",
+    "ticket_model_detected": False,
+    "ticket_query_performed": False,
+    "ticket_matches_found_count": 0,
+    "orders_with_ticket_match_count": 0,
+    "orders_blocked_by_ticket_count": 0,
+    "ticket_blocking_statuses": ticket_blocking_statuses,
+    "ticket_warning_statuses": ticket_warning_statuses,
+    "ticket_filter_error_sanitized": "",
+    "ticket_filter_summary": {},
     "failure_type": "",
     "error": "",
     "query_failure_message_sanitized": "",
@@ -419,6 +472,189 @@ def build_orders(connection):
             "tags": [str(tag) for tag in (node.get("tags") or [])],
             "customer": {"id": str(customer.get("id") or ""), "email": email, "email_source": source},
         })
+    return orders
+
+def normalize_email(value):
+    return str(value or "").strip().lower()
+
+def find_ticket_model():
+    try:
+        return apps.get_model("tickets", "Ticket")
+    except LookupError:
+        pass
+    for model in apps.get_models():
+        label = str(model._meta.label_lower)
+        model_name = str(model.__name__).lower()
+        field_names = {field.name for field in model._meta.fields}
+        has_ticket_name = model_name == "ticket" or "ticket" in label
+        has_status = "status" in field_names
+        has_match_field = bool({"order_no", "order_number", "order_name", "customer_email", "email"} & field_names)
+        if has_ticket_name and has_status and has_match_field:
+            return model
+    return None
+
+def first_field(field_names, candidates):
+    for candidate in candidates:
+        if candidate in field_names:
+            return candidate
+    return ""
+
+def order_match_tokens(order):
+    tokens = set()
+    name = str(order.get("name") or "").strip()
+    if name:
+        tokens.add(name)
+        tokens.add(name.lstrip("#"))
+    oid = str(order.get("id") or "").strip()
+    if oid:
+        tokens.add(oid)
+        tokens.add(oid.rsplit("/", 1)[-1])
+    return {token for token in tokens if token}
+
+def ticket_status_category(status):
+    value = str(status or "").strip().lower()
+    if value in ticket_blocking_statuses:
+        return "blocking"
+    if value in ticket_warning_statuses:
+        return "warning"
+    if value:
+        return "unknown"
+    return "unknown"
+
+def risk_categories_for_ticket(ticket, field_roles):
+    text = " ".join([
+        str(ticket.get(field_roles.get("status", "")) or ""),
+        str(ticket.get(field_roles.get("order_no", "")) or ""),
+        str(ticket.get(field_roles.get("title", "")) or ""),
+    ]).lower()
+    categories = []
+    if any(word in text for word in ["refund", "return", "rma", "chargeback"]):
+        categories.append("refund")
+    if any(word in text for word in ["shipping", "delivery", "delivered", "lost", "damaged", "undeliverable"]):
+        categories.append("shipping_issue")
+    if any(word in text for word in ["complaint", "dispute", "claim", "bad review", "negative"]):
+        categories.append("complaint")
+    return categories
+
+def safe_ticket_summary(ticket, field_roles, match_fields, risk_categories, status_category):
+    return {
+        "ticket_id": str(ticket.get(field_roles.get("id", "")) or ""),
+        "status": str(ticket.get(field_roles.get("status", "")) or ""),
+        "status_category": status_category,
+        "priority": str(ticket.get(field_roles.get("priority", "")) or ""),
+        "is_pinned": bool(ticket.get(field_roles.get("is_pinned", ""))),
+        "match_fields": sorted(match_fields),
+        "risk_categories": risk_categories,
+        "created_at": str(ticket.get(field_roles.get("created_at", "")) or ""),
+        "updated_at": str(ticket.get(field_roles.get("updated_at", "")) or ""),
+    }
+
+def apply_ticket_filter(orders):
+    TicketModel = find_ticket_model()
+    if TicketModel is None:
+        result["ticket_status_check"] = "model_not_found"
+        result["ticket_model_detected"] = False
+        return orders
+
+    result["ticket_model_detected"] = True
+    field_names = {field.name for field in TicketModel._meta.fields}
+    field_roles = {
+        "id": first_field(field_names, ["id", TicketModel._meta.pk.name]),
+        "status": first_field(field_names, ["status"]),
+        "priority": first_field(field_names, ["priority"]),
+        "order_no": first_field(field_names, ["order_no", "order_number", "order_name"]),
+        "customer_email": first_field(field_names, ["customer_email", "email"]),
+        "title": first_field(field_names, ["title", "subject"]),
+        "is_pinned": first_field(field_names, ["is_pinned", "pinned"]),
+        "created_at": first_field(field_names, ["created_at", "created", "created_on"]),
+        "updated_at": first_field(field_names, ["updated_at", "updated", "modified_at"]),
+    }
+    safe_fields = sorted({name for name in field_roles.values() if name})
+    if not field_roles["status"] or not safe_fields:
+        result["ticket_status_check"] = "blocked_ticket_filter_error"
+        result["ticket_filter_error_sanitized"] = "Ticket model found but safe status fields could not be inspected."
+        return orders
+
+    order_by = "-" + field_roles["updated_at"] if field_roles["updated_at"] else "-" + field_roles["id"]
+    try:
+        tickets = list(TicketModel.objects.all().order_by(order_by).values(*safe_fields)[:2000])
+        result["ticket_query_performed"] = True
+        result["ticket_status_check"] = "implemented_read_only"
+    except Exception as exc:
+        result["ticket_status_check"] = "blocked_ticket_filter_error"
+        result["ticket_filter_error_sanitized"] = type(exc).__name__ + ": " + str(exc)
+        return orders
+
+    unique_ticket_ids = set()
+    orders_with_match = 0
+    orders_blocked = 0
+    total_match_count = 0
+
+    for order in orders:
+        tokens = order_match_tokens(order)
+        email = normalize_email((order.get("customer") or {}).get("email"))
+        matches = []
+        order_blocked = False
+        for ticket in tickets:
+            match_fields = set()
+            ticket_order_no = str(ticket.get(field_roles.get("order_no", "")) or "").strip()
+            ticket_email = normalize_email(ticket.get(field_roles.get("customer_email", "")))
+            title = str(ticket.get(field_roles.get("title", "")) or "")
+            if ticket_order_no and (ticket_order_no in tokens or ticket_order_no.lstrip("#") in tokens):
+                match_fields.add("order_no")
+            if email and ticket_email and email == ticket_email:
+                match_fields.add("customer_email")
+            if title and any(token and token in title for token in tokens):
+                match_fields.add("title_order_reference")
+            if not match_fields:
+                continue
+
+            status_category = ticket_status_category(ticket.get(field_roles.get("status", "")))
+            risk_categories = risk_categories_for_ticket(ticket, field_roles)
+            is_blocking = status_category == "blocking"
+            if risk_categories and status_category != "warning":
+                is_blocking = True
+
+            summary = safe_ticket_summary(ticket, field_roles, match_fields, risk_categories, status_category)
+            summary["is_blocking"] = bool(is_blocking)
+            summary["is_warning"] = bool(status_category in {"warning", "unknown"} and not is_blocking)
+            matches.append(summary)
+            unique_ticket_ids.add(str(ticket.get(field_roles.get("id", "")) or ""))
+            total_match_count += 1
+            order_blocked = order_blocked or is_blocking
+
+        order["ticket"] = {
+            "ticket_match_detected": bool(matches),
+            "ticket_match_count": len(matches),
+            "ticket_blocked": bool(order_blocked),
+            "ticket_status_summary": matches,
+            "ticket_blocking_reason": "",
+            "ticket_risk_categories": sorted({cat for match in matches for cat in match.get("risk_categories", [])}),
+        }
+        if matches:
+            orders_with_match += 1
+            blocking_matches = [match for match in matches if match.get("is_blocking")]
+            if blocking_matches:
+                orders_blocked += 1
+                categories = sorted({cat for match in blocking_matches for cat in match.get("risk_categories", [])})
+                status_values = sorted({str(match.get("status") or "") for match in blocking_matches})
+                reason_bits = []
+                if status_values:
+                    reason_bits.append("blocking_status=" + ",".join(status_values))
+                if categories:
+                    reason_bits.append("risk_category=" + ",".join(categories))
+                order["ticket"]["ticket_blocking_reason"] = "; ".join(reason_bits) or "blocking_ticket_match"
+
+    result["ticket_matches_found_count"] = len(unique_ticket_ids)
+    result["orders_with_ticket_match_count"] = orders_with_match
+    result["orders_blocked_by_ticket_count"] = orders_blocked
+    result["ticket_filter_summary"] = {
+        "tickets_scanned_count": len(tickets),
+        "order_ticket_match_events_count": total_match_count,
+        "unique_ticket_matches_count": len(unique_ticket_ids),
+        "orders_with_ticket_match_count": orders_with_match,
+        "orders_blocked_by_ticket_count": orders_blocked,
+    }
     return orders
 
 try:
@@ -492,7 +728,7 @@ try:
             continue
         result["has_next_page"] = bool(page_info.get("hasNextPage"))
         result["end_cursor_present"] = bool(page_info.get("endCursor"))
-        result["orders"] = orders
+        result["orders"] = apply_ticket_filter(orders)
         result["orders_queried"] = len(orders)
         result["success"] = True
         result["successful_query_label"] = label
@@ -527,6 +763,8 @@ except Exception as exc:
         .replace("__API_VERSION_LITERAL__", json.dumps(SHOPIFY_API_VERSION))
         .replace("__ORDER_LIMIT_LITERAL__", str(ORDER_LIMIT))
         .replace("__EMAIL_SOURCES_LITERAL__", json.dumps(EMAIL_SOURCES))
+        .replace("__TICKET_BLOCKING_STATUSES_LITERAL__", json.dumps(TICKET_BLOCKING_STATUSES))
+        .replace("__TICKET_WARNING_STATUSES_LITERAL__", json.dumps(TICKET_WARNING_STATUSES))
     )
 
 
@@ -565,6 +803,14 @@ def _classify_order(order: dict, repeat_counts: dict[str, int]) -> dict:
     email_source = str(customer.get("email_source") or ("detected_in_memory" if email else "none"))
     has_delivered = EXACT_DELIVERED_TAG in tags
     has_review_request = EXACT_REVIEW_REQUEST_TAG in tags
+    ticket = order.get("ticket") or {}
+    ticket_match_detected = bool(ticket.get("ticket_match_detected"))
+    ticket_blocked = bool(ticket.get("ticket_blocked"))
+    ticket_status_unknown = any(
+        str(item.get("status_category") or "") == "unknown"
+        for item in ticket.get("ticket_status_summary", [])
+    )
+    ticket_risk_categories = set(ticket.get("ticket_risk_categories") or [])
     cancelled = _is_cancelled(order)
     refunded = _has_any(order, ("refund", "refunded", "chargeback", "dispute"))
     shipping_issue = _has_any(order, ("shipping issue", "delivery issue", "failed delivery", "undeliverable", "lost", "return", "returned", "rma", "damaged"))
@@ -586,17 +832,33 @@ def _classify_order(order: dict, repeat_counts: dict[str, int]) -> dict:
     if shipping_issue:
         buckets.append("blocked_shipping_or_delivery_issue")
         reasons.append("Order tags or status indicate possible shipping, return, or delivery issue.")
+    if ticket_blocked:
+        buckets.append("blocked_has_open_ticket")
+        reasons.append("Read-only ticket filter found a blocking unresolved or risk ticket match.")
+        if "refund" in ticket_risk_categories:
+            buckets.append("blocked_has_refund_ticket")
+            reasons.append("Matched ticket summary indicates a refund, return, dispute, or chargeback risk.")
+        if "shipping_issue" in ticket_risk_categories:
+            buckets.append("blocked_has_shipping_issue_ticket")
+            reasons.append("Matched ticket summary indicates a shipping or delivery issue risk.")
+        if "complaint" in ticket_risk_categories:
+            buckets.append("blocked_has_complaint_ticket")
+            reasons.append("Matched ticket summary indicates a complaint, dispute, claim, or negative-feedback risk.")
+    if ticket_status_unknown and not ticket_blocked:
+        buckets.append("ticket_status_unknown_needs_manual_review")
+        reasons.append("Matched ticket status could not be confidently mapped; human review is required.")
     if not email:
         buckets.append("blocked_no_email")
         reasons.append("No customer email is available in the read-only order data.")
     blocked = any(bucket.startswith("blocked_") for bucket in buckets)
-    if repeat and not blocked:
+    readiness_blocked = blocked or ticket_status_unknown
+    if repeat and not readiness_blocked:
         buckets.append("repeat_customer_trustpilot_candidate")
         reasons.append("Same customer ID or masked email appears in at least two completed, non-cancelled scanned orders.")
-    if has_delivered and not blocked and email and not has_review_request:
+    if has_delivered and not readiness_blocked and email and not has_review_request:
         buckets.append("ready_for_manual_ali_reviews_check")
         reasons.append("Delivered order with customer email and no obvious cancel/refund/shipping block.")
-    if has_delivered and blocked:
+    if has_delivered and readiness_blocked:
         buckets.append("needs_manual_review")
         reasons.append("Delivered order also has a blocking or warning signal.")
     if not buckets:
@@ -620,10 +882,15 @@ def _classify_order(order: dict, repeat_counts: dict[str, int]) -> dict:
         "email_present": bool(email),
         "email_parse_source": email_source,
         "email_masking_applied": True,
+        "ticket_match_detected": ticket_match_detected,
+        "ticket_blocked": ticket_blocked,
+        "ticket_blocking_reason": str(ticket.get("ticket_blocking_reason") or ""),
+        "ticket_status_summary": ticket.get("ticket_status_summary", []),
+        "ticket_risk_categories": sorted(ticket_risk_categories),
         "repeat_customer_detected": repeat,
         "ali_reviews_sent_status": "unknown_not_checked_in_phase_1",
-        "ticket_status": "ticket_status_unknown",
-        "ticket_status_check": "not_implemented_in_phase_1",
+        "ticket_status": "ticket_blocked" if ticket_blocked else ("ticket_match_detected" if ticket_match_detected else "no_ticket_match"),
+        "ticket_status_check": "implemented_read_only",
         "action_planned": "report_only",
         "shopify_write_planned": False,
         "email_send_planned": False,
@@ -653,6 +920,11 @@ def _compact_order(order: dict) -> dict:
         "email_present": bool(order.get("email_present")),
         "email_parse_source": order.get("email_parse_source", ""),
         "email_masking_applied": True,
+        "ticket_match_detected": bool(order.get("ticket_match_detected")),
+        "ticket_blocked": bool(order.get("ticket_blocked")),
+        "ticket_blocking_reason": order.get("ticket_blocking_reason", ""),
+        "ticket_status_summary": order.get("ticket_status_summary", []),
+        "ticket_risk_categories": order.get("ticket_risk_categories", []),
         "repeat_customer_detected": bool(order.get("repeat_customer_detected")),
         "action_planned": "report_only",
         "shopify_write_planned": False,
@@ -666,8 +938,13 @@ def _primary_bucket(buckets: list[str]) -> str:
         "blocked_cancelled",
         "blocked_refunded_or_partially_refunded",
         "blocked_shipping_or_delivery_issue",
+        "blocked_has_open_ticket",
+        "blocked_has_refund_ticket",
+        "blocked_has_shipping_issue_ticket",
+        "blocked_has_complaint_ticket",
         "existing_manual_review_request_tag_present",
         "blocked_no_email",
+        "ticket_status_unknown_needs_manual_review",
         "needs_manual_review",
         "ready_for_manual_ali_reviews_check",
         "repeat_customer_trustpilot_candidate",
@@ -757,7 +1034,7 @@ def _render_html(payload: dict) -> str:
 <style>body{{font-family:Arial,sans-serif;margin:24px;color:#1f2933}}table{{border-collapse:collapse;width:100%;margin:12px 0 24px}}th,td{{border:1px solid #d9e2ec;padding:8px;vertical-align:top}}th{{background:#f0f4f8;text-align:left}}code{{background:#f5f7fa;padding:1px 3px}}.warning{{border-left:4px solid #c2410c;background:#fff7ed;padding:10px 12px}}</style></head>
 <body>
 <h1>Shopify Review Request Candidate Scan</h1>
-<p class="warning">Phase 1 is report-only. No review request was sent and no Shopify tag was changed.</p>
+<p class="warning">Phase 1.1 is report-only. No review request was sent and no Shopify tag was changed.</p>
 <p>Status: <strong>{escape(str(payload.get("report_status", "")))}</strong></p>
 <p>Orders queried: {payload.get("orders_queried", 0)} | Limit: {payload.get("order_query_limit", 0)}</p>
 <p>Exact tags: <code>{escape(EXACT_DELIVERED_TAG)}</code> and <code>{escape(EXACT_REVIEW_REQUEST_TAG)}</code></p>
@@ -771,6 +1048,18 @@ def _render_html(payload: dict) -> str:
 <tr><th>Email masking applied</th><td>{escape(str(payload.get("email_masking_applied")))}</td></tr>
 <tr><th>Failure message</th><td>{escape(str(payload.get("query_failure_message_sanitized", "")))}</td></tr>
 </tbody></table>
+<h2>Ticket / Risk Filter</h2>
+<table><tbody>
+<tr><th>Ticket status check</th><td>{escape(str(payload.get("ticket_status_check", "")))}</td></tr>
+<tr><th>Ticket model detected</th><td>{escape(str(payload.get("ticket_model_detected")))}</td></tr>
+<tr><th>Ticket query performed</th><td>{escape(str(payload.get("ticket_query_performed")))}</td></tr>
+<tr><th>Ticket matches found</th><td>{int(payload.get("ticket_matches_found_count") or 0)}</td></tr>
+<tr><th>Orders with ticket match</th><td>{int(payload.get("orders_with_ticket_match_count") or 0)}</td></tr>
+<tr><th>Orders blocked by ticket</th><td>{int(payload.get("orders_blocked_by_ticket_count") or 0)}</td></tr>
+<tr><th>Blocking statuses</th><td>{escape(", ".join(str(item) for item in payload.get("ticket_blocking_statuses", [])))}</td></tr>
+<tr><th>Warning statuses</th><td>{escape(", ".join(str(item) for item in payload.get("ticket_warning_statuses", [])))}</td></tr>
+<tr><th>Ticket filter error</th><td>{escape(str(payload.get("ticket_filter_error_sanitized", "")))}</td></tr>
+</tbody></table>
 <h2>Safety</h2><table><tbody>{safety_rows}</tbody></table>
 <h2>Classification Counts</h2><table><thead><tr><th>Bucket</th><th>Count</th></tr></thead><tbody>{count_rows}</tbody></table>
 {bucket_sections}
@@ -780,23 +1069,46 @@ def _render_html(payload: dict) -> str:
 def _render_bucket(bucket: str, orders: list[dict]) -> str:
     rows = "\n".join(_render_order_row(order) for order in orders)
     if not rows:
-        rows = '<tr><td colspan="7">No orders in this bucket.</td></tr>'
+        rows = '<tr><td colspan="8">No orders in this bucket.</td></tr>'
     return f"""<h2><code>{escape(bucket)}</code></h2>
-<table><thead><tr><th>Order</th><th>Created</th><th>Masked email</th><th>Email source</th><th>Customer ID</th><th>Tags</th><th>Classification</th></tr></thead><tbody>{rows}</tbody></table>"""
+<table><thead><tr><th>Order</th><th>Created</th><th>Masked email</th><th>Email source</th><th>Customer ID</th><th>Tags</th><th>Classification</th><th>Ticket summary</th></tr></thead><tbody>{rows}</tbody></table>"""
 
 
 def _render_order_row(order: dict) -> str:
     tags = ", ".join(f"<code>{escape(str(tag))}</code>" for tag in order.get("tags", []))
-    return f"""<tr><td>{escape(str(order.get("order_name", "")))}<br><code>{escape(str(order.get("order_id", "")))}</code></td><td>{escape(str(order.get("createdAt", "")))}</td><td>{escape(str(order.get("masked_email", "")))}</td><td>{escape(str(order.get("email_parse_source", "")))}</td><td><code>{escape(str(order.get("customer_id", "")))}</code></td><td>{tags}</td><td><code>{escape(str(order.get("classification", "")))}</code></td></tr>"""
+    ticket_summary = _render_ticket_summary(order.get("ticket_status_summary", []), order.get("ticket_blocking_reason", ""))
+    return f"""<tr><td>{escape(str(order.get("order_name", "")))}<br><code>{escape(str(order.get("order_id", "")))}</code></td><td>{escape(str(order.get("createdAt", "")))}</td><td>{escape(str(order.get("masked_email", "")))}</td><td>{escape(str(order.get("email_parse_source", "")))}</td><td><code>{escape(str(order.get("customer_id", "")))}</code></td><td>{tags}</td><td><code>{escape(str(order.get("classification", "")))}</code></td><td>{ticket_summary}</td></tr>"""
+
+
+def _render_ticket_summary(ticket_summaries: list[dict], blocking_reason: str) -> str:
+    if not ticket_summaries:
+        return "-"
+    rows = []
+    if blocking_reason:
+        rows.append(f"<strong>{escape(str(blocking_reason))}</strong>")
+    for item in ticket_summaries[:5]:
+        parts = [
+            f"Ticket {escape(str(item.get('ticket_id', '')))}",
+            f"status={escape(str(item.get('status', '')))}",
+            f"priority={escape(str(item.get('priority', '')))}",
+            f"category={escape(str(item.get('status_category', '')))}",
+        ]
+        risks = item.get("risk_categories") or []
+        if risks:
+            parts.append("risk=" + escape(",".join(str(risk) for risk in risks)))
+        rows.append("<br>".join(parts))
+    return "<hr>".join(rows)
 
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     counts = payload.get("classification_counts") or {}
     return (
-        "Shopify review request Phase 1 candidate scan finished.\n"
+        "Shopify review request Phase 1.1 candidate scan finished.\n"
         f"Status: {payload.get('report_status')}\n"
         f"Orders queried: {payload.get('orders_queried')}\n"
         f"Orders with masked email: {payload.get('orders_with_email_count')}\n"
+        f"Ticket query performed: {payload.get('ticket_query_performed')}\n"
+        f"Orders blocked by ticket: {payload.get('orders_blocked_by_ticket_count')}\n"
         f"Ready for manual Ali Reviews check: {counts.get('ready_for_manual_ali_reviews_check', 0)}\n"
         f"Blocked orders: {len(payload.get('blocked_orders', []))}\n"
         "Safety: read-only Shopify order query only; no Shopify writes, tagsAdd, tagsRemove, Ali Reviews API, Gmail API, or email sending.\n"
@@ -819,6 +1131,16 @@ def _empty_query_result() -> dict:
         "orders_queried": 0,
         "orders": [],
         "email_field_sources_attempted": EMAIL_SOURCES,
+        "ticket_status_check": "blocked_ticket_filter_error",
+        "ticket_model_detected": False,
+        "ticket_query_performed": False,
+        "ticket_matches_found_count": 0,
+        "orders_with_ticket_match_count": 0,
+        "orders_blocked_by_ticket_count": 0,
+        "ticket_blocking_statuses": TICKET_BLOCKING_STATUSES,
+        "ticket_warning_statuses": TICKET_WARNING_STATUSES,
+        "ticket_filter_error_sanitized": "Django shell was not reached; ticket model inspection did not run.",
+        "ticket_filter_summary": {},
         "command_attempted_sanitized": _safe_command_attempt(),
         "docker_command_reached": False,
         "django_shell_reached": False,
@@ -839,7 +1161,7 @@ def _empty_query_result() -> dict:
 
 def _issue_summary(success: bool, query_result: dict, orders: list[dict]) -> str:
     if success:
-        return f"Read-only Phase 1 candidate scan classified {len(orders)} orders. No writes or sends were performed."
+        return f"Read-only Phase 1.1 candidate scan classified {len(orders)} orders. No writes or sends were performed."
     error = query_result.get("query_failure_message_sanitized") or query_result.get("failure_type") or "unknown"
     return f"Read-only Shopify candidate scan did not complete: {_sanitize_text(str(error))}"
 
