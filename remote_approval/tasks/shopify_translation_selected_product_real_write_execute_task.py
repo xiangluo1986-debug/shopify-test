@@ -11,7 +11,7 @@ from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 TASK_NAME = "shopify_translation_selected_product_real_write_execute"
 COMMAND_LABEL = TASK_NAME
-PHASE = "16.2B"
+PHASE = "16.2D"
 JSON_REPORT_PATH = LOG_DIR / "shopify_translation_selected_product_real_write_execute.json"
 HTML_REPORT_PATH = LOG_DIR / "shopify_translation_selected_product_real_write_execute.html"
 SMOKE_JSON_REPORT_PATH = LOG_DIR / "translation_console_manual_action_smoke_test.json"
@@ -78,6 +78,8 @@ def run_shopify_translation_selected_product_real_write_execute_task(mode: str) 
         "product_id": payload.get("product_id", ""),
         "entry_count": payload.get("entry_count", 0),
         "would_write_count": payload.get("would_write_count", 0),
+        "write_attempted_count": payload.get("write_attempted_count", 0),
+        "write_succeeded_count": payload.get("write_succeeded_count", 0),
         "single_entry_only": payload.get("single_entry_only", False),
         "requested_locale": payload.get("requested_locale", ""),
         "requested_field": payload.get("requested_field", ""),
@@ -85,6 +87,8 @@ def run_shopify_translation_selected_product_real_write_execute_task(mode: str) 
         "single_entry_selected": payload.get("single_entry_selected", False),
         "preflight_status": payload.get("preflight_status", ""),
         "manual_real_write_allowed_next_step": payload.get("manual_real_write_allowed_next_step", False),
+        "locked_real_write_ready": payload.get("locked_real_write_ready", False),
+        "audit_status": payload.get("audit_status", ""),
         "verified_count": payload.get("verified_count", 0),
         "ack_present": payload.get("ack_present", False),
         "ack_matches": payload.get("ack_matches", False),
@@ -97,6 +101,7 @@ def run_shopify_translation_selected_product_real_write_execute_task(mode: str) 
         "translations_register_called": payload.get("translations_register_called", False),
         "post_write_readback_performed": payload.get("post_write_readback_performed", False),
         "post_write_verified": payload.get("post_write_verified", False),
+        "post_write_readback_matches": payload.get("post_write_readback_matches", False),
         "rollback_required": payload.get("rollback_required", False),
         "rollback_approval_required": payload.get("rollback_approval_required", False),
         "rollback_performed": False,
@@ -359,6 +364,8 @@ def _build_dry_run_payload_from_manual_package(
         "entry_count": entry_count,
         "blocked_entry_count": blocked_entry_count,
         "would_write_count": would_write_count,
+        "write_attempted_count": 0,
+        "write_succeeded_count": 0,
         "verified_count": 0,
         "user_errors_count": 0,
         "ack_present": bool(settings.get("ack_present")),
@@ -373,6 +380,14 @@ def _build_dry_run_payload_from_manual_package(
         "preflight_status": "single_entry_real_write_preflight_not_requested",
         "manual_real_write_allowed_next_step": False,
         "real_write_next_command_preview": [],
+        "locked_real_write_ready": False,
+        "locked_real_write_target": {},
+        "locked_real_write_command_powershell": [],
+        "locked_real_write_required_env": {},
+        "locked_real_write_safety_checklist": [],
+        "post_write_audit_expected_fields": [],
+        "abort_conditions": [],
+        "post_real_write_check_command_powershell": [],
         "real_write_target_product_id": DEFAULT_PRODUCT_ID,
         "real_write_target_locale": "de",
         "real_write_target_field": "meta_title",
@@ -414,6 +429,10 @@ def _build_dry_run_payload_from_manual_package(
         "post_write_readback_checked": False,
         "post_write_verified": False,
         "post_write_readback_matches": False,
+        "post_write_readback_value_digest": "",
+        "post_write_readback_value_chars": 0,
+        "audit_status": "single_entry_real_write_audit_not_run_dry_run",
+        "audit_summary": {},
         "rollback_required": False,
         "rollback_approval_required": False,
         "rollback_performed": False,
@@ -527,6 +546,8 @@ def _docker_failure(
         "entry_count": 0,
         "blocked_entry_count": 0,
         "would_write_count": 0,
+        "write_attempted_count": 0,
+        "write_succeeded_count": 0,
         "verified_count": 0,
         "user_errors_count": 0,
         "ack_present": bool(settings.get("ack_present")),
@@ -541,6 +562,14 @@ def _docker_failure(
         "preflight_status": "single_entry_real_write_preflight_not_requested",
         "manual_real_write_allowed_next_step": False,
         "real_write_next_command_preview": [],
+        "locked_real_write_ready": False,
+        "locked_real_write_target": {},
+        "locked_real_write_command_powershell": [],
+        "locked_real_write_required_env": {},
+        "locked_real_write_safety_checklist": [],
+        "post_write_audit_expected_fields": [],
+        "abort_conditions": [],
+        "post_real_write_check_command_powershell": [],
         "real_write_target_product_id": DEFAULT_PRODUCT_ID,
         "real_write_target_locale": "de",
         "real_write_target_field": "meta_title",
@@ -576,6 +605,10 @@ def _docker_failure(
         "post_write_readback_checked": False,
         "post_write_verified": False,
         "post_write_readback_matches": False,
+        "post_write_readback_value_digest": "",
+        "post_write_readback_value_chars": 0,
+        "audit_status": "single_entry_real_write_audit_not_run",
+        "audit_summary": {},
         "rollback_required": bool(real_run_requested),
         "rollback_approval_required": bool(real_run_requested),
         "rollback_performed": False,
@@ -636,6 +669,14 @@ def _build_payload(settings: dict, result: dict, duration_seconds: float) -> dic
     payload.setdefault("preflight_status", "single_entry_real_write_preflight_not_requested")
     payload.setdefault("manual_real_write_allowed_next_step", False)
     payload.setdefault("real_write_next_command_preview", [])
+    payload.setdefault("locked_real_write_ready", False)
+    payload.setdefault("locked_real_write_target", {})
+    payload.setdefault("locked_real_write_command_powershell", [])
+    payload.setdefault("locked_real_write_required_env", {})
+    payload.setdefault("locked_real_write_safety_checklist", [])
+    payload.setdefault("post_write_audit_expected_fields", [])
+    payload.setdefault("abort_conditions", [])
+    payload.setdefault("post_real_write_check_command_powershell", [])
     payload.setdefault("real_write_target_product_id", DEFAULT_PRODUCT_ID)
     payload.setdefault("real_write_target_locale", "de")
     payload.setdefault("real_write_target_field", "meta_title")
@@ -647,8 +688,14 @@ def _build_payload(settings: dict, result: dict, duration_seconds: float) -> dic
     payload.setdefault("pre_write_existing_outdated_translation", False)
     payload.setdefault("pre_write_digest", "")
     payload.setdefault("translations_register_payload_count", 0)
+    payload.setdefault("write_attempted_count", 0)
+    payload.setdefault("write_succeeded_count", 0)
     payload.setdefault("post_write_readback_checked", payload.get("post_write_readback_performed", False))
     payload.setdefault("post_write_readback_matches", payload.get("post_write_verified", False))
+    payload.setdefault("post_write_readback_value_digest", "")
+    payload.setdefault("post_write_readback_value_chars", 0)
+    payload.setdefault("audit_status", "single_entry_real_write_audit_not_run")
+    payload.setdefault("audit_summary", {})
     payload.update(
         {
             "timestamp": utc_now_iso(),
@@ -728,6 +775,12 @@ def _render_html(payload: dict) -> str:
             ("No Write Confirmed", "no_write_confirmed"),
             ("Preflight Status", "preflight_status"),
             ("Manual Real Write Allowed Next Step", "manual_real_write_allowed_next_step"),
+            ("Locked Real Write Ready", "locked_real_write_ready"),
+            ("Locked Real Write Target", "locked_real_write_target"),
+            ("Locked Real Write Command PowerShell", "locked_real_write_command_powershell"),
+            ("Locked Real Write Required Env", "locked_real_write_required_env"),
+            ("Locked Real Write Safety Checklist", "locked_real_write_safety_checklist"),
+            ("Post-write Audit Expected Fields", "post_write_audit_expected_fields"),
             ("Real Write Target Product ID", "real_write_target_product_id"),
             ("Real Write Target Locale", "real_write_target_locale"),
             ("Real Write Target Field", "real_write_target_field"),
@@ -735,6 +788,8 @@ def _render_html(payload: dict) -> str:
             ("First Real Write Target Mismatch", "first_real_write_target_mismatch"),
             ("Preflight Warnings", "preflight_warnings"),
             ("Real Write Next Command Preview", "real_write_next_command_preview"),
+            ("Post Real Write Check Command PowerShell", "post_real_write_check_command_powershell"),
+            ("Abort Conditions", "abort_conditions"),
             ("Single Entry Only", "single_entry_only"),
             ("Requested Locale", "requested_locale"),
             ("Requested Field", "requested_field"),
@@ -767,6 +822,8 @@ def _render_html(payload: dict) -> str:
             ("Pre-write Digest", "pre_write_digest"),
             ("Pre-write Digest Verified", "pre_write_digest_verified"),
             ("translationsRegister Payload Count", "translations_register_payload_count"),
+            ("Write Attempted Count", "write_attempted_count"),
+            ("Write Succeeded Count", "write_succeeded_count"),
             ("Shopify Write Performed", "shopify_write_performed"),
             ("Mutation Performed", "mutation_performed"),
             ("translationsRegister Called", "translations_register_called"),
@@ -774,6 +831,10 @@ def _render_html(payload: dict) -> str:
             ("Post-write Readback Performed", "post_write_readback_performed"),
             ("Post-write Verified", "post_write_verified"),
             ("Post-write Readback Matches", "post_write_readback_matches"),
+            ("Post-write Readback Value Digest", "post_write_readback_value_digest"),
+            ("Post-write Readback Value Chars", "post_write_readback_value_chars"),
+            ("Audit Status", "audit_status"),
+            ("Audit Summary", "audit_summary"),
             ("Rollback Required", "rollback_required"),
             ("Rollback Approval Required", "rollback_approval_required"),
             ("Rollback Performed", "rollback_performed"),
@@ -798,7 +859,7 @@ def _render_html(payload: dict) -> str:
 <head><meta charset="utf-8"><title>Selected Product Translation Real Write Execute</title></head>
 <body>
   <h1>Selected Product Translation Real Write Execute</h1>
-  <p>Phase 16.2B. Dry-run is the default. Real writes require exact environment ACK, exact product scope, single-entry targeting, pre-write digest verification, and post-write readback. Rollback is never automatic.</p>
+  <p>Phase 16.2D. Dry-run is the default. Real writes require exact environment ACK, exact product scope, single-entry targeting, pre-write digest verification, and post-write readback. Rollback is never automatic.</p>
   <h2>Summary</h2>
   <table border="1" cellspacing="0" cellpadding="6"><tbody>{summary_rows}</tbody></table>
   <h2>Safety</h2>
@@ -815,7 +876,7 @@ def _render_html(payload: dict) -> str:
 
 def _build_approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
-        "Phase 16.2B selected product translation real write execute package generated.\n"
+        "Phase 16.2D selected product translation real write execute package generated.\n"
         f"- execution_status: {payload.get('execution_status')}\n"
         f"- mode: {payload.get('mode')}\n"
         f"- dry_run: {payload.get('dry_run')}\n"
@@ -829,6 +890,8 @@ def _build_approval_message(payload: dict, json_path: Path, html_path: Path) -> 
         f"- single_entry_selected: {payload.get('single_entry_selected')}\n"
         f"- preflight_status: {payload.get('preflight_status')}\n"
         f"- manual_real_write_allowed_next_step: {payload.get('manual_real_write_allowed_next_step')}\n"
+        f"- locked_real_write_ready: {payload.get('locked_real_write_ready')}\n"
+        f"- audit_status: {payload.get('audit_status')}\n"
         f"- verified_count: {payload.get('verified_count')}\n"
         f"- real_write_allowed: {payload.get('real_write_allowed')}\n"
         f"- shopify_write_performed: {payload.get('shopify_write_performed')}\n"
