@@ -54,6 +54,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_sen
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight_task import (
     run_shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_execute_task import (
+    run_shopify_review_request_trustpilot_gmail_one_draft_send_execute_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task import (
     run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task,
 )
@@ -201,6 +204,9 @@ from remote_approval.tasks.shopify_translation_next_batch_locked_dry_run_package
 from remote_approval.tasks.shopify_translation_next_batch_real_write_execute_task import (
     run_shopify_translation_next_batch_real_write_execute_task,
 )
+from remote_approval.tasks.shopify_translation_next_batch_post_write_audit_task import (
+    run_shopify_translation_next_batch_post_write_audit_task,
+)
 from remote_approval.tasks.shopify_translation_batch_multi_locale_task import (
     run_shopify_translation_batch_multi_locale_dry_run_task,
 )
@@ -251,6 +257,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight": (
         run_shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight_task
+    ),
+    "shopify_review_request_trustpilot_gmail_one_draft_send_execute": (
+        run_shopify_review_request_trustpilot_gmail_one_draft_send_execute_task
     ),
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": (
         run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task
@@ -375,6 +384,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_next_batch_real_write_execute": (
         run_shopify_translation_next_batch_real_write_execute_task
+    ),
+    "shopify_translation_next_batch_post_write_audit": (
+        run_shopify_translation_next_batch_post_write_audit_task
     ),
     "shopify_translation_multi_locale_dry_run": run_shopify_translation_multi_locale_dry_run_task,
     "shopify_translation_dry_run": run_shopify_translation_dry_run_task,
@@ -501,6 +513,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight.json",
+    },
+    "shopify_review_request_trustpilot_gmail_one_draft_send_execute": {
+        "description": "Execute or dry-run a locked at-most-one Trustpilot Gmail draft send.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "Gmail drafts.send only when all explicit real-send gates are enabled",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_execute.json",
     },
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": {
         "description": "Generate a no-send/no-write Trustpilot Gmail draft send and Shopify tag design package.",
@@ -807,6 +825,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run", "real-run", "execute-real-write"],
         "write_risk": "high outside dry-run",
         "review_file_path": "logs/shopify_translation_next_batch_real_write_execute.json",
+    },
+    "shopify_translation_next_batch_post_write_audit": {
+        "description": "Audit the selected-product next-batch real write, confirm duplicate protection, and recommend remaining entries without new writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify query plus OpenAI dry-run package generation",
+        "review_file_path": "logs/shopify_translation_next_batch_post_write_audit.json",
     },
     "shopify_translation_multi_locale_dry_run": {
         "description": "Run fixed Shopify product translation previews for one product across de, fr, es, it, and ja.",
