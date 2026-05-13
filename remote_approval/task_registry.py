@@ -51,6 +51,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_loc
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner_task import (
     run_shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight_task import (
+    run_shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task import (
     run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task,
 )
@@ -245,6 +248,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner": (
         run_shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner_task
+    ),
+    "shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight": (
+        run_shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight_task
     ),
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": (
         run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task
@@ -489,6 +495,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; dry-run only",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_locked_runner.json",
+    },
+    "shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight": {
+        "description": "Generate the final manual approval preflight for a future one-draft Trustpilot Gmail send.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_send_final_preflight.json",
     },
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": {
         "description": "Generate a no-send/no-write Trustpilot Gmail draft send and Shopify tag design package.",
