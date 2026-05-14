@@ -1,10 +1,194 @@
 {% extends "admin/base_site.html" %}
 
 {% block content %}
+<style>
+  .tw-hero {
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #f7f9fb;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .tw-safety {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #e8f5e9;
+    color: #185c25;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .tw-tabs,
+  .tw-filter-tabs,
+  .tw-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  .tw-tab,
+  .tw-filter-tab {
+    display: inline-block;
+    padding: 7px 12px;
+    border: 1px solid #cfd8e3;
+    border-radius: 6px;
+    background: #fff;
+    color: #1f2937;
+    text-decoration: none;
+  }
+  .tw-tab.is-active,
+  .tw-filter-tab.is-active {
+    border-color: #2c6ecb;
+    background: #eaf2ff;
+    color: #123f7a;
+    font-weight: 600;
+  }
+  .tw-editor-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .tw-summary-card {
+    border: 1px solid #e1e7ef;
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px;
+  }
+  .tw-summary-label {
+    color: #667085;
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+  .tw-summary-value {
+    margin-top: 4px;
+    font-weight: 600;
+  }
+  .tw-toolbar {
+    padding: 12px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #fff;
+  }
+  .tw-toolbar label {
+    font-weight: 600;
+  }
+  .tw-toolbar select,
+  .tw-toolbar input[type="text"] {
+    min-height: 32px;
+  }
+  .tw-section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 16px 0 8px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    background: #f3f5f7;
+    color: #1f2937;
+  }
+  .tw-count-badge,
+  .tw-status-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #eef2f7;
+    color: #344054;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+  .tw-status-badge.is-translated {
+    background: #e8f5e9;
+    color: #185c25;
+  }
+  .tw-status-badge.is-outdated,
+  .tw-status-badge.is-needs_review {
+    background: #fff4e5;
+    color: #8a4b00;
+  }
+  .tw-status-badge.is-draft_only {
+    background: #eaf2ff;
+    color: #123f7a;
+  }
+  .tw-status-badge.is-untranslated,
+  .tw-status-badge.is-skipped {
+    background: #f2f4f7;
+    color: #475467;
+  }
+  .tw-editor-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .tw-editor-table thead th {
+    background: #f6f8fa;
+    border-bottom: 1px solid #dbe1e8;
+    color: #344054;
+    font-weight: 600;
+    padding: 10px;
+  }
+  .tw-editor-table tbody td {
+    border-top: 1px solid #eef2f7;
+    padding: 12px;
+    vertical-align: top;
+  }
+  .tw-editor-table tbody tr:hover td {
+    background: #fafcff;
+  }
+  .tw-resource-col {
+    width: 20%;
+  }
+  .tw-source-col,
+  .tw-target-col {
+    width: 40%;
+  }
+  .tw-text-block {
+    max-height: 260px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border: 1px solid #e1e7ef;
+    border-radius: 6px;
+    background: #fbfcfe;
+    padding: 9px;
+  }
+  .tw-target-empty {
+    color: #667085;
+    font-style: italic;
+  }
+  .tw-row-meta {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .tw-warning {
+    margin-top: 6px;
+    color: #8a4b00;
+    font-weight: 600;
+  }
+  .tw-empty-state {
+    border: 1px dashed #cfd8e3;
+    border-radius: 8px;
+    background: #fbfcfe;
+    padding: 18px;
+    color: #475467;
+  }
+</style>
 <div id="content-main">
-  <h1>Shopify Translation Workspace</h1>
-  <p>This is a standalone internal tool for Shopify product translation review and preparation.</p>
-  <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This page prepares drafts, previews, reports, and manual instructions only. No Shopify write is performed from this page. Real write requires manual PowerShell plus explicit ACK.</p>
+  <div class="tw-hero">
+    <h1>Shopify Translation Workspace</h1>
+    <p>This is a standalone internal tool for Shopify product translation review and preparation.</p>
+    <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This page prepares drafts, previews, reports, and manual instructions only. No Shopify write is performed from this page. Real write requires manual PowerShell plus explicit ACK.</p>
+    <span class="tw-safety">READ ONLY / NO WRITE FROM THIS PAGE</span>
+  </div>
 
   {% if translation_console_warnings %}
     <div class="messagelist" style="margin-bottom: 16px;">
@@ -17,10 +201,10 @@
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>View Mode</h2>
     <p>This page is read-only. Use Workbench Mode for the staged workflow, or Editor View for a Shopify-like source / target review.</p>
-    <p>
-      <a class="button" href="?ui_mode=workbench&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Workbench Mode</a>
-      <a class="button" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Editor View</a>
-    </p>
+    <div class="tw-tabs">
+      <a class="tw-tab{% if ui_mode == 'workbench' %} is-active{% endif %}" href="?ui_mode=workbench&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Workbench Mode</a>
+      <a class="tw-tab{% if ui_mode == 'editor' %} is-active{% endif %}" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Editor View</a>
+    </div>
     <table>
       <tbody>
         <tr><th>Current mode</th><td>{% if ui_mode == "editor" %}Editor View{% else %}Workbench Mode{% endif %}</td></tr>
@@ -231,13 +415,13 @@
   {% elif ui_mode == "editor" %}
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Translation Editor View</h2>
-    <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This Shopify-like editor is visual review only. No store-saving action exists here.</p>
-    <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
+    <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This editor view is for review only. No Shopify write is performed here. Real writes require manual approval workflow.</p>
+    <form method="get" class="tw-toolbar" style="margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="q" value="{{ product_search_text }}">
       <div>
         <label for="id_editor_selected_product_gid">Product</label><br>
-        <select id="id_editor_selected_product_gid" name="product_gid" style="min-width: 580px;">
+        <select id="id_editor_selected_product_gid" name="product_gid" style="min-width: 460px;">
           {% if product_selector.product_options %}
             {% for product in product_selector.product_options %}
               <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }}</option>
@@ -273,92 +457,103 @@
       <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
       <button type="submit" class="button">Generate draft package dry-run</button>
     </form>
-    <table>
-      <tbody>
-        <tr><th>Product</th><td>{{ editor_view.product_title }}</td></tr>
-        <tr><th>Product gid</th><td>{{ editor_view.product_gid }}</td></tr>
-        <tr><th>Default language</th><td>English</td></tr>
-        <tr><th>Target language</th><td>{{ editor_view.editor_locale_label }} ({{ editor_view.editor_locale }})</td></tr>
-        <tr><th>Active filter</th><td>{{ editor_view.editor_filter }}</td></tr>
-        <tr><th>Rows visible</th><td>{{ editor_view.editor_visible_row_count }} / {{ editor_view.editor_row_count }}</td></tr>
-      </tbody>
-    </table>
+    <div class="tw-editor-summary">
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Product</div>
+        <div class="tw-summary-value">{{ editor_view.editor_selected_product_label }}</div>
+      </div>
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Target locale</div>
+        <div class="tw-summary-value">{{ editor_view.editor_locale_label }} ({{ editor_view.editor_locale }})</div>
+      </div>
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Rows visible</div>
+        <div class="tw-summary-value">{{ editor_view.editor_visible_row_count }} / {{ editor_view.editor_row_count }}</div>
+      </div>
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Active filter</div>
+        <div class="tw-summary-value">{{ editor_view.editor_active_filter_label }}</div>
+      </div>
+    </div>
   </div>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Filters</h2>
-    <p>
+    <div class="tw-filter-tabs">
       {% for tab in editor_view.filter_tabs %}
-        <a class="button" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_search={{ editor_search_query|urlencode }}"{% if tab.active %} style="font-weight: bold;"{% endif %}>{{ tab.label }} ({{ tab.count }})</a>
+        <a class="tw-filter-tab{% if tab.active %} is-active{% endif %}" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_search={{ editor_search_query|urlencode }}">{{ tab.label }} ({{ tab.count }})</a>
       {% endfor %}
-    </p>
+    </div>
   </div>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Dual-column translation editor</h2>
-    {% if not editor_view.product_gid %}
-      <p>Select a product to view translation rows.</p>
-    {% elif editor_view.editor_row_count == 0 %}
-      <p>No translatable rows found for this product.</p>
-    {% elif editor_view.editor_visible_row_count == 0 %}
-      <p>No rows match this filter.</p>
+    {% if editor_view.editor_empty_message %}
+      <div class="tw-empty-state">{{ editor_view.editor_empty_message }}</div>
     {% endif %}
     {% if editor_view.product_gid and editor_view.editor_visible_row_count > 0 %}
-    <table>
+    <table class="tw-editor-table">
       <thead>
         <tr>
-          <th style="width: 18%;">Resource / Field</th>
-          <th style="width: 38%;">Default Language (English)</th>
-          <th style="width: 44%;">Target Language ({{ editor_view.editor_locale_label }})</th>
+          <th class="tw-resource-col">Resource / Field</th>
+          <th class="tw-source-col">Default Language (English)</th>
+          <th class="tw-target-col">Target Language ({{ editor_view.editor_locale_label }})</th>
         </tr>
       </thead>
     </table>
     {% for section in editor_view.sections %}
       {% if section.section_key == "metafields" %}
         <details style="margin-top: 12px;">
-          <summary>{{ section.section_label }} ({{ section.row_count }})</summary>
+          <summary><span class="tw-section-heading">{{ section.section_label }} <span class="tw-count-badge">{{ section.row_count }}</span></span></summary>
       {% else %}
         <div style="margin-top: 12px;">
-          <h3>{{ section.section_label }} ({{ section.row_count }})</h3>
+          <div class="tw-section-heading"><strong>{{ section.section_label }}</strong> <span class="tw-count-badge">{{ section.row_count }}</span></div>
       {% endif %}
       {% if section.rows %}
-        <table>
+        <table class="tw-editor-table">
           <thead>
             <tr>
-              <th style="width: 18%;">Resource / Field</th>
-              <th style="width: 38%;">Default Language (English)</th>
-              <th style="width: 44%;">Target Language ({{ editor_view.editor_locale_label }})</th>
+              <th class="tw-resource-col">Resource / Field</th>
+              <th class="tw-source-col">Default Language (English)</th>
+              <th class="tw-target-col">Target Language ({{ editor_view.editor_locale_label }})</th>
             </tr>
           </thead>
           <tbody>
             {% for row in section.rows %}
-              <tr>
+              <tr class="tw-editor-row status-{{ row.translation_status }}">
                 <td>
                   <strong>{{ row.field_label }}</strong><br>
                   <span style="color: #666;">{{ row.resource_key }}</span><br>
-                  <span>{{ row.translation_status }}</span>
+                  <span class="tw-status-badge is-{{ row.translation_status }}">{{ row.translation_status }}</span>
                 </td>
                 <td>
-                  {% if row.field_key == "body_html" %}
-                    <div style="max-height: 220px; overflow: auto; white-space: pre-wrap;">{{ row.source_value_preview }}</div>
-                  {% else %}
-                    <div style="white-space: pre-wrap;">{{ row.source_value_preview }}</div>
-                  {% endif %}
+                  <div class="tw-text-block">{{ row.source_value_preview }}</div>
                 </td>
                 <td>
                   {% if row.target_value_display %}
-                    <div style="white-space: pre-wrap;">{{ row.target_value_preview }}</div>
+                    <div class="tw-text-block">{{ row.target_value_preview }}</div>
                   {% else %}
-                    <em>No target translation yet</em>
+                    <div class="tw-text-block tw-target-empty">No target translation yet</div>
                   {% endif %}
-                  <div style="margin-top: 6px;">
-                    <strong>Status:</strong> {{ row.translation_status }}
-                    {% if row.status_badges %} | {{ row.status_badges|join:", " }}{% endif %}
+                  <div class="tw-row-meta">
+                    <span class="tw-status-badge is-{{ row.translation_status }}">{{ row.translation_status }}</span>
+                    {% if row.target_value_source %}
+                      <span class="tw-status-badge">{{ row.target_value_source }}</span>
+                    {% else %}
+                      <span class="tw-status-badge">Empty</span>
+                    {% endif %}
+                    {% for badge in row.status_badges %}
+                      <span class="tw-status-badge">{{ badge }}</span>
+                    {% endfor %}
                   </div>
-                  <div><strong>Chars:</strong> {{ row.char_count_display }}</div>
-                  {% if row.seo_warning %}<div><strong>SEO warning:</strong> {{ row.seo_warning }}</div>{% endif %}
-                  {% if row.validation_status %}<div><strong>Validation:</strong> {{ row.validation_status }}</div>{% endif %}
-                  {% if row.seo_status %}<div><strong>SEO status:</strong> {{ row.seo_status }}</div>{% endif %}
+                  <div class="tw-row-meta">
+                    <span><strong>Chars:</strong> {{ row.char_count_display }}</span>
+                    {% if row.char_limit %}<span>Recommended limit {{ row.char_limit }}</span>{% endif %}
+                  </div>
+                  {% if row.seo_warning %}<div class="tw-warning">SEO warning: {{ row.seo_warning }}</div>{% endif %}
+                  {% if row.exceeds_limit %}<div class="tw-warning">Exceeds recommended character limit.</div>{% endif %}
+                  {% if row.validation_status %}<div class="tw-row-meta"><span>Validation: {{ row.validation_status }}</span></div>{% endif %}
+                  {% if row.seo_status %}<div class="tw-row-meta"><span>SEO status: {{ row.seo_status }}</span></div>{% endif %}
                 </td>
               </tr>
             {% endfor %}

@@ -1663,6 +1663,13 @@ def build_translation_console_editor_view(
                 "row_count": len(section_rows),
             }
         )
+    filter_labels = [
+        ("all", "All"),
+        ("untranslated", "Untranslated"),
+        ("outdated", "Outdated"),
+        ("translated", "Translated"),
+        ("needs_review", "Needs Review"),
+    ]
     filter_tabs = [
         {
             "value": value,
@@ -1676,27 +1683,34 @@ def build_translation_console_editor_view(
                 ]
             ),
         }
-        for value, label in [
-            ("all", "All"),
-            ("untranslated", "Untranslated"),
-            ("outdated", "Outdated"),
-            ("translated", "Translated"),
-            ("needs_review", "Needs Review"),
-        ]
+        for value, label in filter_labels
     ]
+    if not product_gid:
+        empty_message = "Select a product to view translation rows."
+    elif not rows:
+        empty_message = "No translatable rows found for this product."
+    elif not visible_rows:
+        empty_message = "No rows match this filter."
+    else:
+        empty_message = ""
     return {
         "editor_view_enabled": True,
         "editor_locale": locale,
         "editor_locale_label": _translation_editor_locale_label(locale),
         "editor_filter": editor_filter,
+        "editor_active_filter_label": dict(filter_labels).get(editor_filter, "All"),
         "editor_search_query": editor_search_query,
         "product_gid": product_gid,
         "product_title": product_title,
+        "editor_selected_product_label": product_title or product_gid or "No product selected",
         "sections": sections,
         "filter_tabs": filter_tabs,
         "editor_row_count": len(rows),
         "editor_visible_row_count": len(visible_rows),
         "editor_search_result_count": len(searched_rows),
+        "editor_has_rows": bool(rows),
+        "editor_has_visible_rows": bool(visible_rows),
+        "editor_empty_message": empty_message,
         "has_draft_result": bool(draft_result),
         "has_apply_plan_preview": bool(apply_plan_preview_result),
         "read_only": True,
