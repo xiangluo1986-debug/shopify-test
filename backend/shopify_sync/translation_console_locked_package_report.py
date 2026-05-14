@@ -19,6 +19,8 @@ FALSE_SAFETY_FLAGS = [
     "gmail_api_call_performed",
     "email_sent",
 ]
+LOCKED_REAL_WRITE_TASK_PLACEHOLDER = "<LOCKED_TRANSLATION_REAL_WRITE_TASK_NAME>"
+REQUIRED_ACK_PLACEHOLDER = "<REQUIRED_EXPLICIT_ACK>"
 
 
 def generate_translation_console_locked_package_dry_run_report(
@@ -244,6 +246,81 @@ def build_locked_report_approval_checklist(
     }
 
 
+def build_translation_console_manual_command_package(
+    approval_checklist: dict | None,
+) -> dict:
+    checklist = approval_checklist or {}
+    generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    report_available = checklist.get("report_available") is True
+    entry_count = _safe_int(checklist.get("entry_count"))
+    candidate_count = _safe_int(checklist.get("candidate_entries_count"))
+    selected_product_gid = str(checklist.get("selected_product_gid") or "")
+    report_product_gid = str(checklist.get("product_gid") or "")
+    json_report_path = str(checklist.get("json_report_path") or "")
+    html_report_path = str(checklist.get("html_report_path") or "")
+    safe_for_manual_review = checklist.get("safe_for_manual_review") is True
+
+    blocking_conditions = []
+    if not report_available:
+        blocking_conditions.append("generate_locked_package_dry_run_report_first")
+    if not safe_for_manual_review:
+        blocking_conditions.append("approval_checklist_not_safe_for_manual_review")
+    if entry_count <= 0:
+        blocking_conditions.append("locked_report_entry_count_zero")
+    if selected_product_gid and report_product_gid and selected_product_gid != report_product_gid:
+        blocking_conditions.append("selected_product_report_mismatch")
+    if not json_report_path:
+        blocking_conditions.append("locked_report_json_path_missing")
+
+    command_package_ready = not blocking_conditions
+    dry_run_command = (
+        _manual_dry_run_command(json_report_path)
+        if report_available and json_report_path
+        else ""
+    )
+    real_run_command = (
+        _manual_real_run_command(json_report_path, entry_count)
+        if command_package_ready
+        else ""
+    )
+    return {
+        "package_status": (
+            "manual_powershell_command_package_ready"
+            if command_package_ready
+            else "manual_powershell_command_package_blocked"
+        ),
+        "command_package_generated_at": generated_at,
+        "report_available": report_available,
+        "command_package_ready": command_package_ready,
+        "show_real_run_command_preview": command_package_ready,
+        "selected_product_gid": selected_product_gid,
+        "report_product_gid": report_product_gid,
+        "report_json_path": json_report_path,
+        "report_html_path": html_report_path,
+        "entry_count": entry_count,
+        "candidate_count": candidate_count,
+        "report_generated_at": checklist.get("generated_at", ""),
+        "required_ack_placeholder": REQUIRED_ACK_PLACEHOLDER,
+        "remote_task_name": LOCKED_REAL_WRITE_TASK_PLACEHOLDER,
+        "remote_task_wired": False,
+        "blocking_conditions": blocking_conditions,
+        "warnings": _manual_command_warnings(command_package_ready),
+        "manual_steps_checklist": _manual_steps_checklist(),
+        "ack_checklist": _manual_ack_checklist(),
+        "dry_run_verification_command": dry_run_command,
+        "manual_real_run_command_preview": real_run_command,
+        "copy_friendly_text": _manual_copy_text(dry_run_command, real_run_command),
+        "read_only": True,
+        "no_command_executed_by_page": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "rollback_performed": False,
+        "gmail_api_call_performed": False,
+        "email_sent": False,
+    }
+
+
 def _empty_approval_checklist(reason: str, selected_product_gid: str, loaded_at: str) -> dict:
     return {
         "checklist_status": "locked_report_approval_checklist_empty",
@@ -276,6 +353,87 @@ def _empty_approval_checklist(reason: str, selected_product_gid: str, loaded_at:
         "gmail_api_call_performed": False,
         "email_sent": False,
     }
+
+
+def _manual_dry_run_command(json_report_path: str) -> str:
+    return "\n".join(
+        [
+            f'$env:SHOPIFY_TRANSLATION_LOCKED_REPORT_PATH="{json_report_path}"',
+            '$env:SHOPIFY_TRANSLATION_CONSOLE_DRY_RUN="1"',
+            (
+                "python remote_approval_runner.py "
+                f"--task {LOCKED_REAL_WRITE_TASK_PLACEHOLDER} --approval local"
+            ),
+        ]
+    )
+
+
+def _manual_real_run_command(json_report_path: str, entry_count: int) -> str:
+    return "\n".join(
+        [
+            "# Manual preview only. Copy only after separate approval.",
+            f'$env:SHOPIFY_TRANSLATION_LOCKED_REPORT_PATH="{json_report_path}"',
+            f'$env:SHOPIFY_TRANSLATION_EXPECTED_ENTRY_COUNT="{entry_count}"',
+            '$env:SHOPIFY_TRANSLATION_CONSOLE_DRY_RUN="0"',
+            f'$env:SHOPIFY_TRANSLATION_REAL_WRITE_ACK="{REQUIRED_ACK_PLACEHOLDER}"',
+            (
+                "python remote_approval_runner.py "
+                f"--task {LOCKED_REAL_WRITE_TASK_PLACEHOLDER} --mode real-run --approval local"
+            ),
+        ]
+    )
+
+
+def _manual_copy_text(dry_run_command: str, real_run_command: str) -> str:
+    parts = []
+    if dry_run_command:
+        parts.append("# Dry-run / verification command")
+        parts.append(dry_run_command)
+    if real_run_command:
+        parts.append("")
+        parts.append("# Manual real-run command preview")
+        parts.append(real_run_command)
+    return "\n".join(parts)
+
+
+def _manual_command_warnings(command_package_ready: bool) -> list[str]:
+    warnings = [
+        "This command package is read-only.",
+        "No command is executed by this page.",
+        "No Shopify write is performed by this page.",
+        "Real write remains outside the web UI and requires PowerShell plus explicit ACK.",
+        "Remote approval runner task must exist before use.",
+    ]
+    if not command_package_ready:
+        warnings.append("Fix the approval checklist before preparing any manual run.")
+    else:
+        warnings.append("Verify report path and entry count before running anything manually.")
+    return warnings
+
+
+def _manual_steps_checklist() -> list[str]:
+    return [
+        "Confirm selected product gid matches report product gid.",
+        "Confirm entry_count equals the intended write count.",
+        "Confirm all entries are candidate entries only.",
+        "Confirm planned values are correct.",
+        "Confirm safety flags are all false.",
+        "Confirm no existing translation will be overwritten.",
+        "Confirm rollback plan or backup value is available or not required.",
+        "Confirm user has approved the manual run.",
+        "Confirm Git status before execution.",
+        "Confirm logs will not be committed.",
+    ]
+
+
+def _manual_ack_checklist() -> list[str]:
+    return [
+        "Replace the ACK placeholder manually.",
+        "Confirm the report JSON path is the intended locked dry-run report.",
+        "Confirm the expected entry count matches the report.",
+        "Run dry-run or verification first.",
+        "Do not run the manual preview from the web page.",
+    ]
 
 
 def _resolve_locked_report_path(preferred_json_path: str = "") -> Path | None:

@@ -326,6 +326,82 @@
   </div>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Manual PowerShell Command Package</h2>
+    <p><strong>This command package is read-only.</strong> No command is executed by this page. No Shopify write is performed by this page. Real write remains outside the web UI and requires PowerShell plus explicit ACK.</p>
+    <table>
+      <tbody>
+        <tr><th>package_status</th><td>{{ manual_command_package.package_status }}</td></tr>
+        <tr><th>command_package_ready</th><td>{{ manual_command_package.command_package_ready }}</td></tr>
+        <tr><th>selected product gid</th><td>{{ manual_command_package.selected_product_gid }}</td></tr>
+        <tr><th>report product gid</th><td>{{ manual_command_package.report_product_gid }}</td></tr>
+        <tr><th>report JSON path</th><td>{{ manual_command_package.report_json_path }}</td></tr>
+        <tr><th>report HTML path</th><td>{{ manual_command_package.report_html_path }}</td></tr>
+        <tr><th>entry_count</th><td>{{ manual_command_package.entry_count }}</td></tr>
+        <tr><th>candidate_count</th><td>{{ manual_command_package.candidate_count }}</td></tr>
+        <tr><th>report generated_at</th><td>{{ manual_command_package.report_generated_at }}</td></tr>
+        <tr><th>package generated_at</th><td>{{ manual_command_package.command_package_generated_at }}</td></tr>
+        <tr><th>required ACK placeholder</th><td><code>{{ manual_command_package.required_ack_placeholder }}</code></td></tr>
+        <tr><th>remote task name</th><td><code>{{ manual_command_package.remote_task_name }}</code></td></tr>
+        <tr><th>task wiring status</th><td>{% if manual_command_package.remote_task_wired %}Task is wired{% else %}Task name not wired yet. Remote approval runner task must exist before use.{% endif %}</td></tr>
+        <tr><th>blocking_conditions</th><td>{{ manual_command_package.blocking_conditions|join:", " }}</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Risk and safety notes</h3>
+    <ul>
+      {% for warning in manual_command_package.warnings %}
+        <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
+
+    <h3>Manual steps checklist</h3>
+    <ul>
+      {% for item in manual_command_package.manual_steps_checklist %}
+        <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+
+    <h3>ACK checklist</h3>
+    <ul>
+      {% for item in manual_command_package.ack_checklist %}
+        <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+
+    {% if manual_command_package.report_available %}
+      <h3>Dry-run / verification command</h3>
+      <p>Preview text only. This page does not run it.</p>
+      <pre style="white-space: pre-wrap;">{{ manual_command_package.dry_run_verification_command }}</pre>
+    {% else %}
+      <p><strong>Generate locked package dry-run report first.</strong></p>
+    {% endif %}
+
+    {% if manual_command_package.show_real_run_command_preview %}
+      <h3>Manual real-run command preview</h3>
+      <p><strong>Manual copy only after approval.</strong> Verify report path and entry count before running. This page does not run this command.</p>
+      <pre style="white-space: pre-wrap;">{{ manual_command_package.manual_real_run_command_preview }}</pre>
+      <h3>Copy-friendly text</h3>
+      <pre style="white-space: pre-wrap;">{{ manual_command_package.copy_friendly_text }}</pre>
+    {% else %}
+      <p><strong>Manual real-run command preview is blocked.</strong> Fix the checklist warnings and regenerate the locked dry-run report first.</p>
+    {% endif %}
+
+    <h3>Page safety flags</h3>
+    <table>
+      <tbody>
+        <tr><th>read_only</th><td>{{ manual_command_package.read_only }}</td></tr>
+        <tr><th>no_command_executed_by_page</th><td>{{ manual_command_package.no_command_executed_by_page }}</td></tr>
+        <tr><th>shopify_write_performed</th><td>{{ manual_command_package.shopify_write_performed }}</td></tr>
+        <tr><th>mutation_performed</th><td>{{ manual_command_package.mutation_performed }}</td></tr>
+        <tr><th>translations_register_called</th><td>{{ manual_command_package.translations_register_called }}</td></tr>
+        <tr><th>rollback_performed</th><td>{{ manual_command_package.rollback_performed }}</td></tr>
+        <tr><th>gmail_api_call_performed</th><td>{{ manual_command_package.gmail_api_call_performed }}</td></tr>
+        <tr><th>email_sent</th><td>{{ manual_command_package.email_sent }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Fetch read-only product translation data</h2>
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       <input type="hidden" name="fetch_read_only" value="1">

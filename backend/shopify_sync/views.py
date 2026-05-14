@@ -85,6 +85,7 @@ from .translation_workflow_status import (
     load_translation_workflow_status,
 )
 from .translation_console_locked_package_report import (
+    build_translation_console_manual_command_package,
     generate_translation_console_locked_package_dry_run_report,
     load_latest_translation_console_locked_package_report,
 )
@@ -1095,6 +1096,9 @@ def translation_console(request):
             ),
         )
     )
+    manual_command_package = build_translation_console_manual_command_package(
+        locked_report_approval_checklist
+    )
 
     return render(
         request,
@@ -1115,6 +1119,7 @@ def translation_console(request):
             "apply_plan_preview_result": apply_plan_preview_result,
             "locked_package_report_result": locked_package_report_result,
             "locked_report_approval_checklist": locked_report_approval_checklist,
+            "manual_command_package": manual_command_package,
             "error_message": error_message,
             "draft_result": draft_result,
             "draft_error_message": draft_error_message,
