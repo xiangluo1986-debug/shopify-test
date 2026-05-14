@@ -2107,25 +2107,25 @@ def _translation_workspace_multi_locale_status(summary: dict):
         if failed or needs_configuration or has_blocking_conditions:
             return (
                 "multi_locale_draft_completed_with_issues",
-                "Draft generation finished with issues. Review each language below.",
+                "Draft generation finished with issues. Shopify was not updated. Review each language below.",
             )
         return (
             "multi_locale_draft_completed",
-            "Draft previews are ready for review. Open each language below.",
+            "Draft previews are ready for review. Shopify was not updated. Open each language below.",
         )
     if needs_configuration and needs_configuration == locale_count:
         return (
             "multi_locale_draft_needs_configuration",
-            "Draft generation could not run because OpenAI configuration is missing.",
+            "Draft generation could not run because OpenAI configuration is missing. Shopify was not updated.",
         )
     if skipped and skipped == locale_count:
         return (
             "multi_locale_draft_skipped",
-            "No missing draft fields were found for the selected languages.",
+            "No missing draft fields were found for the selected languages. Shopify was not updated.",
         )
     return (
         "multi_locale_draft_failed",
-        "Draft generation finished with issues. Review each language below.",
+        "Draft generation finished with issues. Shopify was not updated. Review each language below.",
     )
 
 
