@@ -10,9 +10,10 @@ from datetime import datetime
 from urllib.error import HTTPError, URLError
 
 import requests
+from django.core.exceptions import FieldDoesNotExist
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q
+from django.db.models import F, Q
 from django.http import (
     HttpResponse,
     HttpResponseBadRequest,
@@ -36,6 +37,7 @@ from .translation_console import (
     SUPPORTED_TRANSLATION_LOCALES,
     ShopifyTranslationConsoleError,
     fetch_translation_console_data,
+    normalize_product_gid,
 )
 from .translation_apply_plan import (
     APPLY_PLAN_HTML_PATH,
@@ -88,6 +90,24 @@ SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_states"
 SHOPIFY_SHOP_DOMAIN_RE = re.compile(
     r"^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$"
 )
+TRANSLATION_CONSOLE_PRODUCT_SELECTOR_LIMIT = 50
+TRANSLATION_CONSOLE_PRODUCT_SELECTOR_SORT_FIELDS = [
+    "shopify_published_at",
+    "shopify_product_created_at",
+    "shopify_product_updated_at",
+    "id",
+]
+TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
+    "product_title",
+    "shopify_product_id",
+    "shopify_variant_id",
+    "sku",
+    "variant_title",
+    "handle",
+    "vendor",
+    "product_type",
+    "status",
+]
 
 
 def _shopify_configured():
@@ -577,10 +597,40 @@ def translation_console(request):
         or is_real_write_manual_action_package_post
         or is_status_only_safe_action_post
     )
-    raw_search_text = request.POST.get("q", "") if is_post_action else request.GET.get("q", "")
+    product_search_text = (
+        request.POST.get("product_search_q", "")
+        if is_post_action
+        else request.GET.get("q", "")
+    ).strip()
+    raw_selected_product_gid = (
+        request.POST.get("selected_product_gid", "")
+        if is_post_action
+        else request.GET.get("selected_product_gid", "")
+    )
+    raw_manual_product_gid = (
+        request.POST.get("manual_product_gid", "")
+        if is_post_action
+        else request.GET.get("manual_product_gid", "")
+    )
+    raw_post_product_query = request.POST.get("q", "") if is_post_action else ""
     raw_locale = request.POST.get("locale", "ja") if is_post_action else request.GET.get("locale", "ja")
-    search_text = (raw_search_text or "").strip()
     locale = ((raw_locale or "ja") or "ja").strip()
+    product_selector = _build_translation_console_product_selector(
+        product_search_text=product_search_text,
+        requested_product_gid=raw_selected_product_gid or raw_manual_product_gid,
+    )
+    selected_product_gid = product_selector.get("selected_product_gid", "")
+    explicit_selected_product_gid = normalize_product_gid(raw_selected_product_gid or "") or ""
+    manual_product_gid = normalize_product_gid(raw_manual_product_gid or "") or ""
+    explicit_post_product_gid = normalize_product_gid(raw_post_product_query or "") or ""
+    action_product_query = ""
+    if is_post_action:
+        action_product_query = (
+            explicit_selected_product_gid or manual_product_gid or explicit_post_product_gid
+        )
+    else:
+        action_product_query = selected_product_gid or manual_product_gid
+    search_text = action_product_query if is_post_action else product_search_text
     shop_domain = "kidstoylover.myshopify.com"
     result = {
         "shopify_read_only": True,
@@ -597,7 +647,7 @@ def translation_console(request):
         "translatable_resource": {},
         "translatable_rows": [],
         "locale": locale,
-        "search_text": search_text,
+        "search_text": product_search_text,
     }
     error_message = ""
     draft_result = None
@@ -618,12 +668,17 @@ def translation_console(request):
     manual_action_package_error_message = ""
     safe_action_result = None
     workflow_product_id = (
-        search_text
-        if search_text.startswith("gid://shopify/Product/")
+        selected_product_gid
+        if selected_product_gid.startswith("gid://shopify/Product/")
         else TRANSLATION_WORKFLOW_DEFAULT_PRODUCT_ID
     )
 
-    if search_text and not is_status_only_safe_action_post:
+    should_run_translation_lookup = bool(action_product_query) and (
+        (request.method == "POST" and not is_status_only_safe_action_post)
+        or request.GET.get("fetch_read_only") == "1"
+    )
+
+    if should_run_translation_lookup:
         try:
             installation = ShopifyInstallation.objects.first()
             if installation is None:
@@ -638,7 +693,9 @@ def translation_console(request):
                 or is_real_write_executor_post
                 or is_real_write_manual_action_package_post
             ):
-                selected_product_id = _resolve_translation_console_product_id(installation, search_text, locale)
+                selected_product_id = _resolve_translation_console_product_id(
+                    installation, action_product_query, locale
+                )
                 if selected_product_id:
                     workflow_product_id = selected_product_id
                     result.update(fetch_translation_console_data(installation, selected_product_id, locale))
@@ -667,14 +724,7 @@ def translation_console(request):
                                 if not draft_result.get("blocking_conditions")
                                 else "Draft dry-run stayed no-write but has blocking conditions."
                             ),
-                            summary={
-                                "product_id": draft_result.get("product_id", ""),
-                                "product_title": draft_result.get("product_title", ""),
-                                "draft_entry_count": draft_result.get("draft_entry_count"),
-                                "skipped_entry_count": draft_result.get("skipped_entry_count"),
-                                "blocking_conditions": draft_result.get("blocking_conditions")
-                                or [],
-                            },
+                            summary=_translation_console_draft_summary(draft_result),
                         )
                     if (
                         is_apply_plan_post
@@ -852,7 +902,7 @@ def translation_console(request):
                             "Select a single Shopify product before generating a real write manual action package."
                         )
             else:
-                result.update(fetch_translation_console_data(installation, search_text, locale))
+                result.update(fetch_translation_console_data(installation, action_product_query, locale))
                 product = result.get("product") or {}
                 if product.get("id"):
                     workflow_product_id = product["id"]
@@ -912,6 +962,10 @@ def translation_console(request):
         {
             "title": "Shopify Product Translation Console",
             "search_text": search_text,
+            "product_search_text": product_search_text,
+            "product_selector": product_selector,
+            "selected_product_gid": selected_product_gid,
+            "manual_product_gid": manual_product_gid,
             "selected_locale": locale,
             "supported_locales": SUPPORTED_TRANSLATION_LOCALES,
             "shop_domain": shop_domain,
@@ -962,6 +1016,131 @@ def translation_console(request):
     )
 
 
+def _build_translation_console_product_selector(
+    product_search_text: str,
+    requested_product_gid: str = "",
+    limit: int = TRANSLATION_CONSOLE_PRODUCT_SELECTOR_LIMIT,
+):
+    query = (product_search_text or "").strip()
+    requested_gid = normalize_product_gid((requested_product_gid or "").strip()) or ""
+    queryset = ShopifyProduct.objects.all()
+    supported_fields = _translation_console_supported_product_search_fields()
+    for term in [part for part in query.split() if part.strip()]:
+        queryset = queryset.filter(_translation_console_product_search_q(term, supported_fields))
+    queryset = queryset.order_by(
+        F("shopify_published_at").desc(nulls_last=True),
+        F("shopify_product_created_at").desc(nulls_last=True),
+        F("shopify_product_updated_at").desc(nulls_last=True),
+        F("id").desc(),
+    )
+
+    product_options = []
+    seen_product_ids = set()
+    for product in queryset[: max(limit * 20, limit)]:
+        product_id = getattr(product, "shopify_product_id", None)
+        if not product_id or product_id in seen_product_ids:
+            continue
+        seen_product_ids.add(product_id)
+        product_gid = f"gid://shopify/Product/{product_id}"
+        product_options.append(
+            {
+                "gid": product_gid,
+                "numeric_id": str(product_id),
+                "title": product.product_title or "(untitled product)",
+                "handle": product.handle or "",
+                "vendor": product.vendor or "",
+                "product_type": product.product_type or "",
+                "sku": product.sku or "",
+                "status": product.status or "",
+                "published_at": _format_optional_datetime(product.shopify_published_at),
+                "created_at": _format_optional_datetime(product.shopify_product_created_at),
+                "updated_at": _format_optional_datetime(product.shopify_product_updated_at),
+                "sort_timestamp": _format_optional_datetime(
+                    product.shopify_published_at
+                    or product.shopify_product_created_at
+                    or product.shopify_product_updated_at
+                ),
+            }
+        )
+        if len(product_options) >= limit:
+            break
+
+    selected_gid = requested_gid
+    if not selected_gid:
+        selected_gid = product_options[0]["gid"] if product_options else requested_gid
+
+    return {
+        "product_options": product_options,
+        "selected_product_gid": selected_gid,
+        "selected_product": _find_selector_option(product_options, selected_gid),
+        "product_search_text": query,
+        "result_count": len(product_options),
+        "limit": limit,
+        "has_products": bool(product_options),
+        "no_matching_products": bool(query) and not product_options,
+        "no_products_available": not query and not product_options,
+        "sort_fields": TRANSLATION_CONSOLE_PRODUCT_SELECTOR_SORT_FIELDS,
+        "search_supported_fields": supported_fields,
+    }
+
+
+def _translation_console_supported_product_search_fields():
+    supported = []
+    for field_name in TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS:
+        if _model_has_field(ShopifyProduct, field_name):
+            supported.append(field_name)
+    return supported
+
+
+def _translation_console_product_search_q(term: str, supported_fields: list[str]):
+    value = (term or "").strip()
+    query = Q()
+    if not value:
+        return query
+    for field_name in supported_fields:
+        if field_name in {"shopify_product_id", "shopify_variant_id"}:
+            continue
+        query |= Q(**{f"{field_name}__icontains": value})
+    numeric_id = _extract_shopify_numeric_id(value)
+    if numeric_id:
+        if "shopify_product_id" in supported_fields:
+            query |= Q(shopify_product_id=numeric_id)
+        if "shopify_variant_id" in supported_fields:
+            query |= Q(shopify_variant_id=numeric_id)
+    return query
+
+
+def _extract_shopify_numeric_id(value: str):
+    normalized_gid = normalize_product_gid(value)
+    if normalized_gid:
+        return int(normalized_gid.rsplit("/", 1)[-1])
+    numeric = (value or "").strip()
+    if numeric.isdigit():
+        return int(numeric)
+    return None
+
+
+def _find_selector_option(product_options, selected_gid: str):
+    for option in product_options:
+        if option.get("gid") == selected_gid:
+            return option
+    return {}
+
+
+def _format_optional_datetime(value):
+    if not value:
+        return ""
+    return value.isoformat()
+
+
+def _model_has_field(model, field_name: str) -> bool:
+    try:
+        model._meta.get_field(field_name)
+    except FieldDoesNotExist:
+        return False
+    return True
+
+
 def _resolve_translation_console_product_id(installation, search_text, locale):
     fetched = fetch_translation_console_data(installation, search_text, locale)
     product = fetched.get("product") or {}
@@ -993,6 +1172,40 @@ def _translation_console_safe_action_result(
         "publish_performed": False,
         "apply_performed": False,
         "real_apply_performed": False,
+    }
+
+
+def _translation_console_draft_summary(draft_result: dict):
+    if not draft_result:
+        return {"blocking_conditions": ["missing_draft_result"]}
+    seo_warning_count = (
+        int(draft_result.get("seo_needs_manual_review_count") or 0)
+        + int(draft_result.get("over_length_after_rewrite_count") or 0)
+        + int(draft_result.get("forbidden_phrase_count") or 0)
+        + int(draft_result.get("missing_core_keyword_count") or 0)
+        + int(draft_result.get("too_short_for_seo_count") or 0)
+    )
+    skipped_count = (
+        int(draft_result.get("skipped_existing_translation_count") or 0)
+        + int(draft_result.get("skipped_outdated_translation_count") or 0)
+        + int(draft_result.get("skipped_source_empty_count") or 0)
+    )
+    return {
+        "selected_product_title": draft_result.get("product_title", ""),
+        "selected_product_gid": draft_result.get("product_id", ""),
+        "locales": ", ".join(draft_result.get("target_locales") or []),
+        "configured_fields": ", ".join(draft_result.get("requested_fields") or []),
+        "draft_status": draft_result.get("draft_status", ""),
+        "draft_entry_count": draft_result.get("generated_draft_count", 0),
+        "skipped_count": skipped_count,
+        "seo_warning_count": seo_warning_count,
+        "blocking_conditions": draft_result.get("blocking_conditions") or [],
+        "shopify_write_performed": draft_result.get("shopify_write_performed", False),
+        "mutation_performed": draft_result.get("mutation_performed", False),
+        "translations_register_called": draft_result.get(
+            "translations_register_called", False
+        ),
+        "rollback_performed": draft_result.get("rollback_performed", False),
     }
 
 

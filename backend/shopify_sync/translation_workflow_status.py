@@ -29,7 +29,7 @@ AUDIT_REPORT_CANDIDATES = []
 
 def load_translation_workflow_status(product_id: str) -> dict:
     selected_product_id = (product_id or "").strip() or DEFAULT_SELECTED_PRODUCT_ID
-    report, report_path, report_source, warnings = _load_latest_report()
+    report, report_path, report_source, warnings = _load_latest_report(selected_product_id)
     workflow_status = _workflow_status_from_report(report)
 
     return {
@@ -58,7 +58,7 @@ def load_translation_workflow_status(product_id: str) -> dict:
     }
 
 
-def _load_latest_report() -> tuple[dict, Path | None, str, list[str]]:
+def _load_latest_report(product_id: str = "") -> tuple[dict, Path | None, str, list[str]]:
     warnings = []
     candidate_paths = _audit_report_candidates()
     for path, source in candidate_paths:
@@ -70,6 +70,9 @@ def _load_latest_report() -> tuple[dict, Path | None, str, list[str]]:
             warnings.append(f"{path.name}: {exc.__class__.__name__}")
             continue
         if isinstance(data, dict):
+            if product_id and not _report_matches_product(data, product_id):
+                warnings.append(f"{path.name}: product_id_mismatch")
+                continue
             return data, path, source, warnings
         warnings.append(f"{path.name}: not_a_json_object")
     if not warnings:
@@ -83,6 +86,20 @@ def _load_latest_report() -> tuple[dict, Path | None, str, list[str]]:
         if searched:
             warnings.append(f"searched_paths={searched}")
     return {}, None, "", warnings
+
+
+def _report_matches_product(report: dict, product_id: str) -> bool:
+    report_product_id = str(
+        report.get("product_id")
+        or report.get("readback_target_product_id")
+        or report.get("locked_next_batch_target_product_id")
+        or report.get("locked_small_batch_target_product_id")
+        or report.get("locked_remaining_title_batch_target_product_id")
+        or ""
+    ).strip()
+    if not report_product_id:
+        return False
+    return report_product_id == product_id
 
 
 def _audit_report_candidates() -> list[tuple[Path, str]]:

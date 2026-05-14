@@ -33,27 +33,116 @@
   </div>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Product selector</h2>
+    <p>This selector uses local synced ShopifyProduct rows only. It does not call Shopify or OpenAI.</p>
+    <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
+      <div>
+        <label for="id_product_search_q">Search products</label><br>
+        <input id="id_product_search_q" type="text" name="q" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="title, gid, product id, handle, vendor, product type, SKU">
+      </div>
+      <div>
+        <label for="id_product_search_locale">Preview locale</label><br>
+        <select id="id_product_search_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button">Search local products</button>
+      <a class="button" href="?">Clear search</a>
+    </form>
+    <p>Current search: {% if product_search_text %}<strong>{{ product_search_text }}</strong>{% else %}recent products{% endif %}. Results shown: {{ product_selector.result_count }} of max {{ product_selector.limit }}.</p>
+    <p>Sort order: {{ product_selector.sort_fields|join:", " }} descending, newest first. Search fields: {{ product_selector.search_supported_fields|join:", " }}.</p>
+    {% if product_selector.no_products_available %}
+      <p><strong>No products available.</strong> Sync Shopify products first, or use the manual product ID fallback below.</p>
+    {% elif product_selector.no_matching_products %}
+      <p><strong>No matching products.</strong> Try another keyword or clear search.</p>
+    {% endif %}
+    <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+      <input type="hidden" name="q" value="{{ product_search_text }}">
+      <div>
+        <label for="id_selected_product_gid">Select product</label><br>
+        <select id="id_selected_product_gid" name="selected_product_gid" style="min-width: 620px;">
+          {% if product_selector.product_options %}
+            {% for product in product_selector.product_options %}
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }} | {{ product.sort_timestamp }}</option>
+            {% endfor %}
+          {% else %}
+            <option value="">No products available</option>
+          {% endif %}
+        </select>
+      </div>
+      <div>
+        <label for="id_selector_locale">Preview locale</label><br>
+        <select id="id_selector_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button">Select product</button>
+    </form>
+    <details style="margin-top: 12px;">
+      <summary>Advanced manual product ID fallback</summary>
+      <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 8px;">
+        <input type="hidden" name="q" value="{{ product_search_text }}">
+        <div>
+          <label for="id_manual_product_gid">Product gid or numeric product id</label><br>
+          <input id="id_manual_product_gid" type="text" name="manual_product_gid" value="{{ manual_product_gid }}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+        </div>
+        <div>
+          <label for="id_manual_locale">Preview locale</label><br>
+          <select id="id_manual_locale" name="locale">
+            {% for locale in supported_locales %}
+              <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="button">Use manual product ID</button>
+      </form>
+    </details>
+    {% if product_selector.selected_product %}
+      <table style="margin-top: 12px;">
+        <tbody>
+          <tr><th>Selected product title</th><td>{{ product_selector.selected_product.title }}</td></tr>
+          <tr><th>Selected product gid</th><td>{{ product_selector.selected_product.gid }}</td></tr>
+          <tr><th>Published at</th><td>{{ product_selector.selected_product.published_at }}</td></tr>
+          <tr><th>Created at</th><td>{{ product_selector.selected_product.created_at }}</td></tr>
+          <tr><th>Updated at</th><td>{{ product_selector.selected_product.updated_at }}</td></tr>
+          <tr><th>Handle</th><td>{{ product_selector.selected_product.handle }}</td></tr>
+          <tr><th>Vendor</th><td>{{ product_selector.selected_product.vendor }}</td></tr>
+          <tr><th>Product type</th><td>{{ product_selector.selected_product.product_type }}</td></tr>
+          <tr><th>Sample SKU</th><td>{{ product_selector.selected_product.sku }}</td></tr>
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Safe Actions</h2>
     <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> These actions cannot run Shopify writes, mutations, rollback, or real apply flows.</p>
     <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="refresh_status">
-        <input type="hidden" name="q" value="{{ workflow_status.product_id }}">
+        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Refresh workflow status</button>
       </form>
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="generate_draft_dry_run">
-        <input type="hidden" name="q" value="{{ workflow_status.product_id }}">
+        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Generate draft package dry-run</button>
       </form>
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="generate_locked_package_dry_run_placeholder">
-        <input type="hidden" name="q" value="{{ workflow_status.product_id }}">
+        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Generate locked package dry-run</button>
       </form>
@@ -104,9 +193,11 @@
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Fetch read-only product translation data</h2>
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+      <input type="hidden" name="fetch_read_only" value="1">
+      <input type="hidden" name="q" value="{{ product_search_text }}">
       <div>
-        <label for="id_q">Product ID, title, or handle</label><br>
-        <input id="id_q" type="text" name="q" value="{{ search_text }}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
+        <label for="id_fetch_selected_product_gid">Product gid</label><br>
+        <input id="id_fetch_selected_product_gid" type="text" name="selected_product_gid" value="{{ selected_product_gid }}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
       </div>
       <div>
         <label for="id_locale">Target locale</label><br>
