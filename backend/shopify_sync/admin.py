@@ -3154,6 +3154,36 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
 
     mark_paid.short_description = "深圳仓确认收款 / 标记已支付"
 
+    def _old_settlement_batch_guard_message(self, order):
+        active_group_link = (
+            order.merged_settlement_group_links.select_related("group")
+            .filter(group__status__in=ShenzhenMergedSettlementGroupOrder.ACTIVE_GROUP_STATUSES)
+            .order_by("-added_at", "id")
+            .first()
+        )
+        if active_group_link:
+            group = active_group_link.group
+            group_label = group.group_no or f"Group ID {group.pk}"
+            return f"订单 {self._merge_order_label(order)} 已属于合并结算组 {group_label}，请从合并组加入结算批次。"
+
+        active_coverage = (
+            SettlementBatchEntryCoveredOrder.objects.select_related(
+                "entry",
+                "entry__settlement_batch",
+            )
+            .filter(order=order, released_at__isnull=True)
+            .order_by("id")
+            .first()
+        )
+        if active_coverage:
+            batch_no = active_coverage.entry.settlement_batch.batch_no
+            return (
+                f"订单 {self._merge_order_label(order)} 已被未释放的 SettlementBatchEntry "
+                f"覆盖（{batch_no}），不能通过 old orders 批次单独结算。"
+            )
+
+        return None
+
     def add_to_settlement_batch(self, request, queryset):
         if not (self.is_finance_user(request) or self.is_super_admin(request)):
             self.message_user(request, "只有 Finance 或超级管理员可以执行此操作。")
@@ -3169,6 +3199,27 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if eligible_orders.count() == 0:
             self.message_user(request, "没有符合条件的订单可加入新的结算批次。")
             return
+
+        blocked_order_ids = []
+        guard_messages = []
+        for order in eligible_orders.prefetch_related("merged_settlement_group_links__group"):
+            guard_message = self._old_settlement_batch_guard_message(order)
+            if guard_message:
+                blocked_order_ids.append(order.pk)
+                guard_messages.append(guard_message)
+
+        if guard_messages:
+            for guard_message in guard_messages[:10]:
+                self.message_user(request, guard_message, level=messages.ERROR)
+            if len(guard_messages) > 10:
+                self.message_user(
+                    request,
+                    f"另有 {len(guard_messages) - 10} 个订单被合并组/entry 防重复规则阻止。",
+                    level=messages.ERROR,
+                )
+            eligible_orders = eligible_orders.exclude(pk__in=blocked_order_ids)
+            if eligible_orders.count() == 0:
+                return
 
         from .sync_helpers import allocate_package_costs as recalc_package_total
 
@@ -3804,6 +3855,8 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
 
                     group.settlement_status = "pending_payment"
                     group.save(update_fields=["settlement_status", "updated_at"])
+
+                batch.update_total_amount()
         except (IntegrityError, ValidationError) as exc:
             self.message_user(request, f"未创建结算批次：{exc}", level=messages.ERROR)
             return
@@ -3812,8 +3865,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             request,
             (
                 f"已创建结算批次 {batch.batch_no}；已加入 {len(validations)} 个合并组；"
-                f"覆盖 {covered_orders_count} 个订单。提醒：本阶段 batch total / CSV 仍未切换到 entries，"
-                "Phase E5 完成后才正式用于付款导出。"
+                f"覆盖 {covered_orders_count} 个订单。batch total / CSV 将按 entries 汇总和导出。"
             ),
             level=messages.SUCCESS,
         )
@@ -4133,29 +4185,64 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if not obj or not obj.pk:
             return "-"
 
+        active_entries = obj.entries.exclude(
+            status=SettlementBatchEntry.STATUS_CANCELLED,
+        )
+        has_active_entries = active_entries.exists()
         old_order_ids = set(obj.orders.values_list("id", flat=True))
-        entries_count = obj.entries.count()
+        old_orders_amount_total = sum(
+            (order.total_locked_cost_rmb or ZERO)
+            for order in obj.orders.all()
+        )
+        entries_amount_total = sum(
+            (entry.amount_rmb or ZERO)
+            for entry in active_entries
+        )
         covered_orders = SettlementBatchEntryCoveredOrder.objects.filter(
-            entry__settlement_batch=obj,
+            entry__in=active_entries,
+            released_at__isnull=True,
         )
         covered_orders_count = covered_orders.count()
         covered_order_ids = set(covered_orders.values_list("order_id", flat=True))
         duplicate_count = len(old_order_ids & covered_order_ids)
 
-        warning = ""
-        if duplicate_count:
-            warning = format_html(
+        summary_mode = "entries" if has_active_entries else "old orders"
+        summary_notice = (
+            "当前批次金额按 entries 汇总。"
+            if has_active_entries
+            else "当前批次金额按 old orders 汇总。"
+        )
+        notices = [
+            format_html(
+                '<div style="margin-top:8px;padding:8px 10px;border:1px solid #b2ddff;'
+                'background:#eff8ff;color:#175cd3;border-radius:4px;font-weight:600;">'
+                '{}</div>',
+                summary_notice,
+            )
+        ]
+        if has_active_entries and old_order_ids:
+            notices.append(format_html(
                 '<div style="margin-top:8px;padding:8px 10px;border:1px solid #fecdca;'
                 'background:#fffbfa;color:#b42318;border-radius:4px;font-weight:600;">'
-                '存在重复结算风险：{} 个 old orders 同时出现在 entries covered orders 中。'
-                '本提示只读显示，不自动修复，不改变 total / CSV / payment flow。'
+                '该批次同时包含旧订单和 entries，金额按 entries 汇总，请检查重复风险。'
+                '</div>'
+            ))
+        if duplicate_count:
+            notices.append(format_html(
+                '<div style="margin-top:8px;padding:8px 10px;border:1px solid #fecdca;'
+                'background:#fffbfa;color:#b42318;border-radius:4px;font-weight:600;">'
+                '存在重复结算风险：{} 个 old orders 同时出现在 active entries covered orders 中。'
                 '</div>',
                 duplicate_count,
-            )
+            ))
 
         rows = (
+            ("汇总口径", summary_mode),
+            ("entries amount total", self._format_batch_amount(entries_amount_total)),
+            ("old orders amount total", self._format_batch_amount(old_orders_amount_total)),
+            ("current batch total", self._format_batch_amount(obj.total_amount_rmb)),
             ("old orders count", len(old_order_ids)),
-            ("new entries count", entries_count),
+            ("active entries count", active_entries.count()),
             ("covered orders count", covered_orders_count),
             ("potential duplicate risk count", duplicate_count),
         )
@@ -4166,7 +4253,7 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 '<tr><th style="text-align:left;padding:3px 16px 3px 0;">{}</th><td>{}</td></tr>',
                 rows,
             ),
-            warning,
+            format_html_join("", "{}", ((notice,) for notice in notices)),
         )
     settlement_entry_summary.short_description = "Settlement entry summary"
 
@@ -4220,71 +4307,216 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             self.message_user(request, f"有 {skipped_missing_proof} 个结算批次未确认：缺少付款凭证。", level=messages.WARNING)
     mark_batch_paid.short_description = "深圳仓确认收款 / 标记已支付"
 
-    def export_batch_csv(self, request, queryset):
-        incomplete_orders = [
-            order.order_name
-            for batch in queryset
-            for order in batch.orders.all()
-            if not shenzhen_item_costs_completed(order)
+    def _active_batch_entries(self, batch):
+        return batch.entries.exclude(
+            status=SettlementBatchEntry.STATUS_CANCELLED,
+        ).select_related("order", "merged_group").order_by("created_at", "id")
+
+    def _entries_csv_header(self):
+        return [
+            "batch_no",
+            "entry_type",
+            "order_name",
+            "group_no",
+            "member_order_names",
+            "shipping_name",
+            "shipping_phone",
+            "shipping_address1",
+            "shipping_address2",
+            "shipping_city",
+            "shipping_province",
+            "shipping_zip",
+            "shipping_country",
+            "product_cost_total_rmb",
+            "shipping_cost_rmb",
+            "ordering_cost_rmb",
+            "merged_shipping_cost_rmb",
+            "merged_ordering_cost_rmb",
+            "group_total_cost_rmb",
+            "amount_rmb",
+            "note",
         ]
-        if incomplete_orders:
+
+    def _order_entry_csv_row(self, batch, entry):
+        order = entry.order
+        totals = order_package_cost_totals(order)
+        return [
+            batch.batch_no,
+            SettlementBatchEntry.ENTRY_TYPE_ORDER,
+            self._batch_order_label(order),
+            "",
+            "",
+            order.shipping_name or "",
+            order.shipping_phone or "",
+            order.shipping_address1 or "",
+            order.shipping_address2 or "",
+            order.shipping_city or "",
+            order.shipping_province or "",
+            order.shipping_zip or "",
+            order.shipping_country or "",
+            totals["product_cost"],
+            totals["shipping_cost"],
+            totals["ordering_cost"],
+            "",
+            "",
+            "",
+            entry.amount_rmb,
+            entry.note or "",
+        ]
+
+    def _merged_group_entry_csv_row(self, batch, entry):
+        group = entry.merged_group
+        summary = group.group_cost_summary()
+        member_orders = [
+            group_link.order
+            for group_link in group.group_orders.select_related("order").order_by("added_at", "id")
+        ]
+        return [
+            batch.batch_no,
+            SettlementBatchEntry.ENTRY_TYPE_MERGED_GROUP,
+            "",
+            group.group_no or group.pk,
+            ", ".join(self._batch_order_label(order) for order in member_orders),
+            group.shipping_name,
+            group.shipping_phone,
+            group.shipping_address1,
+            group.shipping_address2,
+            group.shipping_city,
+            group.shipping_province,
+            group.shipping_zip,
+            group.shipping_country,
+            summary["group_product_cost_rmb"],
+            summary["group_shipping_cost_rmb"],
+            summary["group_ordering_cost_rmb"],
+            group.merged_shipping_cost_rmb,
+            group.merged_ordering_cost_rmb,
+            summary["group_total_cost_rmb"],
+            entry.amount_rmb,
+            entry.note or group.note or "",
+        ]
+
+    def export_batch_csv(self, request, queryset):
+        batches = list(queryset)
+        batches_with_entries = [
+            batch for batch in batches
+            if self._active_batch_entries(batch).exists()
+        ]
+        entries_mode = bool(batches_with_entries)
+
+        if entries_mode and len(batches_with_entries) != len(batches):
             self.message_user(
                 request,
-                f"以下订单产品成本或包裹费用未完整，无法导出 CSV：{', '.join(incomplete_orders[:10])}",
+                "请分开导出：包含 active entries 的批次使用 entries CSV，old orders 批次使用旧 CSV。",
                 level=messages.WARNING,
             )
             return
 
+        if not entries_mode:
+            incomplete_orders = [
+                order.order_name
+                for batch in batches
+                for order in batch.orders.all()
+                if not shenzhen_item_costs_completed(order)
+            ]
+            if incomplete_orders:
+                self.message_user(
+                    request,
+                    f"以下订单产品成本或包裹费用未完整，无法导出 CSV：{', '.join(incomplete_orders[:10])}",
+                    level=messages.WARNING,
+                )
+                return
+
+            rows = []
+            for batch in batches:
+                for order in batch.orders.all().select_related("settlement_batch"):
+                    for item in shenzhen_order_items(order):
+                        package = item.package
+                        product_line_total = item_product_cost_total(item)
+                        package_totals = package_cost_totals(package) if package else None
+                        rows.append([
+                            batch.batch_no,
+                            order.order_name,
+                            order.shipping_country,
+                            item.sku,
+                            package.package_no if package else "",
+                            package.tracking_number if package else "",
+                            package.carrier if package else "",
+                            package.shipping_cost_rmb if package else "",
+                            package.ordering_cost_rmb if package else "",
+                            package_totals["total_cost"] if package_totals else "",
+                            item.quantity,
+                            item.locked_product_cost_rmb,
+                            product_line_total,
+                            item.locked_shipping_cost_rmb,
+                            item.handling_fee_rmb,
+                            item.total_cost_rmb,
+                            order.total_locked_cost_rmb,
+                            order.tracking_number,
+                        ])
+            response = HttpResponse(content_type="text/csv")
+            response["Content-Disposition"] = "attachment; filename=settlement_reconciliation.csv"
+            writer = csv.writer(response)
+            writer.writerow([
+                "batch_no",
+                "order_name",
+                "shipping_country",
+                "sku",
+                "package_no",
+                "package_tracking_number",
+                "package_carrier",
+                "package_shipping_cost_rmb",
+                "package_ordering_cost_rmb",
+                "package_current_total_cost_rmb",
+                "quantity",
+                "unit_product_cost_rmb",
+                "item_product_cost_total_rmb",
+                "item_shipping_cost_rmb",
+                "item_ordering_cost_rmb",
+                "item_total_cost_rmb",
+                "order_total_cost_rmb",
+                "tracking_number",
+            ])
+            for row in rows:
+                writer.writerow(row)
+            return response
+
         rows = []
-        for batch in queryset:
-            for order in batch.orders.all().select_related("settlement_batch"):
-                for item in shenzhen_order_items(order):
-                    package = item.package
-                    product_line_total = item_product_cost_total(item)
-                    package_totals = package_cost_totals(package) if package else None
-                    rows.append([
-                        batch.batch_no,
-                        order.order_name,
-                        order.shipping_country,
-                        item.sku,
-                        package.package_no if package else "",
-                        package.tracking_number if package else "",
-                        package.carrier if package else "",
-                        package.shipping_cost_rmb if package else "",
-                        package.ordering_cost_rmb if package else "",
-                        package_totals["total_cost"] if package_totals else "",
-                        item.quantity,
-                        item.locked_product_cost_rmb,
-                        product_line_total,
-                        item.locked_shipping_cost_rmb,
-                        item.handling_fee_rmb,
-                        item.total_cost_rmb,
-                        order.total_locked_cost_rmb,
-                        order.tracking_number,
-                    ])
+        incomplete_entries = []
+        for batch in batches:
+            for entry in self._active_batch_entries(batch):
+                if entry.entry_type == SettlementBatchEntry.ENTRY_TYPE_ORDER:
+                    if not entry.order_id:
+                        incomplete_entries.append(f"{batch.batch_no}: order entry {entry.pk} missing order")
+                        continue
+                    if not shenzhen_item_costs_completed(entry.order):
+                        incomplete_entries.append(f"{batch.batch_no}: {self._batch_order_label(entry.order)}")
+                        continue
+                    rows.append(self._order_entry_csv_row(batch, entry))
+                    continue
+
+                if entry.entry_type == SettlementBatchEntry.ENTRY_TYPE_MERGED_GROUP:
+                    if not entry.merged_group_id:
+                        incomplete_entries.append(f"{batch.batch_no}: merged_group entry {entry.pk} missing group")
+                        continue
+                    summary = entry.merged_group.group_cost_summary()
+                    if not summary["cost_completed"]:
+                        group_label = entry.merged_group.group_no or f"Group ID {entry.merged_group_id}"
+                        incomplete_entries.append(f"{batch.batch_no}: {group_label}")
+                        continue
+                    rows.append(self._merged_group_entry_csv_row(batch, entry))
+
+        if incomplete_entries:
+            self.message_user(
+                request,
+                f"以下 entries 成本未完整或引用缺失，无法导出 CSV：{', '.join(incomplete_entries[:10])}",
+                level=messages.WARNING,
+            )
+            return
+
         response = HttpResponse(content_type="text/csv")
-        response["Content-Disposition"] = "attachment; filename=settlement_reconciliation.csv"
+        response["Content-Disposition"] = "attachment; filename=settlement_reconciliation_entries.csv"
         writer = csv.writer(response)
-        writer.writerow([
-            "batch_no",
-            "order_name",
-            "shipping_country",
-            "sku",
-            "package_no",
-            "package_tracking_number",
-            "package_carrier",
-            "package_shipping_cost_rmb",
-            "package_ordering_cost_rmb",
-            "package_current_total_cost_rmb",
-            "quantity",
-            "unit_product_cost_rmb",
-            "item_product_cost_total_rmb",
-            "item_shipping_cost_rmb",
-            "item_ordering_cost_rmb",
-            "item_total_cost_rmb",
-            "order_total_cost_rmb",
-            "tracking_number",
-        ])
+        writer.writerow(self._entries_csv_header())
         for row in rows:
             writer.writerow(row)
         return response

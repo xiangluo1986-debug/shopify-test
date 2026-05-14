@@ -2,6 +2,7 @@
 
 ## 2026-05-14
 
+- Added Phase E5 merged Shenzhen settlement batch totals and CSV support: batches with active entries now total from `SettlementBatchEntry.amount_rmb`, entries CSV exports one row per order/group entry, mixed old-order/entry duplicate warnings are shown, and old order batch creation blocks active merged-group members or unreleased covered orders.
 - Added Phase E3/E4 merged Shenzhen settlement batch Admin support: SettlementBatch read-only old-order/entry duplicate-risk summaries and a Finance/Admin action to create entry-based batches from merged groups without changing totals, CSV export, payment actions, or Shopify sync.
 - Added Phase E2 settlement batch entry structure and read-only Admin visibility for future merged Shenzhen group coverage, without changing current SettlementBatch totals, CSV export, payment actions, or Shopify sync.
 - Added Phase D merged Shenzhen settlement group cost summaries: group-level shipping/ordering cost entry, product-only member item rollup, cost completeness checks, enhanced group Admin detail, member inline cost status, and Shopify Order group warning without changing single-order formulas.

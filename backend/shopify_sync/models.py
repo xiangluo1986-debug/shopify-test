@@ -912,10 +912,19 @@ class SettlementBatch(models.Model):
 
     def update_total_amount(self):
         """重新计算批次总金额"""
-        total = sum(
-            order.total_locked_cost_rmb or 0
-            for order in self.orders.all()
+        active_entries = self.entries.exclude(
+            status=SettlementBatchEntry.STATUS_CANCELLED,
         )
+        if active_entries.exists():
+            total = sum(
+                entry.amount_rmb or Decimal("0.00")
+                for entry in active_entries
+            )
+        else:
+            total = sum(
+                order.total_locked_cost_rmb or Decimal("0.00")
+                for order in self.orders.all()
+            )
         self.total_amount_rmb = total
         self.save(update_fields=['total_amount_rmb'])
 
