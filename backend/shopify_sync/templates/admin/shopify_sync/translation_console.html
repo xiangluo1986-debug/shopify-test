@@ -486,6 +486,15 @@
     background: #eaf2ff;
     color: #123f7a;
   }
+  .tw-status-badge.is-generated {
+    background: #e8f5e9;
+    color: #185c25;
+  }
+  .tw-status-badge.is-failed,
+  .tw-status-badge.is-needs_configuration {
+    background: #fff1f0;
+    color: #8a1f11;
+  }
   .tw-status-badge.is-untranslated,
   .tw-status-badge.is-skipped {
     background: #f2f4f7;
@@ -1159,7 +1168,7 @@
         <li>Choose product and language.</li>
         <li>Generate drafts for the languages you need.</li>
         <li>Open each language preview and review original vs translation.</li>
-        <li>Apply later through the approved PowerShell command.</li>
+        <li>Keep this page for review only. It cannot update Shopify.</li>
       </ol>
     </div>
   </div>
@@ -1187,7 +1196,7 @@
       <button type="submit" class="button">Generate drafts</button>
     </form>
     <p class="tw-muted" style="margin-top: 10px;">Drafts include product title, product description/body, SEO title, and SEO description.</p>
-    <p class="tw-muted">Variants, options, and metafields are visible for review but not included in automatic drafts yet.</p>
+    <p class="tw-muted">Variants, options, and metafields are visible for review but are not included in automatic drafts yet.</p>
 
     {% if multi_locale_draft_result %}
       <h3>Draft results</h3>
@@ -1209,14 +1218,15 @@
                 <tr>
                   <td><strong>{{ row.locale_label }}</strong> ({{ row.locale }})</td>
                   <td>
-                    <span class="tw-status-badge">{{ row.status_label }}</span>
+                    <span class="tw-status-badge is-{{ row.status_key }}">{{ row.status_label }}</span>
                     <div class="tw-muted">{{ row.message }}</div>
+                    {% if row.failure_reason %}<div class="tw-warning">{{ row.failure_reason }}</div>{% endif %}
                   </td>
                   <td>{{ row.draft_field_count }}</td>
                   <td>{{ row.skipped_existing_field_count }}</td>
                   <td>
                     {% if row.locale in supported_locales %}
-                      <form method="post" class="tw-inline-form">
+                      <form method="post" class="tw-inline-form" action="{{ row.preview_url }}">
                         {% csrf_token %}
                         <input type="hidden" name="ui_mode" value="editor">
                         <input type="hidden" name="action" value="generate_multi_locale_drafts">
@@ -1257,6 +1267,7 @@
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Original vs translation</h2>
+    <p class="tw-muted">Showing {{ editor_view.editor_locale_label }} ({{ selected_locale }}) for the selected product.</p>
     {% if editor_view.editor_empty_message %}
       <div class="tw-empty-state">{{ editor_view.editor_empty_message }}</div>
     {% endif %}
