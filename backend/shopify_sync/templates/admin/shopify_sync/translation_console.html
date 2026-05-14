@@ -364,6 +364,12 @@
           <tr><th>target_locales</th><td>{{ draft_result.target_locales|join:", " }}</td></tr>
           <tr><th>requested_fields</th><td>{{ draft_result.requested_fields|join:", " }}</td></tr>
           <tr><th>generated_draft_count</th><td>{{ draft_result.generated_draft_count }}</td></tr>
+          <tr><th>draft_entry_count</th><td>{{ draft_result.translation_console_detail.summary_counts.draft_entry_count }}</td></tr>
+          <tr><th>skipped_entry_count</th><td>{{ draft_result.translation_console_detail.summary_counts.skipped_entry_count }}</td></tr>
+          <tr><th>seo_warning_count</th><td>{{ draft_result.translation_console_detail.summary_counts.seo_warning_count }}</td></tr>
+          <tr><th>ready_for_apply_plan_count</th><td>{{ draft_result.translation_console_detail.summary_counts.ready_for_apply_plan_count }}</td></tr>
+          <tr><th>needs_manual_review_count</th><td>{{ draft_result.translation_console_detail.summary_counts.needs_manual_review_count }}</td></tr>
+          <tr><th>existing_translation_count</th><td>{{ draft_result.translation_console_detail.summary_counts.existing_translation_count }}</td></tr>
           <tr><th>draft_ready_count</th><td>{{ draft_result.draft_ready_count }}</td></tr>
           <tr><th>draft_needs_manual_review_count</th><td>{{ draft_result.draft_needs_manual_review_count }}</td></tr>
           <tr><th>eligible_apply_plan_count</th><td>{{ draft_result.eligible_apply_plan_count }}</td></tr>
@@ -401,75 +407,95 @@
       </table>
     </div>
 
-    {% if draft_result.entries %}
-      <div class="module" style="padding: 12px; margin-bottom: 16px;">
-        <h2>Eligible draft entries</h2>
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Draft entries table</h2>
+      <p><strong>No Shopify write.</strong> Showing up to {{ draft_result.translation_console_detail.max_rows }} rows. Text previews are capped at {{ draft_result.translation_console_detail.preview_chars }} characters.</p>
+      {% if draft_result.translation_console_detail.draft_entries %}
         <table>
           <thead>
             <tr>
               <th>Locale</th>
-              <th>Field</th>
-              <th>Source value</th>
-              <th>Proposed translation</th>
+              <th>Field / resource_key</th>
+              <th>Source preview</th>
+              <th>Proposed translation preview</th>
+              <th>Proposed chars</th>
               <th>Validation</th>
               <th>SEO validation</th>
-              <th>Eligible</th>
+              <th>SEO warning</th>
+              <th>Eligible for apply plan</th>
+              <th>Blocking reasons</th>
+              <th>Current translation present</th>
+              <th>Outdated</th>
             </tr>
           </thead>
           <tbody>
-            {% for entry in draft_result.entries %}
-              {% if entry.eligible_for_apply_plan %}
-                <tr>
-                  <td>{{ entry.locale }}</td>
-                  <td>{{ entry.field }}</td>
-                  <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.source_value }}</td>
-                  <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.draft_value }}</td>
-                  <td>{{ entry.validation_status }}</td>
-                  <td>{{ entry.seo_validation_status }}</td>
-                  <td>{{ entry.eligible_for_apply_plan }}</td>
-                </tr>
-              {% endif %}
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="module" style="padding: 12px; margin-bottom: 16px;">
-        <h2>Draft and skipped entries</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Locale</th>
-              <th>Field</th>
-              <th>Source value</th>
-              <th>Proposed translation</th>
-              <th>Validation</th>
-              <th>Quality notes</th>
-              <th>SEO validation</th>
-              <th>SEO notes</th>
-              <th>Eligible</th>
-              <th>Skip reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for entry in draft_result.entries %}
+            {% for entry in draft_result.translation_console_detail.draft_entries %}
               <tr>
                 <td>{{ entry.locale }}</td>
-                <td>{{ entry.field }}</td>
-                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.source_value }}</td>
-                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.draft_value }}</td>
+                <td>{{ entry.field }} / {{ entry.resource_key }}</td>
+                <td style="max-width: 320px; white-space: pre-wrap;">{{ entry.source_value_preview }}</td>
+                <td style="max-width: 320px; white-space: pre-wrap;">{{ entry.proposed_translation_preview }}</td>
+                <td>{{ entry.proposed_chars }}</td>
                 <td>{{ entry.validation_status }}</td>
-                <td>{{ entry.quality_notes|join:", " }}</td>
                 <td>{{ entry.seo_validation_status }}</td>
-                <td>{{ entry.seo_notes|join:", " }}</td>
+                <td>{{ entry.seo_warning }}</td>
                 <td>{{ entry.eligible_for_apply_plan }}</td>
-                <td>{{ entry.skip_reason }}</td>
+                <td>{{ entry.blocking_reasons }}</td>
+                <td>{{ entry.current_translation_present }}</td>
+                <td>{{ entry.outdated }}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
-      </div>
-    {% endif %}
+        {% if draft_result.translation_console_detail.draft_entries_truncated %}
+          <p>Draft entries truncated to the first {{ draft_result.translation_console_detail.max_rows }} rows.</p>
+        {% endif %}
+      {% else %}
+        <p>No draft entries to display.</p>
+      {% endif %}
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Skipped entries table</h2>
+      <p><strong>No Shopify write.</strong> Existing/current translations and outdated/manual-review entries are listed here when available.</p>
+      {% if draft_result.translation_console_detail.skipped_entries %}
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field</th>
+              <th>Skipped reason</th>
+              <th>Current translation present</th>
+              <th>Outdated</th>
+              <th>Existing translation preview</th>
+              <th>Source preview</th>
+              <th>SEO warning</th>
+              <th>Blocking reasons</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in draft_result.translation_console_detail.skipped_entries %}
+              <tr>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }}</td>
+                <td>{{ entry.skip_reason }}</td>
+                <td>{{ entry.current_translation_present }}</td>
+                <td>{{ entry.outdated }}</td>
+                <td style="max-width: 320px; white-space: pre-wrap;">{{ entry.existing_translation_preview }}</td>
+                <td style="max-width: 320px; white-space: pre-wrap;">{{ entry.source_value_preview }}</td>
+                <td>{{ entry.seo_warning }}</td>
+                <td>{{ entry.blocking_reasons }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if draft_result.translation_console_detail.skipped_entries_truncated %}
+          <p>Skipped entries truncated to the first {{ draft_result.translation_console_detail.max_rows }} rows.</p>
+        {% endif %}
+      {% else %}
+        <p>No skipped entries to display.</p>
+      {% endif %}
+    </div>
   {% endif %}
 
   {% if apply_plan_result %}

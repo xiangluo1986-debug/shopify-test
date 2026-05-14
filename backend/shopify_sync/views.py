@@ -108,6 +108,8 @@ TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
     "product_type",
     "status",
 ]
+TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS = 50
+TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS = 120
 
 
 def _shopify_configured():
@@ -706,6 +708,7 @@ def translation_console(request):
                         fields=TRANSLATION_DRAFT_FIELDS,
                         installation=installation,
                     )
+                    _attach_translation_console_draft_detail(draft_result)
                     if draft_result.get("blocking_conditions"):
                         draft_error_message = (
                             "Draft generation blocked: "
@@ -1178,6 +1181,7 @@ def _translation_console_safe_action_result(
 def _translation_console_draft_summary(draft_result: dict):
     if not draft_result:
         return {"blocking_conditions": ["missing_draft_result"]}
+    detail = draft_result.get("translation_console_detail") or {}
     seo_warning_count = (
         int(draft_result.get("seo_needs_manual_review_count") or 0)
         + int(draft_result.get("over_length_after_rewrite_count") or 0)
@@ -1196,9 +1200,18 @@ def _translation_console_draft_summary(draft_result: dict):
         "locales": ", ".join(draft_result.get("target_locales") or []),
         "configured_fields": ", ".join(draft_result.get("requested_fields") or []),
         "draft_status": draft_result.get("draft_status", ""),
-        "draft_entry_count": draft_result.get("generated_draft_count", 0),
-        "skipped_count": skipped_count,
+        "draft_entry_count": detail.get(
+            "draft_entry_count", draft_result.get("generated_draft_count", 0)
+        ),
+        "skipped_entry_count": detail.get("skipped_entry_count", skipped_count),
         "seo_warning_count": seo_warning_count,
+        "ready_for_apply_plan_count": draft_result.get("eligible_apply_plan_count", 0),
+        "needs_manual_review_count": draft_result.get(
+            "draft_needs_manual_review_count", 0
+        ),
+        "existing_translation_count": draft_result.get(
+            "skipped_existing_translation_count", 0
+        ),
         "blocking_conditions": draft_result.get("blocking_conditions") or [],
         "shopify_write_performed": draft_result.get("shopify_write_performed", False),
         "mutation_performed": draft_result.get("mutation_performed", False),
@@ -1207,6 +1220,126 @@ def _translation_console_draft_summary(draft_result: dict):
         ),
         "rollback_performed": draft_result.get("rollback_performed", False),
     }
+
+
+def _attach_translation_console_draft_detail(draft_result: dict):
+    if not isinstance(draft_result, dict):
+        return
+    draft_entries = []
+    skipped_entries = []
+    draft_entry_ids = {
+        (entry.get("locale"), entry.get("field"))
+        for entry in (draft_result.get("draft_entries") or [])
+        if isinstance(entry, dict)
+    }
+    for entry in draft_result.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        normalized = _normalize_translation_console_draft_entry(entry)
+        if (entry.get("locale"), entry.get("field")) in draft_entry_ids or entry.get(
+            "draft_value"
+        ):
+            draft_entries.append(normalized)
+        else:
+            skipped_entries.append(normalized)
+
+    summary = _translation_console_draft_detail_counts(
+        draft_result, draft_entries, skipped_entries
+    )
+    draft_result["translation_console_detail"] = {
+        "max_rows": TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS,
+        "preview_chars": TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS,
+        "draft_entries": draft_entries[:TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS],
+        "skipped_entries": skipped_entries[:TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS],
+        "draft_entry_count": len(draft_entries),
+        "skipped_entry_count": len(skipped_entries),
+        "draft_entries_truncated": len(draft_entries)
+        > TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS,
+        "skipped_entries_truncated": len(skipped_entries)
+        > TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS,
+        "summary_counts": summary,
+    }
+
+
+def _normalize_translation_console_draft_entry(entry: dict):
+    seo_notes = _list_from_value(entry.get("seo_notes"))
+    quality_notes = _list_from_value(entry.get("quality_notes"))
+    blocking_reasons = _draft_entry_blocking_reasons(entry, seo_notes, quality_notes)
+    return {
+        "locale": entry.get("locale", ""),
+        "field": entry.get("field", ""),
+        "resource_key": entry.get("source_key") or entry.get("field", ""),
+        "source_value_preview": _preview_text(entry.get("source_value")),
+        "proposed_translation_preview": _preview_text(entry.get("draft_value")),
+        "proposed_chars": entry.get("draft_value_chars") or 0,
+        "validation_status": entry.get("validation_status", ""),
+        "seo_validation_status": entry.get("seo_validation_status", ""),
+        "seo_warning": ", ".join(seo_notes),
+        "eligible_for_apply_plan": bool(entry.get("eligible_for_apply_plan")),
+        "blocking_reasons": ", ".join(blocking_reasons),
+        "skip_reason": entry.get("skip_reason", ""),
+        "current_translation_present": bool(entry.get("existing_translation_present")),
+        "outdated": entry.get("existing_translation_outdated"),
+        "existing_translation_preview": _preview_text(
+            entry.get("existing_translation_value") or entry.get("translation_value")
+        ),
+    }
+
+
+def _translation_console_draft_detail_counts(
+    draft_result: dict, draft_entries: list[dict], skipped_entries: list[dict]
+):
+    skipped_count = (
+        int(draft_result.get("skipped_existing_translation_count") or 0)
+        + int(draft_result.get("skipped_outdated_translation_count") or 0)
+        + int(draft_result.get("skipped_source_empty_count") or 0)
+    )
+    return {
+        "draft_entry_count": len(draft_entries),
+        "skipped_entry_count": skipped_count or len(skipped_entries),
+        "seo_warning_count": int(draft_result.get("seo_needs_manual_review_count") or 0),
+        "ready_for_apply_plan_count": int(
+            draft_result.get("eligible_apply_plan_count") or 0
+        ),
+        "needs_manual_review_count": int(
+            draft_result.get("draft_needs_manual_review_count") or 0
+        ),
+        "existing_translation_count": int(
+            draft_result.get("skipped_existing_translation_count") or 0
+        ),
+    }
+
+
+def _draft_entry_blocking_reasons(entry: dict, seo_notes: list[str], quality_notes: list[str]):
+    reasons = []
+    if entry.get("skip_reason") and entry.get("skip_reason") != "missing_translation":
+        reasons.append(str(entry.get("skip_reason")))
+    reasons.extend(quality_notes)
+    reasons.extend(seo_notes)
+    if entry.get("validation_status") not in {
+        "",
+        "skipped",
+        "draft_ready_for_manual_review",
+    }:
+        reasons.append(str(entry.get("validation_status")))
+    if entry.get("seo_validation_status") not in {"", "skipped", "seo_ready"}:
+        reasons.append(str(entry.get("seo_validation_status")))
+    return list(dict.fromkeys(reason for reason in reasons if reason))
+
+
+def _list_from_value(value):
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item)]
+    return [str(value)]
+
+
+def _preview_text(value, max_chars: int = TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS):
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "..."
 
 
 @login_required
