@@ -79,6 +79,25 @@
     color: #344054;
     font-weight: 600;
   }
+  .tw-group-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0 0;
+  }
+  .tw-group-chip {
+    border: 1px solid #dbe1e8;
+    border-radius: 999px;
+    background: #fff;
+    padding: 4px 9px;
+    color: #344054;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .tw-group-chip.is-folded {
+    background: #f2f4f7;
+    color: #475467;
+  }
   .tw-coverage-table {
     width: 100%;
     border-collapse: separate;
@@ -140,11 +159,32 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin: 16px 0 8px;
+    gap: 10px;
     padding: 9px 12px;
     border-radius: 8px;
     background: #f3f5f7;
     color: #1f2937;
+  }
+  .tw-section-panel {
+    margin-top: 12px;
+  }
+  .tw-section-panel summary {
+    cursor: pointer;
+    list-style-position: inside;
+  }
+  .tw-section-panel.is-folded .tw-section-heading {
+    background: #f7f8fa;
+  }
+  .tw-section-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .tw-section-hint,
+  .tw-muted {
+    color: #667085;
+    font-size: 12px;
+    font-weight: 400;
   }
   .tw-count-badge,
   .tw-status-badge {
@@ -220,6 +260,18 @@
   .tw-resource-key {
     margin-top: 4px;
     color: #667085;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  .tw-resource-type {
+    margin-top: 4px;
+    color: #475467;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .tw-resource-detail {
+    margin-top: 4px;
+    color: #344054;
     font-size: 12px;
     overflow-wrap: anywhere;
   }
@@ -552,11 +604,19 @@
       <div class="tw-summary-card">
         <div class="tw-summary-label">Rows visible</div>
         <div class="tw-summary-value">{{ editor_view.editor_visible_row_count }} / {{ editor_view.editor_row_count }}</div>
+        <div class="tw-muted">Primary: {{ editor_view.editor_primary_visible_row_count }} | Folded advanced: {{ editor_view.editor_folded_row_count }}</div>
       </div>
       <div class="tw-summary-card">
         <div class="tw-summary-label">Active filter</div>
         <div class="tw-summary-value">{{ editor_view.editor_active_filter_label }}</div>
       </div>
+    </div>
+    <div class="tw-group-summary">
+      {% for section in editor_view.sections %}
+        {% if section.has_rows %}
+          <span class="tw-group-chip{% if section.is_folded_noise_group %} is-folded{% endif %}">{{ section.section_label }}: {{ section.row_count }}{% if section.is_folded_noise_group %} folded{% endif %}</span>
+        {% endif %}
+      {% endfor %}
     </div>
   </div>
 
@@ -606,6 +666,7 @@
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Filters</h2>
+    <p class="tw-muted">Missing, untranslated, outdated, and draft-only rows are read-only previews. Filters and search only change what is shown.</p>
     <div class="tw-filter-tabs">
       {% for tab in editor_view.filter_tabs %}
         <a class="tw-filter-tab{% if tab.active %} is-active{% endif %}" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_search={{ editor_search_query|urlencode }}">{{ tab.label }} ({{ tab.count }})</a>
@@ -620,14 +681,17 @@
     {% endif %}
     {% if editor_view.product_gid and editor_view.editor_visible_row_count > 0 %}
     {% for section in editor_view.sections %}
-      {% if section.section_key == "metafields" %}
-        <details style="margin-top: 12px;">
-          <summary><span class="tw-section-heading">{{ section.section_label }} <span class="tw-count-badge">{{ section.row_count }}</span></span></summary>
-      {% else %}
-        <div style="margin-top: 12px;">
-          <div class="tw-section-heading"><strong>{{ section.section_label }}</strong> <span class="tw-count-badge">{{ section.row_count }}</span></div>
-      {% endif %}
-      {% if section.rows %}
+      {% if section.has_rows %}
+      <details class="tw-section-panel{% if section.is_folded_noise_group %} is-folded{% endif %}"{% if not section.collapsed_by_default %} open{% endif %}>
+        <summary>
+          <span class="tw-section-heading">
+            <span class="tw-section-title">
+              <strong>{{ section.section_label }}</strong>
+              <span class="tw-section-hint">{{ section.section_hint }}</span>
+            </span>
+            <span class="tw-count-badge">{{ section.row_count }} rows{% if section.is_folded_noise_group %} folded{% endif %}</span>
+          </span>
+        </summary>
         <div class="tw-editor-table-wrap">
         <table class="tw-editor-table">
           <thead>
@@ -642,7 +706,10 @@
               <tr class="tw-editor-row status-{{ row.translation_status }}">
                 <td>
                   <div class="tw-field-label">{{ row.field_label }}</div>
-                  <div class="tw-resource-key">{{ row.resource_key }}</div>
+                  <div class="tw-resource-type">{{ row.resource_type_label }}</div>
+                  {% if row.resource_detail %}<div class="tw-resource-detail">{{ row.resource_detail }}</div>{% endif %}
+                  <div class="tw-resource-key">Raw key: {{ row.resource_key }}</div>
+                  {% if row.resource_note %}<div class="tw-resource-key">{{ row.resource_note }}</div>{% endif %}
                   <span class="tw-status-badge is-{{ row.translation_status }}">{{ row.translation_status }}</span>
                 </td>
                 <td>
@@ -679,13 +746,7 @@
           </tbody>
         </table>
         </div>
-      {% else %}
-        <p>No visible rows in this section for the current filter.</p>
-      {% endif %}
-      {% if section.section_key == "metafields" %}
-        </details>
-      {% else %}
-        </div>
+      </details>
       {% endif %}
     {% endfor %}
     {% endif %}

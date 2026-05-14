@@ -124,11 +124,48 @@ TRANSLATION_CONSOLE_EDITOR_FILTERS = {
     "needs_review",
 }
 TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
-    ("basic", "Basic"),
-    ("seo", "SEO"),
-    ("options", "Product options"),
-    ("variants", "Variants"),
-    ("metafields", "Advanced Metafields"),
+    {
+        "section_key": "basic",
+        "section_label": "Basic",
+        "section_hint": "Core product fields shown first for daily review.",
+        "collapsible": False,
+        "collapsed_by_default": False,
+    },
+    {
+        "section_key": "seo",
+        "section_label": "SEO",
+        "section_hint": "Search preview fields and URL handle.",
+        "collapsible": False,
+        "collapsed_by_default": False,
+    },
+    {
+        "section_key": "options",
+        "section_label": "Product options",
+        "section_hint": "Option names and option values returned by Shopify translation data.",
+        "collapsible": False,
+        "collapsed_by_default": False,
+    },
+    {
+        "section_key": "variants",
+        "section_label": "Variants",
+        "section_hint": "Variant titles, option values, and variant-level fields when available.",
+        "collapsible": False,
+        "collapsed_by_default": False,
+    },
+    {
+        "section_key": "important_metafields",
+        "section_label": "Important metafields",
+        "section_hint": "Customer-facing metafields likely to matter in translation review.",
+        "collapsible": True,
+        "collapsed_by_default": False,
+    },
+    {
+        "section_key": "technical_metafields",
+        "section_label": "Other metafields / technical fields",
+        "section_hint": "Low-signal or system-like fields are folded to reduce daily noise.",
+        "collapsible": True,
+        "collapsed_by_default": True,
+    },
 ]
 TRANSLATION_CONSOLE_EDITOR_SEO_LIMITS = {
     "title": 70,
@@ -170,8 +207,71 @@ TRANSLATION_WORKSPACE_FIELD_COVERAGE_CORE_AREAS = [
 TRANSLATION_WORKSPACE_FIELD_COVERAGE_EXTRA_SECTIONS = [
     ("options", "Product options"),
     ("variants", "Variants"),
-    ("metafields", "Advanced metafields"),
+    ("important_metafields", "Important metafields"),
+    ("technical_metafields", "Other metafields / technical fields"),
 ]
+TRANSLATION_EDITOR_IMPORTANT_METAFIELD_NAMESPACES = {
+    "custom",
+    "details",
+    "descriptor",
+    "descriptors",
+    "features",
+    "spec",
+    "specs",
+    "specification",
+    "specifications",
+}
+TRANSLATION_EDITOR_IMPORTANT_METAFIELD_HINTS = (
+    "benefit",
+    "bullet",
+    "compat",
+    "description",
+    "feature",
+    "highlight",
+    "included",
+    "material",
+    "model",
+    "package",
+    "scale",
+    "short_description",
+    "size",
+    "spec",
+    "subtitle",
+    "summary",
+    "title",
+)
+TRANSLATION_EDITOR_TECHNICAL_METAFIELD_NAMESPACES = {
+    "google",
+    "inventory",
+    "judgeme",
+    "okendo",
+    "reviews",
+    "shopify",
+    "stamped",
+    "system",
+    "yotpo",
+}
+TRANSLATION_EDITOR_TECHNICAL_METAFIELD_HINTS = (
+    "admin_graphql",
+    "barcode",
+    "count",
+    "created",
+    "gid",
+    "gtin",
+    "hash",
+    "id",
+    "inventory",
+    "json",
+    "mpn",
+    "rating",
+    "schema",
+    "sku",
+    "sync",
+    "template",
+    "timestamp",
+    "token",
+    "updated",
+)
 
 
 def _shopify_configured():
@@ -1688,23 +1788,33 @@ def build_translation_console_editor_view(
     visible_rows = [
         row for row in searched_rows if _translation_editor_row_matches_filter(row, editor_filter)
     ]
+    sections = []
+    folded_row_count = 0
+    for section_config in TRANSLATION_CONSOLE_EDITOR_SECTIONS:
+        section_key = section_config["section_key"]
+        section_rows = [row for row in visible_rows if row["section_key"] == section_key]
+        collapsed_by_default = bool(section_config.get("collapsed_by_default"))
+        if collapsed_by_default:
+            folded_row_count += len(section_rows)
+        sections.append(
+            {
+                "section_key": section_key,
+                "section_label": section_config["section_label"],
+                "section_hint": section_config.get("section_hint", ""),
+                "rows": section_rows,
+                "row_count": len(section_rows),
+                "has_rows": bool(section_rows),
+                "collapsible": bool(section_config.get("collapsible")),
+                "collapsed_by_default": collapsed_by_default,
+                "is_folded_noise_group": collapsed_by_default,
+            }
+        )
     field_coverage = build_translation_workspace_field_coverage(
         rows=rows,
         visible_rows=visible_rows,
         locale=locale,
         product_gid=product_gid,
     )
-    sections = []
-    for section_key, section_label in TRANSLATION_CONSOLE_EDITOR_SECTIONS:
-        section_rows = [row for row in visible_rows if row["section_key"] == section_key]
-        sections.append(
-            {
-                "section_key": section_key,
-                "section_label": section_label,
-                "rows": section_rows,
-                "row_count": len(section_rows),
-            }
-        )
     filter_labels = [
         ("all", "All"),
         ("untranslated", "Untranslated"),
@@ -1749,6 +1859,8 @@ def build_translation_console_editor_view(
         "filter_tabs": filter_tabs,
         "editor_row_count": len(rows),
         "editor_visible_row_count": len(visible_rows),
+        "editor_folded_row_count": folded_row_count,
+        "editor_primary_visible_row_count": len(visible_rows) - folded_row_count,
         "editor_search_result_count": len(searched_rows),
         "field_coverage": field_coverage,
         "editor_has_rows": bool(rows),
@@ -2108,10 +2220,17 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
     exceeds_limit = bool(char_limit and target_chars > char_limit)
     if exceeds_limit:
         badges.append("exceeds limit")
+    section_key = _translation_editor_section_key(field_key)
+    resource_type_label = _translation_editor_resource_type_label(field_key)
+    resource_detail = _translation_editor_resource_detail(field_key, source_row, draft_entry)
+    resource_note = _translation_editor_resource_note(field_key, source_row, draft_entry)
     return {
-        "section_key": _translation_editor_section_key(field_key),
+        "section_key": section_key,
         "field_key": field_key,
         "field_label": _translation_editor_field_label(field_key),
+        "resource_type_label": resource_type_label,
+        "resource_detail": resource_detail,
+        "resource_note": resource_note,
         "resource_key": source_row.get("key") or draft_entry.get("source_key") or field_key,
         "source_value": source_value,
         "source_value_preview": _translation_editor_preview_text(source_value),
@@ -2148,6 +2267,9 @@ def _translation_editor_row_matches_search(row: dict, query: str) -> bool:
         for key in [
             "field_label",
             "field_key",
+            "resource_type_label",
+            "resource_detail",
+            "resource_note",
             "resource_key",
             "source_value",
             "target_value_display",
@@ -2181,7 +2303,7 @@ def _translation_editor_normalize_field_key(value: str):
 
 
 def _translation_editor_section_key(field_key: str) -> str:
-    key = field_key.lower()
+    key = str(field_key or "").lower()
     if key in {"title", "body_html", "description", "product_type"}:
         return "basic"
     if key in {"handle", "meta_title", "meta_description"}:
@@ -2190,12 +2312,15 @@ def _translation_editor_section_key(field_key: str) -> str:
         return "options"
     if "variant" in key:
         return "variants"
-    if "metafield" in key or "." in key:
-        return "metafields"
+    if _translation_editor_is_metafield_key(key):
+        if _translation_editor_is_important_metafield(key):
+            return "important_metafields"
+        return "technical_metafields"
     return "basic"
 
 
 def _translation_editor_field_label(field_key: str) -> str:
+    field_key = str(field_key or "")
     labels = {
         "title": "Title",
         "body_html": "Description",
@@ -2205,7 +2330,260 @@ def _translation_editor_field_label(field_key: str) -> str:
         "meta_title": "Meta title",
         "meta_description": "Meta description",
     }
-    return labels.get(field_key, field_key.replace("_", " ").replace(".", " / ").title())
+    if field_key in labels:
+        return labels[field_key]
+    section_key = _translation_editor_section_key(field_key)
+    if section_key == "options":
+        return _translation_editor_option_label(field_key)
+    if section_key == "variants":
+        return _translation_editor_variant_label(field_key)
+    if section_key in {"important_metafields", "technical_metafields"}:
+        return _translation_editor_metafield_label(field_key)
+    return _translation_editor_humanize_key(field_key)
+
+
+def _translation_editor_resource_type_label(field_key: str) -> str:
+    section_key = _translation_editor_section_key(field_key)
+    labels = {
+        "basic": "Product field",
+        "seo": "SEO field",
+        "options": "Option field",
+        "variants": "Variant field",
+        "important_metafields": "Important metafield",
+        "technical_metafields": "Technical / other field",
+    }
+    return labels.get(section_key, "Product field")
+
+
+def _translation_editor_resource_detail(field_key: str, source_row: dict, draft_entry: dict) -> str:
+    section_key = _translation_editor_section_key(field_key)
+    if section_key in {"important_metafields", "technical_metafields"}:
+        namespace, key = _translation_editor_metafield_parts(field_key)
+        if namespace and key:
+            return f"{namespace} / {key}"
+        return key or namespace or ""
+    if section_key == "variants":
+        return _translation_editor_variant_detail(field_key, source_row, draft_entry)
+    if section_key == "options":
+        return _translation_editor_option_detail(field_key, source_row, draft_entry)
+    return ""
+
+
+def _translation_editor_resource_note(field_key: str, source_row: dict, draft_entry: dict) -> str:
+    section_key = _translation_editor_section_key(field_key)
+    if section_key in {"important_metafields", "technical_metafields"}:
+        namespace, key = _translation_editor_metafield_parts(field_key)
+        parts = []
+        if namespace:
+            parts.append(f"Namespace: {namespace}")
+        if key:
+            parts.append(f"Key: {key}")
+        parts.append(
+            "Group: important"
+            if section_key == "important_metafields"
+            else "Group: other / technical"
+        )
+        return " | ".join(parts)
+    if section_key == "variants":
+        details = _translation_editor_existing_variant_bits(source_row, draft_entry)
+        return " | ".join(details)
+    if section_key == "options":
+        details = _translation_editor_existing_option_bits(source_row, draft_entry)
+        return " | ".join(details)
+    return ""
+
+
+def _translation_editor_is_metafield_key(field_key: str) -> bool:
+    key = str(field_key or "").lower()
+    if key in {
+        "title",
+        "body_html",
+        "description",
+        "product_type",
+        "handle",
+        "meta_title",
+        "meta_description",
+    }:
+        return False
+    if "option" in key or "variant" in key:
+        return False
+    return "metafield" in key or "." in key
+
+
+def _translation_editor_is_important_metafield(field_key: str) -> bool:
+    namespace, key = _translation_editor_metafield_parts(field_key)
+    namespace = namespace.lower()
+    if namespace in TRANSLATION_EDITOR_TECHNICAL_METAFIELD_NAMESPACES:
+        return False
+    if _translation_editor_key_matches_hint(
+        f"{namespace}.{key}", TRANSLATION_EDITOR_TECHNICAL_METAFIELD_HINTS
+    ):
+        return False
+    if namespace in TRANSLATION_EDITOR_IMPORTANT_METAFIELD_NAMESPACES:
+        return True
+    return _translation_editor_key_matches_hint(
+        f"{namespace}.{key}", TRANSLATION_EDITOR_IMPORTANT_METAFIELD_HINTS
+    )
+
+
+def _translation_editor_metafield_parts(field_key: str) -> tuple[str, str]:
+    key = str(field_key or "").strip()
+    lower_key = key.lower()
+    for prefix in ("product.metafields.", "product.metafield.", "metafields.", "metafield."):
+        if lower_key.startswith(prefix):
+            key = key[len(prefix):]
+            break
+    parts = [part for part in re.split(r"[./:]+", key) if part]
+    if len(parts) >= 2:
+        return parts[0], ".".join(parts[1:])
+    if parts:
+        return "", parts[0]
+    return "", ""
+
+
+def _translation_editor_option_label(field_key: str) -> str:
+    tokens = set(_translation_editor_key_tokens(field_key))
+    option_number = _translation_editor_option_number(field_key)
+    prefix = f"Product option {option_number}" if option_number else "Product option"
+    if "value" in tokens or "values" in tokens:
+        return f"{prefix} value"
+    if "name" in tokens:
+        return f"{prefix} name"
+    return prefix
+
+
+def _translation_editor_variant_label(field_key: str) -> str:
+    tokens = set(_translation_editor_key_tokens(field_key))
+    if "sku" in tokens:
+        return "Variant SKU"
+    if "title" in tokens:
+        return "Variant title"
+    if "option" in tokens or any(token.startswith("option") for token in tokens):
+        return "Variant option"
+    return "Variant field"
+
+
+def _translation_editor_metafield_label(field_key: str) -> str:
+    namespace, key = _translation_editor_metafield_parts(field_key)
+    if key:
+        return f"Metafield: {_translation_editor_humanize_key(key)}"
+    if namespace:
+        return f"Metafield: {_translation_editor_humanize_key(namespace)}"
+    return "Metafield"
+
+
+def _translation_editor_option_detail(field_key: str, source_row: dict, draft_entry: dict) -> str:
+    option_name = _translation_editor_first_value(
+        source_row,
+        draft_entry,
+        ("option_name", "name", "option"),
+    )
+    option_value = _translation_editor_first_value(
+        source_row,
+        draft_entry,
+        ("option_value", "value", "variant_option"),
+    )
+    if option_name and option_value:
+        return f"{option_name}: {option_value}"
+    return option_name or option_value or _translation_editor_option_label(field_key)
+
+
+def _translation_editor_variant_detail(field_key: str, source_row: dict, draft_entry: dict) -> str:
+    details = _translation_editor_existing_variant_bits(source_row, draft_entry)
+    if details:
+        return " | ".join(details)
+    return _translation_editor_variant_label(field_key)
+
+
+def _translation_editor_existing_option_bits(source_row: dict, draft_entry: dict) -> list[str]:
+    bits = []
+    option_name = _translation_editor_first_value(
+        source_row,
+        draft_entry,
+        ("option_name", "name", "option"),
+    )
+    option_value = _translation_editor_first_value(
+        source_row,
+        draft_entry,
+        ("option_value", "variant_option", "selected_option_value"),
+    )
+    if option_name:
+        bits.append(f"Option: {option_name}")
+    if option_value:
+        bits.append(f"Value: {option_value}")
+    return bits
+
+
+def _translation_editor_existing_variant_bits(source_row: dict, draft_entry: dict) -> list[str]:
+    bits = []
+    variant_title = _translation_editor_first_value(
+        source_row,
+        draft_entry,
+        ("variant_title", "title", "variant_name"),
+    )
+    option_value = _translation_editor_first_value(
+        source_row,
+        draft_entry,
+        ("option_value", "variant_option", "selected_option_value"),
+    )
+    sku = _translation_editor_first_value(source_row, draft_entry, ("sku", "variant_sku"))
+    if variant_title:
+        bits.append(f"Variant: {variant_title}")
+    if option_value:
+        bits.append(f"Option: {option_value}")
+    if sku:
+        bits.append(f"SKU: {sku}")
+    return bits
+
+
+def _translation_editor_first_value(
+    source_row: dict,
+    draft_entry: dict,
+    keys: tuple[str, ...],
+) -> str:
+    for key in keys:
+        value = source_row.get(key)
+        if value not in (None, ""):
+            return str(value)
+        value = draft_entry.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _translation_editor_option_number(field_key: str) -> str:
+    match = re.search(r"option[_ .:-]*(\d+)", str(field_key or ""), flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _translation_editor_key_tokens(field_key: str) -> list[str]:
+    return [
+        token
+        for token in re.split(r"[^a-z0-9]+", str(field_key or "").lower())
+        if token
+    ]
+
+
+def _translation_editor_key_matches_hint(field_key: str, hints: tuple[str, ...]) -> bool:
+    tokens = set(_translation_editor_key_tokens(field_key))
+    compact_key = re.sub(r"[^a-z0-9]+", "_", str(field_key or "").lower()).strip("_")
+    for hint in hints:
+        normalized_hint = re.sub(r"[^a-z0-9]+", "_", hint.lower()).strip("_")
+        if not normalized_hint:
+            continue
+        if "_" in normalized_hint and normalized_hint in compact_key:
+            return True
+        if normalized_hint in tokens:
+            return True
+        if len(normalized_hint) >= 4 and any(
+            token.startswith(normalized_hint) for token in tokens
+        ):
+            return True
+    return False
+
+
+def _translation_editor_humanize_key(field_key: str) -> str:
+    return str(field_key or "").replace("_", " ").replace(".", " / ").title()
 
 
 def _translation_editor_locale_label(locale: str) -> str:
