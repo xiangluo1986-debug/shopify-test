@@ -75,6 +75,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_audit_ta
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task import (
     run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_design_dry_run_task import (
+    run_shopify_review_request_trustpilot_tag_write_design_dry_run_task,
+)
 from remote_approval.tasks.shopify_review_request_unified_decision_engine_dry_run_task import (
     run_shopify_review_request_unified_decision_engine_dry_run_task,
 )
@@ -300,6 +303,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": (
         run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task
+    ),
+    "shopify_review_request_trustpilot_tag_write_design_dry_run": (
+        run_shopify_review_request_trustpilot_tag_write_design_dry_run_task
     ),
     "shopify_review_request_unified_decision_engine_dry_run": (
         run_shopify_review_request_unified_decision_engine_dry_run_task
@@ -601,6 +607,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_send_tag_design_dry_run.json",
+    },
+    "shopify_review_request_trustpilot_tag_write_design_dry_run": {
+        "description": "Generate a no-write Trustpilot Shopify tag-write design package after Gmail send audit.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_trustpilot_tag_write_design_dry_run.json",
     },
     "shopify_review_request_unified_decision_engine_dry_run": {
         "description": "Generate a unified no-write review request decision report from local Phase 1 reports.",
