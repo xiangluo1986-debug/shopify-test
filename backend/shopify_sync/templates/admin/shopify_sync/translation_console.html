@@ -2,8 +2,209 @@
 
 {% block content %}
 <div id="content-main">
-  <h1>Shopify Product Translation Console</h1>
-  <p>This console is read-only for Shopify writes. Draft generation may call OpenAI, but it does not write, publish, apply, or rollback Shopify data.</p>
+  <h1>Shopify Translation Console</h1>
+  <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This page prepares drafts, previews, reports, and manual instructions only. No Shopify write is performed from this page. Real write requires manual PowerShell plus explicit ACK.</p>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Normal Workbench Mode</h2>
+    <table>
+      <tbody>
+        <tr><th>Current workflow status</th><td>{{ workbench_summary.workflow_status }}</td></tr>
+        <tr><th>Remaining eligible count</th><td>{{ workbench_summary.remaining_eligible_count }}</td></tr>
+        <tr><th>Duplicate protection</th><td>{{ workbench_summary.duplicate_write_protection_status }}</td></tr>
+        <tr><th>Page safety</th><td>READ ONLY / NO WRITE FROM THIS PAGE</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Step 1: Select Product</h2>
+    <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
+      <div>
+        <label for="id_workbench_product_search_q">Search products</label><br>
+        <input id="id_workbench_product_search_q" type="text" name="q" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="title, gid, product id, handle, vendor, product type, SKU">
+      </div>
+      <div>
+        <label for="id_workbench_search_locale">Preview locale</label><br>
+        <select id="id_workbench_search_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button">Search local products</button>
+      <a class="button" href="?">Clear search</a>
+    </form>
+    <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
+      <input type="hidden" name="q" value="{{ product_search_text }}">
+      <div>
+        <label for="id_workbench_selected_product_gid">Select product</label><br>
+        <select id="id_workbench_selected_product_gid" name="selected_product_gid" style="min-width: 620px;">
+          {% if product_selector.product_options %}
+            {% for product in product_selector.product_options %}
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }} | {{ product.sort_timestamp }}</option>
+            {% endfor %}
+          {% else %}
+            <option value="">No products available</option>
+          {% endif %}
+        </select>
+      </div>
+      <div>
+        <label for="id_workbench_selector_locale">Preview locale</label><br>
+        <select id="id_workbench_selector_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="button">Select product</button>
+    </form>
+    <table style="margin-top: 12px;">
+      <tbody>
+        <tr><th>Selected product</th><td>{{ workbench_summary.selected_product_title }}</td></tr>
+        <tr><th>Product gid</th><td>{{ workbench_summary.selected_product_gid }}</td></tr>
+        <tr><th>Published at</th><td>{{ workbench_summary.selected_product_published_at }}</td></tr>
+        <tr><th>Updated at</th><td>{{ workbench_summary.selected_product_updated_at }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Step 2: Generate Translation Draft</h2>
+    <form method="post" style="margin-bottom: 12px;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate_draft_dry_run">
+      <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="locale" value="{{ selected_locale }}">
+      <button type="submit" class="button">Generate draft package dry-run</button>
+    </form>
+    <table>
+      <tbody>
+        <tr><th>Draft status</th><td>{% if workbench_summary.has_draft_result %}{{ workbench_summary.draft_status }}{% else %}Not generated yet{% endif %}</td></tr>
+        <tr><th>Total fields checked</th><td>{{ workbench_summary.total_fields_checked }}</td></tr>
+        <tr><th>New translation candidates</th><td>{{ workbench_summary.new_translation_candidates }}</td></tr>
+        <tr><th>Existing translations skipped</th><td>{{ workbench_summary.existing_translations_skipped }}</td></tr>
+        <tr><th>Skipped entries</th><td>{{ workbench_summary.skipped_entry_count }}</td></tr>
+        <tr><th>Needs review count</th><td>{{ workbench_summary.needs_review_count }}</td></tr>
+        <tr><th>SEO warning count</th><td>{{ workbench_summary.seo_warning_count }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Step 3: Review Translation Plan</h2>
+    <table>
+      <tbody>
+        <tr><th>Candidate count</th><td>{{ workbench_summary.apply_plan_candidate_count }}</td></tr>
+        <tr><th>Blocked / needs review count</th><td>{{ workbench_summary.blocked_or_needs_review_count }}</td></tr>
+        <tr><th>Next write count</th><td>{{ workbench_summary.next_write_count }}</td></tr>
+      </tbody>
+    </table>
+    {% if workbench_summary.candidate_entries %}
+      <table style="margin-top: 12px;">
+        <thead>
+          <tr>
+            <th>Locale</th>
+            <th>Field</th>
+            <th>Proposed translation preview</th>
+            <th>Chars</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in workbench_summary.candidate_entries %}
+            <tr>
+              <td>{{ entry.locale }}</td>
+              <td>{{ entry.field }}</td>
+              <td style="max-width: 420px; white-space: pre-wrap;">{{ entry.proposed_translation_preview }}</td>
+              <td>{{ entry.chars }}</td>
+              <td>{{ entry.safety_status }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>Generate a draft dry-run to see candidate entries.</p>
+    {% endif %}
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Step 4: Generate Locked Dry-run Report</h2>
+    <form method="post" style="margin-bottom: 12px;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate_locked_package_dry_run_report">
+      <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="locale" value="{{ selected_locale }}">
+      <button type="submit" class="button">Generate locked package dry-run report</button>
+    </form>
+    <table>
+      <tbody>
+        <tr><th>Report status</th><td>{{ workbench_summary.report_status }}</td></tr>
+        <tr><th>Entry count</th><td>{{ workbench_summary.report_entry_count }}</td></tr>
+        <tr><th>Generated at</th><td>{{ workbench_summary.report_generated_at }}</td></tr>
+        <tr><th>Status badge</th><td>{% if workbench_summary.report_status == "translation_console_locked_package_dry_run_ready" %}Safe dry-run report ready{% else %}Report not ready or blocked{% endif %}</td></tr>
+      </tbody>
+    </table>
+    <details style="margin-top: 12px;">
+      <summary>Advanced: report files</summary>
+      <table>
+        <tbody>
+          <tr><th>JSON report path</th><td>{{ locked_report_approval_checklist.json_report_path }}</td></tr>
+          <tr><th>HTML report path</th><td>{{ locked_report_approval_checklist.html_report_path }}</td></tr>
+          <tr><th>Loaded at</th><td>{{ locked_report_approval_checklist.loaded_at }}</td></tr>
+        </tbody>
+      </table>
+    </details>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Step 5: Review Approval Checklist</h2>
+    <table>
+      <tbody>
+        <tr><th>Manual review status</th><td>{% if workbench_summary.safe_for_manual_review %}Safe for manual review{% else %}Needs review{% endif %}</td></tr>
+        <tr><th>Entry count</th><td>{{ workbench_summary.report_entry_count }}</td></tr>
+        <tr><th>Product match</th><td>{{ workbench_summary.approval_product_match }}</td></tr>
+        <tr><th>Safety status</th><td>{{ workbench_summary.approval_safety_status }}</td></tr>
+      </tbody>
+    </table>
+    <details style="margin-top: 12px;">
+      <summary>Advanced: approval checklist details</summary>
+      <table>
+        <tbody>
+          {% for item in locked_report_approval_checklist.checklist_items %}
+            <tr><th>{{ item.label }}</th><td>{{ item.passed }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Step 6: Run Manually in PowerShell</h2>
+    <p>{% if workbench_summary.manual_command_ready %}<strong>Ready for manual PowerShell execution.</strong>{% else %}<strong>Blocked before manual execution.</strong>{% endif %} Real write must be run manually in PowerShell with ACK. This page does not run commands.</p>
+    {% if workbench_summary.manual_command_blocking_conditions %}
+      <p>Blocked reasons: {{ workbench_summary.manual_command_blocking_conditions|join:", " }}</p>
+    {% endif %}
+    <details style="margin-top: 12px;">
+      <summary>Advanced: PowerShell commands</summary>
+      <p>Preview text only. No command is executed by this page.</p>
+      {% if manual_command_package.dry_run_verification_command %}
+        <h3>Dry-run / verification command</h3>
+        <pre style="white-space: pre-wrap;">{{ manual_command_package.dry_run_verification_command }}</pre>
+      {% endif %}
+      {% if manual_command_package.show_real_run_command_preview %}
+        <h3>Manual command preview</h3>
+        <pre style="white-space: pre-wrap;">{{ manual_command_package.manual_real_run_command_preview }}</pre>
+      {% else %}
+        <p>Manual command preview is hidden until the checklist is safe.</p>
+      {% endif %}
+    </details>
+  </div>
+
+  <details style="margin-bottom: 16px;">
+    <summary><strong>Advanced / Developer Details</strong></summary>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Translation workflow status</h2>
@@ -1730,5 +1931,6 @@
       </table>
     </div>
   {% endif %}
+  </details>
 </div>
 {% endblock %}

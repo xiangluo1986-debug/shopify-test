@@ -1099,6 +1099,15 @@ def translation_console(request):
     manual_command_package = build_translation_console_manual_command_package(
         locked_report_approval_checklist
     )
+    workbench_summary = build_translation_console_workbench_summary(
+        product_selector=product_selector,
+        workflow_status=workflow_status,
+        draft_result=draft_result,
+        apply_plan_preview_result=apply_plan_preview_result,
+        locked_package_report_result=locked_package_report_result,
+        locked_report_approval_checklist=locked_report_approval_checklist,
+        manual_command_package=manual_command_package,
+    )
 
     return render(
         request,
@@ -1120,6 +1129,7 @@ def translation_console(request):
             "locked_package_report_result": locked_package_report_result,
             "locked_report_approval_checklist": locked_report_approval_checklist,
             "manual_command_package": manual_command_package,
+            "workbench_summary": workbench_summary,
             "error_message": error_message,
             "draft_result": draft_result,
             "draft_error_message": draft_error_message,
@@ -1376,6 +1386,119 @@ def build_apply_plan_preview_from_draft_result(draft_result: dict | None):
         "apply_performed": False,
         "real_apply_performed": False,
         "no_new_shopify_writes_performed": True,
+    }
+
+
+def build_translation_console_workbench_summary(
+    product_selector: dict | None,
+    workflow_status: dict | None,
+    draft_result: dict | None,
+    apply_plan_preview_result: dict | None,
+    locked_package_report_result: dict | None,
+    locked_report_approval_checklist: dict | None,
+    manual_command_package: dict | None,
+):
+    product_selector = product_selector or {}
+    workflow_status = workflow_status or {}
+    draft_result = draft_result or {}
+    apply_plan_preview_result = apply_plan_preview_result or {}
+    locked_package_report_result = locked_package_report_result or {}
+    locked_report_approval_checklist = locked_report_approval_checklist or {}
+    manual_command_package = manual_command_package or {}
+    draft_detail = draft_result.get("translation_console_detail") or {}
+    draft_counts = draft_detail.get("summary_counts") or {}
+    draft_entry_count = int(draft_counts.get("draft_entry_count") or 0)
+    skipped_entry_count = int(draft_counts.get("skipped_entry_count") or 0)
+    report_generated_at = (
+        locked_package_report_result.get("generated_at")
+        or locked_report_approval_checklist.get("generated_at")
+        or ""
+    )
+    return {
+        "ui_mode": "normal",
+        "selected_product_title": (
+            (product_selector.get("selected_product") or {}).get("title", "")
+        ),
+        "selected_product_gid": product_selector.get("selected_product_gid", ""),
+        "selected_product_published_at": (
+            (product_selector.get("selected_product") or {}).get("published_at", "")
+        ),
+        "selected_product_updated_at": (
+            (product_selector.get("selected_product") or {}).get("updated_at", "")
+        ),
+        "workflow_status": workflow_status.get("workflow_status", "unknown"),
+        "remaining_eligible_count": workflow_status.get("remaining_eligible_count", 0),
+        "duplicate_write_protection_status": workflow_status.get(
+            "duplicate_write_protection_status", ""
+        ),
+        "has_draft_result": bool(draft_result),
+        "draft_status": draft_result.get("draft_status", ""),
+        "total_fields_checked": draft_entry_count + skipped_entry_count,
+        "new_translation_candidates": int(
+            apply_plan_preview_result.get("apply_plan_candidate_count")
+            or draft_counts.get("ready_for_apply_plan_count")
+            or 0
+        ),
+        "existing_translations_skipped": int(
+            draft_counts.get("existing_translation_count") or 0
+        ),
+        "skipped_entry_count": skipped_entry_count,
+        "needs_review_count": int(draft_counts.get("needs_manual_review_count") or 0),
+        "seo_warning_count": int(draft_counts.get("seo_warning_count") or 0),
+        "has_apply_plan_preview": bool(apply_plan_preview_result),
+        "apply_plan_candidate_count": int(
+            apply_plan_preview_result.get("apply_plan_candidate_count") or 0
+        ),
+        "blocked_or_needs_review_count": int(
+            apply_plan_preview_result.get("blocked_or_needs_review_count") or 0
+        ),
+        "next_write_count": int(
+            apply_plan_preview_result.get("apply_plan_candidate_count") or 0
+        ),
+        "candidate_entries": (
+            apply_plan_preview_result.get("candidate_entries") or []
+        )[:5],
+        "has_locked_report": bool(locked_package_report_result)
+        or bool(locked_report_approval_checklist.get("report_available")),
+        "report_status": (
+            locked_package_report_result.get("report_status")
+            or locked_report_approval_checklist.get("report_status")
+            or ""
+        ),
+        "report_entry_count": int(
+            locked_package_report_result.get("entry_count")
+            or locked_report_approval_checklist.get("entry_count")
+            or 0
+        ),
+        "report_generated_at": report_generated_at,
+        "safe_for_manual_review": bool(
+            locked_report_approval_checklist.get("safe_for_manual_review")
+        ),
+        "approval_checklist_status": locked_report_approval_checklist.get(
+            "checklist_status", ""
+        ),
+        "approval_product_match": (
+            bool(locked_report_approval_checklist.get("selected_product_gid"))
+            and locked_report_approval_checklist.get("selected_product_gid")
+            == locked_report_approval_checklist.get("product_gid")
+        ),
+        "approval_safety_status": (
+            "all clear"
+            if locked_report_approval_checklist.get("safety_flags_all_false")
+            else "needs review"
+        ),
+        "manual_command_status": manual_command_package.get("package_status", ""),
+        "manual_command_ready": bool(
+            manual_command_package.get("command_package_ready")
+        ),
+        "manual_command_blocking_conditions": manual_command_package.get(
+            "blocking_conditions", []
+        ),
+        "read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "rollback_performed": False,
     }
 
 
