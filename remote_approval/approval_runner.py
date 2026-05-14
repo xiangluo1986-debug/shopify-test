@@ -1,8 +1,13 @@
 import argparse
 import json
 import os
+import sys
 import uuid
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from remote_approval.approval_client import (
     ApprovalConfig,
@@ -25,6 +30,7 @@ from remote_approval.utils import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run fixed tasks with remote approval gates.")
+    parser.add_argument("task_or_command", nargs="?", help="Registered task name, or 'list'")
     parser.add_argument("--task", help="Registered task name, for example: demo")
     parser.add_argument(
         "--mode",
@@ -41,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.task_or_command:
+        if args.task_or_command == "list":
+            args.list_tasks = True
+        elif not args.task:
+            args.task = args.task_or_command
     if args.list_tasks:
         _print_task_list()
         return 0
@@ -286,6 +297,7 @@ def _execute_selected_action(
         "shopify_translation_csv_json_small_batch_manual_real_run_test_package",
         "shopify_translation_csv_json_small_batch_post_write_audit_package",
         "shopify_translation_selected_product_missing_translation_draft_package",
+        "shopify_translation_translatable_resource_mapping_audit",
         "shopify_translation_selected_product_real_write_execute",
         "shopify_translation_first_real_write_completion_audit",
         "shopify_translation_small_batch_locked_dry_run_package",
@@ -637,6 +649,14 @@ def _summarize_task_result(result: dict) -> str:
         "selected_product_seo_fields_completion_status",
         "json_selected_product_missing_translation_draft_package_path",
         "html_selected_product_missing_translation_draft_package_path",
+        "json_mapping_audit_path",
+        "html_mapping_audit_path",
+        "audit_status",
+        "target_product_gid",
+        "target_locale",
+        "can_enable_options_draft_generation",
+        "can_enable_variants_draft_generation",
+        "can_enable_metafields_draft_generation",
         "json_ali_reviews_capability_discovery_path",
         "html_ali_reviews_capability_discovery_path",
         "json_kudosi_api_403_diagnostics_path",
@@ -1031,6 +1051,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_translation_csv_json_small_batch_manual_real_run_test_package",
         "shopify_translation_csv_json_small_batch_post_write_audit_package",
         "shopify_translation_selected_product_missing_translation_draft_package",
+        "shopify_translation_translatable_resource_mapping_audit",
         "shopify_translation_small_batch_locked_dry_run_package",
         "shopify_translation_small_batch_real_write_gate_preflight",
         "shopify_translation_small_batch_real_write_execute",
@@ -1092,3 +1113,7 @@ def _finish_stopped_by_interrupt(args, approval_id: str, reply: ApprovalReply, l
     print("Task stopped by local interrupt.")
     send_voice_prompt("Task failed. Please check the log.")
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

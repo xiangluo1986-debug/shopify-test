@@ -222,6 +222,9 @@ from remote_approval.tasks.shopify_translation_csv_json_small_batch_post_write_a
 from remote_approval.tasks.shopify_translation_selected_product_missing_translation_draft_package_task import (
     run_shopify_translation_selected_product_missing_translation_draft_package_task,
 )
+from remote_approval.tasks.shopify_translation_translatable_resource_mapping_audit_task import (
+    run_shopify_translation_translatable_resource_mapping_audit_task,
+)
 from remote_approval.tasks.shopify_translation_selected_product_real_write_execute_task import (
     run_shopify_translation_selected_product_real_write_execute_task,
 )
@@ -451,6 +454,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_translation_selected_product_missing_translation_draft_package": (
         run_shopify_translation_selected_product_missing_translation_draft_package_task
+    ),
+    "shopify_translation_translatable_resource_mapping_audit": (
+        run_shopify_translation_translatable_resource_mapping_audit_task
     ),
     "shopify_translation_selected_product_real_write_execute": (
         run_shopify_translation_selected_product_real_write_execute_task
@@ -961,6 +967,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify query plus OpenAI draft generation",
         "review_file_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
+    },
+    "shopify_translation_translatable_resource_mapping_audit": {
+        "description": "Read-only Shopify translatableResource mapping audit for options, variants, and metafields.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify GraphQL query",
+        "review_file_path": "logs/shopify_translation_translatable_resource_mapping_audit.json",
     },
     "shopify_translation_selected_product_real_write_execute": {
         "description": "Dry-run or execute the selected product translation real write with strict ACK, scope, digest, and readback verification gates.",
