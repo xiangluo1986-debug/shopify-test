@@ -1,5 +1,9 @@
 # 更新日志
 
+## 2026-05-14
+
+- Added Phase B base models and read-only Admin display for Shenzhen merged settlement groups, keeping Shopify orders separate and leaving settlement cost formulas unchanged.
+
 ## 2026-05-12
 
 - Shopify Order 顶部当前订单摘要新增“澳币结算金额” badge，按系统维护的 AUD/CNY 汇率将结算总成本 RMB 换算为 AUD。

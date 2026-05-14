@@ -1,4 +1,7 @@
+import re
+
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -12,6 +15,46 @@ class ShopifyInstallation(models.Model):
 
     def __str__(self):
         return self.shop
+
+
+def _normalize_address_text(value):
+    return re.sub(r"\s+", " ", (value or "").strip()).casefold()
+
+
+def _normalize_address_country(value):
+    return (value or "").strip().upper()
+
+
+def _normalize_address_zip(value):
+    return re.sub(r"\s+", "", (value or "").strip()).upper()
+
+
+def _normalize_address_phone(value):
+    return re.sub(r"\D+", "", value or "")
+
+
+def build_shenzhen_address_match_key(
+    *,
+    shipping_name="",
+    shipping_phone="",
+    shipping_address1="",
+    shipping_address2="",
+    shipping_city="",
+    shipping_province="",
+    shipping_zip="",
+    shipping_country="",
+):
+    parts = [
+        _normalize_address_text(shipping_name),
+        _normalize_address_phone(shipping_phone),
+        _normalize_address_text(shipping_address1),
+        _normalize_address_text(shipping_address2),
+        _normalize_address_text(shipping_city),
+        _normalize_address_text(shipping_province),
+        _normalize_address_zip(shipping_zip),
+        _normalize_address_country(shipping_country),
+    ]
+    return "|".join(parts)
 
 
 class ShopifyOrder(models.Model):
@@ -174,6 +217,179 @@ class ShopifyOrder(models.Model):
                     item.sku or item.product_title or str(item.shopify_line_item_id)
                 )
         return missing_skus
+
+
+class ShenzhenMergedSettlementGroup(models.Model):
+    STATUS_CHOICES = [
+        ("draft", "\u8349\u7a3f"),
+        ("active", "\u5df2\u542f\u7528"),
+        ("cancelled", "\u5df2\u53d6\u6d88"),
+    ]
+    GROUP_NO_PREFIX = "SMG"
+
+    group_no = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    shipping_name = models.CharField(max_length=255, blank=True, default="")
+    shipping_phone = models.CharField(max_length=50, blank=True, default="")
+    shipping_address1 = models.CharField(max_length=255, blank=True, default="")
+    shipping_address2 = models.CharField(max_length=255, blank=True, default="")
+    shipping_city = models.CharField(max_length=255, blank=True, default="")
+    shipping_province = models.CharField(max_length=255, blank=True, default="")
+    shipping_zip = models.CharField(max_length=20, blank=True, default="")
+    shipping_country = models.CharField(max_length=10, blank=True, default="")
+    address_match_key = models.CharField(max_length=2048, blank=True, default="")
+    merged_shipping_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    merged_ordering_cost_rmb = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    note = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_shenzhen_merged_settlement_groups",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["status", "created_at"], name="shenz_merge_grp_status_idx"),
+            models.Index(fields=["shipping_country"], name="shenz_merge_grp_country_idx"),
+        ]
+
+    def __str__(self):
+        return self.group_no or f"Merged settlement group {self.pk or ''}".strip()
+
+    @classmethod
+    def generate_group_no(cls):
+        today = timezone.localdate().strftime("%Y%m%d")
+        prefix = f"{cls.GROUP_NO_PREFIX}-{today}-"
+        latest = cls.objects.filter(group_no__startswith=prefix).order_by("-group_no").first()
+        next_seq = 1
+        if latest and latest.group_no:
+            try:
+                next_seq = int(latest.group_no.rsplit("-", 1)[-1]) + 1
+            except ValueError:
+                next_seq = 1
+        return f"{prefix}{next_seq:04d}"
+
+    def sync_address_match_key(self):
+        self.address_match_key = build_shenzhen_address_match_key(
+            shipping_name=self.shipping_name,
+            shipping_phone=self.shipping_phone,
+            shipping_address1=self.shipping_address1,
+            shipping_address2=self.shipping_address2,
+            shipping_city=self.shipping_city,
+            shipping_province=self.shipping_province,
+            shipping_zip=self.shipping_zip,
+            shipping_country=self.shipping_country,
+        )
+
+    def clean(self):
+        super().clean()
+        self.sync_address_match_key()
+
+    def save(self, *args, **kwargs):
+        if not self.group_no:
+            self.group_no = self.generate_group_no()
+        self.sync_address_match_key()
+        super().save(*args, **kwargs)
+
+
+class ShenzhenMergedSettlementGroupOrder(models.Model):
+    ADDRESS_MATCH_STATUS_CHOICES = [
+        ("exact", "Exact"),
+        ("override", "Override"),
+    ]
+    ACTIVE_GROUP_STATUSES = ("draft", "active")
+
+    group = models.ForeignKey(
+        ShenzhenMergedSettlementGroup,
+        on_delete=models.CASCADE,
+        related_name="group_orders",
+    )
+    order = models.ForeignKey(
+        ShopifyOrder,
+        on_delete=models.CASCADE,
+        related_name="merged_settlement_group_links",
+    )
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="added_shenzhen_merged_settlement_orders",
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+    address_match_status = models.CharField(
+        max_length=20,
+        choices=ADDRESS_MATCH_STATUS_CHOICES,
+        default="exact",
+    )
+    address_match_key = models.CharField(max_length=2048, blank=True, default="")
+    override_reason = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["group", "added_at", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["group", "order"], name="shenz_merge_group_order_uniq"),
+        ]
+        indexes = [
+            models.Index(fields=["order", "added_at"], name="shenz_merge_ord_order_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.group} - {self.order}"
+
+    def sync_order_address_match_key(self):
+        try:
+            order = self.order
+        except (ShopifyOrder.DoesNotExist, AttributeError):
+            return
+        self.address_match_key = build_shenzhen_address_match_key(
+            shipping_name=order.shipping_name,
+            shipping_phone=order.shipping_phone,
+            shipping_address1=order.shipping_address1,
+            shipping_address2=order.shipping_address2,
+            shipping_city=order.shipping_city,
+            shipping_province=order.shipping_province,
+            shipping_zip=order.shipping_zip,
+            shipping_country=order.shipping_country,
+        )
+
+    def clean(self):
+        super().clean()
+        self.sync_order_address_match_key()
+        if not self.group_id or not self.order_id:
+            return
+
+        if self.group.status in self.ACTIVE_GROUP_STATUSES:
+            duplicate_queryset = self.__class__.objects.filter(
+                order_id=self.order_id,
+                group__status__in=self.ACTIVE_GROUP_STATUSES,
+            )
+            if self.pk:
+                duplicate_queryset = duplicate_queryset.exclude(pk=self.pk)
+            if duplicate_queryset.exists():
+                raise ValidationError(
+                    {"order": "This order already belongs to another draft or active merged settlement group."}
+                )
+
+        if self.group.address_match_key and self.address_match_key:
+            is_exact_match = self.group.address_match_key == self.address_match_key
+            if self.address_match_status == "exact" and not is_exact_match:
+                raise ValidationError(
+                    {"address_match_status": "Use override when the order address key differs from the group key."}
+                )
+            if self.address_match_status == "override" and not is_exact_match and not self.override_reason.strip():
+                raise ValidationError(
+                    {"override_reason": "Override reason is required when address keys differ."}
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class ShopifyOrderPackage(models.Model):

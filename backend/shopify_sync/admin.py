@@ -14,7 +14,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.middleware.csrf import get_token
 from django.urls import path, reverse
 from django.utils import timezone
-from django.utils.html import escape, format_html
+from django.utils.html import escape, format_html, format_html_join
 
 from .models import (
     FinanceExchangeRate,
@@ -26,6 +26,8 @@ from .models import (
     ShopifyOrderItem,
     ShippingCostRule,
     SettlementBatch,
+    ShenzhenMergedSettlementGroup,
+    ShenzhenMergedSettlementGroupOrder,
     ShenzhenCountryShippingDefault,
     ShenzhenProductCountryShippingDefault,
 )
@@ -1370,6 +1372,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "order_shipping_cost_rmb",
         "order_handling_fee_rmb",
         "total_locked_cost_rmb",
+        "merged_settlement_group_display",
         "settlement_status_display",
         "exception_review_summary",
         "shenzhen_items_total_cost_summary",
@@ -1430,6 +1433,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     "is_shenzhen_order",
                     "settlement_status_display",
                     "settlement_batch",
+                    "merged_settlement_group_display",
                     "transferred_at",
                     "transfer_note",
                     "tracking_number",
@@ -2014,6 +2018,37 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     settlement_status_display.short_description = "结算状态"
     settlement_status_display.admin_order_field = "settlement_status"
 
+    def merged_settlement_group_display(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+        group_links = list(
+            obj.merged_settlement_group_links.select_related("group").order_by(
+                "group__status",
+                "-added_at",
+            )
+        )
+        if not group_links:
+            return "-"
+
+        request = getattr(self, "_current_request", None)
+        can_link = bool(request and (self.is_super_admin(request) or self.is_finance_user(request)))
+        rows = []
+        for group_link in group_links:
+            group = group_link.group
+            label = f"{group.group_no or group.pk} ({group.get_status_display()})"
+            if can_link:
+                url = reverse("admin:shopify_sync_shenzhenmergedsettlementgroup_change", args=[group.pk])
+                label_html = format_html('<a href="{}">{}</a>', url, label)
+            else:
+                label_html = label
+            rows.append((
+                label_html,
+                group_link.get_address_match_status_display(),
+                group_link.added_at.strftime("%Y-%m-%d %H:%M") if group_link.added_at else "-",
+            ))
+        return format_html_join("", "{} - {} - {}<br>", rows)
+    merged_settlement_group_display.short_description = "Merged settlement group"
+
     def exception_review_summary(self, obj):
         if not obj:
             return "-"
@@ -2385,6 +2420,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                             "shipping_zip",
                             "current_location",
                             "settlement_status_display",
+                            "merged_settlement_group_display",
                             "tracking_number",
                             "tracking_company",
                             "tracking_info_summary",
@@ -2955,6 +2991,197 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             except ValueError:
                 next_seq = 1
         return f"{prefix}-{next_seq:03d}"
+
+
+class ShenzhenMergedSettlementGroupOrderInline(admin.TabularInline):
+    model = ShenzhenMergedSettlementGroupOrder
+    extra = 0
+    fields = (
+        "order_link",
+        "order_name",
+        "customer_name",
+        "shipping_country",
+        "settlement_status_display",
+        "total_locked_cost_rmb_display",
+        "item_count",
+        "address_match_status",
+        "address_match_key",
+        "override_reason",
+        "added_by",
+        "added_at",
+    )
+    readonly_fields = fields
+    can_delete = False
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("group", "order", "added_by")
+        )
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_authenticated
+
+    def order_link(self, obj):
+        if not obj or not obj.order_id:
+            return "-"
+        url = reverse("admin:shopify_sync_shopifyorder_change", args=[obj.order_id])
+        return format_html('<a href="{}">{}</a>', url, obj.order.order_name or obj.order_id)
+    order_link.short_description = "Order"
+
+    def order_name(self, obj):
+        return obj.order.order_name if obj and obj.order_id else "-"
+    order_name.short_description = "Order name"
+
+    def customer_name(self, obj):
+        return obj.order.customer_name if obj and obj.order_id else "-"
+    customer_name.short_description = "Customer"
+
+    def shipping_country(self, obj):
+        return obj.order.shipping_country if obj and obj.order_id else "-"
+    shipping_country.short_description = "Country"
+
+    def settlement_status_display(self, obj):
+        if not obj or not obj.order_id:
+            return "-"
+        return settlement_status_admin_label(obj.order.settlement_status)
+    settlement_status_display.short_description = "Settlement status"
+
+    def total_locked_cost_rmb_display(self, obj):
+        if not obj or not obj.order_id:
+            return "-"
+        return obj.order.total_locked_cost_rmb if obj.order.total_locked_cost_rmb is not None else "-"
+    total_locked_cost_rmb_display.short_description = "Total locked cost RMB"
+
+    def item_count(self, obj):
+        if not obj or not obj.order_id:
+            return "-"
+        return obj.order.order_items.filter(fulfillment_location=SHENZHEN_ITEM_LOCATION).count()
+    item_count.short_description = "Item count"
+
+
+@admin.register(ShenzhenMergedSettlementGroup)
+class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
+    inlines = [ShenzhenMergedSettlementGroupOrderInline]
+    list_display = (
+        "group_no",
+        "status",
+        "shipping_country",
+        "shipping_city",
+        "members_count",
+        "merged_shipping_cost_rmb",
+        "merged_ordering_cost_rmb",
+        "created_at",
+    )
+    list_filter = ("status", "shipping_country", "created_at")
+    search_fields = (
+        "group_no",
+        "shipping_name",
+        "shipping_phone",
+        "shipping_address1",
+        "shipping_address2",
+        "shipping_city",
+        "shipping_province",
+        "shipping_zip",
+        "note",
+        "group_orders__order__order_name",
+        "group_orders__order__order_number",
+    )
+    readonly_fields = (
+        "group_no",
+        "status",
+        "shipping_name",
+        "shipping_phone",
+        "shipping_address1",
+        "shipping_address2",
+        "shipping_city",
+        "shipping_province",
+        "shipping_zip",
+        "shipping_country",
+        "address_match_key",
+        "merged_shipping_cost_rmb",
+        "merged_ordering_cost_rmb",
+        "members_count",
+        "note",
+        "created_by",
+        "created_at",
+        "updated_at",
+    )
+    fieldsets = (
+        (
+            "Group",
+            {
+                "fields": (
+                    "group_no",
+                    "status",
+                    "members_count",
+                    "created_by",
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
+        (
+            "Shipping snapshot",
+            {
+                "fields": (
+                    "shipping_name",
+                    "shipping_phone",
+                    "shipping_address1",
+                    "shipping_address2",
+                    "shipping_city",
+                    "shipping_province",
+                    "shipping_zip",
+                    "shipping_country",
+                    "address_match_key",
+                )
+            },
+        ),
+        (
+            "Merged costs",
+            {
+                "fields": (
+                    "merged_shipping_cost_rmb",
+                    "merged_ordering_cost_rmb",
+                    "note",
+                )
+            },
+        ),
+    )
+
+    def _can_view_merged_groups(self, request):
+        return self.is_super_admin(request) or self.is_finance_user(request)
+
+    def has_module_permission(self, request):
+        return self._can_view_merged_groups(request)
+
+    def has_view_permission(self, request, obj=None):
+        return self._can_view_merged_groups(request)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def members_count(self, obj):
+        if not obj or not obj.pk:
+            return 0
+        return obj.group_orders.count()
+    members_count.short_description = "Members"
 
 
 @admin.register(SettlementBatch)
