@@ -4,6 +4,10 @@ import time
 from html import escape
 from pathlib import Path
 
+from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppression import (
+    CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+    evaluate_customer_level_duplicate,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -181,6 +185,10 @@ def _guard_summary(candidate: dict) -> dict:
         or bool(matched_aliases)
         or candidate_summary["source_decision"] == "blocked_existing_trustpilot_invitation_tag"
     )
+    customer_level_duplicate = evaluate_customer_level_duplicate(
+        candidate_summary["order_name"],
+        candidate_summary["masked_email"],
+    )
     returned_triggered = _returned_package_guard_triggered(candidate_summary)
     risk_triggered = _risk_ticket_refund_cancel_dispute_blocker_detected(candidate_summary)
     repeat_confirmed = (
@@ -201,8 +209,30 @@ def _guard_summary(candidate: dict) -> dict:
     return {
         "repeat_customer_confirmed": repeat_confirmed,
         "duplicate_trustpilot_invitation_alias_detected": duplicate_detected,
+        "customer_level_duplicate_block_applies": customer_level_duplicate[
+            "customer_level_duplicate_block_applies"
+        ],
+        "customer_level_duplicate_classification": customer_level_duplicate["classification"],
+        "prior_trustpilot_invitation_detected": customer_level_duplicate[
+            "prior_trustpilot_invitation_detected"
+        ],
+        "prior_trustpilot_order_name": customer_level_duplicate["prior_trustpilot_order_name"],
+        "customer_level_duplicate_match_basis": customer_level_duplicate[
+            "same_customer_detection_basis"
+        ],
+        "same_customer_detected": customer_level_duplicate["same_customer_detected"],
+        "same_email_detected": customer_level_duplicate["same_email_detected"],
+        "same_masked_email_detected": customer_level_duplicate["same_masked_email_detected"],
+        "existing_unsent_gmail_draft_should_not_be_sent": customer_level_duplicate[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
+        "future_optional_draft_cleanup_needs_separate_locked_phase": customer_level_duplicate[
+            "future_optional_draft_cleanup_needs_separate_locked_phase"
+        ],
         "duplicate_trustpilot_invitation_block_confirmed": (
-            not duplicate_detected and alias_coverage["all_required_aliases_present"]
+            not duplicate_detected
+            and not customer_level_duplicate["customer_level_duplicate_block_applies"]
+            and alias_coverage["all_required_aliases_present"]
         ),
         "matched_trustpilot_invitation_tags": matched_aliases,
         "returned_package_guard_triggered": returned_triggered,
@@ -267,6 +297,13 @@ def _blocking_conditions(
             {
                 "status": "blocked_duplicate_trustpilot_invitation_alias_detected",
                 "detail": "selected candidate already has a Trustpilot invitation alias.",
+            }
+        )
+    if guard_summary["customer_level_duplicate_block_applies"]:
+        conditions.append(
+            {
+                "status": CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+                "detail": "selected candidate matches a prior Trustpilot invitation customer/email signal.",
             }
         )
     if guard_summary["returned_package_guard_triggered"]:
@@ -334,6 +371,28 @@ def _build_payload(
         ],
         "duplicate_trustpilot_invitation_alias_detected": guard_summary[
             "duplicate_trustpilot_invitation_alias_detected"
+        ],
+        "customer_level_duplicate_block_applies": guard_summary[
+            "customer_level_duplicate_block_applies"
+        ],
+        "customer_level_duplicate_classification": guard_summary[
+            "customer_level_duplicate_classification"
+        ],
+        "prior_trustpilot_invitation_detected": guard_summary[
+            "prior_trustpilot_invitation_detected"
+        ],
+        "prior_trustpilot_order_name": guard_summary["prior_trustpilot_order_name"],
+        "customer_level_duplicate_match_basis": guard_summary[
+            "customer_level_duplicate_match_basis"
+        ],
+        "same_customer_detected": guard_summary["same_customer_detected"],
+        "same_email_detected": guard_summary["same_email_detected"],
+        "same_masked_email_detected": guard_summary["same_masked_email_detected"],
+        "existing_unsent_gmail_draft_should_not_be_sent": guard_summary[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
+        "future_optional_draft_cleanup_needs_separate_locked_phase": guard_summary[
+            "future_optional_draft_cleanup_needs_separate_locked_phase"
         ],
         "matched_trustpilot_invitation_tags": guard_summary["matched_trustpilot_invitation_tags"],
         "returned_package_guard_confirmed": guard_summary["returned_package_guard_confirmed"],
@@ -439,6 +498,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "duplicate_trustpilot_invitation_block_confirmed": payload[
             "duplicate_trustpilot_invitation_block_confirmed"
         ],
+        "customer_level_duplicate_block_applies": payload["customer_level_duplicate_block_applies"],
+        "prior_trustpilot_order_name": payload["prior_trustpilot_order_name"],
+        "existing_unsent_gmail_draft_should_not_be_sent": payload[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
         "returned_package_guard_confirmed": payload["returned_package_guard_confirmed"],
         "first_order_customer_block_confirmed": payload["first_order_customer_block_confirmed"],
         "blocking_condition_count": payload["blocking_condition_count"],
@@ -480,6 +544,12 @@ def _render_html_report(payload: dict) -> str:
             (
                 "Duplicate Trustpilot invitation block confirmed",
                 "duplicate_trustpilot_invitation_block_confirmed",
+            ),
+            ("Customer-level duplicate block applies", "customer_level_duplicate_block_applies"),
+            ("Prior Trustpilot order", "prior_trustpilot_order_name"),
+            (
+                "Existing unsent Gmail draft should not be sent",
+                "existing_unsent_gmail_draft_should_not_be_sent",
             ),
             ("Returned package guard confirmed", "returned_package_guard_confirmed"),
             ("First-order customer block confirmed", "first_order_customer_block_confirmed"),

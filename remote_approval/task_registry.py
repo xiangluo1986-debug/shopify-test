@@ -9,6 +9,9 @@ from remote_approval.tasks.shopify_review_request_ali_reviews_capability_discove
 from remote_approval.tasks.shopify_review_request_candidate_scan_task import (
     run_shopify_review_request_candidate_scan_task,
 )
+from remote_approval.tasks.shopify_review_request_customer_level_trustpilot_duplicate_audit_task import (
+    run_shopify_review_request_customer_level_trustpilot_duplicate_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
     run_shopify_review_request_gmail_readiness_package_task,
 )
@@ -32,6 +35,9 @@ from remote_approval.tasks.shopify_review_request_next_repeat_customer_candidate
 )
 from remote_approval.tasks.shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task import (
     run_shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task,
+)
+from remote_approval.tasks.shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner_task import (
+    run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner_task,
 )
 from remote_approval.tasks.shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute_task import (
     run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute_task,
@@ -290,6 +296,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
         run_shopify_review_request_ali_reviews_capability_discovery_task
     ),
     "shopify_review_request_candidate_scan": run_shopify_review_request_candidate_scan_task,
+    "shopify_review_request_customer_level_trustpilot_duplicate_audit": (
+        run_shopify_review_request_customer_level_trustpilot_duplicate_audit_task
+    ),
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
     "shopify_review_request_gmail_oauth_setup_helper": run_shopify_review_request_gmail_oauth_setup_helper_task,
     "shopify_review_request_kudosi_api_403_diagnostics": run_shopify_review_request_kudosi_api_403_diagnostics_task,
@@ -301,6 +310,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_one_candidate_gmail_draft_package": (
         run_shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task
+    ),
+    "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner": (
+        run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner_task
     ),
     "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute": (
         run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute_task
@@ -548,6 +560,12 @@ TASK_METADATA: Dict[str, dict] = {
         "write_risk": "read-only Shopify order query",
         "review_file_path": "logs/shopify_review_request_candidate_scan.json",
     },
+    "shopify_review_request_customer_level_trustpilot_duplicate_audit": {
+        "description": "Audit customer-level Trustpilot duplicate invitation suppression for #22620 against prior local reports and DB identity.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local DB/read-only report audit only",
+        "review_file_path": "logs/shopify_review_request_customer_level_trustpilot_duplicate_audit.json",
+    },
     "shopify_review_request_gmail_readiness_package": {
         "description": "Generate a docs-only Gmail send permission readiness package for review requests.",
         "allowed_modes": ["dry-run"],
@@ -595,6 +613,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_trustpilot_one_candidate_gmail_draft_package.json",
+    },
+    "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner": {
+        "description": "Validate the locked no-write one-candidate Trustpilot Gmail draft creation preflight.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; preflight only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
     },
     "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute": {
         "description": "Dry-run or execute a locked exactly-one Trustpilot Gmail draft create for selected order #22620.",

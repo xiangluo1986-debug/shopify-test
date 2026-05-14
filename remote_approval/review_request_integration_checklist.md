@@ -352,3 +352,22 @@ Future tracking design note:
   Kudosi/Ali Reviews API, webhook, or export support.
 - Phase 4.2 does not enable redirects, call Trustpilot/Kudosi/Ali Reviews APIs,
   call Gmail APIs, send email, or write Shopify data.
+
+## Phase 4.8C Customer-Level Trustpilot Duplicate Suppression
+
+- [x] Add a local audit task:
+  `shopify_review_request_customer_level_trustpilot_duplicate_audit`.
+- [x] Audit order `#22620` against prior Trustpilot order `#22621` using local
+  DB identity where available and existing local reports only.
+- [x] Treat a prior successful Trustpilot Gmail send report, Trustpilot tag
+  write report, Trustpilot tag write audit, or local Trustpilot alias tag report
+  as a customer-level suppression signal.
+- [x] Block any matching customer/email signal with classification
+  `blocked_existing_trustpilot_invitation_customer_level`.
+- [x] Keep raw customer emails internal only; JSON/HTML reports must contain
+  masked email and boolean comparison fields only.
+- [x] Existing unsent Gmail drafts for a blocked order must not be sent.
+  Optional cleanup/deletion requires a separate locked phase.
+- [x] Phase 4.8C does not create Gmail drafts, send Gmail, delete Gmail drafts,
+  write Shopify tags, remove Shopify tags, call Trustpilot/Kudosi/Ali Reviews
+  APIs, enable tracking redirects, or generate tracking tokens.

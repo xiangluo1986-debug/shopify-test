@@ -5,6 +5,12 @@ from collections import Counter
 from html import escape
 from pathlib import Path
 
+from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppression import (
+    CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+    build_customer_level_duplicate_context,
+    evaluate_customer_level_duplicate,
+    public_context_summary,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -37,6 +43,7 @@ DECISION_BUCKETS = [
     "blocked_refund_or_cancelled",
     "blocked_ticket_risk",
     "blocked_existing_trustpilot_invitation_tag",
+    CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
     "trustpilot_gmail_candidate_dry_run",
     "ali_reviews_candidate_waiting_for_send_api",
     "already_review_sent_skip",
@@ -100,9 +107,18 @@ def _build_payload(sources: dict, source_errors: dict, duration_seconds: float) 
     source_status = _source_report_status(sources, source_errors)
     source_ready = not source_errors and all(item["ready"] for item in source_status.values())
     decisions = []
+    customer_duplicate_context = build_customer_level_duplicate_context()
     if source_ready:
         orders = sources["candidate_scan"].get("orders") or []
-        decisions = [_decision_row(order) for order in orders if isinstance(order, dict)]
+        customer_duplicate_context = build_customer_level_duplicate_context(
+            [_safe_text(order.get("order_name", "")) for order in orders if isinstance(order, dict)],
+            extra_rows=[order for order in orders if isinstance(order, dict)],
+        )
+        decisions = [
+            _decision_row(order, customer_duplicate_context)
+            for order in orders
+            if isinstance(order, dict)
+        ]
     counts = Counter(row["decision"] for row in decisions)
     counts = {bucket: int(counts.get(bucket, 0)) for bucket in DECISION_BUCKETS}
     safety = _safety_summary()
@@ -127,6 +143,7 @@ def _build_payload(sources: dict, source_errors: dict, duration_seconds: float) 
         "gmail_sender_planned": GMAIL_SENDER_PLANNED,
         "trustpilot_link": TRUSTPILOT_LINK,
         "decisions": decisions,
+        "customer_level_duplicate_summary": public_context_summary(customer_duplicate_context),
         "trustpilot_template_preview": {
             "subject": TRUSTPILOT_EMAIL_SUBJECT,
             "body_template": TRUSTPILOT_EMAIL_BODY,
@@ -200,7 +217,7 @@ def _source_report_status(sources: dict, source_errors: dict) -> dict:
     return result
 
 
-def _decision_row(order: dict) -> dict:
+def _decision_row(order: dict, customer_duplicate_context: dict) -> dict:
     tags = [_safe_text(tag) for tag in order.get("tags", []) if str(tag).strip()]
     tag_set = set(tags)
     normalized_tags = {_normalize_tag(tag) for tag in tags}
@@ -211,6 +228,11 @@ def _decision_row(order: dict) -> dict:
     has_ticket_risk = _has_ticket_risk(order)
     matched_trustpilot_tags = _matched_trustpilot_invitation_tags(order, tags)
     has_trustpilot_tag = bool(matched_trustpilot_tags)
+    customer_level_duplicate = evaluate_customer_level_duplicate(
+        _safe_text(order.get("order_name", "")),
+        masked_email,
+        customer_duplicate_context,
+    )
     has_returned_package_tag = _has_returned_package_tag(tags)
     has_review_sent = ALI_REVIEW_SENT_TAG in tag_set
     has_historical_manual = HISTORICAL_ALI_MANUAL_TAG in tag_set
@@ -227,6 +249,8 @@ def _decision_row(order: dict) -> dict:
         decision = "blocked_ticket_risk"
     elif has_trustpilot_tag:
         decision = "blocked_existing_trustpilot_invitation_tag"
+    elif customer_level_duplicate["customer_level_duplicate_block_applies"]:
+        decision = CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION
     elif has_review_sent:
         decision = "already_review_sent_skip"
     elif repeat_detected and not has_trustpilot_tag:
@@ -247,6 +271,19 @@ def _decision_row(order: dict) -> dict:
         "safe_tags_summary": _tags_summary(tags),
         "existing_trustpilot_invitation_tag_detected": has_trustpilot_tag,
         "matched_trustpilot_invitation_tags": matched_trustpilot_tags,
+        "customer_level_duplicate_block_applies": customer_level_duplicate[
+            "customer_level_duplicate_block_applies"
+        ],
+        "prior_trustpilot_invitation_detected": customer_level_duplicate[
+            "prior_trustpilot_invitation_detected"
+        ],
+        "prior_trustpilot_order_name": customer_level_duplicate["prior_trustpilot_order_name"],
+        "customer_level_duplicate_match_basis": customer_level_duplicate[
+            "same_customer_detection_basis"
+        ],
+        "same_customer_detected": customer_level_duplicate["same_customer_detected"],
+        "same_email_detected": customer_level_duplicate["same_email_detected"],
+        "same_masked_email_detected": customer_level_duplicate["same_masked_email_detected"],
         "risk_summary": _risk_summary(order),
         "decision": decision,
         "planned_next_action": _planned_next_action(decision),
@@ -322,6 +359,7 @@ def _planned_next_action(decision: str) -> str:
         "blocked_refund_or_cancelled": "Do not send; refund, partial refund, dispute, or cancellation risk.",
         "blocked_ticket_risk": "Do not send; ticket/risk case requires resolution first.",
         "blocked_existing_trustpilot_invitation_tag": "Do not create a draft, send Gmail, or write Shopify tag; an existing Trustpilot invitation tag already marks this order/customer history.",
+        CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION: "Do not create a draft, send Gmail, or write Shopify tag; this customer/email already has a prior Trustpilot invitation signal.",
         "trustpilot_gmail_candidate_dry_run": "Dry-run only: future Gmail Trustpilot invitation preview; no email sent.",
         "ali_reviews_candidate_waiting_for_send_api": "Wait for confirmed Ali Reviews/Kudosi send API before any product review request.",
         "already_review_sent_skip": "Skip; Review sent tag already present.",

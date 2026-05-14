@@ -8,6 +8,10 @@ from email.message import EmailMessage
 from html import escape
 from pathlib import Path
 
+from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppression import (
+    CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+    evaluate_customer_level_duplicate,
+)
 from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 
@@ -93,6 +97,10 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execu
     source_privacy_scan = _privacy_scan_text(source_text)
     source_summary = _source_summary(source_preflight, source_error)
     source_safety = _source_safety_summary(source_preflight)
+    customer_level_duplicate = evaluate_customer_level_duplicate(
+        source_summary["selected_order_name"],
+        source_summary["selected_masked_email"],
+    )
     gates = _gate_status(normalized_mode)
     blocking_conditions = _blocking_conditions(
         source_preflight=source_preflight,
@@ -100,6 +108,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execu
         source_privacy_scan=source_privacy_scan,
         source_summary=source_summary,
         source_safety=source_safety,
+        customer_level_duplicate=customer_level_duplicate,
         gates=gates,
     )
     create_result = _gmail_draft_create_result(source_preflight, gates, blocking_conditions)
@@ -108,6 +117,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execu
         source_summary=source_summary,
         source_safety=source_safety,
         source_privacy_scan=source_privacy_scan,
+        customer_level_duplicate=customer_level_duplicate,
         gates=gates,
         blocking_conditions=blocking_conditions,
         create_result=create_result,
@@ -221,6 +231,7 @@ def _blocking_conditions(
     source_privacy_scan: dict,
     source_summary: dict,
     source_safety: dict,
+    customer_level_duplicate: dict,
     gates: dict,
 ) -> list[dict]:
     if not gates["mode_valid"]:
@@ -254,6 +265,13 @@ def _blocking_conditions(
             {
                 "status": "blocked_duplicate_trustpilot_invitation_guard_missing",
                 "detail": "duplicate Trustpilot invitation guard is not confirmed.",
+            }
+        )
+    if customer_level_duplicate["customer_level_duplicate_block_applies"]:
+        conditions.append(
+            {
+                "status": CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+                "detail": "selected candidate matches a prior Trustpilot invitation customer/email signal.",
             }
         )
     if not source_summary["returned_package_guard_confirmed"]:
@@ -720,6 +738,7 @@ def _build_payload(
     source_summary: dict,
     source_safety: dict,
     source_privacy_scan: dict,
+    customer_level_duplicate: dict,
     gates: dict,
     blocking_conditions: list[dict],
     create_result: dict,
@@ -747,6 +766,26 @@ def _build_payload(
         "would_create_count": source_summary["would_create_count"],
         "duplicate_trustpilot_invitation_guard_confirmed": source_summary[
             "duplicate_trustpilot_invitation_guard_confirmed"
+        ],
+        "customer_level_duplicate_block_applies": customer_level_duplicate[
+            "customer_level_duplicate_block_applies"
+        ],
+        "customer_level_duplicate_classification": customer_level_duplicate["classification"],
+        "prior_trustpilot_invitation_detected": customer_level_duplicate[
+            "prior_trustpilot_invitation_detected"
+        ],
+        "prior_trustpilot_order_name": customer_level_duplicate["prior_trustpilot_order_name"],
+        "customer_level_duplicate_match_basis": customer_level_duplicate[
+            "same_customer_detection_basis"
+        ],
+        "same_customer_detected": customer_level_duplicate["same_customer_detected"],
+        "same_email_detected": customer_level_duplicate["same_email_detected"],
+        "same_masked_email_detected": customer_level_duplicate["same_masked_email_detected"],
+        "existing_unsent_gmail_draft_should_not_be_sent": customer_level_duplicate[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
+        "future_optional_draft_cleanup_needs_separate_locked_phase": customer_level_duplicate[
+            "future_optional_draft_cleanup_needs_separate_locked_phase"
         ],
         "returned_package_guard_confirmed": source_summary["returned_package_guard_confirmed"],
         "first_order_customer_block_confirmed": source_summary["first_order_customer_block_confirmed"],
@@ -867,6 +906,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "real_gmail_draft_create_blocked_reason": payload["real_gmail_draft_create_blocked_reason"],
         "gmail_draft_id_partial": payload["gmail_draft_id_partial"],
         "gmail_draft_verified": payload["gmail_draft_verified"],
+        "customer_level_duplicate_block_applies": payload["customer_level_duplicate_block_applies"],
+        "prior_trustpilot_order_name": payload["prior_trustpilot_order_name"],
+        "existing_unsent_gmail_draft_should_not_be_sent": payload[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
         "gmail_oauth_env_read_attempted": payload["gmail_oauth_env_read_attempted"],
         "protected_raw_email_lookup_attempted": payload["protected_raw_email_lookup_attempted"],
         "raw_email_available_to_runtime": payload["raw_email_available_to_runtime"],
@@ -937,6 +981,9 @@ def _render_html_report(payload: dict) -> str:
     <tr><th>Real Gmail draft create executed</th><td>{escape(str(payload["real_gmail_draft_create_executed"]))}</td></tr>
     <tr><th>Blocked reason</th><td>{escape(str(payload["real_gmail_draft_create_blocked_reason"]))}</td></tr>
     <tr><th>Gmail draft id partial</th><td><code>{escape(str(payload["gmail_draft_id_partial"]))}</code></td></tr>
+    <tr><th>Customer-level duplicate block applies</th><td>{escape(str(payload["customer_level_duplicate_block_applies"]))}</td></tr>
+    <tr><th>Prior Trustpilot order</th><td><code>{escape(str(payload["prior_trustpilot_order_name"]))}</code></td></tr>
+    <tr><th>Existing unsent Gmail draft should not be sent</th><td>{escape(str(payload["existing_unsent_gmail_draft_should_not_be_sent"]))}</td></tr>
   </tbody></table>
   <h2>Real-Run Gates</h2>
   <table><tbody>

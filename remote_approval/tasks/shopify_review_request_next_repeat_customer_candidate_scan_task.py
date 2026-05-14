@@ -5,6 +5,12 @@ from collections import Counter
 from html import escape
 from pathlib import Path
 
+from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppression import (
+    CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+    build_customer_level_duplicate_context,
+    evaluate_customer_level_duplicate,
+    public_context_summary,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -55,8 +61,13 @@ def run_shopify_review_request_next_repeat_customer_candidate_scan_task(mode: st
     source_status = _source_report_status(sources, source_errors)
     completed_order_names = _completed_order_names(sources)
     rows = _merged_order_rows(sources)
+    customer_duplicate_context = build_customer_level_duplicate_context(
+        [_row_order_name(row) for row in rows],
+        extra_rows=[(row.get("candidate_scan_order") or {}) for row in rows]
+        + [(row.get("unified_decision") or {}) for row in rows],
+    )
     evaluated_rows = [
-        _evaluate_order(row, completed_order_names, index)
+        _evaluate_order(row, completed_order_names, index, customer_duplicate_context)
         for index, row in enumerate(rows, start=1)
     ]
     ready_candidates = [
@@ -72,6 +83,7 @@ def run_shopify_review_request_next_repeat_customer_candidate_scan_task(mode: st
         evaluated_rows=evaluated_rows,
         ready_candidates=ready_candidates,
         blocking_conditions=blocking_conditions,
+        customer_duplicate_context=customer_duplicate_context,
         status=status,
         duration_seconds=round(time.time() - started, 3),
     )
@@ -210,7 +222,13 @@ def _order_keys(row: dict) -> list[str]:
     return _dedupe(keys)
 
 
-def _evaluate_order(row: dict, completed_order_names: list[str], source_index: int) -> dict:
+def _row_order_name(row: dict) -> str:
+    order = row.get("candidate_scan_order") or {}
+    decision = row.get("unified_decision") or {}
+    return _safe_text(order.get("order_name") or decision.get("order_name") or "")
+
+
+def _evaluate_order(row: dict, completed_order_names: list[str], source_index: int, customer_duplicate_context: dict) -> dict:
     order = row.get("candidate_scan_order") or {}
     decision = row.get("unified_decision") or {}
     order_name = _safe_text(order.get("order_name") or decision.get("order_name") or "")
@@ -230,6 +248,11 @@ def _evaluate_order(row: dict, completed_order_names: list[str], source_index: i
         or source_decision == "trustpilot_gmail_candidate_dry_run"
     )
     ticket_risk = _has_ticket_risk(order, decision)
+    customer_level_duplicate = evaluate_customer_level_duplicate(
+        order_name,
+        masked_email,
+        customer_duplicate_context,
+    )
     block_reasons = _candidate_block_reasons(
         order_name=order_name,
         completed_order_names=completed_order_names,
@@ -241,8 +264,14 @@ def _evaluate_order(row: dict, completed_order_names: list[str], source_index: i
         repeat_customer_detected=repeat_customer_detected,
         ticket_risk=ticket_risk,
         order=order,
+        customer_level_duplicate=customer_level_duplicate,
     )
     ready = not block_reasons
+    classification = (
+        CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION
+        if customer_level_duplicate["customer_level_duplicate_block_applies"]
+        else ("ready_next_trustpilot_repeat_customer_candidate" if ready else "blocked")
+    )
     return {
         "source_index": source_index,
         "order_name": order_name,
@@ -258,6 +287,20 @@ def _evaluate_order(row: dict, completed_order_names: list[str], source_index: i
         "existing_trustpilot_invitation_tag_detected": bool(matched_trustpilot_tags),
         "ticket_risk_detected": ticket_risk,
         "candidate_status": "ready_next_trustpilot_repeat_customer_candidate" if ready else "blocked",
+        "classification": classification,
+        "customer_level_duplicate_block_applies": customer_level_duplicate[
+            "customer_level_duplicate_block_applies"
+        ],
+        "prior_trustpilot_invitation_detected": customer_level_duplicate[
+            "prior_trustpilot_invitation_detected"
+        ],
+        "prior_trustpilot_order_name": customer_level_duplicate["prior_trustpilot_order_name"],
+        "customer_level_duplicate_match_basis": customer_level_duplicate[
+            "same_customer_detection_basis"
+        ],
+        "same_customer_detected": customer_level_duplicate["same_customer_detected"],
+        "same_email_detected": customer_level_duplicate["same_email_detected"],
+        "same_masked_email_detected": customer_level_duplicate["same_masked_email_detected"],
         "blocking_reasons": block_reasons,
         "planned_action": "report_candidate_only_no_draft_no_send_no_tag_write" if ready else "do_not_contact",
         "future_write_tag_if_later_approved": CANONICAL_TRUSTPILOT_TAG if ready else "",
@@ -310,6 +353,7 @@ def _candidate_block_reasons(
     repeat_customer_detected: bool,
     ticket_risk: bool,
     order: dict,
+    customer_level_duplicate: dict,
 ) -> list[str]:
     reasons = []
     tag_set = set(tags)
@@ -317,6 +361,8 @@ def _candidate_block_reasons(
         reasons.append("completed_trustpilot_order_already_processed")
     if matched_trustpilot_tags or source_decision == "blocked_existing_trustpilot_invitation_tag":
         reasons.append("existing_trustpilot_invitation_tag_or_alias_detected")
+    if customer_level_duplicate.get("customer_level_duplicate_block_applies") is True:
+        reasons.append(CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION)
     if not repeat_customer_detected:
         reasons.append("repeat_customer_not_confirmed")
     if not masked_email or "***@" not in masked_email:
@@ -380,6 +426,7 @@ def _build_payload(
     evaluated_rows: list[dict],
     ready_candidates: list[dict],
     blocking_conditions: list[dict],
+    customer_duplicate_context: dict,
     status: str,
     duration_seconds: float,
 ) -> dict:
@@ -438,11 +485,14 @@ def _build_payload(
         "ready_candidate_queue": ready_candidates[:10],
         "evaluated_orders": evaluated_rows[:150],
         "blocked_counts": dict(sorted(blocked_counts.items())),
+        "customer_level_duplicate_summary": public_context_summary(customer_duplicate_context),
         "trustpilot_tag_matching_policy": {
             "canonical_write_tag_for_future_real_write_only": CANONICAL_TRUSTPILOT_TAG,
             "current_task_write_tag": "",
             "future_real_writes_must_use_exact_canonical_tag": True,
             "duplicate_detection_uses_tolerant_alias_matching": True,
+            "customer_level_duplicate_suppression_enabled": True,
+            "customer_level_duplicate_classification": CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
             "legacy_tags_are_not_removed": True,
             **_trustpilot_alias_coverage(),
         },

@@ -27,6 +27,7 @@ FUTURE_TRACKING_STATUSES = (
     "clicked",
     "review_detected",
     "blocked_existing_trustpilot_invitation_tag",
+    "blocked_existing_trustpilot_invitation_customer_level",
     "blocked_returned_package",
     "blocked_first_order_customer",
     "blocked_risk_or_ticket",
@@ -57,6 +58,11 @@ BLOCKED_REASON_DEFINITIONS = (
         "Duplicate Trustpilot invitation",
         ("duplicate trustpilot", "existing_trustpilot", "trustpilot invitation"),
     ),
+    (
+        "customer_level_duplicate_trustpilot",
+        "Customer-level duplicate Trustpilot",
+        ("customer_level", "same_customer", "same_email", "prior_trustpilot"),
+    ),
     ("first_order", "First order", ("first order", "first_order")),
     (
         "risk_ticket_refund_cancel_dispute",
@@ -81,6 +87,12 @@ REPORT_DEFINITIONS = (
         "Candidate scan",
         "shopify_review_request_candidate_scan.json",
         ("report_status", "status"),
+    ),
+    (
+        "customer_level_duplicate_audit",
+        "Customer-level Trustpilot duplicate audit",
+        "shopify_review_request_customer_level_trustpilot_duplicate_audit.json",
+        ("customer_level_duplicate_audit_status", "report_status", "status"),
     ),
     (
         "manual_action_package",
@@ -584,6 +596,13 @@ def _row_from_mapping(item, source_label, source_path, source_section):
         "blocking_reasons": blocking_reasons,
         "blocking_summary": ", ".join(blocking_reasons),
         "repeat_customer_detected": _safe_text(item.get("repeat_customer_detected")),
+        "customer_level_duplicate_block_applies": item.get("customer_level_duplicate_block_applies") is True,
+        "prior_trustpilot_order_name": _safe_text(item.get("prior_trustpilot_order_name")),
+        "same_customer_detected": item.get("same_customer_detected") is True,
+        "same_email_detected": item.get("same_email_detected") is True,
+        "existing_unsent_gmail_draft_should_not_be_sent": (
+            item.get("existing_unsent_gmail_draft_should_not_be_sent") is True
+        ),
     }
 
 
@@ -1040,6 +1059,8 @@ def _attach_status_badges(rows, latest_scan):
             badges.append(_badge("Blocked: returned package", "rrw-badge-bad"))
         if _row_has_duplicate_trustpilot(row):
             badges.append(_badge("Blocked: duplicate Trustpilot invitation", "rrw-badge-bad"))
+        if _row_has_customer_level_duplicate_trustpilot(row):
+            badges.append(_badge("Blocked: customer duplicate Trustpilot", "rrw-badge-bad"))
         if _row_has_first_order(row):
             badges.append(_badge("Blocked: first order", "rrw-badge-warn"))
         if _row_has_risk_or_ticket(row):
@@ -1081,6 +1102,19 @@ def _row_has_duplicate_trustpilot(row):
     return row.get("trustpilot_invitation_present") and (
         _row_has_blocker(row)
         or _row_text_contains(row, ("duplicate", "existing_trustpilot", "trustpilot invitation"))
+    )
+
+
+def _row_has_customer_level_duplicate_trustpilot(row):
+    return row.get("customer_level_duplicate_block_applies") or _row_text_contains(
+        row,
+        (
+            "blocked_existing_trustpilot_invitation_customer_level",
+            "customer_level",
+            "same_customer",
+            "same_email",
+            "prior_trustpilot",
+        ),
     )
 
 
@@ -1196,7 +1230,9 @@ def _summary(
     )
     blocked_duplicate = (
         _int_or_zero(blocked_counts.get("existing_trustpilot_invitation_tag_or_alias_detected"))
+        or _int_or_zero(blocked_counts.get("blocked_existing_trustpilot_invitation_customer_level"))
         or _count_for_blocker(blocked_reason_counts, "duplicate_trustpilot_invitation")
+        or _count_for_blocker(blocked_reason_counts, "customer_level_duplicate_trustpilot")
     )
     next_candidate = latest_scan.get("selected_order_name") or (
         candidate_queue[0]["order_name"] if candidate_queue else ""

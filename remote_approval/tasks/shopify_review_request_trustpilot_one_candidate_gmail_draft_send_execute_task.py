@@ -6,6 +6,10 @@ from email.utils import getaddresses
 from html import escape
 from pathlib import Path
 
+from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppression import (
+    CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+    evaluate_customer_level_duplicate,
+)
 from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 
@@ -92,6 +96,10 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute
     source_privacy_scan = _privacy_scan_text(source_text)
     source_summary = _source_summary(source_report, source_error)
     source_safety = _source_safety_summary(source_report)
+    customer_level_duplicate = evaluate_customer_level_duplicate(
+        source_summary["selected_order_name"],
+        source_summary["selected_masked_email"],
+    )
     gates = _gate_status(normalized_mode)
     blocking_conditions = _blocking_conditions(
         source_report=source_report,
@@ -100,6 +108,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute
         source_summary=source_summary,
         source_safety=source_safety,
         gates=gates,
+        customer_level_duplicate=customer_level_duplicate,
         source_text=source_text,
     )
     send_result = _gmail_draft_send_result(source_summary, gates, blocking_conditions)
@@ -108,6 +117,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute
         source_summary=source_summary,
         source_safety=source_safety,
         source_privacy_scan=source_privacy_scan,
+        customer_level_duplicate=customer_level_duplicate,
         gates=gates,
         blocking_conditions=blocking_conditions,
         send_result=send_result,
@@ -217,6 +227,7 @@ def _blocking_conditions(
     source_summary: dict,
     source_safety: dict,
     gates: dict,
+    customer_level_duplicate: dict,
     source_text: str,
 ) -> list[dict]:
     if not gates["mode_valid"]:
@@ -225,6 +236,13 @@ def _blocking_conditions(
         return [{"status": "blocked_missing_or_invalid_source_report", "detail": _sanitize_text(source_error)}]
 
     conditions = []
+    if customer_level_duplicate["customer_level_duplicate_block_applies"]:
+        conditions.append(
+            {
+                "status": CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+                "detail": "selected draft matches a prior Trustpilot invitation customer/email signal.",
+            }
+        )
     if source_report.get("task_name") != EXPECTED_SOURCE_TASK:
         conditions.append({"status": "blocked_invalid_source_report", "detail": "source task name mismatch."})
     if str(source_report.get("phase")) != "4.7":
@@ -742,6 +760,7 @@ def _build_payload(
     source_summary: dict,
     source_safety: dict,
     source_privacy_scan: dict,
+    customer_level_duplicate: dict,
     gates: dict,
     blocking_conditions: list[dict],
     send_result: dict,
@@ -770,6 +789,26 @@ def _build_payload(
         "draft_created_confirmed": source_summary["draft_created_confirmed"],
         "would_send_gmail_draft": source_summary["would_send_gmail_draft"],
         "would_send_count": source_summary["would_send_count"],
+        "customer_level_duplicate_block_applies": customer_level_duplicate[
+            "customer_level_duplicate_block_applies"
+        ],
+        "customer_level_duplicate_classification": customer_level_duplicate["classification"],
+        "prior_trustpilot_invitation_detected": customer_level_duplicate[
+            "prior_trustpilot_invitation_detected"
+        ],
+        "prior_trustpilot_order_name": customer_level_duplicate["prior_trustpilot_order_name"],
+        "customer_level_duplicate_match_basis": customer_level_duplicate[
+            "same_customer_detection_basis"
+        ],
+        "same_customer_detected": customer_level_duplicate["same_customer_detected"],
+        "same_email_detected": customer_level_duplicate["same_email_detected"],
+        "same_masked_email_detected": customer_level_duplicate["same_masked_email_detected"],
+        "existing_unsent_gmail_draft_should_not_be_sent": customer_level_duplicate[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
+        "future_optional_draft_cleanup_needs_separate_locked_phase": customer_level_duplicate[
+            "future_optional_draft_cleanup_needs_separate_locked_phase"
+        ],
         "dry_run": send_result["dry_run"],
         "real_run_requested": gates["real_run_requested"],
         "real_run_gate_status": gates,
@@ -887,6 +926,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "draft_created_confirmed": payload["draft_created_confirmed"],
         "would_send_gmail_draft": payload["would_send_gmail_draft"],
         "would_send_count": payload["would_send_count"],
+        "customer_level_duplicate_block_applies": payload["customer_level_duplicate_block_applies"],
+        "prior_trustpilot_order_name": payload["prior_trustpilot_order_name"],
+        "existing_unsent_gmail_draft_should_not_be_sent": payload[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
         "dry_run": payload["dry_run"],
         "real_run_requested": payload["real_run_requested"],
         "real_gmail_send_allowed": payload["real_gmail_send_allowed"],
@@ -970,6 +1014,9 @@ def _render_html_report(payload: dict) -> str:
     <tr><th>Draft created confirmed</th><td>{escape(str(payload["draft_created_confirmed"]))}</td></tr>
     <tr><th>Would send Gmail draft</th><td>{escape(str(payload["would_send_gmail_draft"]))}</td></tr>
     <tr><th>Would send count</th><td>{escape(str(payload["would_send_count"]))}</td></tr>
+    <tr><th>Customer-level duplicate block applies</th><td>{escape(str(payload["customer_level_duplicate_block_applies"]))}</td></tr>
+    <tr><th>Prior Trustpilot order</th><td><code>{escape(str(payload["prior_trustpilot_order_name"]))}</code></td></tr>
+    <tr><th>Existing unsent Gmail draft should not be sent</th><td>{escape(str(payload["existing_unsent_gmail_draft_should_not_be_sent"]))}</td></tr>
     <tr><th>Dry-run</th><td>{escape(str(payload["dry_run"]))}</td></tr>
     <tr><th>Real Gmail send allowed</th><td>{escape(str(payload["real_gmail_send_allowed"]))}</td></tr>
     <tr><th>Real Gmail send executed</th><td>{escape(str(payload["real_gmail_send_executed"]))}</td></tr>

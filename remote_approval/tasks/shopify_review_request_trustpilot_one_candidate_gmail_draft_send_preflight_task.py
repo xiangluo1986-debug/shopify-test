@@ -4,6 +4,10 @@ import time
 from html import escape
 from pathlib import Path
 
+from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppression import (
+    CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+    evaluate_customer_level_duplicate,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -65,12 +69,17 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflig
     source_privacy_scan = _privacy_scan_text(source_text)
     source_summary = _source_summary(source_report, source_error)
     source_safety = _source_safety_summary(source_report)
+    customer_level_duplicate = evaluate_customer_level_duplicate(
+        source_summary["selected_order_name"],
+        source_summary["selected_masked_email"],
+    )
     blocking_conditions = _blocking_conditions(
         source_report=source_report,
         source_error=source_error,
         source_privacy_scan=source_privacy_scan,
         source_summary=source_summary,
         source_safety=source_safety,
+        customer_level_duplicate=customer_level_duplicate,
         source_text=source_text,
     )
     status = blocking_conditions[0]["status"] if blocking_conditions else SUCCESS_STATUS
@@ -79,6 +88,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflig
         source_summary=source_summary,
         source_privacy_scan=source_privacy_scan,
         source_safety=source_safety,
+        customer_level_duplicate=customer_level_duplicate,
         blocking_conditions=blocking_conditions,
         duration_seconds=round(time.time() - started, 3),
     )
@@ -144,6 +154,7 @@ def _blocking_conditions(
     source_privacy_scan: dict,
     source_summary: dict,
     source_safety: dict,
+    customer_level_duplicate: dict,
     source_text: str,
 ) -> list[dict]:
     if source_error:
@@ -176,6 +187,13 @@ def _blocking_conditions(
         )
     if source_summary["blocking_condition_count"] != 0 or source_summary["blocking_conditions_present"]:
         conditions.append({"status": "blocked_source_has_blocking_conditions", "detail": "source report has blockers."})
+    if customer_level_duplicate["customer_level_duplicate_block_applies"]:
+        conditions.append(
+            {
+                "status": CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+                "detail": "selected draft matches a prior Trustpilot invitation customer/email signal.",
+            }
+        )
     if source_safety["source_send_write_block_flag_names"]:
         conditions.append(
             {
@@ -205,6 +223,7 @@ def _build_payload(
     source_summary: dict,
     source_privacy_scan: dict,
     source_safety: dict,
+    customer_level_duplicate: dict,
     blocking_conditions: list[dict],
     duration_seconds: float,
 ) -> dict:
@@ -237,6 +256,26 @@ def _build_payload(
         "draft_created_confirmed": draft_created_confirmed,
         "would_send_gmail_draft": success,
         "would_send_count": 1 if success else 0,
+        "customer_level_duplicate_block_applies": customer_level_duplicate[
+            "customer_level_duplicate_block_applies"
+        ],
+        "customer_level_duplicate_classification": customer_level_duplicate["classification"],
+        "prior_trustpilot_invitation_detected": customer_level_duplicate[
+            "prior_trustpilot_invitation_detected"
+        ],
+        "prior_trustpilot_order_name": customer_level_duplicate["prior_trustpilot_order_name"],
+        "customer_level_duplicate_match_basis": customer_level_duplicate[
+            "same_customer_detection_basis"
+        ],
+        "same_customer_detected": customer_level_duplicate["same_customer_detected"],
+        "same_email_detected": customer_level_duplicate["same_email_detected"],
+        "same_masked_email_detected": customer_level_duplicate["same_masked_email_detected"],
+        "existing_unsent_gmail_draft_should_not_be_sent": customer_level_duplicate[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
+        "future_optional_draft_cleanup_needs_separate_locked_phase": customer_level_duplicate[
+            "future_optional_draft_cleanup_needs_separate_locked_phase"
+        ],
         "real_gmail_send_allowed_now": False,
         "future_real_gmail_send_needs_next_phase": True,
         "send_preflight_only": True,
@@ -323,6 +362,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "draft_created_confirmed": payload["draft_created_confirmed"],
         "would_send_gmail_draft": payload["would_send_gmail_draft"],
         "would_send_count": payload["would_send_count"],
+        "customer_level_duplicate_block_applies": payload["customer_level_duplicate_block_applies"],
+        "prior_trustpilot_order_name": payload["prior_trustpilot_order_name"],
+        "existing_unsent_gmail_draft_should_not_be_sent": payload[
+            "existing_unsent_gmail_draft_should_not_be_sent"
+        ],
         "real_gmail_send_allowed_now": payload["real_gmail_send_allowed_now"],
         "future_real_gmail_send_needs_next_phase": payload["future_real_gmail_send_needs_next_phase"],
         "blocking_condition_count": payload["blocking_condition_count"],
@@ -387,6 +431,9 @@ def _render_html_report(payload: dict) -> str:
     <tr><th>Draft created confirmed</th><td>{escape(str(payload["draft_created_confirmed"]))}</td></tr>
     <tr><th>Would send Gmail draft</th><td>{escape(str(payload["would_send_gmail_draft"]))}</td></tr>
     <tr><th>Would send count</th><td>{escape(str(payload["would_send_count"]))}</td></tr>
+    <tr><th>Customer-level duplicate block applies</th><td>{escape(str(payload["customer_level_duplicate_block_applies"]))}</td></tr>
+    <tr><th>Prior Trustpilot order</th><td><code>{escape(str(payload["prior_trustpilot_order_name"]))}</code></td></tr>
+    <tr><th>Existing unsent Gmail draft should not be sent</th><td>{escape(str(payload["existing_unsent_gmail_draft_should_not_be_sent"]))}</td></tr>
     <tr><th>Real Gmail send allowed now</th><td>{escape(str(payload["real_gmail_send_allowed_now"]))}</td></tr>
     <tr><th>Future real Gmail send needs next phase</th><td>{escape(str(payload["future_real_gmail_send_needs_next_phase"]))}</td></tr>
   </tbody></table>
