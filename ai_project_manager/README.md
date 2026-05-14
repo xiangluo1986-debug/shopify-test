@@ -25,6 +25,16 @@ Example real local run:
 .\scripts\run_codex_task.ps1 -TaskFile .\ai_project_manager\tasks\my_task.md
 ```
 
+## Clipboard Runner Workflow
+
+Copy a scoped Codex task to the Windows clipboard, then save and run it with the clipboard wrapper. The task name becomes `ai_project_manager/tasks/<Name>.md`; names may contain only letters, numbers, dash, underscore, and dot.
+
+Example clipboard dry run:
+
+```powershell
+.\scripts\run_codex_clipboard_task.ps1 -Name my_task -DryRun
+```
+
 Run outputs are written under `logs/codex_runs/yyyyMMdd_HHmmss/` for review. The runner never stages, commits, pushes, restores, or resets files.
 
 Do not use `--dangerously-bypass-approvals-and-sandbox` for this workflow. Keep sandboxing enabled and keep commit/push manual.
