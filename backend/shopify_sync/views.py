@@ -629,47 +629,75 @@ def translation_console(request):
         or is_status_only_safe_action_post
         or is_locked_package_preview_post
     )
-    product_search_text = (
-        request.POST.get("product_search_q", "")
-        if is_post_action
-        else request.GET.get("q", "")
-    ).strip()
+    request_params = request.POST if is_post_action else request.GET
+    translation_console_warnings = []
+    product_search_text = request_params.get("product_search_q", "") if is_post_action else request_params.get("q", "")
+    product_search_text = product_search_text.strip()
+    raw_product_url_parameter = (
+        request_params.get("product_gid", "") or request_params.get("product_id", "")
+    )
+    normalized_product_url_parameter = (
+        normalize_product_gid(raw_product_url_parameter or "") or ""
+    )
+    invalid_product_url_parameter = bool(
+        raw_product_url_parameter and not normalized_product_url_parameter
+    )
+    if invalid_product_url_parameter:
+        translation_console_warnings.append(
+            "The product_gid/product_id URL parameter was not a valid Shopify product gid or numeric product id."
+        )
     raw_selected_product_gid = (
-        request.POST.get("selected_product_gid", "")
-        if is_post_action
-        else request.GET.get("selected_product_gid", "")
+        request_params.get("selected_product_gid", "") or raw_product_url_parameter
     )
-    raw_manual_product_gid = (
-        request.POST.get("manual_product_gid", "")
-        if is_post_action
-        else request.GET.get("manual_product_gid", "")
-    )
+    raw_manual_product_gid = request_params.get("manual_product_gid", "")
     raw_post_product_query = request.POST.get("q", "") if is_post_action else ""
-    raw_locale = request.POST.get("locale", "ja") if is_post_action else request.GET.get("locale", "ja")
-    locale = ((raw_locale or "ja") or "ja").strip()
-    raw_ui_mode = (
-        request.POST.get("view_mode", "")
-        if is_post_action
-        else request.GET.get("view_mode", "")
+    raw_locale = (
+        request_params.get("target_locale", "") or request_params.get("locale", "ja")
     )
+    locale = ((raw_locale or "ja") or "ja").strip()
+    if locale not in SUPPORTED_TRANSLATION_LOCALES:
+        translation_console_warnings.append(
+            f"Unsupported locale '{locale}' was ignored; using {SUPPORTED_TRANSLATION_LOCALES[0]}."
+        )
+        locale = SUPPORTED_TRANSLATION_LOCALES[0]
+    raw_ui_mode = request_params.get("ui_mode", "") or request_params.get("view_mode", "")
+    if raw_ui_mode and raw_ui_mode not in {"workbench", "editor"}:
+        translation_console_warnings.append(
+            "Unsupported ui_mode was ignored; using workbench."
+        )
     ui_mode = "editor" if raw_ui_mode == "editor" else "workbench"
-    editor_filter = (
-        request.POST.get("editor_filter", "")
-        if is_post_action
-        else request.GET.get("editor_filter", "")
-    ).strip()
+    editor_filter = request_params.get("editor_filter", "").strip()
     if editor_filter not in TRANSLATION_CONSOLE_EDITOR_FILTERS:
+        if editor_filter:
+            translation_console_warnings.append(
+                "Unsupported editor_filter was ignored; using all."
+            )
         editor_filter = "all"
     editor_search_query = (
-        request.POST.get("editor_q", "")
-        if is_post_action
-        else request.GET.get("editor_q", "")
+        request_params.get("editor_search", "") or request_params.get("editor_q", "")
     ).strip()
     product_selector = _build_translation_console_product_selector(
         product_search_text=product_search_text,
-        requested_product_gid=raw_selected_product_gid or raw_manual_product_gid,
+        requested_product_gid=(
+            "" if invalid_product_url_parameter else raw_selected_product_gid or raw_manual_product_gid
+        ),
     )
     selected_product_gid = product_selector.get("selected_product_gid", "")
+    if (
+        raw_product_url_parameter
+        and normalized_product_url_parameter
+        and not product_selector.get("selected_product")
+    ):
+        translation_console_warnings.append(
+            "The requested product is not in the local product selector; Editor View will only show rows if the read-only lookup can find it."
+        )
+    if invalid_product_url_parameter:
+        product_selector = {
+            **product_selector,
+            "selected_product_gid": "",
+            "selected_product": {},
+        }
+        selected_product_gid = ""
     explicit_selected_product_gid = normalize_product_gid(raw_selected_product_gid or "") or ""
     manual_product_gid = normalize_product_gid(raw_manual_product_gid or "") or ""
     explicit_post_product_gid = normalize_product_gid(raw_post_product_query or "") or ""
@@ -679,7 +707,11 @@ def translation_console(request):
             explicit_selected_product_gid or manual_product_gid or explicit_post_product_gid
         )
     else:
-        action_product_query = selected_product_gid or manual_product_gid
+        action_product_query = (
+            explicit_selected_product_gid or manual_product_gid or selected_product_gid
+        )
+    if invalid_product_url_parameter:
+        action_product_query = ""
     search_text = action_product_query if is_post_action else product_search_text
     shop_domain = "kidstoylover.myshopify.com"
     result = {
@@ -1173,6 +1205,7 @@ def translation_console(request):
             "ui_mode": ui_mode,
             "editor_filter": editor_filter,
             "editor_search_query": editor_search_query,
+            "translation_console_warnings": translation_console_warnings,
             "editor_view": editor_view,
             "shop_domain": shop_domain,
             "result": result,
@@ -1573,14 +1606,13 @@ def build_translation_console_editor_view(
     editor_search_query = (editor_search_query or "").strip()
     selected_product = product_selector.get("selected_product") or {}
     product = result.get("product") or {}
+    product_has_read_only_lookup = bool(product.get("id"))
     product_gid = product.get("id") or product_selector.get("selected_product_gid", "")
     product_title = product.get("title") or selected_product.get("title", "")
 
     draft_entries = _translation_editor_draft_entries_by_key(draft_result, locale)
     source_rows = _translation_editor_source_rows_by_key(result)
     field_keys = list(dict.fromkeys(list(source_rows.keys()) + list(draft_entries.keys())))
-    if not field_keys:
-        field_keys = ["title", "body_html", "product_type", "handle", "meta_title", "meta_description"]
     if "title" in field_keys and not source_rows.get("title") and product_title:
         source_rows["title"] = {
             "key": "title",
@@ -1592,6 +1624,18 @@ def build_translation_console_editor_view(
             "translation_value": "",
             "translation_outdated": False,
         }
+    elif not field_keys and product_title and not product_has_read_only_lookup:
+        source_rows["title"] = {
+            "key": "title",
+            "source_value": product_title,
+            "digest": "",
+            "source_locale": "en",
+            "target_locale": locale,
+            "has_translation": False,
+            "translation_value": "",
+            "translation_outdated": False,
+        }
+        field_keys = ["title"]
 
     rows = [
         _build_translation_editor_row(

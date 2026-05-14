@@ -3152,6 +3152,7 @@ class ShopifyProductAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     ordering = ("-shopify_published_at", "-shopify_product_created_at", "-id")
     list_display = (
         "product_title",
+        "translation_workspace_link",
         "variant_title",
         "sku",
         "is_shenzhen_product",
@@ -3178,6 +3179,20 @@ class ShopifyProductAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "shopify_variant_id",
     )
     list_filter = ("is_shenzhen_product", "status", "vendor", "product_type")
+
+    def translation_workspace_link(self, obj):
+        product_id = getattr(obj, "shopify_product_id", None)
+        if not product_id:
+            return "-"
+        product_gid = f"gid://shopify/Product/{product_id}"
+        query = urlencode({"ui_mode": "editor", "product_gid": product_gid})
+        return format_html(
+            '<a href="/admin/shopify_sync/translation-console/?{}">Open Translation Workspace</a>',
+            query,
+        )
+
+    translation_workspace_link.short_description = "Translation workspace"
+
     fieldsets = (
         (
             "Shopify 来源字段（自动同步）",

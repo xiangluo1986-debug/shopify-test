@@ -2,15 +2,24 @@
 
 {% block content %}
 <div id="content-main">
-  <h1>Shopify Translation Console</h1>
+  <h1>Shopify Translation Workspace</h1>
+  <p>This is a standalone internal tool for Shopify product translation review and preparation.</p>
   <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This page prepares drafts, previews, reports, and manual instructions only. No Shopify write is performed from this page. Real write requires manual PowerShell plus explicit ACK.</p>
+
+  {% if translation_console_warnings %}
+    <div class="messagelist" style="margin-bottom: 16px;">
+      {% for warning in translation_console_warnings %}
+        <div class="warning">{{ warning }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>View Mode</h2>
     <p>This page is read-only. Use Workbench Mode for the staged workflow, or Editor View for a Shopify-like source / target review.</p>
     <p>
-      <a class="button" href="?view_mode=workbench&q={{ product_search_text|urlencode }}&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Workbench Mode</a>
-      <a class="button" href="?view_mode=editor&q={{ product_search_text|urlencode }}&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_q={{ editor_search_query|urlencode }}">Editor View</a>
+      <a class="button" href="?ui_mode=workbench&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Workbench Mode</a>
+      <a class="button" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Editor View</a>
     </p>
     <table>
       <tbody>
@@ -224,11 +233,11 @@
     <h2>Translation Editor View</h2>
     <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This Shopify-like editor is visual review only. No store-saving action exists here.</p>
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
-      <input type="hidden" name="view_mode" value="editor">
+      <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="q" value="{{ product_search_text }}">
       <div>
         <label for="id_editor_selected_product_gid">Product</label><br>
-        <select id="id_editor_selected_product_gid" name="selected_product_gid" style="min-width: 580px;">
+        <select id="id_editor_selected_product_gid" name="product_gid" style="min-width: 580px;">
           {% if product_selector.product_options %}
             {% for product in product_selector.product_options %}
               <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }}</option>
@@ -240,7 +249,7 @@
       </div>
       <div>
         <label for="id_editor_locale">Target locale</label><br>
-        <select id="id_editor_locale" name="locale">
+        <select id="id_editor_locale" name="target_locale">
           {% for locale in supported_locales %}
             <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
           {% endfor %}
@@ -248,20 +257,20 @@
       </div>
       <div>
         <label for="id_editor_q">Search fields</label><br>
-        <input id="id_editor_q" type="text" name="editor_q" value="{{ editor_search_query }}" style="min-width: 260px;" placeholder="title, SEO, phrase, status">
+        <input id="id_editor_q" type="text" name="editor_search" value="{{ editor_search_query }}" style="min-width: 260px;" placeholder="title, SEO, phrase, status">
       </div>
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
       <button type="submit" class="button">Open Editor View</button>
     </form>
     <form method="post" style="margin-bottom: 12px;">
       {% csrf_token %}
-      <input type="hidden" name="view_mode" value="editor">
+      <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="action" value="generate_draft_dry_run">
       <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
-      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
-      <input type="hidden" name="locale" value="{{ selected_locale }}">
+      <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="target_locale" value="{{ selected_locale }}">
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-      <input type="hidden" name="editor_q" value="{{ editor_search_query }}">
+      <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
       <button type="submit" class="button">Generate draft package dry-run</button>
     </form>
     <table>
@@ -270,6 +279,7 @@
         <tr><th>Product gid</th><td>{{ editor_view.product_gid }}</td></tr>
         <tr><th>Default language</th><td>English</td></tr>
         <tr><th>Target language</th><td>{{ editor_view.editor_locale_label }} ({{ editor_view.editor_locale }})</td></tr>
+        <tr><th>Active filter</th><td>{{ editor_view.editor_filter }}</td></tr>
         <tr><th>Rows visible</th><td>{{ editor_view.editor_visible_row_count }} / {{ editor_view.editor_row_count }}</td></tr>
       </tbody>
     </table>
@@ -279,13 +289,21 @@
     <h2>Filters</h2>
     <p>
       {% for tab in editor_view.filter_tabs %}
-        <a class="button" href="?view_mode=editor&q={{ product_search_text|urlencode }}&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_q={{ editor_search_query|urlencode }}"{% if tab.active %} style="font-weight: bold;"{% endif %}>{{ tab.label }} ({{ tab.count }})</a>
+        <a class="button" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_search={{ editor_search_query|urlencode }}"{% if tab.active %} style="font-weight: bold;"{% endif %}>{{ tab.label }} ({{ tab.count }})</a>
       {% endfor %}
     </p>
   </div>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Dual-column translation editor</h2>
+    {% if not editor_view.product_gid %}
+      <p>Select a product to view translation rows.</p>
+    {% elif editor_view.editor_row_count == 0 %}
+      <p>No translatable rows found for this product.</p>
+    {% elif editor_view.editor_visible_row_count == 0 %}
+      <p>No rows match this filter.</p>
+    {% endif %}
+    {% if editor_view.product_gid and editor_view.editor_visible_row_count > 0 %}
     <table>
       <thead>
         <tr>
@@ -355,6 +373,7 @@
         </div>
       {% endif %}
     {% endfor %}
+    {% endif %}
   </div>
   {% endif %}
 
