@@ -50,7 +50,9 @@ from .translation_apply_plan import (
 from .translation_drafts import (
     DEFAULT_FIELDS as TRANSLATION_DRAFT_FIELDS,
     DEFAULT_TARGET_LOCALES as TRANSLATION_DRAFT_TARGET_LOCALES,
+    build_product_identity_context,
     generate_selected_product_missing_translation_draft_package,
+    validate_product_identity_draft,
 )
 from .translation_final_review import (
     FINAL_REVIEW_HTML_PATH,
@@ -1929,9 +1931,13 @@ def _translation_workspace_draft_locale_summary(
     elif blocking_conditions:
         status = "failed"
         message = "Draft generation did not complete for this language."
-    elif int((draft_result or {}).get("draft_blocked_count") or 0):
+    elif int((draft_result or {}).get("draft_blocked_count") or 0) or int(
+        counts.get("product_identity_mismatch_count")
+        or (draft_result or {}).get("product_identity_mismatch_count")
+        or 0
+    ):
         status = "needs review"
-        message = "Draft preview has blocked fields that may mention a different product."
+        message = "Draft preview has fields that may mention a different product."
     elif int(counts.get("draft_entry_count") or 0):
         status = "generated"
         message = "Draft preview is ready for review."
@@ -2687,6 +2693,10 @@ def build_translation_console_editor_view(
 
     draft_entries = _translation_editor_draft_entries_by_key(draft_result, locale)
     source_rows = _translation_editor_source_rows_by_key(result)
+    source_identity_context = build_product_identity_context(
+        product={**selected_product, **product},
+        translatable_rows=result.get("translatable_rows") or [],
+    )
     field_keys = list(dict.fromkeys(list(source_rows.keys()) + list(draft_entries.keys())))
     if "title" in field_keys and not source_rows.get("title") and product_title:
         source_rows["title"] = {
@@ -2718,6 +2728,7 @@ def build_translation_console_editor_view(
             source_row=source_rows.get(field_key) or {},
             draft_entry=draft_entries.get(field_key) or {},
             locale=locale,
+            source_identity_context=source_identity_context,
         )
         for field_key in field_keys
     ]
@@ -3125,7 +3136,13 @@ def _translation_editor_source_rows_by_key(result: dict):
     return rows
 
 
-def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry: dict, locale: str):
+def _build_translation_editor_row(
+    field_key: str,
+    source_row: dict,
+    draft_entry: dict,
+    locale: str,
+    source_identity_context: dict | None = None,
+):
     field_key = _translation_editor_normalize_field_key(field_key)
     source_value = str(
         source_row.get("source_value")
@@ -3134,6 +3151,8 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
     )
     existing_value = str(
         source_row.get("translation_value")
+        or source_row.get("target_value_display")
+        or source_row.get("target_value")
         or draft_entry.get("existing_translation_value")
         or draft_entry.get("translation_value")
         or ""
@@ -3151,22 +3170,59 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
     target_value = existing_value or draft_value
     seo_notes = _list_from_value(draft_entry.get("seo_notes"))
     quality_notes = _list_from_value(draft_entry.get("quality_notes"))
-    validation_reasons = _list_from_value(draft_entry.get("validation_reasons"))
-    suspicious_terms = _list_from_value(draft_entry.get("suspicious_terms"))
+    target_identity = {}
+    if target_value:
+        identity_context = (
+            draft_entry.get("source_identity_context")
+            or source_identity_context
+            or build_product_identity_context(source_values=[source_value])
+        )
+        target_identity = validate_product_identity_draft(
+            identity_context,
+            target_value,
+            field=field_key,
+        )
+    target_identity_mismatch = bool(target_identity.get("product_identity_mismatch"))
+    validation_reasons = _translation_editor_unique_list(
+        _list_from_value(draft_entry.get("validation_reasons"))
+        + _list_from_value(target_identity.get("validation_reasons"))
+    )
+    suspicious_terms = _translation_editor_unique_list(
+        _list_from_value(draft_entry.get("suspicious_terms"))
+        + _list_from_value(target_identity.get("suspicious_terms"))
+    )
     identity_warning = str(
         draft_entry.get("identity_warning_text")
         or draft_entry.get("warning_text")
+        or target_identity.get("warning_text")
         or ""
     ).strip()
-    draft_blocked = bool(draft_entry.get("draft_blocked"))
-    product_identity_mismatch = bool(draft_entry.get("product_identity_mismatch"))
-    blocking_reasons = (
-        _draft_entry_blocking_reasons(draft_entry, seo_notes, quality_notes)
-        if draft_entry
-        else []
+    if target_identity_mismatch and existing_value:
+        identity_warning = "This existing translation may mention a different product. Please review before using."
+    draft_blocked = bool(
+        draft_entry.get("draft_blocked")
+        or (draft_value and not existing_value and target_identity_mismatch)
+    )
+    product_identity_mismatch = bool(
+        draft_entry.get("product_identity_mismatch") or target_identity_mismatch
     )
     validation_status = draft_entry.get("validation_status", "")
+    if product_identity_mismatch and validation_status in {"", "skipped"}:
+        validation_status = (
+            "existing_translation_needs_review_identity_mismatch"
+            if existing_value
+            else "blocked"
+        )
     seo_status = draft_entry.get("seo_validation_status", "")
+    blocking_reasons = _translation_editor_unique_list(
+        (
+            _draft_entry_blocking_reasons(draft_entry, seo_notes, quality_notes)
+            if draft_entry
+            else []
+        )
+        + validation_reasons
+        + (["product_identity_mismatch"] if product_identity_mismatch else [])
+    )
     needs_review = bool(
         draft_blocked
         or product_identity_mismatch
@@ -3183,10 +3239,10 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
     )
     if existing_translation_present and outdated:
         translation_status = "outdated"
-    elif existing_translation_present:
-        translation_status = "translated"
     elif needs_review:
         translation_status = "needs_review"
+    elif existing_translation_present:
+        translation_status = "translated"
     elif draft_value:
         translation_status = "draft_only"
     elif draft_entry.get("skip_reason"):
@@ -3196,7 +3252,11 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
 
     badges = []
     if existing_translation_present:
-        badges.append("existing translation")
+        badges.append(
+            "existing translation needs review"
+            if product_identity_mismatch
+            else "existing translation"
+        )
     if outdated:
         badges.append("outdated")
     if draft_value and not existing_translation_present:
@@ -3229,16 +3289,22 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
         "resource_note": resource_note,
         "resource_key": source_row.get("key") or draft_entry.get("source_key") or field_key,
         "source_value": source_value,
-        "source_value_preview": _translation_editor_preview_text(source_value),
+        "source_value_preview": _translation_editor_preview_text(
+            source_value,
+            field_key=field_key,
+        ),
         "target_value_display": target_value,
-        "target_value_preview": _translation_editor_preview_text(target_value),
+        "target_value_preview": _translation_editor_preview_text(
+            target_value,
+            field_key=field_key,
+        ),
         "target_value_source": (
             "existing translation"
             if existing_value
             else ("GPT draft" if draft_value else "")
         ),
         "target_value_source_label": (
-            "Already translated"
+            ("Existing translation" if product_identity_mismatch else "Already translated")
             if existing_value
             else ("Draft only" if draft_value else "")
         ),
@@ -3256,8 +3322,10 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
         "identity_warning": identity_warning,
         "suspicious_terms": ", ".join(suspicious_terms),
         "validation_reasons": ", ".join(validation_reasons),
-        "product_identity_validation_status": draft_entry.get(
-            "product_identity_validation_status", ""
+        "product_identity_validation_status": (
+            draft_entry.get("product_identity_validation_status")
+            or target_identity.get("validation_status")
+            or ""
         ),
         "product_identity_mismatch": product_identity_mismatch,
         "draft_blocked": draft_blocked,
@@ -3267,6 +3335,7 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
         "outdated": outdated,
         "digest": source_row.get("digest") or draft_entry.get("source_digest") or "",
         "needs_review": needs_review,
+        "full_description_display": field_key == "body_html",
         "read_only": True,
     }
 
@@ -3286,6 +3355,7 @@ def _translation_editor_status_label(status: str) -> str:
 def _translation_editor_badge_label(badge: str) -> str:
     labels = {
         "existing translation": "Already translated",
+        "existing translation needs review": "Existing translation",
         "outdated": "Needs review",
         "GPT draft": "Draft only",
         "SEO warning": "Needs review",
@@ -3944,12 +4014,19 @@ def _list_from_value(value):
     return [str(value)]
 
 
+def _translation_editor_unique_list(values):
+    return list(dict.fromkeys(str(value) for value in values if str(value)))
+
+
 def _translation_editor_preview_text(
     value,
     max_chars: int = TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS,
+    field_key: str = "",
 ):
     text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     text = re.sub(r"\n{3,}", "\n\n", text)
+    if _translation_editor_normalize_field_key(field_key) == "body_html":
+        return text
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 1].rstrip() + "..."

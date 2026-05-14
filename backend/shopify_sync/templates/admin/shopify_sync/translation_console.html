@@ -581,6 +581,12 @@
     border-color: #cfd8e3;
     background: #fcfdf8;
   }
+  .tw-description-note {
+    margin: 0 0 6px;
+    color: #475467;
+    font-size: 12px;
+    font-weight: 600;
+  }
   .tw-target-empty {
     color: #667085;
     font-style: italic;
@@ -1336,10 +1342,12 @@
                   </details>
                 </td>
                 <td>
+                  {% if row.full_description_display %}<div class="tw-description-note">Full description shown</div>{% endif %}
                   <div class="tw-text-block">{{ row.source_value_preview }}</div>
                 </td>
                 <td>
                   {% if row.target_value_display %}
+                    {% if row.full_description_display %}<div class="tw-description-note">Full description shown</div>{% endif %}
                     <div class="tw-text-block is-target">{{ row.target_value_preview }}</div>
                   {% else %}
                     <div class="tw-text-block is-target tw-target-empty">Needs translation</div>
@@ -1353,12 +1361,12 @@
                         <span class="tw-status-badge">{{ row.target_value_source_label }}</span>
                       {% endif %}
                       {% for badge in row.status_badge_labels %}
-                        <span class="tw-status-badge{% if badge == 'Blocked draft' %} is-blocked{% endif %}">{{ badge }}</span>
+                        <span class="tw-status-badge{% if badge == 'Blocked draft' or badge == 'Possible wrong product' %} is-blocked{% endif %}">{{ badge }}</span>
                       {% endfor %}
                     </div>
                   {% endif %}
                   {% if row.seo_warning %}<div class="tw-warning">{{ row.seo_warning }}</div>{% endif %}
-                  {% if row.draft_blocked %}
+                  {% if row.product_identity_mismatch %}
                     <div class="tw-warning tw-identity-warning">
                       <strong>Possible wrong product name detected</strong><br>
                       {{ row.identity_warning }}

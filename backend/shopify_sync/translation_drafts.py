@@ -313,6 +313,8 @@ def generate_selected_product_missing_translation_draft_package(
                 entry = _entry_template(locale, field, row, "missing_translation")
                 missing_by_locale.setdefault(locale, []).append(entry)
             _attach_source_identity_context(entry, source_identity_context)
+            if existing_present:
+                _attach_existing_translation_identity_validation(entry)
             result["entries"].append(entry)
             _count_entry(result, entry)
 
@@ -677,6 +679,12 @@ def _entry_template(locale, field, row, reason):
         "source_value": str((row or {}).get("source_value") or ""),
         "source_digest": str((row or {}).get("digest") or ""),
         "existing_translation_present": bool((row or {}).get("has_translation")),
+        "existing_translation_value": str(
+            (row or {}).get("translation_value")
+            or (row or {}).get("target_value_display")
+            or (row or {}).get("target_value")
+            or ""
+        ),
         "existing_translation_outdated": (row or {}).get("translation_outdated"),
         "draft_value": "",
         "draft_value_chars": 0,
@@ -829,6 +837,39 @@ def _attach_product_identity_validation(entry, draft):
                 notes.append(reason)
 
 
+def _attach_existing_translation_identity_validation(entry):
+    existing_value = str(entry.get("existing_translation_value") or "").strip()
+    if not existing_value:
+        return
+    identity = validate_product_identity_draft(
+        entry.get("source_identity_context") or build_product_identity_context(
+            source_values=[entry.get("source_value", "")]
+        ),
+        existing_value,
+        field=entry.get("field", ""),
+    )
+    if not identity["product_identity_mismatch"]:
+        return
+    entry["product_identity_validation_status"] = identity["validation_status"]
+    entry["validation_reasons"] = identity["validation_reasons"]
+    entry["suspicious_terms"] = identity["suspicious_terms"]
+    entry["identity_warning_text"] = (
+        "This existing translation may mention a different product. Please review before using."
+    )
+    entry["warning_text"] = entry["identity_warning_text"]
+    entry["product_identity_mismatch"] = True
+    entry["needs_review"] = True
+    entry["source_identity_terms"] = identity["source_identity_terms"]
+    entry["source_model_terms"] = identity["source_model_terms"]
+    entry["validation_status"] = "existing_translation_needs_review_identity_mismatch"
+    if entry.get("skip_reason") == "already_translated":
+        entry["skip_reason"] = "existing_translation_identity_mismatch_manual_review_required"
+    notes = entry.setdefault("quality_notes", [])
+    for reason in identity["validation_reasons"]:
+        if reason not in notes:
+            notes.append(reason)
+
+
 def _normalize_product_identity_context(context):
     if not isinstance(context, dict):
         return build_product_identity_context(source_values=[])
@@ -957,6 +998,13 @@ def _count_entry(result, entry):
     per_locale = _summary_bucket(result, "per_locale_results", entry["locale"])
     per_field = _summary_bucket(result, "per_field_results", entry["field"])
     reason = entry.get("skip_reason")
+    if entry.get("product_identity_mismatch"):
+        per_locale["product_identity_mismatch_count"] += 1
+        per_field["product_identity_mismatch_count"] += 1
+        result["product_identity_mismatch_count"] += 1
+        per_locale["draft_needs_manual_review_count"] += 1
+        per_field["draft_needs_manual_review_count"] += 1
+        result["draft_needs_manual_review_count"] += 1
     if reason == "already_translated":
         per_locale["skipped_existing_translation_count"] += 1
         per_field["skipped_existing_translation_count"] += 1
@@ -965,6 +1013,8 @@ def _count_entry(result, entry):
         per_locale["skipped_outdated_translation_count"] += 1
         per_field["skipped_outdated_translation_count"] += 1
         result["skipped_outdated_translation_count"] += 1
+    elif reason == "existing_translation_identity_mismatch_manual_review_required":
+        return
     elif reason == "source_empty":
         per_locale["skipped_source_empty_count"] += 1
         per_field["skipped_source_empty_count"] += 1
@@ -1377,6 +1427,15 @@ def _recalculate_quality_stats(result):
             _increment(result, per_locale, per_field, "missing_core_keyword_count")
         if "too_short_for_seo" in seo_notes:
             _increment(result, per_locale, per_field, "too_short_for_seo_count")
+
+    draft_entry_ids = {id(entry) for entry in result["draft_entries"]}
+    for entry in result["entries"]:
+        if id(entry) in draft_entry_ids or not entry.get("product_identity_mismatch"):
+            continue
+        per_locale = result["per_locale_results"][entry["locale"]]
+        per_field = result["per_field_results"][entry["field"]]
+        _increment(result, per_locale, per_field, "product_identity_mismatch_count")
+        _increment(result, per_locale, per_field, "draft_needs_manual_review_count")
 
 
 def _increment(result, per_locale, per_field, key):
