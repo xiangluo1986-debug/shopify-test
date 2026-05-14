@@ -65,6 +65,64 @@
     margin-top: 4px;
     font-weight: 600;
   }
+  .tw-coverage-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+  }
+  .tw-coverage-pill {
+    border: 1px solid #dbe1e8;
+    border-radius: 6px;
+    background: #fff;
+    padding: 7px 10px;
+    color: #344054;
+    font-weight: 600;
+  }
+  .tw-coverage-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .tw-coverage-table th,
+  .tw-coverage-table td {
+    border-top: 1px solid #eef2f7;
+    padding: 9px 10px;
+    vertical-align: top;
+    text-align: left;
+  }
+  .tw-coverage-table thead th {
+    border-top: 0;
+    background: #f6f8fa;
+    color: #344054;
+  }
+  .tw-coverage-status {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #eef2f7;
+    color: #344054;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+  .tw-coverage-status.is-visible {
+    background: #e8f5e9;
+    color: #185c25;
+  }
+  .tw-coverage-status.is-available_hidden_by_filter,
+  .tw-coverage-status.is-nested_only {
+    background: #eaf2ff;
+    color: #123f7a;
+  }
+  .tw-coverage-status.is-missing,
+  .tw-coverage-status.is-not_detected {
+    background: #f2f4f7;
+    color: #475467;
+  }
   .tw-toolbar {
     padding: 12px;
     border: 1px solid #dbe1e8;
@@ -499,6 +557,50 @@
         <div class="tw-summary-label">Active filter</div>
         <div class="tw-summary-value">{{ editor_view.editor_active_filter_label }}</div>
       </div>
+    </div>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Field Coverage Summary</h2>
+    <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This audit uses the editor rows already loaded for the selected product and locale.</p>
+    <div class="tw-coverage-summary">
+      <span class="tw-coverage-pill">Core fields visible: {{ editor_view.field_coverage.core_visible_count }} / {{ editor_view.field_coverage.core_area_count }}</span>
+      <span class="tw-coverage-pill">Draft-supported visible: {{ editor_view.field_coverage.draft_supported_visible_count }} / {{ editor_view.field_coverage.draft_supported_area_count }}</span>
+      <span class="tw-coverage-pill">Editor rows loaded: {{ editor_view.field_coverage.editor_row_count }}</span>
+      <span class="tw-coverage-pill">Rows after filter: {{ editor_view.field_coverage.visible_row_count }}</span>
+      <span class="tw-coverage-pill">Review-only / unsupported areas: {{ editor_view.field_coverage.review_only_or_unsupported_count }}</span>
+    </div>
+    {% if editor_view.field_coverage.missing_core_fields %}
+      <p class="tw-warning">Missing core fields: {{ editor_view.field_coverage.missing_core_fields|join:", " }}</p>
+    {% endif %}
+    <div class="tw-editor-table-wrap">
+      <table class="tw-coverage-table">
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Coverage</th>
+            <th>Current filter</th>
+            <th>Draft support</th>
+            <th>Source keys</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in editor_view.field_coverage.entries %}
+            <tr>
+              <td>
+                <strong>{{ entry.area_label }}</strong><br>
+                <span class="tw-resource-key">{{ entry.group_label }}</span>
+              </td>
+              <td><span class="tw-coverage-status is-{{ entry.coverage_status }}">{{ entry.coverage_label }}</span></td>
+              <td>{{ entry.visible_row_count }} / {{ entry.row_count }} rows shown</td>
+              <td>{{ entry.support_label }}</td>
+              <td>{% if entry.field_keys %}{{ entry.field_keys|join:", " }}{% else %}No row keys{% endif %}</td>
+              <td>{{ entry.notes }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 

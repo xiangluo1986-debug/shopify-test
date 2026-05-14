@@ -137,6 +137,41 @@ TRANSLATION_CONSOLE_EDITOR_SEO_LIMITS = {
     "body_html": 320,
     "description": 320,
 }
+TRANSLATION_WORKSPACE_FIELD_COVERAGE_CORE_AREAS = [
+    {
+        "area_key": "title",
+        "area_label": "Product title",
+        "group_label": "Basic",
+        "field_keys": ("title",),
+        "note": "Main Shopify product title.",
+    },
+    {
+        "area_key": "body_html",
+        "area_label": "Description / body HTML",
+        "group_label": "Basic",
+        "field_keys": ("body_html", "description"),
+        "note": "Full product description HTML for visual review.",
+    },
+    {
+        "area_key": "meta_title",
+        "area_label": "SEO meta title",
+        "group_label": "SEO",
+        "field_keys": ("meta_title",),
+        "note": "SEO title translation field.",
+    },
+    {
+        "area_key": "meta_description",
+        "area_label": "SEO meta description",
+        "group_label": "SEO",
+        "field_keys": ("meta_description",),
+        "note": "SEO description translation field.",
+    },
+]
+TRANSLATION_WORKSPACE_FIELD_COVERAGE_EXTRA_SECTIONS = [
+    ("options", "Product options"),
+    ("variants", "Variants"),
+    ("metafields", "Advanced metafields"),
+]
 
 
 def _shopify_configured():
@@ -1653,6 +1688,12 @@ def build_translation_console_editor_view(
     visible_rows = [
         row for row in searched_rows if _translation_editor_row_matches_filter(row, editor_filter)
     ]
+    field_coverage = build_translation_workspace_field_coverage(
+        rows=rows,
+        visible_rows=visible_rows,
+        locale=locale,
+        product_gid=product_gid,
+    )
     sections = []
     for section_key, section_label in TRANSLATION_CONSOLE_EDITOR_SECTIONS:
         section_rows = [row for row in visible_rows if row["section_key"] == section_key]
@@ -1709,6 +1750,7 @@ def build_translation_console_editor_view(
         "editor_row_count": len(rows),
         "editor_visible_row_count": len(visible_rows),
         "editor_search_result_count": len(searched_rows),
+        "field_coverage": field_coverage,
         "editor_has_rows": bool(rows),
         "editor_has_visible_rows": bool(visible_rows),
         "editor_empty_message": empty_message,
@@ -1719,6 +1761,251 @@ def build_translation_console_editor_view(
         "mutation_performed": False,
         "translations_register_called": False,
         "rollback_performed": False,
+    }
+
+
+def build_translation_workspace_field_coverage(
+    rows: list[dict],
+    visible_rows: list[dict],
+    locale: str,
+    product_gid: str = "",
+):
+    rows = rows or []
+    visible_rows = visible_rows or []
+    locale = (locale or "ja").strip()
+    normalized_draft_fields = {
+        _translation_editor_normalize_field_key(field)
+        for field in TRANSLATION_DRAFT_FIELDS
+    }
+    rows_by_key = {}
+    for row in rows:
+        field_key = _translation_editor_normalize_field_key(row.get("field_key"))
+        if field_key:
+            rows_by_key.setdefault(field_key, []).append(row)
+    visible_row_ids = {id(row) for row in visible_rows}
+
+    entries = []
+    core_entries = []
+    for area in TRANSLATION_WORKSPACE_FIELD_COVERAGE_CORE_AREAS:
+        entry = _build_translation_workspace_field_coverage_entry(
+            area=area,
+            rows_by_key=rows_by_key,
+            visible_row_ids=visible_row_ids,
+            draft_fields=normalized_draft_fields,
+        )
+        entries.append(entry)
+        core_entries.append(entry)
+
+    image_alt_entry = _build_translation_workspace_image_alt_coverage_entry(
+        rows_by_key=rows_by_key,
+        visible_row_ids=visible_row_ids,
+    )
+    entries.append(image_alt_entry)
+
+    for section_key, section_label in TRANSLATION_WORKSPACE_FIELD_COVERAGE_EXTRA_SECTIONS:
+        entries.append(
+            _build_translation_workspace_section_coverage_entry(
+                section_key=section_key,
+                section_label=section_label,
+                rows=rows,
+                visible_row_ids=visible_row_ids,
+            )
+        )
+
+    draft_supported_entries = [
+        entry for entry in entries if entry["support_status"] == "draft_supported"
+    ]
+    visible_statuses = {"visible", "available_hidden_by_filter", "nested_only"}
+    missing_core_fields = [
+        entry["area_label"]
+        for entry in core_entries
+        if entry["coverage_status"] == "missing"
+    ]
+    review_only_or_unsupported = [
+        entry["area_label"]
+        for entry in entries
+        if entry["support_status"] != "draft_supported"
+    ]
+    visible_row_keys = sorted(
+        {
+            row.get("field_key", "")
+            for row in rows
+            if row.get("field_key")
+        }
+    )
+    return {
+        "locale": locale,
+        "product_gid": product_gid,
+        "entries": entries,
+        "core_area_count": len(core_entries),
+        "core_visible_count": len(
+            [
+                entry
+                for entry in core_entries
+                if entry["coverage_status"] in visible_statuses
+            ]
+        ),
+        "draft_supported_area_count": len(draft_supported_entries),
+        "draft_supported_visible_count": len(
+            [
+                entry
+                for entry in draft_supported_entries
+                if entry["coverage_status"] in visible_statuses
+            ]
+        ),
+        "editor_row_count": len(rows),
+        "visible_row_count": len(visible_rows),
+        "missing_core_fields": missing_core_fields,
+        "missing_core_count": len(missing_core_fields),
+        "review_only_or_unsupported_count": len(review_only_or_unsupported),
+        "review_only_or_unsupported_fields": review_only_or_unsupported,
+        "visible_row_keys": visible_row_keys,
+        "has_product": bool(product_gid),
+        "read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "rollback_performed": False,
+    }
+
+
+def _build_translation_workspace_field_coverage_entry(
+    area: dict,
+    rows_by_key: dict,
+    visible_row_ids: set[int],
+    draft_fields: set[str],
+):
+    field_keys = [
+        _translation_editor_normalize_field_key(field)
+        for field in area.get("field_keys", ())
+    ]
+    matching_rows = []
+    for field_key in field_keys:
+        matching_rows.extend(rows_by_key.get(field_key) or [])
+    visible_count = sum(1 for row in matching_rows if id(row) in visible_row_ids)
+    if matching_rows and visible_count:
+        coverage_status = "visible"
+        coverage_label = "Visible"
+    elif matching_rows:
+        coverage_status = "available_hidden_by_filter"
+        coverage_label = "Available, hidden by filter"
+    else:
+        coverage_status = "missing"
+        coverage_label = "Missing"
+
+    draft_supported = any(field_key in draft_fields for field_key in field_keys)
+    support_status = "draft_supported" if draft_supported else "review_only"
+    support_label = (
+        "Draft package supported"
+        if draft_supported
+        else "Review-only in editor"
+    )
+    notes = area.get("note", "")
+    if not matching_rows:
+        notes = f"{notes} Not returned by the current product translation data.".strip()
+    elif not draft_supported:
+        notes = f"{notes} Current draft generation does not cover this field.".strip()
+    return {
+        "area_key": area.get("area_key", ""),
+        "area_label": area.get("area_label", ""),
+        "group_label": area.get("group_label", ""),
+        "coverage_status": coverage_status,
+        "coverage_label": coverage_label,
+        "support_status": support_status,
+        "support_label": support_label,
+        "field_keys": field_keys,
+        "row_count": len(matching_rows),
+        "visible_row_count": visible_count,
+        "notes": notes,
+    }
+
+
+def _build_translation_workspace_image_alt_coverage_entry(
+    rows_by_key: dict,
+    visible_row_ids: set[int],
+):
+    body_rows = (rows_by_key.get("body_html") or []) + (rows_by_key.get("description") or [])
+    visible_count = sum(1 for row in body_rows if id(row) in visible_row_ids)
+    body_html = "\n".join(
+        str(row.get("source_value") or row.get("target_value_display") or "")
+        for row in body_rows
+    )
+    has_image_tag = bool(re.search(r"<img\b", body_html, flags=re.IGNORECASE))
+    has_alt_attribute = bool(
+        re.search(r"<img\b[^>]*\balt\s*=", body_html, flags=re.IGNORECASE)
+    )
+    if not body_rows:
+        coverage_status = "missing"
+        coverage_label = "Missing"
+        notes = "Image alt text cannot be reviewed because Description / body HTML is missing."
+    elif has_image_tag and has_alt_attribute:
+        coverage_status = "nested_only"
+        coverage_label = "Nested in body HTML"
+        notes = "Alt attributes are visible inside Description HTML only; there is no separate alt-text editor row."
+    elif has_image_tag:
+        coverage_status = "nested_only"
+        coverage_label = "Image HTML visible"
+        notes = "Image tags are visible inside Description HTML, but separate alt-text coverage is not available."
+    else:
+        coverage_status = "not_detected"
+        coverage_label = "Not detected"
+        notes = "No image tags were detected in the visible Description HTML source."
+    return {
+        "area_key": "image_alt_text",
+        "area_label": "Image alt text in body HTML",
+        "group_label": "Media",
+        "coverage_status": coverage_status,
+        "coverage_label": coverage_label,
+        "support_status": "not_separate_field",
+        "support_label": "No separate editor row",
+        "field_keys": ["body_html"],
+        "row_count": len(body_rows),
+        "visible_row_count": visible_count,
+        "notes": notes,
+    }
+
+
+def _build_translation_workspace_section_coverage_entry(
+    section_key: str,
+    section_label: str,
+    rows: list[dict],
+    visible_row_ids: set[int],
+):
+    section_rows = [row for row in rows if row.get("section_key") == section_key]
+    visible_count = sum(1 for row in section_rows if id(row) in visible_row_ids)
+    if section_rows and visible_count:
+        coverage_status = "visible"
+        coverage_label = "Visible"
+    elif section_rows:
+        coverage_status = "available_hidden_by_filter"
+        coverage_label = "Available, hidden by filter"
+    else:
+        coverage_status = "missing"
+        coverage_label = "Missing"
+    field_keys = sorted(
+        {
+            row.get("field_key", "")
+            for row in section_rows
+            if row.get("field_key")
+        }
+    )
+    notes = (
+        "Rows in this section are visible for review only; current draft generation does not cover them."
+        if section_rows
+        else "No rows in this section were returned by the current product translation data."
+    )
+    return {
+        "area_key": section_key,
+        "area_label": section_label,
+        "group_label": "Additional sections",
+        "coverage_status": coverage_status,
+        "coverage_label": coverage_label,
+        "support_status": "review_only",
+        "support_label": "Review-only in editor",
+        "field_keys": field_keys,
+        "row_count": len(section_rows),
+        "visible_row_count": visible_count,
+        "notes": notes,
     }
 
 
