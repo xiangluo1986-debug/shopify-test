@@ -20,7 +20,14 @@ REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_draft_pack
 GMAIL_SEND_FROM = "info@kidstoylover.com"
 TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 TRUSTPILOT_TAG = "1: trustpilot"
-TRUSTPILOT_TAG_ALIASES = ["1: trustpilot", "1: trustpoilt"]
+TRUSTPILOT_TAG_ALIASES = [
+    "1: trustpilot",
+    "1: trustpoilt",
+    "1:trustpilot",
+    "1 : trustpilot",
+    "1:trustpoilt",
+    "1 : trustpoilt",
+]
 TARGET_DECISION = "trustpilot_gmail_candidate_dry_run"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_DRAFT_CREATE_ENABLED_ENV = "TRUSTPILOT_GMAIL_CREATE_DRAFTS"
@@ -601,7 +608,9 @@ def _sanitize_text(text: str) -> str:
 
 
 def _normalize_tag(tag: str) -> str:
-    return str(tag or "").strip().lower()
+    text = str(tag or "").strip().lower()
+    text = re.sub(r"\s*:\s*", ":", text)
+    return re.sub(r"\s+", " ", text)
 
 
 def _split_scopes(value: str) -> list[str]:

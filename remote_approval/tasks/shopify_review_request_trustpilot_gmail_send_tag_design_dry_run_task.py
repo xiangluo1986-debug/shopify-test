@@ -17,7 +17,14 @@ REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_send_tag_d
 
 READY_STATUS = "trustpilot_gmail_send_tag_design_dry_run_ready"
 TRUSTPILOT_TAG = "1: trustpilot"
-TRUSTPILOT_TAG_ALIASES = ["1: trustpilot", "1: trustpoilt"]
+TRUSTPILOT_TAG_ALIASES = [
+    "1: trustpilot",
+    "1: trustpoilt",
+    "1:trustpilot",
+    "1 : trustpilot",
+    "1:trustpoilt",
+    "1 : trustpoilt",
+]
 EXPECTED_AUDIT_STATUS = "first_trustpilot_gmail_draft_audit_passed"
 ALLOWED_REPORT_EMAILS = {"info@kidstoylover.com"}
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")

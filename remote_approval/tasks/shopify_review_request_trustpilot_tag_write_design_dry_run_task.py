@@ -27,7 +27,14 @@ EXPECTED_ORDER_NAME = "#22621"
 EXPECTED_MASKED_EMAIL = "m***@gmail.com"
 EXPECTED_DRAFT_ID_PARTIAL = "r-22...3521"
 PLANNED_SHOPIFY_TAG = "1: trustpilot"
-TRUSTPILOT_TAG_ALIASES = ["1: trustpilot", "1: trustpoilt", "trustpilot", "trustpoilt"]
+TRUSTPILOT_TAG_ALIASES = [
+    "1: trustpilot",
+    "1: trustpoilt",
+    "1:trustpilot",
+    "1 : trustpilot",
+    "1:trustpoilt",
+    "1 : trustpoilt",
+]
 ALLOWED_REPORT_EMAILS = {"info@kidstoylover.com"}
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SECRET_VALUE_PATTERNS = [
@@ -167,7 +174,10 @@ def _duplicate_trustpilot_tag_check(candidate_scan: dict, candidate_scan_error: 
         "duplicate_tag_check_source_available": False,
         "candidate_order_found": False,
         "duplicate_trustpilot_tag_detected": False,
+        "canonical_trustpilot_tag_detected": False,
+        "legacy_trustpilot_tag_detected": False,
         "matched_trustpilot_tags": [],
+        "matched_legacy_trustpilot_tags": [],
         "safe_tags_summary": [],
         "duplicate_tag_check_error_sanitized": _sanitize_text(candidate_scan_error),
         "future_live_shopify_tag_readback_required": True,
@@ -184,8 +194,12 @@ def _duplicate_trustpilot_tag_check(candidate_scan: dict, candidate_scan_error: 
     tags = [_safe_text(tag) for tag in row.get("tags", []) if str(tag).strip()]
     result["safe_tags_summary"] = tags
     matched = [tag for tag in tags if _is_trustpilot_tag_alias(tag)]
+    legacy_matched = [tag for tag in matched if not _is_exact_canonical_trustpilot_tag(tag)]
     result["matched_trustpilot_tags"] = matched
+    result["matched_legacy_trustpilot_tags"] = legacy_matched
     result["duplicate_trustpilot_tag_detected"] = bool(matched)
+    result["canonical_trustpilot_tag_detected"] = any(_is_exact_canonical_trustpilot_tag(tag) for tag in matched)
+    result["legacy_trustpilot_tag_detected"] = bool(legacy_matched)
     return result
 
 
@@ -194,8 +208,14 @@ def _is_trustpilot_tag_alias(tag: str) -> bool:
     return normalized in {_normalize_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}
 
 
+def _is_exact_canonical_trustpilot_tag(tag: str) -> bool:
+    return str(tag or "").strip() == PLANNED_SHOPIFY_TAG
+
+
 def _normalize_tag(tag: str) -> str:
-    return re.sub(r"\s+", " ", str(tag or "").strip().lower())
+    text = str(tag or "").strip().lower()
+    text = re.sub(r"\s*:\s*", ":", text)
+    return re.sub(r"\s+", " ", text)
 
 
 def _build_payload(
@@ -235,7 +255,18 @@ def _build_payload(
         "future_real_tag_write_requires_manual_approval": True,
         "duplicate_trustpilot_tag_detected": duplicate_check["duplicate_trustpilot_tag_detected"],
         "matched_trustpilot_tags": duplicate_check["matched_trustpilot_tags"],
+        "canonical_trustpilot_tag_detected": duplicate_check["canonical_trustpilot_tag_detected"],
+        "legacy_trustpilot_tag_detected": duplicate_check["legacy_trustpilot_tag_detected"],
+        "matched_legacy_trustpilot_tags": duplicate_check["matched_legacy_trustpilot_tags"],
+        "canonical_trustpilot_tag": PLANNED_SHOPIFY_TAG,
         "trustpilot_tag_aliases": TRUSTPILOT_TAG_ALIASES,
+        "trustpilot_tag_matching_policy": {
+            "canonical_write_tag": PLANNED_SHOPIFY_TAG,
+            "future_write_requires_exact_canonical_tag": True,
+            "matching_normalizes_whitespace_around_colon": True,
+            "matching_tolerates_legacy_trustpoilt_typo": True,
+            "legacy_tags_are_not_removed_automatically": True,
+        },
         "duplicate_tag_check_source": duplicate_check["duplicate_tag_check_source"],
         "duplicate_tag_check_source_available": duplicate_check["duplicate_tag_check_source_available"],
         "duplicate_tag_check_candidate_order_found": duplicate_check["candidate_order_found"],
@@ -337,6 +368,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "source_sent_count": payload["source_sent_count"],
         "planned_shopify_tag": payload["planned_shopify_tag"],
         "duplicate_trustpilot_tag_detected": payload["duplicate_trustpilot_tag_detected"],
+        "legacy_trustpilot_tag_detected": payload["legacy_trustpilot_tag_detected"],
         "repeat_customer_guard_confirmed": payload["repeat_customer_guard_confirmed"],
         "returned_package_guard_confirmed": payload["returned_package_guard_confirmed"],
         "real_tag_write_allowed_now": payload["real_tag_write_allowed_now"],
@@ -397,6 +429,7 @@ def _render_html_report(payload: dict) -> str:
   <p>Source Gmail draft id partial: <code>{escape(payload["source_gmail_draft_id_partial"])}</code></p>
   <p>Planned Shopify tag: <code>{escape(payload["planned_shopify_tag"])}</code></p>
   <p>Duplicate Trustpilot tag detected in local report: <strong>{escape(str(payload["duplicate_trustpilot_tag_detected"]))}</strong></p>
+  <p>Legacy Trustpilot tag detected: <strong>{escape(str(payload["legacy_trustpilot_tag_detected"]))}</strong></p>
   <p>Repeat customer guard confirmed: <strong>{escape(str(payload["repeat_customer_guard_confirmed"]))}</strong></p>
   <p>Returned package guard confirmed: <strong>{escape(str(payload["returned_package_guard_confirmed"]))}</strong></p>
   <p>Real tag write allowed now: <strong>{escape(str(payload["real_tag_write_allowed_now"]))}</strong></p>
@@ -500,6 +533,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Selected order: {payload.get('selected_order_name')}\n"
         f"Planned tag: {payload.get('planned_shopify_tag')}\n"
         f"Duplicate Trustpilot tag detected: {payload.get('duplicate_trustpilot_tag_detected')}\n"
+        f"Legacy Trustpilot tag detected: {payload.get('legacy_trustpilot_tag_detected')}\n"
         f"Repeat guard confirmed: {payload.get('repeat_customer_guard_confirmed')}\n"
         f"Returned package guard confirmed: {payload.get('returned_package_guard_confirmed')}\n"
         f"Blocking conditions: {payload.get('blocking_condition_count')}\n"

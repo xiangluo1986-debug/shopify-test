@@ -29,7 +29,14 @@ GMAIL_SEND_FROM = "info@kidstoylover.com"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 TRUSTPILOT_TAG = "1: trustpilot"
-TRUSTPILOT_TAG_ALIASES = ["1: trustpilot", "1: trustpoilt"]
+TRUSTPILOT_TAG_ALIASES = [
+    "1: trustpilot",
+    "1: trustpoilt",
+    "1:trustpilot",
+    "1 : trustpilot",
+    "1:trustpoilt",
+    "1 : trustpoilt",
+]
 SHOP_DOMAIN = "kidstoylover.myshopify.com"
 SHOPIFY_API_VERSION = "2026-01"
 PROTECTED_LOOKUP_TIMEOUT_SECONDS = 120
@@ -1087,7 +1094,9 @@ def _sanitize_text(text: str) -> str:
 
 
 def _normalize_tag(tag: str) -> str:
-    return str(tag or "").strip().lower()
+    text = str(tag or "").strip().lower()
+    text = re.sub(r"\s*:\s*", ":", text)
+    return re.sub(r"\s+", " ", text)
 
 
 def _split_scopes(value: str) -> list[str]:

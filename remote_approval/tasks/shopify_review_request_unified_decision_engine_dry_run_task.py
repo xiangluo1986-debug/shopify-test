@@ -20,7 +20,14 @@ REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_unified_decision_engine_dry
 HISTORICAL_ALI_MANUAL_TAG = "1: reveiw request"
 ALI_REVIEW_PENDING_TAG = "1: Review request"
 ALI_REVIEW_SENT_TAG = "Review sent"
-TRUSTPILOT_TAG_ALIASES = ["1: trustpilot", "1: trustpoilt"]
+TRUSTPILOT_TAG_ALIASES = [
+    "1: trustpilot",
+    "1: trustpoilt",
+    "1:trustpilot",
+    "1 : trustpilot",
+    "1:trustpoilt",
+    "1 : trustpoilt",
+]
 GMAIL_SENDER_PLANNED = "info@kidstoylover.com"
 TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 
@@ -514,7 +521,9 @@ def _issue_summary(status: str, counts: dict, source_errors: dict) -> str:
 
 
 def _normalize_tag(tag: str) -> str:
-    return str(tag or "").strip().lower()
+    text = str(tag or "").strip().lower()
+    text = re.sub(r"\s*:\s*", ":", text)
+    return re.sub(r"\s+", " ", text)
 
 
 def _has_returned_package_tag(tags: list[str]) -> bool:
