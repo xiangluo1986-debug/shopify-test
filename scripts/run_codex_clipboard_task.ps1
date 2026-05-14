@@ -194,8 +194,8 @@ if ($DryRun) {
 }
 
 if (-not $Force) {
-    $confirmation = Read-Host "Proceed with this clipboard task? Type YES to continue"
-    if ($confirmation -cne "YES") {
+    $confirmation = Read-Host "Proceed with this clipboard task? Type Y to continue"
+    if ($confirmation -cnotin @("Y", "YES", "y", "yes")) {
         Write-Host "Cancelled. No task file saved and runner was not called."
         return
     }
@@ -218,6 +218,8 @@ New-Item -ItemType Directory -Force -Path $tasksDir | Out-Null
 Set-Content -LiteralPath $taskFile -Value $taskFileText -Encoding UTF8
 
 Write-Host "Saved task file: $taskFile"
+Write-Host "Task name: $Name"
+Write-Host "Use the exact run directory printed by the runner for output review, especially when multiple tasks run."
 
 $runnerParams = @{
     TaskFile = $taskFile
@@ -230,3 +232,7 @@ if ($Notify) {
 }
 
 & $runnerPath @runnerParams
+
+Write-Host "Clipboard runner finished for task: $Name"
+Write-Host "Saved task file: $taskFile"
+Write-Host "Use the exact run directory from the runner's Run output command above."

@@ -108,6 +108,58 @@ function Save-Lines {
     Set-Content -LiteralPath $Path -Value @($Lines) -Encoding UTF8
 }
 
+function Get-SafeRunTaskName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TaskFilePath
+    )
+
+    try {
+        $stem = [System.IO.Path]::GetFileNameWithoutExtension($TaskFilePath)
+        if ([string]::IsNullOrWhiteSpace($stem)) {
+            return ""
+        }
+
+        $safeName = $stem.Trim()
+        $safeName = $safeName -replace '[^A-Za-z0-9._-]', '_'
+        $safeName = $safeName -replace '_+', '_'
+        $safeName = $safeName.Trim("._-".ToCharArray())
+
+        if ($safeName.Length -gt 80) {
+            $safeName = $safeName.Substring(0, 80).Trim("._-".ToCharArray())
+        }
+
+        if ([string]::IsNullOrWhiteSpace($safeName)) {
+            return ""
+        }
+
+        if ($safeName -match '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])$') {
+            return ""
+        }
+
+        return $safeName
+    } catch {
+        return ""
+    }
+}
+
+function Write-RunOutputCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RunDirectory
+    )
+
+    Write-Host ""
+    Write-Host "Run output command:"
+    Write-Host ('$run = "{0}"' -f $RunDirectory)
+    Write-Host 'Get-Content "$run\last_message.txt" -Raw'
+    Write-Host 'Get-Content "$run\safety_warnings.txt" -Raw'
+    Write-Host 'Get-Content "$run\changed_files_after.txt" -Raw'
+    Write-Host 'Get-Content "$run\staged_files_after.txt" -Raw'
+    Write-Host 'git status --short --branch'
+    Write-Host 'git diff --cached --name-only'
+}
+
 function Test-TextFileHasContent {
     param(
         [Parameter(Mandatory = $true)]
@@ -467,14 +519,22 @@ if ($DryRun) {
 
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $runRoot = Join-Path -Path $resolvedProjectRoot -ChildPath "logs\codex_runs"
-$outputDir = Join-Path -Path $runRoot -ChildPath $timestamp
+$safeTaskName = Get-SafeRunTaskName -TaskFilePath $resolvedTaskFile
+if ([string]::IsNullOrWhiteSpace($safeTaskName)) {
+    $runDirectoryName = $timestamp
+} else {
+    $runDirectoryName = "{0}_{1}" -f $timestamp, $safeTaskName
+}
+
+$outputDir = Join-Path -Path $runRoot -ChildPath $runDirectoryName
 $suffix = 1
 while (Test-Path -LiteralPath $outputDir) {
-    $outputDir = Join-Path -Path $runRoot -ChildPath ("{0}_{1}" -f $timestamp, $suffix)
+    $outputDir = Join-Path -Path $runRoot -ChildPath ("{0}_{1}" -f $runDirectoryName, $suffix)
     $suffix += 1
 }
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+Set-Content -LiteralPath (Join-Path -Path $runRoot -ChildPath "latest_run_path.txt") -Value $outputDir -Encoding UTF8
 
 $taskUsedPath = Join-Path -Path $outputDir -ChildPath "task_used.md"
 $fullOutputPath = Join-Path -Path $outputDir -ChildPath "full_output.txt"
@@ -574,9 +634,11 @@ Write-Host "Safety warnings written to: $warningsPath"
 
 if ($codexExitCode -ne 0) {
     Write-Warning "codex exec exited with code $codexExitCode. Review $fullOutputPath and $lastMessagePath."
+    Write-RunOutputCommand -RunDirectory $outputDir
     Invoke-CompletionSound -Warning $true
     exit $codexExitCode
 }
 
 Write-Host "codex exec completed. Review $lastMessagePath and $fullOutputPath."
+Write-RunOutputCommand -RunDirectory $outputDir
 Invoke-CompletionSound -Warning ($hasSafetyWarnings -or $hasRunnerWarnings)
