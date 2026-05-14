@@ -61,4 +61,15 @@ git diff --cached --name-only
 
 Use the exact `$run` path printed by the task that just finished. When multiple PowerShell windows run tasks in parallel, do not rely only on "latest" lookup patterns because another task may finish later and become the newest run. `logs/codex_runs/latest_run_path.txt` is only a convenience helper; for parallel tasks, use the exact per-run command printed by that runner.
 
+## Reviewing a completed Codex run
+
+Use the review helper with the exact per-run folder printed by the runner:
+
+```powershell
+$run = "C:\Users\xiang\OneDrive\桌面\aftersales\logs\codex_runs\YYYYMMDD_HHMMSS_taskname"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\review_codex_run.ps1 -RunPath $run
+```
+
+Add `-ShowFullOutput` to include `full_output.txt` after the main summary. Add `-OpenFolder` to open the run folder in Explorer.
+
 Do not use `--dangerously-bypass-approvals-and-sandbox` for this workflow. Keep sandboxing enabled and keep commit/push manual.

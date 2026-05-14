@@ -17,3 +17,4 @@
 - Do not run destructive database, Docker, or cleanup commands, including `flush`, `drop`, `truncate`, `prune`, or `docker compose down -v`.
 - Keep changes minimal, scoped, and limited to the task's allowed files.
 - If unrelated local changes are present, leave them untouched.
+- When multiple Codex tasks are running in parallel, use the exact per-run `$run` path printed by the runner and review it through `scripts/review_codex_run.ps1`. Do not rely on `latest_run_path.txt` as the primary source.
