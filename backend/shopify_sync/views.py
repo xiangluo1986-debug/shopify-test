@@ -7,6 +7,7 @@ import hashlib
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 
 import requests
@@ -26,6 +27,7 @@ from django.http import (
 )
 from django.shortcuts import render
 from django.utils.html import escape
+from django.utils.safestring import mark_safe
 
 from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem, ShopifySyncState
 from .review_request_workbench import build_review_request_workbench_context
@@ -121,6 +123,37 @@ TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
 TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS = 50
 TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS = 120
 TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS = 1200
+TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS = {
+    "a",
+    "b",
+    "br",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "hr",
+    "i",
+    "li",
+    "ol",
+    "p",
+    "strong",
+    "ul",
+}
+TRANSLATION_CONSOLE_HTML_PREVIEW_VOID_TAGS = {"br", "hr"}
+TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS = {
+    "embed",
+    "iframe",
+    "object",
+    "script",
+    "style",
+}
+TRANSLATION_CONSOLE_HTML_PREVIEW_SAFE_URL_SCHEMES = {
+    "",
+    "http",
+    "https",
+    "mailto",
+    "tel",
+}
 TRANSLATION_WORKSPACE_DRAFT_FIELDS = [
     "title",
     "body_html",
@@ -3280,6 +3313,7 @@ def _build_translation_editor_row(
     resource_type_label = _translation_editor_resource_type_label(field_key)
     resource_detail = _translation_editor_resource_detail(field_key, source_row, draft_entry)
     resource_note = _translation_editor_resource_note(field_key, source_row, draft_entry)
+    has_html_preview = field_key == "body_html"
     return {
         "section_key": section_key,
         "field_key": field_key,
@@ -3293,10 +3327,20 @@ def _build_translation_editor_row(
             source_value,
             field_key=field_key,
         ),
+        "source_value_html_preview": (
+            _translation_editor_sanitize_html_preview(source_value)
+            if has_html_preview
+            else ""
+        ),
         "target_value_display": target_value,
         "target_value_preview": _translation_editor_preview_text(
             target_value,
             field_key=field_key,
+        ),
+        "target_value_html_preview": (
+            _translation_editor_sanitize_html_preview(target_value)
+            if has_html_preview and target_value
+            else ""
         ),
         "target_value_source": (
             "existing translation"
@@ -3335,7 +3379,8 @@ def _build_translation_editor_row(
         "outdated": outdated,
         "digest": source_row.get("digest") or draft_entry.get("source_digest") or "",
         "needs_review": needs_review,
-        "full_description_display": field_key == "body_html",
+        "full_description_display": has_html_preview,
+        "has_html_preview": has_html_preview,
         "read_only": True,
     }
 
@@ -4016,6 +4061,112 @@ def _list_from_value(value):
 
 def _translation_editor_unique_list(values):
     return list(dict.fromkeys(str(value) for value in values if str(value)))
+
+
+class _TranslationConsoleHtmlPreviewSanitizer(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._parts = []
+        self._drop_stack = []
+
+    def handle_starttag(self, tag, attrs):
+        normalized_tag = str(tag or "").lower()
+        if normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS:
+            self._drop_stack.append(normalized_tag)
+            return
+        if self._drop_stack or normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS:
+            return
+        attr_text = _translation_editor_sanitized_html_preview_attrs(
+            normalized_tag,
+            attrs,
+        )
+        if normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_VOID_TAGS:
+            self._parts.append(f"<{normalized_tag}{attr_text}>")
+            return
+        self._parts.append(f"<{normalized_tag}{attr_text}>")
+
+    def handle_startendtag(self, tag, attrs):
+        normalized_tag = str(tag or "").lower()
+        if (
+            self._drop_stack
+            or normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS
+            or normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS
+        ):
+            return
+        attr_text = _translation_editor_sanitized_html_preview_attrs(
+            normalized_tag,
+            attrs,
+        )
+        if normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_VOID_TAGS:
+            self._parts.append(f"<{normalized_tag}{attr_text}>")
+            return
+        self._parts.append(f"<{normalized_tag}{attr_text}></{normalized_tag}>")
+
+    def handle_endtag(self, tag):
+        normalized_tag = str(tag or "").lower()
+        if self._drop_stack:
+            if normalized_tag == self._drop_stack[-1]:
+                self._drop_stack.pop()
+            elif normalized_tag in self._drop_stack:
+                self._drop_stack = self._drop_stack[
+                    : self._drop_stack.index(normalized_tag)
+                ]
+            return
+        if (
+            normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS
+            and normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_VOID_TAGS
+        ):
+            self._parts.append(f"</{normalized_tag}>")
+
+    def handle_data(self, data):
+        if not self._drop_stack:
+            self._parts.append(str(escape(data)))
+
+    def get_html(self):
+        return "".join(self._parts)
+
+
+def _translation_editor_sanitized_html_preview_attrs(tag: str, attrs) -> str:
+    sanitized = []
+    for raw_name, raw_value in attrs or []:
+        name = str(raw_name or "").lower()
+        value = "" if raw_value is None else str(raw_value)
+        if not name or name.startswith("on"):
+            continue
+        if name == "dir" and value.lower() in {"auto", "ltr", "rtl"}:
+            sanitized.append(f' dir="{escape(value.lower())}"')
+        elif (
+            tag == "a"
+            and name == "href"
+            and _translation_editor_html_preview_url_is_safe(value)
+        ):
+            sanitized.append(f' href="{escape(value)}"')
+        elif tag == "a" and name == "title":
+            sanitized.append(f' title="{escape(value)}"')
+    if tag == "a" and any(attr.startswith(" href=") for attr in sanitized):
+        sanitized.append(' rel="noopener noreferrer"')
+    return "".join(sanitized)
+
+
+def _translation_editor_html_preview_url_is_safe(value: str) -> bool:
+    href = str(value or "").strip()
+    if not href:
+        return False
+    compact_href = re.sub(r"[\x00-\x20]+", "", href).lower()
+    if compact_href.startswith(("javascript:", "data:", "vbscript:")):
+        return False
+    parsed = urllib.parse.urlparse(compact_href)
+    return parsed.scheme.lower() in TRANSLATION_CONSOLE_HTML_PREVIEW_SAFE_URL_SCHEMES
+
+
+def _translation_editor_sanitize_html_preview(value):
+    sanitizer = _TranslationConsoleHtmlPreviewSanitizer()
+    try:
+        sanitizer.feed(str(value or ""))
+        sanitizer.close()
+    except ValueError:
+        return mark_safe(str(escape(value or "")))
+    return mark_safe(sanitizer.get_html())
 
 
 def _translation_editor_preview_text(

@@ -581,6 +581,100 @@
     border-color: #cfd8e3;
     background: #fcfdf8;
   }
+  .tw-html-display {
+    max-width: 100%;
+  }
+  .tw-html-mode-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .tw-html-mode-tab {
+    display: inline-block;
+    margin: 0 2px 8px 0;
+    border: 1px solid #cfd8e3;
+    border-radius: 4px;
+    background: #ffffff;
+    color: #344054;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 7px 9px;
+    user-select: none;
+  }
+  .tw-html-mode-tab:hover {
+    color: #1d4ed8;
+  }
+  .tw-html-mode-input:focus + .tw-html-mode-tab {
+    outline: 2px solid #93c5fd;
+    outline-offset: 1px;
+  }
+  .tw-html-mode-input:checked + .tw-html-mode-tab {
+    background: #1d4ed8;
+    color: #ffffff;
+  }
+  .tw-html-pane {
+    display: none;
+  }
+  .tw-html-preview-mode:checked ~ .tw-html-preview-pane,
+  .tw-html-code-mode:checked ~ .tw-html-code-pane {
+    display: block;
+  }
+  .tw-html-preview {
+    max-height: 520px;
+    overflow: auto;
+    overflow-wrap: break-word;
+    border: 1px solid #e1e7ef;
+    border-radius: 6px;
+    background: #fff;
+    color: #1f2937;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.58;
+    padding: 12px;
+  }
+  .tw-html-preview h1,
+  .tw-html-preview h2,
+  .tw-html-preview h3 {
+    margin: 0 0 10px;
+    color: #111827;
+    line-height: 1.25;
+  }
+  .tw-html-preview h1 {
+    font-size: 20px;
+  }
+  .tw-html-preview h2 {
+    font-size: 18px;
+  }
+  .tw-html-preview h3 {
+    font-size: 16px;
+  }
+  .tw-html-preview p,
+  .tw-html-preview ul,
+  .tw-html-preview ol {
+    margin: 0 0 10px;
+  }
+  .tw-html-preview ul,
+  .tw-html-preview ol {
+    padding-left: 22px;
+  }
+  .tw-html-preview li {
+    margin: 3px 0;
+  }
+  .tw-html-preview a {
+    color: #1d4ed8;
+    text-decoration: underline;
+  }
+  .tw-html-preview.is-target {
+    border-color: #cfd8e3;
+    background: #fcfdf8;
+  }
+  .tw-code-block {
+    font-family: Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.55;
+  }
   .tw-description-note {
     margin: 0 0 6px;
     color: #475467;
@@ -1343,12 +1437,42 @@
                 </td>
                 <td>
                   {% if row.full_description_display %}<div class="tw-description-note">Full description shown</div>{% endif %}
-                  <div class="tw-text-block">{{ row.source_value_preview }}</div>
+                  {% if row.has_html_preview %}
+                    <div class="tw-html-display">
+                      <input class="tw-html-mode-input tw-html-preview-mode" type="radio" id="tw-source-preview-{{ section.section_key }}-{{ forloop.counter }}" name="tw-source-mode-{{ section.section_key }}-{{ forloop.counter }}" checked>
+                      <label class="tw-html-mode-tab" for="tw-source-preview-{{ section.section_key }}-{{ forloop.counter }}">Normal preview</label>
+                      <input class="tw-html-mode-input tw-html-code-mode" type="radio" id="tw-source-code-{{ section.section_key }}-{{ forloop.counter }}" name="tw-source-mode-{{ section.section_key }}-{{ forloop.counter }}">
+                      <label class="tw-html-mode-tab" for="tw-source-code-{{ section.section_key }}-{{ forloop.counter }}">Code</label>
+                      <div class="tw-html-pane tw-html-preview-pane">
+                        <div class="tw-html-preview">{{ row.source_value_html_preview }}</div>
+                      </div>
+                      <div class="tw-html-pane tw-html-code-pane">
+                        <div class="tw-text-block tw-code-block">{{ row.source_value_preview }}</div>
+                      </div>
+                    </div>
+                  {% else %}
+                    <div class="tw-text-block">{{ row.source_value_preview }}</div>
+                  {% endif %}
                 </td>
                 <td>
                   {% if row.target_value_display %}
                     {% if row.full_description_display %}<div class="tw-description-note">Full description shown</div>{% endif %}
-                    <div class="tw-text-block is-target">{{ row.target_value_preview }}</div>
+                    {% if row.has_html_preview %}
+                      <div class="tw-html-display">
+                        <input class="tw-html-mode-input tw-html-preview-mode" type="radio" id="tw-target-preview-{{ section.section_key }}-{{ forloop.counter }}" name="tw-target-mode-{{ section.section_key }}-{{ forloop.counter }}" checked>
+                        <label class="tw-html-mode-tab" for="tw-target-preview-{{ section.section_key }}-{{ forloop.counter }}">Normal preview</label>
+                        <input class="tw-html-mode-input tw-html-code-mode" type="radio" id="tw-target-code-{{ section.section_key }}-{{ forloop.counter }}" name="tw-target-mode-{{ section.section_key }}-{{ forloop.counter }}">
+                        <label class="tw-html-mode-tab" for="tw-target-code-{{ section.section_key }}-{{ forloop.counter }}">Code</label>
+                        <div class="tw-html-pane tw-html-preview-pane">
+                          <div class="tw-html-preview is-target">{{ row.target_value_html_preview }}</div>
+                        </div>
+                        <div class="tw-html-pane tw-html-code-pane">
+                          <div class="tw-text-block is-target tw-code-block">{{ row.target_value_preview }}</div>
+                        </div>
+                      </div>
+                    {% else %}
+                      <div class="tw-text-block is-target">{{ row.target_value_preview }}</div>
+                    {% endif %}
                   {% else %}
                     <div class="tw-text-block is-target tw-target-empty">Needs translation</div>
                   {% endif %}
