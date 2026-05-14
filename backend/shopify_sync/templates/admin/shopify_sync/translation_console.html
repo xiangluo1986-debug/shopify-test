@@ -140,11 +140,11 @@
       </form>
       <form method="post">
         {% csrf_token %}
-        <input type="hidden" name="action" value="generate_locked_package_dry_run_placeholder">
+        <input type="hidden" name="action" value="generate_locked_package_dry_run_preview">
         <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
         <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
-        <button type="submit" class="button">Generate locked package dry-run</button>
+        <button type="submit" class="button">Generate locked package dry-run preview</button>
       </form>
     </div>
     <table>
@@ -152,7 +152,7 @@
         <tr><th>Latest audit report</th><td>{% if workflow_status.latest_audit_report_filename %}{{ workflow_status.latest_audit_report_filename }}{% else %}No audit report found{% endif %}</td></tr>
         <tr><th>Latest audit report source</th><td>{{ workflow_status.latest_audit_report_source }}</td></tr>
         <tr><th>Latest audit display path</th><td>{{ workflow_status.latest_audit_report_path }}</td></tr>
-        <tr><th>Locked package generation</th><td>Read-only placeholder in this panel. Use the existing no-write locked-package flow for full report generation.</td></tr>
+        <tr><th>Locked package generation</th><td>Preview only in this panel. It does not write files, call remote runner, or write Shopify translations.</td></tr>
         <tr><th>Real write execution</th><td>No real write action is available from this panel.</td></tr>
       </tbody>
     </table>
@@ -494,6 +494,117 @@
         {% endif %}
       {% else %}
         <p>No skipped entries to display.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if apply_plan_preview_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Apply Plan Preview / Locked Package Preview</h2>
+      <p><strong>This is a preview only.</strong> This page does not write Shopify translations. Real writes still require locked package + explicit ACK + remote approval runner.</p>
+      <table>
+        <tbody>
+          <tr><th>preview_status</th><td>{{ apply_plan_preview_result.preview_status }}</td></tr>
+          <tr><th>selected product gid</th><td>{{ apply_plan_preview_result.product_id }}</td></tr>
+          <tr><th>product title</th><td>{{ apply_plan_preview_result.product_title }}</td></tr>
+          <tr><th>configured locale scope</th><td>{{ apply_plan_preview_result.configured_locale_scope|join:", " }}</td></tr>
+          <tr><th>configured fields</th><td>{{ apply_plan_preview_result.configured_fields|join:", " }}</td></tr>
+          <tr><th>apply_plan_candidate_count</th><td>{{ apply_plan_preview_result.apply_plan_candidate_count }}</td></tr>
+          <tr><th>blocked_or_needs_review_count</th><td>{{ apply_plan_preview_result.blocked_or_needs_review_count }}</td></tr>
+          <tr><th>seo_warning_count</th><td>{{ apply_plan_preview_result.seo_warning_count }}</td></tr>
+          <tr><th>existing_translation_count</th><td>{{ apply_plan_preview_result.existing_translation_count }}</td></tr>
+          <tr><th>blocking_conditions</th><td>{{ apply_plan_preview_result.blocking_conditions|join:", " }}</td></tr>
+          <tr><th>shopify_write_performed</th><td>{{ apply_plan_preview_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ apply_plan_preview_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ apply_plan_preview_result.translations_register_called }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ apply_plan_preview_result.rollback_performed }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Candidate entries table</h2>
+      <p><strong>Preview only / No Shopify write.</strong> These entries are candidates for a later locked package, not approval to write.</p>
+      {% if apply_plan_preview_result.candidate_entries %}
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field / resource_key</th>
+              <th>Proposed translation preview</th>
+              <th>Chars</th>
+              <th>SEO status</th>
+              <th>Planned value source</th>
+              <th>Digest</th>
+              <th>would_write</th>
+              <th>Safety status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in apply_plan_preview_result.candidate_entries %}
+              <tr>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }} / {{ entry.resource_key }}</td>
+                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.proposed_translation_preview }}</td>
+                <td>{{ entry.chars }}</td>
+                <td>{{ entry.seo_status }}</td>
+                <td>{{ entry.planned_value_source }}</td>
+                <td>{{ entry.digest }}</td>
+                <td>{{ entry.would_write }}</td>
+                <td>{{ entry.safety_status }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if apply_plan_preview_result.candidate_entries_truncated %}
+          <p>Candidate entries truncated to the first {{ apply_plan_preview_result.max_rows }} rows.</p>
+        {% endif %}
+      {% else %}
+        <p>No candidate entries. Generate draft dry-run first, or review blocked entries below.</p>
+      {% endif %}
+    </div>
+
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Blocked / needs review entries table</h2>
+      <p><strong>Preview only / No Shopify write.</strong> These entries are excluded from the preview candidate set.</p>
+      {% if apply_plan_preview_result.blocked_entries %}
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field / resource_key</th>
+              <th>Reason</th>
+              <th>SEO warning</th>
+              <th>Validation status</th>
+              <th>SEO status</th>
+              <th>Blocking reasons</th>
+              <th>Current translation present</th>
+              <th>Outdated</th>
+              <th>would_write</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in apply_plan_preview_result.blocked_entries %}
+              <tr>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }} / {{ entry.resource_key }}</td>
+                <td>{{ entry.reason }}</td>
+                <td>{{ entry.seo_warning }}</td>
+                <td>{{ entry.validation_status }}</td>
+                <td>{{ entry.seo_status }}</td>
+                <td>{{ entry.blocking_reasons }}</td>
+                <td>{{ entry.current_translation_present }}</td>
+                <td>{{ entry.outdated }}</td>
+                <td>{{ entry.would_write }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if apply_plan_preview_result.blocked_entries_truncated %}
+          <p>Blocked entries truncated to the first {{ apply_plan_preview_result.max_rows }} rows.</p>
+        {% endif %}
+      {% else %}
+        <p>No blocked or needs-review entries.</p>
       {% endif %}
     </div>
   {% endif %}
