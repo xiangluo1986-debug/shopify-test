@@ -86,6 +86,7 @@ from .translation_workflow_status import (
 )
 from .translation_console_locked_package_report import (
     generate_translation_console_locked_package_dry_run_report,
+    load_latest_translation_console_locked_package_report,
 )
 
 
@@ -1084,6 +1085,17 @@ def translation_console(request):
             summary={"blocking_conditions": ["missing_or_unavailable_selected_product"]},
         )
 
+    locked_report_approval_checklist = (
+        load_latest_translation_console_locked_package_report(
+            selected_product_gid=workflow_product_id,
+            preferred_json_path=(
+                locked_package_report_result.get("json_report_path", "")
+                if locked_package_report_result
+                else ""
+            ),
+        )
+    )
+
     return render(
         request,
         "admin/shopify_sync/translation_console.html",
@@ -1102,6 +1114,7 @@ def translation_console(request):
             "safe_action_result": safe_action_result,
             "apply_plan_preview_result": apply_plan_preview_result,
             "locked_package_report_result": locked_package_report_result,
+            "locked_report_approval_checklist": locked_report_approval_checklist,
             "error_message": error_message,
             "draft_result": draft_result,
             "draft_error_message": draft_error_message,

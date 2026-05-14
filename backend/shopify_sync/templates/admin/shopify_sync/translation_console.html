@@ -225,6 +225,107 @@
   {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Locked Report Approval Checklist</h2>
+    <p><strong>This approval checklist is read-only.</strong> This page still does not write Shopify translations. Real writes require explicit ACK and remote approval runner. No write button is available on this page.</p>
+    {% if locked_report_approval_checklist.report_available %}
+      <table>
+        <tbody>
+          <tr><th>checklist_status</th><td>{{ locked_report_approval_checklist.checklist_status }}</td></tr>
+          <tr><th>safe_for_manual_review</th><td>{{ locked_report_approval_checklist.safe_for_manual_review }}</td></tr>
+          <tr><th>report_status</th><td>{{ locked_report_approval_checklist.report_status }}</td></tr>
+          <tr><th>product_gid</th><td>{{ locked_report_approval_checklist.product_gid }}</td></tr>
+          <tr><th>selected_product_gid</th><td>{{ locked_report_approval_checklist.selected_product_gid }}</td></tr>
+          <tr><th>generated_at</th><td>{{ locked_report_approval_checklist.generated_at }}</td></tr>
+          <tr><th>loaded_at</th><td>{{ locked_report_approval_checklist.loaded_at }}</td></tr>
+          <tr><th>report_freshness</th><td>{{ locked_report_approval_checklist.report_freshness }}</td></tr>
+          <tr><th>entry_count</th><td>{{ locked_report_approval_checklist.entry_count }}</td></tr>
+          <tr><th>candidate_entries_count</th><td>{{ locked_report_approval_checklist.candidate_entries_count }}</td></tr>
+          <tr><th>blocked_or_needs_review_count</th><td>{{ locked_report_approval_checklist.blocked_or_needs_review_count }}</td></tr>
+          <tr><th>JSON report path</th><td>{{ locked_report_approval_checklist.json_report_path }}</td></tr>
+          <tr><th>HTML report path</th><td>{{ locked_report_approval_checklist.html_report_path }}</td></tr>
+          <tr><th>warnings</th><td>{{ locked_report_approval_checklist.warnings|join:", " }}</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Checklist items</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Passed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in locked_report_approval_checklist.checklist_items %}
+            <tr>
+              <td>{{ item.label }}</td>
+              <td>{{ item.passed }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <h3>Safety flags summary</h3>
+      <table>
+        <tbody>
+          {% for key, value in locked_report_approval_checklist.safety_flags.items %}
+            <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+          {% endfor %}
+          <tr><th>missing_or_nonfalse_safety_flags</th><td>{{ locked_report_approval_checklist.missing_safety_flags|join:", " }}</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Candidate entry details</h3>
+      {% if locked_report_approval_checklist.candidate_entries %}
+        <table>
+          <thead>
+            <tr>
+              <th>Locale</th>
+              <th>Field / resource_key</th>
+              <th>Planned value preview</th>
+              <th>Chars</th>
+              <th>SEO status</th>
+              <th>Validation status</th>
+              <th>Digest</th>
+              <th>would_write</th>
+              <th>dry_run_only</th>
+              <th>Source preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in locked_report_approval_checklist.candidate_entries %}
+              <tr>
+                <td>{{ entry.locale }}</td>
+                <td>{{ entry.field }} / {{ entry.resource_key }}</td>
+                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.planned_value_preview }}</td>
+                <td>{{ entry.chars }}</td>
+                <td>{{ entry.seo_status }}</td>
+                <td>{{ entry.validation_status }}</td>
+                <td style="word-break: break-all;">{{ entry.digest }}</td>
+                <td>{{ entry.would_write }}</td>
+                <td>{{ entry.dry_run_only }}</td>
+                <td style="max-width: 360px; white-space: pre-wrap;">{{ entry.source_preview }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No candidate entries in the loaded locked package report.</p>
+      {% endif %}
+    {% else %}
+      <p><strong>Generate locked package dry-run report first.</strong></p>
+      <table>
+        <tbody>
+          <tr><th>checklist_status</th><td>{{ locked_report_approval_checklist.checklist_status }}</td></tr>
+          <tr><th>loaded_at</th><td>{{ locked_report_approval_checklist.loaded_at }}</td></tr>
+          <tr><th>warnings</th><td>{{ locked_report_approval_checklist.warnings|join:", " }}</td></tr>
+          <tr><th>read_error</th><td>{{ locked_report_approval_checklist.read_error }}</td></tr>
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Fetch read-only product translation data</h2>
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       <input type="hidden" name="fetch_read_only" value="1">
