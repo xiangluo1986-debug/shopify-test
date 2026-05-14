@@ -115,6 +115,7 @@ TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
 ]
 TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS = 50
 TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS = 120
+TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS = 1200
 TRANSLATION_CONSOLE_EDITOR_FILTERS = {
     "all",
     "untranslated",
@@ -1826,9 +1827,9 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
         "field_label": _translation_editor_field_label(field_key),
         "resource_key": source_row.get("key") or draft_entry.get("source_key") or field_key,
         "source_value": source_value,
-        "source_value_preview": _preview_text(source_value, 220),
+        "source_value_preview": _translation_editor_preview_text(source_value),
         "target_value_display": target_value,
-        "target_value_preview": _preview_text(target_value, 220),
+        "target_value_preview": _translation_editor_preview_text(target_value),
         "target_value_source": (
             "existing translation"
             if existing_value
@@ -2188,6 +2189,17 @@ def _list_from_value(value):
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value if str(item)]
     return [str(value)]
+
+
+def _translation_editor_preview_text(
+    value,
+    max_chars: int = TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS,
+):
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "..."
 
 
 def _preview_text(value, max_chars: int = TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS):
