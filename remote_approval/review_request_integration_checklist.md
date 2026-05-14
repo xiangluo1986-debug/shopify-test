@@ -327,3 +327,28 @@ Phase 0.3 automation decision:
   confirmed.
 - No Shopify `tagsAdd` or `tagsRemove` call is allowed until required Shopify
   scopes are confirmed and a separate write phase is approved.
+
+## Phase 4.2 Review Request Workbench
+
+- [x] Add a read-only admin workbench at
+  `/admin/shopify_sync/review-request-workbench/`.
+- [x] Use local synced order data and local review-request JSON reports only.
+- [x] Keep customer email display masked by default.
+- [x] Do not add send, draft, Shopify tag write, review API, or tracking
+  redirect actions.
+- [x] Keep the exact existing Shopify review-request tag as
+  `1: reveiw request`; do not treat corrected spelling as equivalent.
+- [x] Show Trustpilot invitation aliases exactly as local reports recorded
+  them, including `1: trustpilot`, `1: trustpoilt`, `1:trustpilot`,
+  `1 : trustpilot`, `1:trustpoilt`, and `1 : trustpoilt`.
+
+Future tracking design note:
+
+- Gmail alone cannot prove that a customer clicked a Trustpilot link or left a
+  review.
+- Future click tracking would need a separate, explicitly approved local
+  redirect token/link design.
+- Future review detection would need Trustpilot Business/API/export support or
+  Kudosi/Ali Reviews API, webhook, or export support.
+- Phase 4.2 does not enable redirects, call Trustpilot/Kudosi/Ali Reviews APIs,
+  call Gmail APIs, send email, or write Shopify data.

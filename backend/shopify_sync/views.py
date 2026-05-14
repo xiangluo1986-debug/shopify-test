@@ -10,6 +10,7 @@ from datetime import datetime
 from urllib.error import HTTPError, URLError
 
 import requests
+from django.contrib import admin
 from django.core.exceptions import FieldDoesNotExist
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
@@ -18,6 +19,7 @@ from django.http import (
     HttpResponse,
     HttpResponseBadRequest,
     HttpResponseForbidden,
+    HttpResponseNotAllowed,
     HttpResponseRedirect,
     HttpResponseServerError,
     JsonResponse,
@@ -26,6 +28,7 @@ from django.shortcuts import render
 from django.utils.html import escape
 
 from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem, ShopifySyncState
+from .review_request_workbench import build_review_request_workbench_context
 from .sync_helpers import (
     ORDER_SYNC_TASK_NAMES,
     run_shopify_sync_task,
@@ -122,6 +125,7 @@ TRANSLATION_CONSOLE_EDITOR_FILTERS = {
     "outdated",
     "translated",
     "needs_review",
+    "draft_only",
 }
 TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
     {
@@ -157,7 +161,7 @@ TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
         "section_label": "Important metafields",
         "section_hint": "Customer-facing metafields likely to matter in translation review.",
         "collapsible": True,
-        "collapsed_by_default": False,
+        "collapsed_by_default": True,
     },
     {
         "section_key": "technical_metafields",
@@ -727,6 +731,19 @@ def _user_has_shopify_sync_access(request):
 
 
 @staff_member_required
+def review_request_workbench(request):
+    if not _user_has_shopify_sync_access(request):
+        return HttpResponseForbidden("Only authorized Shopify sync staff can view this workbench.")
+    if request.method not in {"GET", "HEAD"}:
+        return HttpResponseNotAllowed(["GET", "HEAD"])
+
+    context = admin.site.each_context(request)
+    context.update(build_review_request_workbench_context())
+    context["title"] = "Review Request Workbench"
+    return render(request, "admin/shopify_sync/review_request_workbench.html", context)
+
+
+@staff_member_required
 def translation_console(request):
     post_action = (request.POST.get("action") or "").strip() if request.method == "POST" else ""
     is_refresh_status_post = post_action == "refresh_status"
@@ -799,9 +816,9 @@ def translation_console(request):
     raw_ui_mode = request_params.get("ui_mode", "") or request_params.get("view_mode", "")
     if raw_ui_mode and raw_ui_mode not in {"workbench", "editor"}:
         translation_console_warnings.append(
-            "Unsupported ui_mode was ignored; using workbench."
+            "Unsupported ui_mode was ignored; using editor."
         )
-    ui_mode = "editor" if raw_ui_mode == "editor" else "workbench"
+    ui_mode = "workbench" if raw_ui_mode == "workbench" else "editor"
     editor_filter = request_params.get("editor_filter", "").strip()
     if editor_filter not in TRANSLATION_CONSOLE_EDITOR_FILTERS:
         if editor_filter:
@@ -1819,9 +1836,41 @@ def build_translation_console_editor_view(
         ("all", "All"),
         ("untranslated", "Untranslated"),
         ("outdated", "Outdated"),
+        ("draft_only", "Draft Only"),
         ("translated", "Translated"),
         ("needs_review", "Needs Review"),
     ]
+    status_summary = {
+        "visible": len(visible_rows),
+        "untranslated": len(
+            [
+                row
+                for row in searched_rows
+                if _translation_editor_row_matches_filter(row, "untranslated")
+            ]
+        ),
+        "outdated": len(
+            [
+                row
+                for row in searched_rows
+                if _translation_editor_row_matches_filter(row, "outdated")
+            ]
+        ),
+        "needs_review": len(
+            [
+                row
+                for row in searched_rows
+                if _translation_editor_row_matches_filter(row, "needs_review")
+            ]
+        ),
+        "draft_only": len(
+            [
+                row
+                for row in searched_rows
+                if _translation_editor_row_matches_filter(row, "draft_only")
+            ]
+        ),
+    }
     filter_tabs = [
         {
             "value": value,
@@ -1862,6 +1911,7 @@ def build_translation_console_editor_view(
         "editor_folded_row_count": folded_row_count,
         "editor_primary_visible_row_count": len(visible_rows) - folded_row_count,
         "editor_search_result_count": len(searched_rows),
+        "status_summary": status_summary,
         "field_coverage": field_coverage,
         "editor_has_rows": bool(rows),
         "editor_has_visible_rows": bool(visible_rows),
@@ -2289,6 +2339,8 @@ def _translation_editor_row_matches_filter(row: dict, editor_filter: str) -> boo
         return status == "untranslated"
     if editor_filter == "outdated":
         return status == "outdated"
+    if editor_filter == "draft_only":
+        return status == "draft_only"
     if editor_filter == "needs_review":
         return bool(row.get("needs_review")) or status in {"needs_review", "skipped"}
     return True

@@ -18,6 +18,11 @@ urlpatterns = [
         shopify_sync_views.translation_console,
         name="shopify_translation_console",
     ),
+    path(
+        "admin/shopify_sync/review-request-workbench/",
+        shopify_sync_views.review_request_workbench,
+        name="shopify_review_request_workbench",
+    ),
     path("admin/", admin.site.urls),
     path("auth/shopify/", include("shopify_sync.urls")),
 
