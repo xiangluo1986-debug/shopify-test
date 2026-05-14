@@ -1,3 +1,8 @@
+---
+name: shopify-sync
+description: Work on Shopify sync, API reads, pagination, and scheduler issues safely.
+---
+
 # Shopify Sync Skill
 
 Use this skill when working on Shopify order sync, product sync, Shopify API reads, pagination, retry behavior, or sync dashboard / scheduler issues in this aftersales project.

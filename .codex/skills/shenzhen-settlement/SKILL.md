@@ -1,3 +1,8 @@
+---
+name: shenzhen-settlement
+description: Work on Shenzhen warehouse settlement, cost, profit, and payment workflows.
+---
+
 # Shenzhen Settlement Skill
 
 Use this skill when working on Shenzhen warehouse settlement, packages, costs, profit, payment workflow, CSV export, or Shopify Order admin settlement UI.

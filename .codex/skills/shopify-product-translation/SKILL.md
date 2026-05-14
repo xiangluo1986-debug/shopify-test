@@ -1,3 +1,8 @@
+---
+name: shopify-product-translation
+description: Translate and review Shopify product SEO content safely.
+---
+
 # Shopify Product Translation and SEO Skill
 
 Use this skill when translating Shopify products, editing translated product content, or reviewing Shopify SEO output.

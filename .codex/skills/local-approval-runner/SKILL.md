@@ -1,3 +1,8 @@
+---
+name: local-approval-runner
+description: Run local PowerShell approval workflows for fixed Codex tasks.
+---
+
 # Local Approval Runner Skill
 
 ## Purpose

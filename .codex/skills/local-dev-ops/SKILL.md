@@ -1,3 +1,8 @@
+---
+name: local-dev-ops
+description: Handle local Docker, PowerShell, scheduler, and validation operations.
+---
+
 # Local Dev Ops Skill
 
 Use this skill for Docker, Windows PowerShell, scheduler, cloudflared, local validation, and Git-saving questions in this project.

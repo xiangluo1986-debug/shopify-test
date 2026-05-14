@@ -1,3 +1,8 @@
+---
+name: django-ticket-debug
+description: Debug and make small safe changes to the Django ticket system.
+---
+
 # Django Ticket Debug Skill
 
 Use this skill when debugging or making small changes to the ticket system in this project.
