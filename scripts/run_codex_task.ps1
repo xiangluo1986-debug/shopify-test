@@ -13,7 +13,9 @@ param(
 
     [switch]$DryRun,
 
-    [switch]$Notify
+    [switch]$Notify,
+
+    [switch]$Review
 )
 
 Set-StrictMode -Version Latest
@@ -150,14 +152,45 @@ function Write-RunOutputCommand {
     )
 
     Write-Host ""
-    Write-Host "Run output command:"
+    Write-Host "Preferred review command:"
     Write-Host ('$run = "{0}"' -f $RunDirectory)
+    Write-Host 'powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\review_codex_run.ps1 -RunPath $run'
+    Write-Host ""
+    Write-Host "Fallback manual output commands:"
     Write-Host 'Get-Content "$run\last_message.txt" -Raw'
     Write-Host 'Get-Content "$run\safety_warnings.txt" -Raw'
     Write-Host 'Get-Content "$run\changed_files_after.txt" -Raw'
     Write-Host 'Get-Content "$run\staged_files_after.txt" -Raw'
     Write-Host 'git status --short --branch'
     Write-Host 'git diff --cached --name-only'
+}
+
+function Invoke-RunReview {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RunDirectory
+    )
+
+    $reviewScriptPath = Join-Path -Path $PSScriptRoot -ChildPath "review_codex_run.ps1"
+    if (-not (Test-Path -LiteralPath $reviewScriptPath -PathType Leaf)) {
+        Write-Warning "Review helper not found: $reviewScriptPath"
+        return
+    }
+
+    Write-Host ""
+    Write-Host "Running review helper:"
+    Write-Host ('$run = "{0}"' -f $RunDirectory)
+    Write-Host 'powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\review_codex_run.ps1 -RunPath $run'
+
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $reviewScriptPath -RunPath $RunDirectory
+        $reviewExitCode = $LASTEXITCODE
+        if ($null -ne $reviewExitCode -and $reviewExitCode -ne 0) {
+            Write-Warning "Review helper exited with code $reviewExitCode."
+        }
+    } catch {
+        Write-Warning "Review helper failed: $($_.Exception.Message)"
+    }
 }
 
 function Test-TextFileHasContent {
@@ -635,10 +668,16 @@ Write-Host "Safety warnings written to: $warningsPath"
 if ($codexExitCode -ne 0) {
     Write-Warning "codex exec exited with code $codexExitCode. Review $fullOutputPath and $lastMessagePath."
     Write-RunOutputCommand -RunDirectory $outputDir
+    if ($Review) {
+        Invoke-RunReview -RunDirectory $outputDir
+    }
     Invoke-CompletionSound -Warning $true
     exit $codexExitCode
 }
 
 Write-Host "codex exec completed. Review $lastMessagePath and $fullOutputPath."
 Write-RunOutputCommand -RunDirectory $outputDir
+if ($Review) {
+    Invoke-RunReview -RunDirectory $outputDir
+}
 Invoke-CompletionSound -Warning ($hasSafetyWarnings -or $hasRunnerWarnings)

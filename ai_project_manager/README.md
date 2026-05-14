@@ -9,7 +9,7 @@ The workflow is intentionally not full auto:
 3. PowerShell runs `scripts/run_codex_task.ps1` with that task file.
 4. The script combines `SAFETY_RULES.md`, the saved task, and a final-response footer, then passes the prompt to `codex exec` through stdin.
 5. `codex exec` performs the work in the selected sandbox.
-6. The user reviews `last_message.txt`, `full_output.txt`, git status files, and safety warnings from the run folder.
+6. The user reviews the exact run folder with the printed `scripts/review_codex_run.ps1` command.
 7. The user pastes the important result back to ChatGPT for review and next-step planning.
 8. Any commit or push remains manual and only after human review.
 
@@ -45,9 +45,27 @@ Example clipboard dry run:
 .\scripts\run_codex_clipboard_task.ps1 -Name my_task -DryRun
 ```
 
+Example clipboard run with automatic review helper output:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\run_codex_clipboard_task.ps1 `
+  -Name phase_xxx `
+  -Sandbox workspace-write `
+  -Notify `
+  -Review
+```
+
 Run outputs are written under `logs/codex_runs/yyyyMMdd_HHmmss_<task-file-stem>/` for review when the task file stem can be safely used in a folder name. If the task name cannot be made safe, the runner falls back to `logs/codex_runs/yyyyMMdd_HHmmss/`. The runner never stages, commits, pushes, restores, or resets files.
 
-At the end of each real run, the runner prints a copy-ready command that reads that exact run directory:
+At the end of each real run, the runner prints the preferred review helper command first. Use the exact `$run` path printed by that task:
+
+```powershell
+$run = "C:\path\to\aftersales\logs\codex_runs\20260514_151234_my_task"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\review_codex_run.ps1 -RunPath $run
+```
+
+The old manual output commands are printed under `Fallback manual output commands:` and are fallback only:
 
 ```powershell
 $run = "C:\path\to\aftersales\logs\codex_runs\20260514_151234_my_task"

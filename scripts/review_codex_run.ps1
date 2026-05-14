@@ -160,6 +160,57 @@ function Test-FileHasNonWhitespaceContent {
     return -not [string]::IsNullOrWhiteSpace($text)
 }
 
+function Test-SafetyWarningsTextIsBenign {
+    param(
+        [AllowNull()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $true
+    }
+
+    $nonEmptyLines = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @($Text -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+            $nonEmptyLines.Add($trimmed)
+        }
+    }
+
+    if ($nonEmptyLines.Count -ne 1) {
+        return $false
+    }
+
+    $benignMessages = @(
+        "No safety warnings detected.",
+        "OK: no safety warnings recorded.",
+        "OK: no safety warnings detected."
+    )
+
+    foreach ($message in $benignMessages) {
+        if ([string]::Equals($nonEmptyLines[0], $message, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-SafetyWarningsRequireReview {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+
+    $text = Get-FileText -Path $Path
+    return -not (Test-SafetyWarningsTextIsBenign -Text $text)
+}
+
 if ([string]::IsNullOrWhiteSpace($RunPath)) {
     throw "RunPath is required. Pass -RunPath <completed runner output directory>."
 }
@@ -183,7 +234,7 @@ foreach ($fileName in $expectedFiles) {
 
 $safetyWarningsPath = Join-Path -Path $resolvedRunPath -ChildPath "safety_warnings.txt"
 $changedFilesAfterPath = Join-Path -Path $resolvedRunPath -ChildPath "changed_files_after.txt"
-$safetyWarningsNonEmpty = Test-FileHasNonWhitespaceContent -Path $safetyWarningsPath
+$safetyWarningsRequireReview = Test-SafetyWarningsRequireReview -Path $safetyWarningsPath
 $changedFilesRecorded = Test-FileHasNonWhitespaceContent -Path $changedFilesAfterPath
 
 Write-Host "Codex run review"
@@ -208,6 +259,8 @@ if (-not $fileExists["safety_warnings.txt"]) {
     $safetyText = Get-FileText -Path $safetyWarningsPath
     if ([string]::IsNullOrWhiteSpace($safetyText)) {
         Write-Host "OK: no safety warnings recorded."
+    } elseif (Test-SafetyWarningsTextIsBenign -Text $safetyText) {
+        Write-Host "OK: no safety warnings detected."
     } else {
         Write-Host "REVIEW REQUIRED: safety warnings exist."
         Write-SafeText -Text $safetyText
@@ -245,7 +298,7 @@ if ($null -ne $currentStagedFiles) {
     }
 }
 
-if ($safetyWarningsNonEmpty) {
+if ($safetyWarningsRequireReview) {
     Write-Host "REVIEW REQUIRED: safety warnings exist."
 }
 

@@ -9,6 +9,8 @@ param(
 
     [switch]$Notify,
 
+    [switch]$Review,
+
     [switch]$DryRun,
 
     [switch]$Force
@@ -161,6 +163,7 @@ Write-Host "Task save path: $taskFile"
 Write-Host "Runner path: $runnerPath"
 Write-Host "Sandbox: $Sandbox"
 Write-Host "Notify: $($Notify.IsPresent)"
+Write-Host "Review: $($Review.IsPresent)"
 Write-Host "DryRun: $($DryRun.IsPresent)"
 Write-Host "Force: $($Force.IsPresent)"
 Write-Host "Clipboard preview (first $previewLineCount lines):"
@@ -229,6 +232,10 @@ $runnerParams = @{
 
 if ($Notify) {
     $runnerParams["Notify"] = $true
+}
+
+if ($Review) {
+    $runnerParams["Review"] = $true
 }
 
 & $runnerPath @runnerParams
