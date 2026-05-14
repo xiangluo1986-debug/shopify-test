@@ -69,6 +69,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_sen
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_repeat_customer_guard_task import (
     run_shopify_review_request_trustpilot_gmail_repeat_customer_guard_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_audit_task import (
+    run_shopify_review_request_trustpilot_gmail_send_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task import (
     run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task,
 )
@@ -291,6 +294,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_repeat_customer_guard": (
         run_shopify_review_request_trustpilot_gmail_repeat_customer_guard_task
+    ),
+    "shopify_review_request_trustpilot_gmail_send_audit": (
+        run_shopify_review_request_trustpilot_gmail_send_audit_task
     ),
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": (
         run_shopify_review_request_trustpilot_gmail_send_tag_design_dry_run_task
@@ -583,6 +589,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify lookup only",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_repeat_customer_guard.json",
+    },
+    "shopify_review_request_trustpilot_gmail_send_audit": {
+        "description": "Audit the one-draft Trustpilot Gmail send report without new Gmail, Shopify, or Kudosi actions.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_send_audit.json",
     },
     "shopify_review_request_trustpilot_gmail_send_tag_design_dry_run": {
         "description": "Generate a no-send/no-write Trustpilot Gmail draft send and Shopify tag design package.",
