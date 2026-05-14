@@ -39,6 +39,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_one_candidate_gmail
 from remote_approval.tasks.shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflight_task import (
     run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflight_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute_task import (
+    run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute_task,
+)
 from remote_approval.tasks.shopify_review_request_returned_package_guard_task import (
     run_shopify_review_request_returned_package_guard_task,
 )
@@ -304,6 +307,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflight": (
         run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflight_task
+    ),
+    "shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute": (
+        run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute_task
     ),
     "shopify_review_request_returned_package_guard": run_shopify_review_request_returned_package_guard_task,
     "shopify_review_request_shopify_tag_permission_readiness": (
@@ -601,6 +607,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; preflight only",
         "review_file_path": "logs/shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflight.json",
+    },
+    "shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute": {
+        "description": "Dry-run or execute a locked exactly-one Trustpilot Gmail draft send for selected order #22620.",
+        "allowed_modes": ["dry-run", "real-run"],
+        "write_risk": "Gmail drafts.send only in real-run when DRY_RUN=0 and every exact Phase 4.8 ACK gate is valid",
+        "review_file_path": "logs/shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute.json",
     },
     "shopify_review_request_returned_package_guard": {
         "description": "Run a read-only return/returned package tag guard before any review request send path.",
