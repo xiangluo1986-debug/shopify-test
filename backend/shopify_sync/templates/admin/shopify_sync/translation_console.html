@@ -297,6 +297,20 @@
     background: #f2f4f7;
     color: #475467;
   }
+  .tw-mvp-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .tw-mvp-action {
+    border: 1px solid #dbe1e8;
+    border-radius: 6px;
+    background: #fff;
+    padding: 7px 10px;
+    color: #344054;
+    font-weight: 600;
+  }
   .tw-coverage-table {
     width: 100%;
     border-collapse: separate;
@@ -330,6 +344,18 @@
   .tw-coverage-status.is-visible {
     background: #e8f5e9;
     color: #185c25;
+  }
+  .tw-coverage-status.is-included {
+    background: #e8f5e9;
+    color: #185c25;
+  }
+  .tw-coverage-status.is-partially_included,
+  .tw-coverage-status.is-needs_mapping,
+  .tw-coverage-status.is-editor_only,
+  .tw-coverage-status.is-not_loaded,
+  .tw-coverage-status.is-select_product {
+    background: #fff4e5;
+    color: #8a4b00;
   }
   .tw-coverage-status.is-available_hidden_by_filter,
   .tw-coverage-status.is-nested_only {
@@ -646,10 +672,20 @@
     font-weight: 700;
   }
   .translation-workspace .tw-status-badge.is-translated,
-  .translation-workspace .tw-coverage-status.is-visible {
+  .translation-workspace .tw-coverage-status.is-visible,
+  .translation-workspace .tw-coverage-status.is-included {
     border-color: #86efac;
     background: #dcfce7;
     color: #14532d;
+  }
+  .translation-workspace .tw-coverage-status.is-partially_included,
+  .translation-workspace .tw-coverage-status.is-needs_mapping,
+  .translation-workspace .tw-coverage-status.is-editor_only,
+  .translation-workspace .tw-coverage-status.is-not_loaded,
+  .translation-workspace .tw-coverage-status.is-select_product {
+    border-color: #facc15;
+    background: #fef9c3;
+    color: #713f12;
   }
   .translation-workspace .tw-status-badge.is-outdated,
   .translation-workspace .tw-status-badge.is-needs_review {
@@ -732,6 +768,75 @@
     </div>
     <span class="tw-muted">{% if ui_mode == "editor" %}Daily editor view{% else %}Dry-run workflow workbench{% endif %}</span>
   </div>
+
+  {% if single_product_mvp %}
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Single Product Translation MVP</h2>
+    <div class="tw-editor-summary">
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Selected product</div>
+        <div class="tw-summary-value">{% if single_product_mvp.selected_product_title %}{{ single_product_mvp.selected_product_title }}{% else %}No product selected{% endif %}</div>
+        {% if single_product_mvp.selected_product_gid %}<div class="tw-resource-key">{{ single_product_mvp.selected_product_gid }}</div>{% endif %}
+      </div>
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Selected locale</div>
+        <div class="tw-summary-value">{{ single_product_mvp.selected_locale }} / {{ single_product_mvp.selected_locale_label }}</div>
+      </div>
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Supported target locales</div>
+        <div class="tw-summary-value">{{ single_product_mvp.supported_target_locales|join:", " }}</div>
+      </div>
+      <div class="tw-summary-card">
+        <div class="tw-summary-label">Current draft fields</div>
+        <div class="tw-summary-value">{{ single_product_mvp.draft_fields|join:", " }}</div>
+      </div>
+    </div>
+    <div class="tw-coverage-summary">
+      <span class="tw-coverage-pill">Rows loaded: {{ single_product_mvp.editor_row_count }}</span>
+      <span class="tw-coverage-pill">Draft coverage: {{ single_product_mvp.draft_coverage_summary_status }}</span>
+      <span class="tw-coverage-pill">Read-only page: {{ single_product_mvp.read_only }}</span>
+    </div>
+    <div class="tw-editor-table-wrap">
+      <table class="tw-coverage-table">
+        <thead>
+          <tr>
+            <th>Coverage group</th>
+            <th>Status</th>
+            <th>Draft coverage</th>
+            <th>Source rows</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for group in single_product_mvp.groups %}
+            <tr>
+              <td><strong>{{ group.label }}</strong></td>
+              <td><span class="tw-coverage-status is-{{ group.status_key }}">{{ group.status_label }}</span></td>
+              <td>
+                {% if group.included_labels %}<div><strong>Included:</strong> {{ group.included_labels|join:", " }}</div>{% endif %}
+                {% if group.editor_only_labels %}<div><strong>Editor-only:</strong> {{ group.editor_only_labels|join:", " }}</div>{% endif %}
+                {% if group.needs_mapping_labels %}<div><strong>Needs mapping:</strong> {{ group.needs_mapping_labels|join:", " }}</div>{% endif %}
+                {% if group.missing_labels %}<div><strong>Missing:</strong> {{ group.missing_labels|join:", " }}</div>{% endif %}
+                {% if group.not_loaded_labels %}<div><strong>Not loaded:</strong> {{ group.not_loaded_labels|join:", " }}</div>{% endif %}
+              </td>
+              <td>
+                {{ group.visible_row_count }} / {{ group.source_row_count }} visible
+                {% if group.draft_source_row_count %}<br>{{ group.draft_source_row_count }} rows classified in latest draft run{% endif %}
+                {% if group.missing_translation_count %}<br>{{ group.missing_translation_count }} missing target translations{% endif %}
+              </td>
+              <td>{{ group.notes }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="tw-mvp-actions">
+      {% for action in single_product_mvp.next_actions %}
+        <span class="tw-mvp-action">{{ action.label }}: {{ action.status }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
   {% if ui_mode == "workbench" %}
   <div class="module" style="padding: 12px; margin-bottom: 16px;">

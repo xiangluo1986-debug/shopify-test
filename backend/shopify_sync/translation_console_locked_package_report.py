@@ -46,6 +46,7 @@ def generate_translation_console_locked_package_dry_run_report(
         "product_title": preview.get("product_title", ""),
         "configured_locale_scope": preview.get("configured_locale_scope") or [],
         "configured_fields": preview.get("configured_fields") or [],
+        "draft_coverage_summary": preview.get("draft_coverage_summary") or {},
         "entry_count": len(candidates),
         "candidate_entries": [_report_candidate_entry(entry) for entry in candidates],
         "blocked_or_needs_review_count": len(blocked_entries),
