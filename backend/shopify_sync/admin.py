@@ -1793,6 +1793,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if not (self.is_finance_user(request) or self.is_super_admin(request)):
             self.message_user(request, "只有 Admin / Finance 可以提出异常订单审核。", level=messages.WARNING)
             return self._redirect_to_change(obj)
+        guard_message = self._single_order_settlement_guard_message(obj)
+        if guard_message:
+            self.message_user(request, guard_message, level=messages.WARNING)
+            return self._redirect_to_change(obj)
         if obj.settlement_batch_id or obj.settlement_status in FINANCE_LOCKED_STATUSES:
             self.message_user(request, "订单已进入待支付/已提交支付/已支付/结算批次阶段，不能退回异常审核。", level=messages.WARNING)
             return self._redirect_to_change(obj)
@@ -1844,6 +1848,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return HttpResponseRedirect(reverse("admin:shopify_sync_shopifyorder_changelist"))
         if not self.is_shenzhen_user(request):
             self.message_user(request, "只有 Shenzhen Warehouse 可以重新提交异常审核订单。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        guard_message = self._single_order_settlement_guard_message(obj)
+        if guard_message:
+            self.message_user(request, guard_message, level=messages.WARNING)
             return self._redirect_to_change(obj)
         if obj.settlement_batch_id or obj.settlement_status in FINANCE_LOCKED_STATUSES:
             self.message_user(request, "订单已进入财务/结算阶段，不能重新提交异常审核。", level=messages.WARNING)
@@ -1897,6 +1905,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if not self.is_shenzhen_user(request):
             self.message_user(request, "只有 Shenzhen Warehouse 可以执行深圳仓审核。", level=messages.WARNING)
             return self._redirect_to_change(obj)
+        guard_message = self._single_order_settlement_guard_message(obj)
+        if guard_message:
+            self.message_user(request, guard_message, level=messages.WARNING)
+            return self._redirect_to_change(obj)
         if obj.settlement_batch_id or obj.settlement_status in FINANCE_LOCKED_STATUSES:
             self.message_user(request, "订单已进入财务/结算阶段，不能重新提交深圳仓审核。", level=messages.WARNING)
             return self._redirect_to_change(obj)
@@ -1921,6 +1933,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if not (self.is_finance_user(request) or self.is_super_admin(request)):
             self.message_user(request, "只有 Admin / Finance 可以执行最终审核。", level=messages.WARNING)
             return self._redirect_to_change(obj)
+        guard_message = self._single_order_settlement_guard_message(obj)
+        if guard_message:
+            self.message_user(request, guard_message, level=messages.WARNING)
+            return self._redirect_to_change(obj)
         if obj.settlement_status != "cost_confirmed":
             self.message_user(request, "必须先由深圳仓确认成本后，Admin / Finance 才能审核进入待结算。", level=messages.WARNING)
             return self._redirect_to_change(obj)
@@ -1941,6 +1957,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return HttpResponseRedirect(reverse("admin:shopify_sync_shopifyorder_changelist"))
         if not self.is_shenzhen_user(request):
             self.message_user(request, "只有 Shenzhen Warehouse 可以撤回深圳仓确认。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+        guard_message = self._single_order_settlement_guard_message(obj)
+        if guard_message:
+            self.message_user(request, guard_message, level=messages.WARNING)
             return self._redirect_to_change(obj)
         if obj.settlement_batch_id or obj.settlement_status in FINANCE_LOCKED_STATUSES:
             self.message_user(request, "订单已进入财务/结算阶段，不能撤回。", level=messages.WARNING)
@@ -3188,17 +3208,39 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
 
     mark_paid.short_description = "深圳仓确认收款 / 标记已支付"
 
-    def _old_settlement_batch_guard_message(self, order):
-        active_group_link = (
+    def _active_merged_group_link(self, order):
+        return (
             order.merged_settlement_group_links.select_related("group")
-            .filter(group__status__in=ShenzhenMergedSettlementGroupOrder.ACTIVE_GROUP_STATUSES)
+            .filter(
+                models.Q(group__status__in=ShenzhenMergedSettlementGroupOrder.ACTIVE_GROUP_STATUSES)
+                | (
+                    ~models.Q(group__status="cancelled")
+                    & ~models.Q(group__settlement_status__in=("paid", "cancelled"))
+                )
+            )
             .order_by("-added_at", "id")
             .first()
         )
+
+    def _active_merged_group_guard_message(self, order, action_message="请在合并组中处理结算流程。"):
+        active_group_link = self._active_merged_group_link(order)
         if active_group_link:
             group = active_group_link.group
             group_label = group.group_no or f"Group ID {group.pk}"
-            return f"订单 {self._merge_order_label(order)} 已属于合并结算组 {group_label}，请从合并组加入结算批次。"
+            return f"订单 {self._merge_order_label(order)} 已属于合并结算组 {group_label}，{action_message}"
+
+        return None
+
+    def _single_order_settlement_guard_message(self, order):
+        return self._active_merged_group_guard_message(order)
+
+    def _old_settlement_batch_guard_message(self, order):
+        active_group_message = self._active_merged_group_guard_message(
+            order,
+            action_message="请从合并组加入结算批次。",
+        )
+        if active_group_message:
+            return active_group_message
 
         active_coverage = (
             SettlementBatchEntryCoveredOrder.objects.select_related(
