@@ -76,6 +76,19 @@ function Invoke-GitLines {
     return @($output | ForEach-Object { $_.ToString() })
 }
 
+function Get-SafeCount {
+    param(
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value) {
+        return 0
+    }
+
+    return @($Value).Count
+}
+
 function Save-Lines {
     param(
         [Parameter(Mandatory = $true)]
@@ -85,12 +98,12 @@ function Save-Lines {
         [object[]]$Lines
     )
 
-    if ($null -eq $Lines -or $Lines.Count -eq 0) {
+    if ((Get-SafeCount -Value $Lines) -eq 0) {
         Set-Content -LiteralPath $Path -Value "" -Encoding UTF8
         return
     }
 
-    Set-Content -LiteralPath $Path -Value $Lines -Encoding UTF8
+    Set-Content -LiteralPath $Path -Value @($Lines) -Encoding UTF8
 }
 
 function Get-StatusPaths {
@@ -130,7 +143,7 @@ function New-SafetyWarnings {
 
     $warnings = New-Object System.Collections.Generic.List[string]
 
-    if (@($StagedFiles).Count -gt 0) {
+    if ((Get-SafeCount -Value $StagedFiles) -gt 0) {
         $warnings.Add("WARNING: staged area is not empty. Review staged_files_after.txt before continuing.")
     }
 
@@ -167,7 +180,7 @@ function New-SafetyWarnings {
         }
     }
 
-    if ($warnings.Count -eq 0) {
+    if ((Get-SafeCount -Value $warnings) -eq 0) {
         $warnings.Add("No safety warnings detected.")
     }
 
@@ -191,6 +204,165 @@ function Format-CommandLine {
             $_
         }
     }) -join " ")
+}
+
+function ConvertTo-ProcessArgument {
+    param(
+        [AllowNull()]
+        [string]$Argument
+    )
+
+    if ($null -eq $Argument -or $Argument.Length -eq 0) {
+        return '""'
+    }
+
+    if ($Argument -notmatch '[\s"&|<>()^]') {
+        return $Argument
+    }
+
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $backslashes = 0
+
+    foreach ($char in $Argument.ToCharArray()) {
+        if ($char -eq [char]92) {
+            $backslashes += 1
+            continue
+        }
+
+        if ($char -eq [char]34) {
+            if ($backslashes -gt 0) {
+                [void]$builder.Append(('\' * ($backslashes * 2)))
+                $backslashes = 0
+            }
+
+            [void]$builder.Append('\"')
+            continue
+        }
+
+        if ($backslashes -gt 0) {
+            [void]$builder.Append(('\' * $backslashes))
+            $backslashes = 0
+        }
+
+        [void]$builder.Append($char)
+    }
+
+    if ($backslashes -gt 0) {
+        [void]$builder.Append(('\' * ($backslashes * 2)))
+    }
+
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Join-ProcessArguments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    return (($Arguments | ForEach-Object { ConvertTo-ProcessArgument -Argument $_ }) -join " ")
+}
+
+function Invoke-CodexProcess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments,
+
+        [Parameter(Mandatory = $true)]
+        [string]$InputText,
+
+        [Parameter(Mandatory = $true)]
+        [string]$OutputPath
+    )
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $extension = [System.IO.Path]::GetExtension($Executable)
+
+    if ($extension -in @(".bat", ".cmd")) {
+        if ([string]::IsNullOrWhiteSpace($env:ComSpec)) {
+            $startInfo.FileName = "cmd.exe"
+        } else {
+            $startInfo.FileName = $env:ComSpec
+        }
+
+        $startInfo.Arguments = "/d /c " + (Join-ProcessArguments -Arguments (@($Executable) + $Arguments))
+    } else {
+        $startInfo.FileName = $Executable
+        $startInfo.Arguments = Join-ProcessArguments -Arguments $Arguments
+    }
+
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $startInfo.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $startInfo.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    $inputError = $null
+
+    try {
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+
+        try {
+            $inputBytes = [System.Text.Encoding]::UTF8.GetBytes($InputText)
+            $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
+            $process.StandardInput.BaseStream.Flush()
+        } catch {
+            $inputError = $_.Exception
+        } finally {
+            $process.StandardInput.Close()
+        }
+
+        $process.WaitForExit()
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
+
+        $outputParts = New-Object System.Collections.Generic.List[string]
+        if (-not [string]::IsNullOrEmpty($stdout)) {
+            $outputParts.Add($stdout.TrimEnd())
+        }
+
+        if (-not [string]::IsNullOrEmpty($stderr)) {
+            $outputParts.Add($stderr.TrimEnd())
+        }
+
+        if ($null -ne $inputError) {
+            $outputParts.Add("ERROR: failed to write prompt to codex stdin: $($inputError.Message)")
+        }
+
+        $combinedOutput = ($outputParts.ToArray() -join [Environment]::NewLine)
+        if ($combinedOutput.Length -gt 0) {
+            $combinedOutput += [Environment]::NewLine
+        }
+
+        [System.IO.File]::WriteAllText($OutputPath, $combinedOutput, [System.Text.Encoding]::UTF8)
+
+        if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+            Write-Host $stdout.TrimEnd()
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            Write-Host $stderr.TrimEnd()
+        }
+
+        if ($null -ne $inputError -and $process.ExitCode -eq 0) {
+            return 1
+        }
+
+        return $process.ExitCode
+    } finally {
+        $process.Dispose()
+    }
 }
 
 $resolvedProjectRoot = Resolve-RequiredPath -Path $ProjectRoot -Name "ProjectRoot"
@@ -265,7 +437,7 @@ $footer
 
 Set-Content -LiteralPath $taskUsedPath -Value $prompt -Encoding UTF8
 
-$gitBefore = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--branch")
+$gitBefore = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--branch"))
 Save-Lines -Path $gitBeforePath -Lines $gitBefore
 
 Write-Host "Git status before:"
@@ -291,8 +463,19 @@ Write-Host "Run directory: $outputDir"
 Write-Host "Running:"
 Write-Host (Format-CommandLine -Executable $resolvedCodexCmd -Arguments $actualCodexArgs)
 
-$prompt | & $resolvedCodexCmd @actualCodexArgs 2>&1 | Tee-Object -FilePath $fullOutputPath
-$codexExitCode = $LASTEXITCODE
+try {
+    $codexExitCode = Invoke-CodexProcess -Executable $resolvedCodexCmd -Arguments $actualCodexArgs -InputText $prompt -OutputPath $fullOutputPath
+} catch {
+    $codexExitCode = 1
+    $failureMessage = "ERROR: failed to invoke codex exec: $($_.Exception.Message)"
+    if (Test-Path -LiteralPath $fullOutputPath) {
+        Add-Content -LiteralPath $fullOutputPath -Value $failureMessage -Encoding UTF8
+    } else {
+        Set-Content -LiteralPath $fullOutputPath -Value $failureMessage -Encoding UTF8
+    }
+
+    Write-Warning $failureMessage
+}
 
 if (-not (Test-Path -LiteralPath $fullOutputPath)) {
     Set-Content -LiteralPath $fullOutputPath -Value "" -Encoding UTF8
@@ -302,11 +485,11 @@ if (-not (Test-Path -LiteralPath $lastMessagePath)) {
     Set-Content -LiteralPath $lastMessagePath -Value "codex exec did not create last_message.txt" -Encoding UTF8
 }
 
-$gitAfter = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--branch")
-$changedStatus = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--untracked-files=all")
-$stagedFiles = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("diff", "--cached", "--name-only")
-$changedFiles = Get-StatusPaths -StatusLines $changedStatus
-$warnings = New-SafetyWarnings -ChangedFiles $changedFiles -StagedFiles $stagedFiles
+$gitAfter = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--branch"))
+$changedStatus = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--untracked-files=all"))
+$stagedFiles = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("diff", "--cached", "--name-only"))
+$changedFiles = @(Get-StatusPaths -StatusLines $changedStatus)
+$warnings = @(New-SafetyWarnings -ChangedFiles $changedFiles -StagedFiles $stagedFiles)
 
 Save-Lines -Path $gitAfterPath -Lines $gitAfter
 Save-Lines -Path $changedFilesPath -Lines $changedStatus
