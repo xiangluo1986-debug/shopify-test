@@ -78,6 +78,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_desi
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_design_dry_run_task import (
     run_shopify_review_request_trustpilot_tag_write_design_dry_run_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_final_preflight_task import (
+    run_shopify_review_request_trustpilot_tag_write_final_preflight_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_locked_runner_task import (
     run_shopify_review_request_trustpilot_tag_write_locked_runner_task,
 )
@@ -309,6 +312,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_tag_write_design_dry_run": (
         run_shopify_review_request_trustpilot_tag_write_design_dry_run_task
+    ),
+    "shopify_review_request_trustpilot_tag_write_final_preflight": (
+        run_shopify_review_request_trustpilot_tag_write_final_preflight_task
     ),
     "shopify_review_request_trustpilot_tag_write_locked_runner": (
         run_shopify_review_request_trustpilot_tag_write_locked_runner_task
@@ -619,6 +625,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_trustpilot_tag_write_design_dry_run.json",
+    },
+    "shopify_review_request_trustpilot_tag_write_final_preflight": {
+        "description": "Generate the final no-write preflight package before a future one-tag Trustpilot Shopify tag write.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; future Shopify tagsAdd only behind explicit gates",
+        "review_file_path": "logs/shopify_review_request_trustpilot_tag_write_final_preflight.json",
     },
     "shopify_review_request_trustpilot_tag_write_locked_runner": {
         "description": "Validate locked gates for a future one-tag Trustpilot Shopify tag write without writing.",
