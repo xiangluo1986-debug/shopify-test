@@ -84,6 +84,9 @@ from .translation_workflow_status import (
     DEFAULT_SELECTED_PRODUCT_ID as TRANSLATION_WORKFLOW_DEFAULT_PRODUCT_ID,
     load_translation_workflow_status,
 )
+from .translation_console_locked_package_report import (
+    generate_translation_console_locked_package_dry_run_report,
+)
 
 
 SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_states"
@@ -571,7 +574,9 @@ def translation_console(request):
     is_locked_package_preview_post = post_action in {
         "generate_locked_package_dry_run_placeholder",
         "generate_locked_package_dry_run_preview",
+        "generate_locked_package_dry_run_report",
     }
+    is_locked_package_report_post = post_action == "generate_locked_package_dry_run_report"
     is_status_only_safe_action_post = is_refresh_status_post
     is_draft_post = post_action in {
         "generate_missing_translation_drafts",
@@ -672,6 +677,7 @@ def translation_console(request):
     manual_action_package_error_message = ""
     safe_action_result = None
     apply_plan_preview_result = None
+    locked_package_report_result = None
     workflow_product_id = (
         selected_product_gid
         if selected_product_gid.startswith("gid://shopify/Product/")
@@ -737,15 +743,37 @@ def translation_console(request):
                         draft_result
                     )
                     if is_locked_package_preview_post:
+                        if is_locked_package_report_post:
+                            if apply_plan_preview_result.get("apply_plan_candidate_count"):
+                                locked_package_report_result = (
+                                    generate_translation_console_locked_package_dry_run_report(
+                                        apply_plan_preview_result
+                                    )
+                                )
+                            else:
+                                locked_package_report_result = (
+                                    _empty_locked_package_report_result(
+                                        "no_apply_plan_preview_candidates"
+                                    )
+                                )
                         safe_action_result = _translation_console_safe_action_result(
                             action=post_action,
-                            action_status=apply_plan_preview_result.get(
-                                "preview_status", "apply_plan_preview_ready"
+                            action_status=(
+                                locked_package_report_result.get("report_status")
+                                if locked_package_report_result
+                                else apply_plan_preview_result.get(
+                                    "preview_status", "apply_plan_preview_ready"
+                                )
                             ),
                             message=(
-                                "Locked package / apply-plan preview generated in memory only."
-                                if not apply_plan_preview_result.get("blocking_conditions")
-                                else "Locked package / apply-plan preview stayed no-write but needs review."
+                                "Locked package dry-run report generated only. No Shopify write performed."
+                                if locked_package_report_result
+                                and locked_package_report_result.get("json_report_path")
+                                else (
+                                    "Locked package / apply-plan preview generated in memory only."
+                                    if not apply_plan_preview_result.get("blocking_conditions")
+                                    else "Locked package / apply-plan preview stayed no-write but needs review."
+                                )
                             ),
                             summary={
                                 "apply_plan_candidate_count": apply_plan_preview_result.get(
@@ -754,8 +782,29 @@ def translation_console(request):
                                 "blocked_or_needs_review_count": apply_plan_preview_result.get(
                                     "blocked_or_needs_review_count", 0
                                 ),
-                                "blocking_conditions": apply_plan_preview_result.get(
-                                    "blocking_conditions", []
+                                "blocking_conditions": (
+                                    locked_package_report_result.get(
+                                        "blocking_conditions", []
+                                    )
+                                    if locked_package_report_result
+                                    else apply_plan_preview_result.get(
+                                        "blocking_conditions", []
+                                    )
+                                ),
+                                "report_status": (
+                                    locked_package_report_result.get("report_status")
+                                    if locked_package_report_result
+                                    else ""
+                                ),
+                                "json_report_path": (
+                                    locked_package_report_result.get("json_report_path")
+                                    if locked_package_report_result
+                                    else ""
+                                ),
+                                "html_report_path": (
+                                    locked_package_report_result.get("html_report_path")
+                                    if locked_package_report_result
+                                    else ""
                                 ),
                                 "preview_only": True,
                             },
@@ -886,13 +935,28 @@ def translation_console(request):
                         apply_plan_preview_result = _empty_apply_plan_preview_result(
                             "generate_draft_dry_run_first"
                         )
+                        if is_locked_package_report_post:
+                            locked_package_report_result = (
+                                _empty_locked_package_report_result(
+                                    "generate_draft_dry_run_first"
+                                )
+                            )
                         safe_action_result = _translation_console_safe_action_result(
                             action=post_action,
-                            action_status=apply_plan_preview_result["preview_status"],
+                            action_status=(
+                                locked_package_report_result.get("report_status")
+                                if locked_package_report_result
+                                else apply_plan_preview_result["preview_status"]
+                            ),
                             message="Generate draft dry-run first.",
                             summary={
                                 "blocking_conditions": apply_plan_preview_result.get(
                                     "blocking_conditions", []
+                                ),
+                                "report_status": (
+                                    locked_package_report_result.get("report_status")
+                                    if locked_package_report_result
+                                    else ""
                                 ),
                                 "preview_only": True,
                             },
@@ -983,14 +1047,27 @@ def translation_console(request):
         apply_plan_preview_result = _empty_apply_plan_preview_result(
             "generate_draft_dry_run_first"
         )
+        if is_locked_package_report_post:
+            locked_package_report_result = _empty_locked_package_report_result(
+                "generate_draft_dry_run_first"
+            )
         safe_action_result = _translation_console_safe_action_result(
             action=post_action,
-            action_status=apply_plan_preview_result["preview_status"],
+            action_status=(
+                locked_package_report_result.get("report_status")
+                if locked_package_report_result
+                else apply_plan_preview_result["preview_status"]
+            ),
             message="Generate draft dry-run first.",
             summary={
                 "workflow_status": workflow_status.get("workflow_status"),
                 "blocking_conditions": apply_plan_preview_result.get(
                     "blocking_conditions", []
+                ),
+                "report_status": (
+                    locked_package_report_result.get("report_status")
+                    if locked_package_report_result
+                    else ""
                 ),
                 "preview_only": True,
             },
@@ -1024,6 +1101,7 @@ def translation_console(request):
             "workflow_status": workflow_status,
             "safe_action_result": safe_action_result,
             "apply_plan_preview_result": apply_plan_preview_result,
+            "locked_package_report_result": locked_package_report_result,
             "error_message": error_message,
             "draft_result": draft_result,
             "draft_error_message": draft_error_message,
@@ -1313,6 +1391,28 @@ def _empty_apply_plan_preview_result(reason: str):
     }
 
 
+def _empty_locked_package_report_result(reason: str):
+    return {
+        "report_status": "translation_console_locked_package_dry_run_blocked",
+        "json_report_path": "",
+        "html_report_path": "",
+        "entry_count": 0,
+        "blocked_or_needs_review_count": 0,
+        "blocking_conditions": [reason],
+        "dry_run_only": True,
+        "preview_only": True,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "rollback_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "gmail_api_call_performed": False,
+        "email_sent": False,
+    }
+
+
 def _normalize_apply_plan_preview_entry(entry: dict):
     seo_notes = _list_from_value(entry.get("seo_notes"))
     quality_notes = _list_from_value(entry.get("quality_notes"))
@@ -1344,6 +1444,8 @@ def _normalize_apply_plan_preview_entry(entry: dict):
         "field": entry.get("field", ""),
         "resource_key": entry.get("source_key") or entry.get("field", ""),
         "proposed_translation_preview": _preview_text(proposed_value),
+        "planned_value": proposed_value,
+        "source_preview": _preview_text(entry.get("source_value")),
         "chars": len(proposed_value),
         "seo_status": entry.get("seo_validation_status", ""),
         "planned_value_source": "draft_result" if proposed_value else "",

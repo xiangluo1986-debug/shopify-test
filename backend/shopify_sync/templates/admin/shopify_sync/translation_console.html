@@ -146,6 +146,14 @@
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Generate locked package dry-run preview</button>
       </form>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="generate_locked_package_dry_run_report">
+        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+        <input type="hidden" name="locale" value="{{ selected_locale }}">
+        <button type="submit" class="button">Generate locked package dry-run report</button>
+      </form>
     </div>
     <table>
       <tbody>
@@ -187,6 +195,32 @@
           </tbody>
         </table>
       {% endif %}
+    </div>
+  {% endif %}
+
+  {% if locked_package_report_result %}
+    <div class="module" style="padding: 12px; margin-bottom: 16px;">
+      <h2>Locked package dry-run report result</h2>
+      <p><strong>Report generated only. No Shopify write performed.</strong></p>
+      <table>
+        <tbody>
+          <tr><th>report_status</th><td>{{ locked_package_report_result.report_status }}</td></tr>
+          <tr><th>entry_count</th><td>{{ locked_package_report_result.entry_count }}</td></tr>
+          <tr><th>blocked_or_needs_review_count</th><td>{{ locked_package_report_result.blocked_or_needs_review_count }}</td></tr>
+          <tr><th>JSON report path</th><td>{{ locked_package_report_result.json_report_path }}</td></tr>
+          <tr><th>HTML report path</th><td>{{ locked_package_report_result.html_report_path }}</td></tr>
+          <tr><th>blocking_conditions</th><td>{{ locked_package_report_result.blocking_conditions|join:", " }}</td></tr>
+          <tr><th>shopify_api_call_performed</th><td>{{ locked_package_report_result.shopify_api_call_performed }}</td></tr>
+          <tr><th>shopify_write_performed</th><td>{{ locked_package_report_result.shopify_write_performed }}</td></tr>
+          <tr><th>mutation_performed</th><td>{{ locked_package_report_result.mutation_performed }}</td></tr>
+          <tr><th>translations_register_called</th><td>{{ locked_package_report_result.translations_register_called }}</td></tr>
+          <tr><th>rollback_performed</th><td>{{ locked_package_report_result.rollback_performed }}</td></tr>
+          <tr><th>publish_performed</th><td>{{ locked_package_report_result.publish_performed }}</td></tr>
+          <tr><th>apply_performed</th><td>{{ locked_package_report_result.apply_performed }}</td></tr>
+          <tr><th>gmail_api_call_performed</th><td>{{ locked_package_report_result.gmail_api_call_performed }}</td></tr>
+          <tr><th>email_sent</th><td>{{ locked_package_report_result.email_sent }}</td></tr>
+        </tbody>
+      </table>
     </div>
   {% endif %}
 
