@@ -1,0 +1,324 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$TaskFile,
+
+    [string]$ProjectRoot = (Get-Location).Path,
+
+    [string]$Sandbox = "workspace-write",
+
+    [string]$CodexCmd = "C:\Users\xiang\AppData\Roaming\npm\codex.cmd",
+
+    [string]$Model = "",
+
+    [switch]$DryRun
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+function Resolve-RequiredPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "$Name not found: $Path"
+    }
+
+    return (Resolve-Path -LiteralPath $Path).ProviderPath
+}
+
+function Resolve-TaskPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BasePath
+    )
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return Resolve-RequiredPath -Path $Path -Name "TaskFile"
+    }
+
+    $projectRelative = Join-Path -Path $BasePath -ChildPath $Path
+    if (Test-Path -LiteralPath $projectRelative) {
+        return Resolve-RequiredPath -Path $projectRelative -Name "TaskFile"
+    }
+
+    return Resolve-RequiredPath -Path $Path -Name "TaskFile"
+}
+
+function Invoke-GitLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $output = & git -C $Root @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $joinedOutput = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        throw "git $($Arguments -join ' ') failed:$([Environment]::NewLine)$joinedOutput"
+    }
+
+    if ($null -eq $output) {
+        return @()
+    }
+
+    return @($output | ForEach-Object { $_.ToString() })
+}
+
+function Save-Lines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [AllowNull()]
+        [object[]]$Lines
+    )
+
+    if ($null -eq $Lines -or $Lines.Count -eq 0) {
+        Set-Content -LiteralPath $Path -Value "" -Encoding UTF8
+        return
+    }
+
+    Set-Content -LiteralPath $Path -Value $Lines -Encoding UTF8
+}
+
+function Get-StatusPaths {
+    param(
+        [AllowNull()]
+        [string[]]$StatusLines
+    )
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @($StatusLines)) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -lt 4) {
+            continue
+        }
+
+        $path = $line.Substring(3).Trim()
+        if ($path -like "* -> *") {
+            $path = ($path -split " -> ")[-1].Trim()
+        }
+
+        $path = $path.Trim('"')
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            $paths.Add($path)
+        }
+    }
+
+    return @($paths)
+}
+
+function New-SafetyWarnings {
+    param(
+        [AllowNull()]
+        [string[]]$ChangedFiles,
+
+        [AllowNull()]
+        [string[]]$StagedFiles
+    )
+
+    $warnings = New-Object System.Collections.Generic.List[string]
+
+    if (@($StagedFiles).Count -gt 0) {
+        $warnings.Add("WARNING: staged area is not empty. Review staged_files_after.txt before continuing.")
+    }
+
+    foreach ($path in @($ChangedFiles)) {
+        if ([string]::IsNullOrWhiteSpace($path)) {
+            continue
+        }
+
+        $normalized = ($path -replace "\\", "/").Trim()
+        $leaf = Split-Path -Path $normalized -Leaf
+
+        if ($normalized -eq "logs" -or $normalized -eq "logs/" -or ($normalized -like "logs/*" -and $normalized -notlike "logs/codex_runs/*")) {
+            $warnings.Add("WARNING: changed path is under logs/ outside logs/codex_runs/: $normalized")
+        }
+
+        if ($leaf -eq ".env" -or $leaf -like ".env.*") {
+            $warnings.Add("WARNING: changed path looks like an environment file: $normalized")
+        }
+
+        if ($normalized -eq ".codex/config.toml") {
+            $warnings.Add("WARNING: changed path is forbidden config: $normalized")
+        }
+
+        if ($normalized -like "backend/logs/*") {
+            $warnings.Add("WARNING: changed path is under backend/logs/: $normalized")
+        }
+
+        if ($normalized -like "backend/reviews/*") {
+            $warnings.Add("WARNING: changed path is under backend/reviews/: $normalized")
+        }
+
+        if ($normalized -match "(?i)(secret|token|credential|key)") {
+            $warnings.Add("WARNING: changed path contains a secret-risk word: $normalized")
+        }
+    }
+
+    if ($warnings.Count -eq 0) {
+        $warnings.Add("No safety warnings detected.")
+    }
+
+    return @($warnings)
+}
+
+function Format-CommandLine {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $parts = @($Executable) + $Arguments
+    return (($parts | ForEach-Object {
+        if ($_ -match '\s') {
+            '"' + ($_ -replace '"', '\"') + '"'
+        } else {
+            $_
+        }
+    }) -join " ")
+}
+
+$resolvedProjectRoot = Resolve-RequiredPath -Path $ProjectRoot -Name "ProjectRoot"
+$resolvedTaskFile = Resolve-TaskPath -Path $TaskFile -BasePath $resolvedProjectRoot
+$resolvedCodexCmd = Resolve-RequiredPath -Path $CodexCmd -Name "CodexCmd"
+$safetyRulesPath = Resolve-RequiredPath -Path (Join-Path -Path $resolvedProjectRoot -ChildPath "ai_project_manager\SAFETY_RULES.md") -Name "SAFETY_RULES.md"
+
+$footer = @"
+Before your final response, inspect the current git status and any relevant validation output.
+Your final response must list changed files, validation commands and results, staged files status, and confirmation that no commit or push was run.
+Do not stage, commit, push, restore, reset, or delete unrelated files.
+"@
+
+$codexArgs = @(
+    "exec",
+    "--cd",
+    $resolvedProjectRoot,
+    "--sandbox",
+    $Sandbox,
+    "-o",
+    "<run-dir>\last_message.txt"
+)
+
+if (-not [string]::IsNullOrWhiteSpace($Model)) {
+    $codexArgs += @("--model", $Model)
+}
+
+if ($DryRun) {
+    Write-Host "Dry run only. Validated inputs and did not create a run directory."
+    Write-Host "ProjectRoot: $resolvedProjectRoot"
+    Write-Host "TaskFile: $resolvedTaskFile"
+    Write-Host "SafetyRules: $safetyRulesPath"
+    Write-Host "Would run:"
+    Write-Host (Format-CommandLine -Executable $resolvedCodexCmd -Arguments $codexArgs)
+    Write-Host "Prompt would be provided on stdin from SAFETY_RULES.md, the task file, and the final-response footer."
+    return
+}
+
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$runRoot = Join-Path -Path $resolvedProjectRoot -ChildPath "logs\codex_runs"
+$outputDir = Join-Path -Path $runRoot -ChildPath $timestamp
+$suffix = 1
+while (Test-Path -LiteralPath $outputDir) {
+    $outputDir = Join-Path -Path $runRoot -ChildPath ("{0}_{1}" -f $timestamp, $suffix)
+    $suffix += 1
+}
+
+New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+
+$taskUsedPath = Join-Path -Path $outputDir -ChildPath "task_used.md"
+$fullOutputPath = Join-Path -Path $outputDir -ChildPath "full_output.txt"
+$lastMessagePath = Join-Path -Path $outputDir -ChildPath "last_message.txt"
+$gitBeforePath = Join-Path -Path $outputDir -ChildPath "git_status_before.txt"
+$gitAfterPath = Join-Path -Path $outputDir -ChildPath "git_status_after.txt"
+$changedFilesPath = Join-Path -Path $outputDir -ChildPath "changed_files_after.txt"
+$stagedFilesPath = Join-Path -Path $outputDir -ChildPath "staged_files_after.txt"
+$warningsPath = Join-Path -Path $outputDir -ChildPath "safety_warnings.txt"
+
+$safetyText = Get-Content -LiteralPath $safetyRulesPath -Raw
+$taskText = Get-Content -LiteralPath $resolvedTaskFile -Raw
+$prompt = @"
+$safetyText
+
+# Task File
+
+$taskText
+
+# Required Final Response
+
+$footer
+"@
+
+Set-Content -LiteralPath $taskUsedPath -Value $prompt -Encoding UTF8
+
+$gitBefore = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--branch")
+Save-Lines -Path $gitBeforePath -Lines $gitBefore
+
+Write-Host "Git status before:"
+foreach ($line in $gitBefore) {
+    Write-Host $line
+}
+
+$actualCodexArgs = @(
+    "exec",
+    "--cd",
+    $resolvedProjectRoot,
+    "--sandbox",
+    $Sandbox,
+    "-o",
+    $lastMessagePath
+)
+
+if (-not [string]::IsNullOrWhiteSpace($Model)) {
+    $actualCodexArgs += @("--model", $Model)
+}
+
+Write-Host "Run directory: $outputDir"
+Write-Host "Running:"
+Write-Host (Format-CommandLine -Executable $resolvedCodexCmd -Arguments $actualCodexArgs)
+
+$prompt | & $resolvedCodexCmd @actualCodexArgs 2>&1 | Tee-Object -FilePath $fullOutputPath
+$codexExitCode = $LASTEXITCODE
+
+if (-not (Test-Path -LiteralPath $fullOutputPath)) {
+    Set-Content -LiteralPath $fullOutputPath -Value "" -Encoding UTF8
+}
+
+if (-not (Test-Path -LiteralPath $lastMessagePath)) {
+    Set-Content -LiteralPath $lastMessagePath -Value "codex exec did not create last_message.txt" -Encoding UTF8
+}
+
+$gitAfter = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--branch")
+$changedStatus = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--untracked-files=all")
+$stagedFiles = Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("diff", "--cached", "--name-only")
+$changedFiles = Get-StatusPaths -StatusLines $changedStatus
+$warnings = New-SafetyWarnings -ChangedFiles $changedFiles -StagedFiles $stagedFiles
+
+Save-Lines -Path $gitAfterPath -Lines $gitAfter
+Save-Lines -Path $changedFilesPath -Lines $changedStatus
+Save-Lines -Path $stagedFilesPath -Lines $stagedFiles
+Save-Lines -Path $warningsPath -Lines $warnings
+
+Write-Host "Git status after written to: $gitAfterPath"
+Write-Host "Safety warnings written to: $warningsPath"
+
+if ($codexExitCode -ne 0) {
+    Write-Warning "codex exec exited with code $codexExitCode. Review $fullOutputPath and $lastMessagePath."
+    exit $codexExitCode
+}
+
+Write-Host "codex exec completed. Review $lastMessagePath and $fullOutputPath."
