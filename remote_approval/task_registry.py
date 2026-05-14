@@ -586,8 +586,8 @@ TASK_METADATA: Dict[str, dict] = {
     },
     "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute": {
         "description": "Dry-run or execute a locked exactly-one Trustpilot Gmail draft create for selected order #22620.",
-        "allowed_modes": ["dry-run"],
-        "write_risk": "Gmail drafts.create only when DRY_RUN=0 and every exact Phase 4.5 ACK gate is valid",
+        "allowed_modes": ["dry-run", "real-run"],
+        "write_risk": "Gmail drafts.create only in real-run when DRY_RUN=0 and every exact Phase 4.6A ACK gate is valid",
         "review_file_path": "logs/shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute.json",
     },
     "shopify_review_request_returned_package_guard": {

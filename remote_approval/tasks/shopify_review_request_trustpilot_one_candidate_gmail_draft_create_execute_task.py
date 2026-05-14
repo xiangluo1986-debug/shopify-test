@@ -33,6 +33,7 @@ ORDER_ENV = "REVIEW_REQUEST_REAL_GMAIL_DRAFT_CREATE_ORDER_NAME"
 MAX_ENV = "REVIEW_REQUEST_REAL_GMAIL_DRAFT_CREATE_MAX"
 SOURCE_REPORT_ENV = "REVIEW_REQUEST_REAL_GMAIL_DRAFT_CREATE_SOURCE_REPORT"
 DRY_RUN_ENV = "DRY_RUN"
+VALID_MODES = {"dry-run", "real-run"}
 
 GMAIL_SEND_FROM = "info@kidstoylover.com"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
@@ -86,15 +87,13 @@ SOURCE_UNSAFE_FLAG_KEYS = [
 
 
 def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute_task(mode: str) -> dict:
-    if mode != "dry-run":
-        raise ValueError(f"{TASK_NAME} only supports dry-run mode.")
-
     started = time.time()
+    normalized_mode = str(mode or "").strip()
     source_preflight, source_error, source_text = _read_source_preflight()
     source_privacy_scan = _privacy_scan_text(source_text)
     source_summary = _source_summary(source_preflight, source_error)
     source_safety = _source_safety_summary(source_preflight)
-    gates = _gate_status()
+    gates = _gate_status(normalized_mode)
     blocking_conditions = _blocking_conditions(
         source_preflight=source_preflight,
         source_error=source_error,
@@ -177,17 +176,22 @@ def _source_safety_summary(source_preflight: dict) -> dict:
     }
 
 
-def _gate_status() -> dict:
+def _gate_status(mode: str) -> dict:
+    normalized_mode = str(mode or "").strip()
     dry_run_raw = os.environ.get(DRY_RUN_ENV, "").strip()
     approval_raw = os.environ.get(APPROVAL_ENV, "").strip()
     requested_order_name = os.environ.get(ORDER_ENV, "").strip()
     requested_create_max = os.environ.get(MAX_ENV, "").strip()
     requested_source_report = os.environ.get(SOURCE_REPORT_ENV, "").strip()
-    dry_run = dry_run_raw != "0"
+    real_run_requested = normalized_mode == "real-run"
     return {
+        "cli_mode": _safe_text(normalized_mode),
+        "mode_valid": normalized_mode in VALID_MODES,
         "dry_run_raw": dry_run_raw or "1",
-        "dry_run": dry_run,
-        "real_run_requested": not dry_run,
+        "dry_run_env_present": bool(dry_run_raw),
+        "dry_run_env_is_zero": dry_run_raw == "0",
+        "dry_run": normalized_mode != "real-run",
+        "real_run_requested": real_run_requested,
         "approval_present": bool(approval_raw),
         "approval_valid": approval_raw == APPROVAL_VALUE,
         "requested_order_name": _safe_text(requested_order_name),
@@ -201,7 +205,8 @@ def _gate_status() -> dict:
             and requested_order_name == EXPECTED_ORDER_NAME
             and requested_create_max == EXPECTED_CREATE_MAX
             and requested_source_report == SOURCE_PREFLIGHT_REPORT_ENV_VALUE
-            and not dry_run
+            and dry_run_raw == "0"
+            and real_run_requested
         ),
         "required_ack_env_names": [APPROVAL_ENV, ORDER_ENV, MAX_ENV, SOURCE_REPORT_ENV, DRY_RUN_ENV],
         "expected_order_name": EXPECTED_ORDER_NAME,
@@ -218,6 +223,8 @@ def _blocking_conditions(
     source_safety: dict,
     gates: dict,
 ) -> list[dict]:
+    if not gates["mode_valid"]:
+        return [{"status": "blocked_invalid_mode", "detail": "mode must be dry-run or real-run."}]
     if source_error:
         return [{"status": "blocked_missing_or_invalid_source_preflight", "detail": _sanitize_text(source_error)}]
 
@@ -294,6 +301,20 @@ def _real_run_gate_conditions(gates: dict) -> list[dict]:
                 "detail": f"{APPROVAL_ENV} did not match the required value.",
             }
         )
+    if not gates["dry_run_env_present"]:
+        conditions.append(
+            {
+                "status": "blocked_real_gmail_draft_create_dry_run_not_disabled",
+                "detail": f"{DRY_RUN_ENV}=0 is required for real Gmail draft creation.",
+            }
+        )
+    elif not gates["dry_run_env_is_zero"]:
+        conditions.append(
+            {
+                "status": "blocked_real_gmail_draft_create_dry_run_not_disabled",
+                "detail": f"{DRY_RUN_ENV} must equal 0 for real Gmail draft creation.",
+            }
+        )
     if not gates["requested_order_name"]:
         conditions.append(
             {"status": "blocked_missing_real_gmail_draft_create_order_name", "detail": f"{ORDER_ENV} is missing."}
@@ -321,16 +342,19 @@ def _real_run_gate_conditions(gates: dict) -> list[dict]:
 
 
 def _gmail_draft_create_result(source_preflight: dict, gates: dict, blocking_conditions: list[dict]) -> dict:
-    result = _base_create_result()
+    result = _base_create_result(gates["cli_mode"] or "dry-run")
     if blocking_conditions:
         result["one_candidate_gmail_draft_create_execute_status"] = blocking_conditions[0]["status"]
         result["real_gmail_draft_create_blocked_reason"] = blocking_conditions[0]["status"]
-        result["mode"] = "real-run" if gates["real_run_requested"] else "dry-run"
         return result
     if gates["dry_run"]:
         return result
 
     result["mode"] = "real-run"
+    if not gates["all_real_run_ack_gates_valid"]:
+        result["one_candidate_gmail_draft_create_execute_status"] = "blocked_real_gmail_draft_create_ack_incomplete"
+        result["real_gmail_draft_create_blocked_reason"] = result["one_candidate_gmail_draft_create_execute_status"]
+        return result
     result["real_gmail_draft_create_allowed"] = True
     lookup = _protected_runtime_customer_lookup(source_preflight)
     _apply_customer_lookup_report(result, lookup)
@@ -390,11 +414,11 @@ def _gmail_draft_create_result(source_preflight: dict, gates: dict, blocking_con
     return result
 
 
-def _base_create_result() -> dict:
+def _base_create_result(mode: str = "dry-run") -> dict:
     safety = _safety_summary()
     return {
         "one_candidate_gmail_draft_create_execute_status": DRY_RUN_STATUS,
-        "mode": "dry-run",
+        "mode": _safe_text(mode) or "dry-run",
         "dry_run": True,
         "real_gmail_draft_create_allowed": False,
         "real_gmail_draft_create_executed": False,
@@ -739,6 +763,7 @@ def _build_payload(
         "max_real_gmail_drafts_allowed": 1,
         "gmail_draft_id_partial": create_result["gmail_draft_id_partial"],
         "gmail_draft_verified": create_result["gmail_draft_verified"],
+        "gmail_oauth_env_read_attempted": create_result["gmail_oauth_env_read_attempted"],
         "gmail_oauth_present": create_result["gmail_oauth_present"],
         "gmail_sender_matches_expected": create_result["gmail_sender_matches_expected"],
         "gmail_compose_scope_present": create_result["gmail_compose_scope_present"],
@@ -842,6 +867,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "real_gmail_draft_create_blocked_reason": payload["real_gmail_draft_create_blocked_reason"],
         "gmail_draft_id_partial": payload["gmail_draft_id_partial"],
         "gmail_draft_verified": payload["gmail_draft_verified"],
+        "gmail_oauth_env_read_attempted": payload["gmail_oauth_env_read_attempted"],
         "protected_raw_email_lookup_attempted": payload["protected_raw_email_lookup_attempted"],
         "raw_email_available_to_runtime": payload["raw_email_available_to_runtime"],
         "blocking_condition_count": payload["blocking_condition_count"],
