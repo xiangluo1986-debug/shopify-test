@@ -3,6 +3,8 @@ import os
 import re
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from html import escape
 from pathlib import Path
 
@@ -20,6 +22,11 @@ HTML_REPORT_PATH = LOG_DIR / "shopify_translation_translatable_resource_mapping_
 PRODUCT_GID_RE = re.compile(r"^gid://shopify/Product/\d+$")
 LOCALE_RE = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
 DOCKER_TIMEOUT_SECONDS = 300
+DIRECT_GRAPHQL_TIMEOUT_SECONDS = 30
+DIRECT_MAX_OPTIONS = 100
+DIRECT_MAX_OPTION_VALUES = 250
+DIRECT_MAX_VARIANTS = 100
+DIRECT_MAX_METAFIELDS = 100
 
 TEXT_LIKE_METAFIELD_TYPES = {
     "json",
@@ -114,8 +121,10 @@ def run_shopify_translation_translatable_resource_mapping_audit_task(mode: str) 
             "SHOPIFY_TRANSLATION_MAPPING_AUDIT_SKIP_SHOPIFY_API was set; "
             "no Shopify API request was attempted."
         )
-    else:
+    elif _use_docker_requested():
         query_result = _run_mapping_audit_in_docker(requested_scope)
+    else:
+        query_result = _run_mapping_audit_direct_host(requested_scope)
 
     payload = _build_payload(
         requested_scope=requested_scope,
@@ -187,6 +196,11 @@ def _validate_requested_scope(scope: dict) -> list[str]:
 
 def _skip_shopify_api_requested() -> bool:
     value = os.environ.get("SHOPIFY_TRANSLATION_MAPPING_AUDIT_SKIP_SHOPIFY_API", "")
+    return value.strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _use_docker_requested() -> bool:
+    value = os.environ.get("SHOPIFY_TRANSLATION_MAPPING_AUDIT_USE_DOCKER", "")
     return value.strip().lower() in {"1", "true", "yes", "y"}
 
 
@@ -269,6 +283,656 @@ def _run_mapping_audit_in_docker(scope: dict) -> dict:
     }
 
 
+def _run_mapping_audit_direct_host(scope: dict) -> dict:
+    result = {
+        **_empty_query_result(scope),
+        "audit_status": "blocked_read_only_shopify_query_failed",
+        "execution_mode": "direct_host_python",
+        "start_time": utc_now_iso(),
+    }
+    config = _direct_shopify_config()
+    result["shop_domain"] = config.get("shop_domain") or SHOP_DOMAIN
+    result["shopify_api_version"] = config.get("api_version") or SHOPIFY_API_VERSION
+
+    if config.get("missing"):
+        result.update(
+            {
+                "failure_type": "missing_shopify_readonly_credentials",
+                "error": "Missing Shopify read-only credentials in the host Python environment.",
+                "blocking_reasons": ["missing_shopify_readonly_credentials"],
+            }
+        )
+        return result
+    if config.get("invalid"):
+        result.update(
+            {
+                "failure_type": "invalid_shopify_readonly_configuration",
+                "error": "Invalid Shopify read-only host configuration.",
+                "blocking_reasons": ["invalid_shopify_readonly_configuration"],
+            }
+        )
+        return result
+
+    try:
+        product_gid = scope["product_gid"]
+        target_locale = scope["target_locale"]
+        _direct_fetch_translatable_resource(
+            result,
+            config,
+            product_gid,
+            target_locale,
+            "product_translatable_resource",
+            "PRODUCT",
+        )
+        _direct_fetch_product_structure(result, config, product_gid)
+
+        for nested_type in ["PRODUCT_OPTION", "PRODUCT_OPTION_VALUE", "METAFIELD"]:
+            _direct_fetch_nested_resources(result, config, product_gid, target_locale, nested_type)
+
+        structure = result.get("product_structure") or {}
+        for option in (structure.get("options") or [])[:DIRECT_MAX_OPTIONS]:
+            option_id = option.get("id") or ""
+            if option_id and not _resource_already_collected(result, option_id):
+                _direct_fetch_translatable_resource(
+                    result,
+                    config,
+                    option_id,
+                    target_locale,
+                    "product_option_translatable_resource_fallback",
+                    "PRODUCT_OPTION",
+                    product_gid,
+                )
+        for option_value_id in result.get("option_value_ids_from_structure", [])[
+            :DIRECT_MAX_OPTION_VALUES
+        ]:
+            if option_value_id and not _resource_already_collected(result, option_value_id):
+                _direct_fetch_translatable_resource(
+                    result,
+                    config,
+                    option_value_id,
+                    target_locale,
+                    "product_option_value_translatable_resource_fallback",
+                    "PRODUCT_OPTION_VALUE",
+                    product_gid,
+                )
+        for variant in (structure.get("variants") or [])[:DIRECT_MAX_VARIANTS]:
+            variant_id = variant.get("id") or ""
+            if variant_id:
+                _direct_fetch_translatable_resource(
+                    result,
+                    config,
+                    variant_id,
+                    target_locale,
+                    "variant_translatable_resource_probe",
+                    "PRODUCT_VARIANT",
+                    product_gid,
+                )
+        for metafield in (structure.get("metafields") or [])[:DIRECT_MAX_METAFIELDS]:
+            metafield_id = metafield.get("id") or ""
+            if metafield_id and not _resource_already_collected(result, metafield_id):
+                _direct_fetch_translatable_resource(
+                    result,
+                    config,
+                    metafield_id,
+                    target_locale,
+                    "metafield_translatable_resource_fallback",
+                    "METAFIELD",
+                    product_gid,
+                )
+
+        if not _resource_already_collected(result, product_gid):
+            result.update(
+                {
+                    "failure_type": "product_translatable_resource_not_found",
+                    "error": "Product translatableResource was not returned by Shopify.",
+                    "blocking_reasons": ["product_translatable_resource_not_found"],
+                }
+            )
+            return result
+
+        result["success"] = True
+        result["audit_status"] = "completed_read_only_mapping_audit"
+        result["blocking_reasons"] = []
+        return result
+    except Exception as exc:
+        result.update(
+            {
+                "failure_type": "direct_host_read_only_exception",
+                "error": f"{type(exc).__name__}: {_sanitize_text(str(exc))}",
+                "blocking_reasons": ["direct_host_read_only_exception"],
+            }
+        )
+        return result
+
+
+def _direct_shopify_config() -> dict:
+    raw_domain = _first_env_value(("SHOPIFY_STORE_DOMAIN", "SHOPIFY_SHOP_DOMAIN")) or SHOP_DOMAIN
+    token = _first_env_value(("SHOPIFY_ADMIN_ACCESS_TOKEN", "SHOPIFY_ACCESS_TOKEN"))
+    api_version = _first_env_value(("SHOPIFY_API_VERSION",)) or SHOPIFY_API_VERSION
+    shop_domain = _normalize_shop_domain(raw_domain)
+
+    missing = []
+    if not shop_domain:
+        missing.append("shop_domain")
+    if not token:
+        missing.append("admin_token")
+
+    invalid = []
+    if shop_domain and not re.fullmatch(r"[a-z0-9][a-z0-9.-]*[a-z0-9]", shop_domain):
+        invalid.append("shop_domain")
+    if api_version and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", api_version):
+        invalid.append("api_version")
+
+    return {
+        "shop_domain": shop_domain,
+        "api_version": api_version,
+        "access_token": token,
+        "missing": missing,
+        "invalid": invalid,
+    }
+
+
+def _first_env_value(names: tuple[str, ...]) -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
+def _normalize_shop_domain(value: str) -> str:
+    domain = str(value or "").strip()
+    domain = re.sub(r"^https?://", "", domain, flags=re.IGNORECASE)
+    domain = domain.strip().strip("/")
+    if "/" in domain:
+        domain = domain.split("/", 1)[0]
+    return domain.lower()
+
+
+def _direct_graphql_endpoint(config: dict) -> str:
+    return (
+        f"https://{config['shop_domain']}/admin/api/"
+        f"{config['api_version']}/graphql.json"
+    )
+
+
+def _direct_post_graphql(
+    result: dict,
+    config: dict,
+    label: str,
+    query: str,
+    variables: dict,
+    resource_type: str = "",
+) -> dict | None:
+    attempt = {
+        "label": label,
+        "resource_type": resource_type,
+        "variables": _variables_for_report(variables),
+        "query": _safe_query(query),
+        "success": False,
+        "error": "",
+    }
+    result["queries_attempted"].append(attempt)
+    body = json.dumps({"query": query, "variables": variables or {}}).encode("utf-8")
+    token_header = "X-Shopify-" + "Access-Token"
+    request = urllib.request.Request(
+        _direct_graphql_endpoint(config),
+        data=body,
+        headers={
+            token_header: config["access_token"],
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+        method="POST",
+    )
+    result["shopify_api_call_performed"] = True
+    result["read_only_shopify_query_performed"] = True
+    try:
+        with urllib.request.urlopen(request, timeout=DIRECT_GRAPHQL_TIMEOUT_SECONDS) as response:
+            attempt["http_status"] = response.status
+            payload = json.loads(_decode_bytes(response.read()))
+    except urllib.error.HTTPError as exc:
+        attempt["http_status"] = exc.code
+        attempt["error"] = (
+            "Shopify read-only GraphQL query failed with HTTP status "
+            f"{exc.code}."
+        )
+        _attach_graphql_error_messages(attempt, _decode_bytes(exc.read()))
+        result["query_failures"].append(dict(attempt))
+        return None
+    except urllib.error.URLError as exc:
+        attempt["error"] = "Shopify read-only GraphQL request failed."
+        attempt["exception_summary"] = _sanitize_text(str(getattr(exc, "reason", exc)))
+        result["query_failures"].append(dict(attempt))
+        return None
+    except json.JSONDecodeError:
+        attempt["error"] = "Shopify read-only GraphQL response was not JSON."
+        result["query_failures"].append(dict(attempt))
+        return None
+
+    if payload.get("errors"):
+        attempt["error"] = "Shopify read-only GraphQL query returned errors."
+        attempt["graphql_errors"] = _graphql_error_messages(payload)
+        result["query_failures"].append(dict(attempt))
+        return None
+
+    attempt["success"] = True
+    return payload.get("data") or {}
+
+
+def _attach_graphql_error_messages(attempt: dict, body_text: str) -> None:
+    try:
+        payload = json.loads(body_text)
+    except json.JSONDecodeError:
+        return
+    messages = _graphql_error_messages(payload)
+    if messages:
+        attempt["graphql_errors"] = messages
+
+
+def _graphql_error_messages(payload: dict) -> list[str]:
+    messages = []
+    for error in payload.get("errors") or []:
+        messages.append(_preview(error.get("message", ""), 240))
+    return messages
+
+
+def _direct_fetch_translatable_resource(
+    result: dict,
+    config: dict,
+    resource_id: str,
+    target_locale: str,
+    label: str,
+    resource_type: str = "",
+    parent_resource_id: str = "",
+) -> bool:
+    data = _direct_post_graphql(
+        result,
+        config,
+        label,
+        _translatable_resource_query(include_translations=True),
+        {"id": resource_id, "locale": target_locale},
+        resource_type,
+    )
+    resource = (data or {}).get("translatableResource")
+    if resource:
+        _append_resource(result, resource, label, resource_type, parent_resource_id)
+        return True
+
+    fallback_label = label + "_source_only_fallback"
+    data = _direct_post_graphql(
+        result,
+        config,
+        fallback_label,
+        _translatable_resource_query(include_translations=False),
+        {"id": resource_id},
+        resource_type,
+    )
+    resource = (data or {}).get("translatableResource")
+    if resource:
+        resource["translations"] = []
+        _append_resource(result, resource, fallback_label, resource_type, parent_resource_id)
+        return True
+    return False
+
+
+def _direct_fetch_nested_resources(
+    result: dict,
+    config: dict,
+    product_gid: str,
+    target_locale: str,
+    resource_type: str,
+) -> int:
+    label = "nested_" + resource_type.lower()
+    data = _direct_post_graphql(
+        result,
+        config,
+        label,
+        _nested_query(),
+        {"id": product_gid, "locale": target_locale, "resourceType": resource_type},
+        resource_type,
+    )
+    nodes = (
+        (((data or {}).get("translatableResource") or {}).get("nestedTranslatableResources") or {})
+        .get("nodes")
+        or []
+    )
+    for node in nodes:
+        _append_resource(result, node, label, resource_type, product_gid)
+    return len(nodes)
+
+
+def _direct_fetch_product_structure(result: dict, config: dict, product_gid: str) -> None:
+    data = _direct_post_graphql(
+        result,
+        config,
+        "product_structure",
+        _product_structure_query(include_option_value_ids=True),
+        {"id": product_gid},
+        "PRODUCT",
+    )
+    product = (data or {}).get("product")
+    if not product:
+        data = _direct_post_graphql(
+            result,
+            config,
+            "product_structure_fallback",
+            _product_structure_query(include_option_value_ids=False),
+            {"id": product_gid},
+            "PRODUCT",
+        )
+        product = (data or {}).get("product")
+    if not product:
+        return
+    result["product_structure"] = _safe_product_structure(product)
+    result["option_value_ids_from_structure"] = _option_value_ids_from_product(product)[
+        :DIRECT_MAX_OPTION_VALUES
+    ]
+
+
+def _translatable_resource_query(include_translations: bool = True) -> str:
+    if include_translations:
+        return """
+query MappingTranslatableResource($id: ID!, $locale: String!) {
+  translatableResource(resourceId: $id) {
+    resourceId
+    translatableContent {
+      key
+      value
+      digest
+      locale
+    }
+    translations(locale: $locale) {
+      key
+      value
+      locale
+      outdated
+    }
+  }
+}
+"""
+    return """
+query MappingTranslatableResourceSourceOnly($id: ID!) {
+  translatableResource(resourceId: $id) {
+    resourceId
+    translatableContent {
+      key
+      value
+      digest
+      locale
+    }
+  }
+}
+"""
+
+
+def _nested_query() -> str:
+    return """
+query MappingNestedTranslatableResources($id: ID!, $locale: String!, $resourceType: TranslatableResourceType!) {
+  translatableResource(resourceId: $id) {
+    resourceId
+    nestedTranslatableResources(first: 100, resourceType: $resourceType) {
+      nodes {
+        resourceId
+        translatableContent {
+          key
+          value
+          digest
+          locale
+        }
+        translations(locale: $locale) {
+          key
+          value
+          locale
+          outdated
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _product_structure_query(include_option_value_ids: bool = True) -> str:
+    if include_option_value_ids:
+        return """
+query MappingProductStructure($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    handle
+    options {
+      id
+      name
+      position
+      values
+      optionValues {
+        id
+        name
+        hasVariants
+      }
+    }
+    variants(first: 100) {
+      edges {
+        node {
+          id
+          title
+          sku
+          selectedOptions {
+            name
+            value
+          }
+        }
+      }
+    }
+    metafields(first: 100) {
+      edges {
+        node {
+          id
+          namespace
+          key
+          type
+        }
+      }
+    }
+  }
+}
+"""
+    return """
+query MappingProductStructureFallback($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    handle
+    options {
+      id
+      name
+      values
+    }
+    variants(first: 100) {
+      edges {
+        node {
+          id
+          title
+          selectedOptions {
+            name
+            value
+          }
+        }
+      }
+    }
+    metafields(first: 100) {
+      edges {
+        node {
+          id
+          namespace
+          key
+          type
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _safe_product_structure(product: dict) -> dict:
+    options = []
+    for option in product.get("options") or []:
+        option_values = [
+            {
+                "id": str(value.get("id") or ""),
+                "name_preview": _preview(value.get("name", "")),
+                "has_variants": value.get("hasVariants"),
+            }
+            for value in option.get("optionValues") or []
+        ]
+        options.append(
+            {
+                "id": str(option.get("id") or ""),
+                "name_preview": _preview(option.get("name", "")),
+                "position": option.get("position"),
+                "values_preview": [_preview(value) for value in option.get("values") or []],
+                "option_values": option_values,
+            }
+        )
+
+    variants = []
+    for edge in ((product.get("variants") or {}).get("edges") or [])[:DIRECT_MAX_VARIANTS]:
+        node = edge.get("node") or {}
+        variants.append(
+            {
+                "id": str(node.get("id") or ""),
+                "title_preview": _preview(node.get("title", "")),
+                "sku_present": bool(node.get("sku")),
+                "selected_options": [
+                    {
+                        "name_preview": _preview(item.get("name", "")),
+                        "value_preview": _preview(item.get("value", "")),
+                    }
+                    for item in node.get("selectedOptions") or []
+                ],
+            }
+        )
+
+    metafields = []
+    for edge in ((product.get("metafields") or {}).get("edges") or [])[:DIRECT_MAX_METAFIELDS]:
+        node = edge.get("node") or {}
+        metafields.append(
+            {
+                "id": str(node.get("id") or ""),
+                "namespace": str(node.get("namespace") or ""),
+                "key": str(node.get("key") or ""),
+                "type": str(node.get("type") or ""),
+            }
+        )
+
+    return {
+        "product_found": True,
+        "product_id": str(product.get("id") or ""),
+        "title_preview": _preview(product.get("title", "")),
+        "handle": str(product.get("handle") or ""),
+        "option_count": len(options),
+        "variant_count": len(variants),
+        "metafield_count": len(metafields),
+        "options": options,
+        "variants": variants,
+        "metafields": metafields,
+    }
+
+
+def _option_value_ids_from_product(product: dict) -> list[str]:
+    option_value_ids = []
+    for option in product.get("options") or []:
+        for value in option.get("optionValues") or []:
+            value_id = str(value.get("id") or "")
+            if value_id:
+                option_value_ids.append(value_id)
+    return option_value_ids
+
+
+def _append_resource(
+    result: dict,
+    resource: dict,
+    source_query_label: str,
+    resource_type: str = "",
+    parent_resource_id: str = "",
+) -> None:
+    if not resource:
+        return
+    resource_id = str(resource.get("resourceId") or "")
+    if not resource_id:
+        return
+    result["resources"].append(
+        {
+            "resource_id": resource_id,
+            "resource_type": resource_type or _resource_type_from_gid(resource_id),
+            "parent_resource_id": parent_resource_id,
+            "source_query_label": source_query_label,
+            "translatable_content": _safe_content(resource.get("translatableContent") or []),
+            "translations": _safe_translations(resource.get("translations") or []),
+        }
+    )
+
+
+def _safe_content(items: list[dict]) -> list[dict]:
+    output = []
+    for item in items or []:
+        value = item.get("value") or ""
+        output.append(
+            {
+                "key": str(item.get("key") or ""),
+                "value_preview": _preview(value),
+                "value_chars": len(str(value)),
+                "digest": str(item.get("digest") or ""),
+                "locale": str(item.get("locale") or ""),
+            }
+        )
+    return output
+
+
+def _safe_translations(items: list[dict]) -> list[dict]:
+    output = []
+    for item in items or []:
+        value = item.get("value") or ""
+        output.append(
+            {
+                "key": str(item.get("key") or ""),
+                "value_preview": _preview(value),
+                "value_chars": len(str(value)),
+                "locale": str(item.get("locale") or ""),
+                "outdated": item.get("outdated"),
+            }
+        )
+    return output
+
+
+def _safe_query(query: str) -> str:
+    return "\n".join(line.rstrip() for line in query.strip().splitlines())
+
+
+def _variables_for_report(variables: dict) -> dict:
+    redacted = {}
+    for key, value in (variables or {}).items():
+        if key.lower() in {"token", "password", "secret"}:
+            redacted[key] = "[redacted]"
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def _preview(value, limit: int = 160) -> str:
+    text = _sanitize_text(str(value or "")).replace("\r", " ").replace("\n", " ")
+    text = " ".join(text.split())
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+def _resource_already_collected(result: dict, resource_id: str) -> bool:
+    return any(resource.get("resource_id") == resource_id for resource in result.get("resources") or [])
+
+
 def _build_payload(requested_scope: dict, query_result: dict, duration_seconds: float) -> dict:
     resources = query_result.get("resources") or []
     structure = query_result.get("product_structure") or {}
@@ -276,6 +940,9 @@ def _build_payload(requested_scope: dict, query_result: dict, duration_seconds: 
     grouped_rows = _group_rows(rows)
     group_counts = {group: len(items) for group, items in grouped_rows.items()}
     recommendation = _final_recommendation(grouped_rows, query_result)
+    queries_attempted = query_result.get("queries_attempted") or []
+    query_failures = query_result.get("query_failures") or []
+    query_success_count = len([item for item in queries_attempted if item.get("success")])
     audit_status = query_result.get("audit_status") or (
         "completed_read_only_mapping_audit" if query_result.get("success") else "blocked_read_only_shopify_query_failed"
     )
@@ -292,17 +959,21 @@ def _build_payload(requested_scope: dict, query_result: dict, duration_seconds: 
         "task_name": TASK_NAME,
         "mode": "dry-run-read-only-report",
         "command_label": COMMAND_LABEL,
+        "execution_mode": query_result.get("execution_mode", ""),
         "target_product_gid": requested_scope["product_gid"],
         "target_locale": requested_scope["target_locale"],
-        "shop_domain": SHOP_DOMAIN,
-        "shopify_api_version": SHOPIFY_API_VERSION,
+        "shop_domain": query_result.get("shop_domain") or SHOP_DOMAIN,
+        "shopify_api_version": query_result.get("shopify_api_version") or SHOPIFY_API_VERSION,
         "json_mapping_audit_path": str(JSON_REPORT_PATH),
         "html_mapping_audit_path": str(HTML_REPORT_PATH),
         "success": audit_status == "completed_read_only_mapping_audit",
         "audit_status": audit_status,
         "api_success_failure_summary": _api_summary(query_result, audit_status),
-        "queries_attempted": query_result.get("queries_attempted") or [],
-        "query_failures": query_result.get("query_failures") or [],
+        "attempted_query_count": len(queries_attempted),
+        "query_success_count": query_success_count,
+        "query_failure_count": len(query_failures),
+        "queries_attempted": queries_attempted,
+        "query_failures": query_failures,
         "product_structure": structure,
         "group_counts": group_counts,
         "translatable_content_rows_by_group": grouped_rows,
@@ -351,12 +1022,16 @@ def _empty_query_result(scope: dict) -> dict:
         "audit_status": "",
         "target_product_gid": scope.get("product_gid", ""),
         "target_locale": scope.get("target_locale", ""),
+        "shop_domain": SHOP_DOMAIN,
+        "shopify_api_version": SHOPIFY_API_VERSION,
+        "execution_mode": "",
         "shopify_api_call_performed": False,
         "read_only_shopify_query_performed": False,
         "queries_attempted": [],
         "query_failures": [],
         "resources": [],
         "product_structure": _empty_product_structure(),
+        "option_value_ids_from_structure": [],
         "blocking_reasons": [],
         "failure_type": "",
         "error": "",
@@ -553,13 +1228,16 @@ def _candidate_rows(rows: list[dict]) -> list[dict]:
 def _api_summary(query_result: dict, audit_status: str) -> dict:
     attempts = query_result.get("queries_attempted") or []
     failures = query_result.get("query_failures") or []
+    success_count = len([item for item in attempts if item.get("success")])
     return {
         "audit_status": audit_status,
         "shopify_api_call_performed": bool(query_result.get("shopify_api_call_performed")),
         "read_only_shopify_query_performed": bool(query_result.get("read_only_shopify_query_performed")),
         "attempted_query_count": len(attempts),
-        "successful_query_count": len([item for item in attempts if item.get("success")]),
+        "successful_query_count": success_count,
         "failed_query_count": len(failures),
+        "query_success_count": success_count,
+        "query_failure_count": len(failures),
         "failure_type": query_result.get("failure_type", ""),
         "error": _sanitize_text(query_result.get("error", "")),
     }
