@@ -8,6 +8,11 @@ from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppr
     CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
     evaluate_customer_level_duplicate,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_eligibility import (
+    eligibility_blocking_conditions,
+    eligibility_policy_summary,
+    source_eligibility_summary,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -22,7 +27,6 @@ REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_one_candidate_gm
 SUCCESS_STATUS = "trustpilot_one_candidate_gmail_draft_send_preflight_passed"
 EXPECTED_SOURCE_TASK = "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute"
 EXPECTED_SOURCE_STATUS = "real_gmail_draft_created_and_verified"
-EXPECTED_ORDER_NAME = "#22620"
 
 ALLOWED_REPORT_EMAILS = {"info@kidstoylover.com"}
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
@@ -69,6 +73,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflig
     source_privacy_scan = _privacy_scan_text(source_text)
     source_summary = _source_summary(source_report, source_error)
     source_safety = _source_safety_summary(source_report)
+    eligibility_summary = source_eligibility_summary(source_report)
     customer_level_duplicate = evaluate_customer_level_duplicate(
         source_summary["selected_order_name"],
         source_summary["selected_masked_email"],
@@ -79,6 +84,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflig
         source_privacy_scan=source_privacy_scan,
         source_summary=source_summary,
         source_safety=source_safety,
+        eligibility_summary=eligibility_summary,
         customer_level_duplicate=customer_level_duplicate,
         source_text=source_text,
     )
@@ -88,6 +94,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflig
         source_summary=source_summary,
         source_privacy_scan=source_privacy_scan,
         source_safety=source_safety,
+        eligibility_summary=eligibility_summary,
         customer_level_duplicate=customer_level_duplicate,
         blocking_conditions=blocking_conditions,
         duration_seconds=round(time.time() - started, 3),
@@ -154,6 +161,7 @@ def _blocking_conditions(
     source_privacy_scan: dict,
     source_summary: dict,
     source_safety: dict,
+    eligibility_summary: dict,
     customer_level_duplicate: dict,
     source_text: str,
 ) -> list[dict]:
@@ -169,8 +177,9 @@ def _blocking_conditions(
         conditions.append(
             {"status": "blocked_source_draft_create_status", "detail": "source draft create status is not verified."}
         )
-    if source_summary["selected_order_name"] != EXPECTED_ORDER_NAME:
-        conditions.append({"status": "blocked_selected_order_mismatch", "detail": "selected order must be #22620."})
+    if not source_summary["selected_order_name"]:
+        conditions.append({"status": "blocked_selected_order_missing", "detail": "selected order is missing."})
+    conditions.extend(eligibility_blocking_conditions(eligibility_summary))
     if not _is_masked_email(source_summary["selected_masked_email"]):
         conditions.append({"status": "blocked_unmasked_email_detected", "detail": "selected email is not masked."})
     if source_summary["gmail_draft_created"] is not True:
@@ -223,6 +232,7 @@ def _build_payload(
     source_summary: dict,
     source_privacy_scan: dict,
     source_safety: dict,
+    eligibility_summary: dict,
     customer_level_duplicate: dict,
     blocking_conditions: list[dict],
     duration_seconds: float,
@@ -273,6 +283,16 @@ def _build_payload(
         "existing_unsent_gmail_draft_should_not_be_sent": customer_level_duplicate[
             "existing_unsent_gmail_draft_should_not_be_sent"
         ],
+        "trustpilot_eligibility_passed": eligibility_summary.get("eligible_for_trustpilot") is True,
+        "trustpilot_eligibility_summary": eligibility_summary,
+        "selected_candidate_trustpilot_eligibility": eligibility_summary,
+        "delivered_tag_present": eligibility_summary.get("delivered_tag_present", False),
+        "canonical_review_request_tag_present": eligibility_summary.get("canonical_review_request_tag_present", False),
+        "review_request_tag_typo_detected": eligibility_summary.get("review_request_tag_typo_detected", False),
+        "merged_or_related_order_guard_status": eligibility_summary.get("merged_or_related_order_guard_status", ""),
+        "related_order_names": eligibility_summary.get("related_order_names", []),
+        "eligible_for_trustpilot": eligibility_summary.get("eligible_for_trustpilot", False),
+        "trustpilot_eligibility_policy": eligibility_policy_summary(),
         "future_optional_draft_cleanup_needs_separate_locked_phase": customer_level_duplicate[
             "future_optional_draft_cleanup_needs_separate_locked_phase"
         ],
@@ -358,6 +378,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "source_draft_create_status": payload["source_draft_create_status"],
         "selected_order_name": payload["selected_order_name"],
         "selected_masked_email": payload["selected_masked_email"],
+        "delivered_tag_present": payload["delivered_tag_present"],
+        "canonical_review_request_tag_present": payload["canonical_review_request_tag_present"],
+        "merged_or_related_order_guard_status": payload["merged_or_related_order_guard_status"],
+        "eligible_for_trustpilot": payload["eligible_for_trustpilot"],
         "gmail_draft_id_partial": payload["gmail_draft_id_partial"],
         "draft_created_confirmed": payload["draft_created_confirmed"],
         "would_send_gmail_draft": payload["would_send_gmail_draft"],
@@ -551,7 +575,7 @@ def _safe_int(value) -> int:
 def _issue_summary(status: str, blocking_conditions: list[dict]) -> str:
     if status == SUCCESS_STATUS:
         return (
-            "Phase 4.7 send preflight passed for selected order #22620; the existing Gmail draft would be "
+            "Phase 4.7 send preflight passed for the selected order; the existing Gmail draft would be "
             "eligible for a later separate send phase, but this task performed no send, Shopify write, external "
             "review API call, or tracking action."
         )

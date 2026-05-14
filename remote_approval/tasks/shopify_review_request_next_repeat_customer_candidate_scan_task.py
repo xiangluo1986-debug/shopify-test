@@ -11,6 +11,18 @@ from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppr
     evaluate_customer_level_duplicate,
     public_context_summary,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_eligibility import (
+    BLOCKED_MISSING_DELIVERED_TAG,
+    BLOCKED_MISSING_REVIEW_REQUEST_TAG,
+    BLOCKED_MERGED_ORDER_GROUP_NOT_READY,
+    BLOCKED_RETURNED_PACKAGE,
+    BLOCKED_RISK_OR_TICKET,
+    CANONICAL_REVIEW_REQUEST_TAG,
+    TYPO_REVIEW_REQUEST_TAGS,
+    build_trustpilot_eligibility_context,
+    eligibility_policy_summary,
+    evaluate_trustpilot_candidate_eligibility,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -66,8 +78,12 @@ def run_shopify_review_request_next_repeat_customer_candidate_scan_task(mode: st
         extra_rows=[(row.get("candidate_scan_order") or {}) for row in rows]
         + [(row.get("unified_decision") or {}) for row in rows],
     )
+    eligibility_context = build_trustpilot_eligibility_context(
+        [(row.get("candidate_scan_order") or {}) for row in rows]
+        + [(row.get("unified_decision") or {}) for row in rows]
+    )
     evaluated_rows = [
-        _evaluate_order(row, completed_order_names, index, customer_duplicate_context)
+        _evaluate_order(row, completed_order_names, index, customer_duplicate_context, eligibility_context)
         for index, row in enumerate(rows, start=1)
     ]
     ready_candidates = [
@@ -84,6 +100,7 @@ def run_shopify_review_request_next_repeat_customer_candidate_scan_task(mode: st
         ready_candidates=ready_candidates,
         blocking_conditions=blocking_conditions,
         customer_duplicate_context=customer_duplicate_context,
+        eligibility_context=eligibility_context,
         status=status,
         duration_seconds=round(time.time() - started, 3),
     )
@@ -106,7 +123,7 @@ def _load_sources() -> tuple[dict, dict]:
             errors[name] = "missing_source_report"
             continue
         try:
-            sources[name] = json.loads(path.read_text(encoding="utf-8"))
+            sources[name] = json.loads(path.read_text(encoding="utf-8"), strict=False)
         except json.JSONDecodeError as exc:
             errors[name] = _sanitize_text(f"source_report_json_parse_error: {exc}")
     return sources, errors
@@ -228,7 +245,13 @@ def _row_order_name(row: dict) -> str:
     return _safe_text(order.get("order_name") or decision.get("order_name") or "")
 
 
-def _evaluate_order(row: dict, completed_order_names: list[str], source_index: int, customer_duplicate_context: dict) -> dict:
+def _evaluate_order(
+    row: dict,
+    completed_order_names: list[str],
+    source_index: int,
+    customer_duplicate_context: dict,
+    eligibility_context: dict,
+) -> dict:
     order = row.get("candidate_scan_order") or {}
     decision = row.get("unified_decision") or {}
     order_name = _safe_text(order.get("order_name") or decision.get("order_name") or "")
@@ -266,12 +289,26 @@ def _evaluate_order(row: dict, completed_order_names: list[str], source_index: i
         order=order,
         customer_level_duplicate=customer_level_duplicate,
     )
-    ready = not block_reasons
-    classification = (
-        CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION
-        if customer_level_duplicate["customer_level_duplicate_block_applies"]
-        else ("ready_next_trustpilot_repeat_customer_candidate" if ready else "blocked")
+    eligibility = evaluate_trustpilot_candidate_eligibility(
+        {
+            "order_name": order_name,
+            "order_id_or_gid": order_id,
+            "masked_email": masked_email,
+            "tags": tags,
+            "tags_of_interest": _tags_of_interest(tags),
+            "source_decision": source_decision,
+            "classification_buckets": classification_buckets,
+            "blocking_reasons": block_reasons,
+            "ticket_risk_detected": ticket_risk,
+            "repeat_customer_detected": repeat_customer_detected,
+        },
+        eligibility_context,
+        customer_level_duplicate=customer_level_duplicate,
+        existing_blocking_reasons=block_reasons,
     )
+    block_reasons = _dedupe([*eligibility["blocking_reasons"], *block_reasons])
+    ready = not block_reasons
+    classification = "ready_next_trustpilot_repeat_customer_candidate" if ready else _primary_blocker(block_reasons)
     return {
         "source_index": source_index,
         "order_name": order_name,
@@ -283,6 +320,15 @@ def _evaluate_order(row: dict, completed_order_names: list[str], source_index: i
         "source_decision": source_decision,
         "classification_buckets": classification_buckets,
         "tags_of_interest": _tags_of_interest(tags),
+        "delivered_tag_present": eligibility["delivered_tag_present"],
+        "canonical_review_request_tag_present": eligibility["canonical_review_request_tag_present"],
+        "review_request_tag_typo_detected": eligibility["review_request_tag_typo_detected"],
+        "typo_review_request_tags_detected": eligibility["typo_review_request_tags_detected"],
+        "merged_or_related_order_guard_status": eligibility["merged_or_related_order_guard_status"],
+        "related_order_names": eligibility["related_order_names"],
+        "related_order_count": eligibility["related_order_count"],
+        "eligible_for_trustpilot": eligibility["eligible_for_trustpilot"],
+        "trustpilot_eligibility_summary": eligibility,
         "matched_trustpilot_invitation_tags": matched_trustpilot_tags,
         "existing_trustpilot_invitation_tag_detected": bool(matched_trustpilot_tags),
         "ticket_risk_detected": ticket_risk,
@@ -386,6 +432,29 @@ def _candidate_block_reasons(
     return _dedupe(reasons)
 
 
+def _primary_blocker(block_reasons: list[str]) -> str:
+    priority = [
+        BLOCKED_MISSING_DELIVERED_TAG,
+        BLOCKED_MISSING_REVIEW_REQUEST_TAG,
+        BLOCKED_MERGED_ORDER_GROUP_NOT_READY,
+        CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
+        BLOCKED_RETURNED_PACKAGE,
+        BLOCKED_RISK_OR_TICKET,
+    ]
+    for reason in priority:
+        if reason in block_reasons:
+            return reason
+    if any("returned_package" in reason or "return_or_shipping_issue" in reason for reason in block_reasons):
+        return BLOCKED_RETURNED_PACKAGE
+    if any(
+        token in reason
+        for reason in block_reasons
+        for token in ("ticket", "risk", "refund", "cancel", "dispute", "chargeback", "shipping")
+    ):
+        return BLOCKED_RISK_OR_TICKET
+    return block_reasons[0] if block_reasons else "blocked"
+
+
 def _has_ticket_risk(order: dict, decision: dict) -> bool:
     if order.get("ticket_blocked") is True:
         return True
@@ -427,6 +496,7 @@ def _build_payload(
     ready_candidates: list[dict],
     blocking_conditions: list[dict],
     customer_duplicate_context: dict,
+    eligibility_context: dict,
     status: str,
     duration_seconds: float,
 ) -> dict:
@@ -452,6 +522,10 @@ def _build_payload(
         for row in evaluated_rows
         for reason in row.get("blocking_reasons", [])
     )
+    audit_22582 = _order_audit("#22582", evaluated_rows)
+    next_candidate_blocked_reason = ""
+    if not selected_candidate:
+        next_candidate_blocked_reason = "no_eligible_delivered_review_request_candidate"
     payload = {
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
@@ -471,6 +545,7 @@ def _build_payload(
         "eligible_candidate_count": eligible_candidate_count,
         "eligible_repeat_customer_candidate_count": eligible_candidate_count,
         "next_candidate_selected": bool(selected_candidate),
+        "next_candidate_blocked_reason": next_candidate_blocked_reason,
         "next_candidate_count": next_candidate_count,
         "next_candidate_order_name": selected_candidate.get("order_name", ""),
         "next_candidate_masked_email": selected_candidate.get("masked_email", ""),
@@ -484,6 +559,15 @@ def _build_payload(
         ],
         "ready_candidate_queue": ready_candidates[:10],
         "evaluated_orders": evaluated_rows[:150],
+        "candidate_22582_audit": audit_22582,
+        "audit_22582": audit_22582,
+        "trustpilot_eligibility_policy": eligibility_policy_summary(),
+        "trustpilot_eligibility_context_summary": {
+            "local_db_related_lookup": eligibility_context.get("local_db_related_lookup", {}),
+            "related_order_group_count": eligibility_context.get("related_order_group_count", 0),
+            "raw_customer_email_output": False,
+            "email_hash_output": False,
+        },
         "blocked_counts": dict(sorted(blocked_counts.items())),
         "customer_level_duplicate_summary": public_context_summary(customer_duplicate_context),
         "trustpilot_tag_matching_policy": {
@@ -535,6 +619,23 @@ def _count_semantics_validation(next_candidate_selected: bool, next_candidate_co
         "next_candidate_selected": next_candidate_selected,
         "next_candidate_count": next_candidate_count,
         "max_next_candidate_count": 1,
+    }
+
+
+def _order_audit(order_name: str, evaluated_rows: list[dict]) -> dict:
+    row = next((item for item in evaluated_rows if item.get("order_name") == order_name), {})
+    eligibility = row.get("trustpilot_eligibility_summary") if isinstance(row.get("trustpilot_eligibility_summary"), dict) else {}
+    return {
+        "audit_order_name": order_name,
+        "present_in_scan": bool(row),
+        "delivered_tag_present": eligibility.get("delivered_tag_present", False),
+        "canonical_review_request_tag_present": eligibility.get("canonical_review_request_tag_present", False),
+        "review_request_tag_typo_detected": eligibility.get("review_request_tag_typo_detected", False),
+        "merged_or_related_order_guard_status": eligibility.get("merged_or_related_order_guard_status", "unavailable"),
+        "related_order_names": eligibility.get("related_order_names", []),
+        "classification": row.get("classification") or eligibility.get("classification", "unavailable"),
+        "eligible_for_trustpilot": eligibility.get("eligible_for_trustpilot", False),
+        "blocking_reasons": row.get("blocking_reasons", []),
     }
 
 
@@ -787,7 +888,7 @@ def _tags_of_interest(tags: list[str]) -> list[str]:
         normalized = _normalize_tag(tag)
         if normalized in {_normalize_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}:
             interests.append(tag)
-        elif tag in {"1: reveiw request", "1: Review request", "Review sent", "Delivered"}:
+        elif tag in {CANONICAL_REVIEW_REQUEST_TAG, *TYPO_REVIEW_REQUEST_TAGS, "1: Review request", "Review sent", "Delivered", "妥投"}:
             interests.append(tag)
         elif _has_returned_package_tag([tag]) or _has_risk_tag([tag]):
             interests.append(tag)

@@ -8,6 +8,13 @@ from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppr
     CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION,
     evaluate_customer_level_duplicate,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_eligibility import (
+    build_trustpilot_eligibility_context,
+    eligibility_blocking_conditions,
+    eligibility_policy_summary,
+    evaluate_trustpilot_candidate_eligibility,
+    source_report_order_rows,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -21,7 +28,6 @@ REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_one_candidate_gm
 SUCCESS_STATUS = "trustpilot_one_candidate_gmail_draft_package_ready"
 EXPECTED_SOURCE_TASK = "shopify_review_request_next_repeat_customer_candidate_scan"
 EXPECTED_SOURCE_STATUS = "next_repeat_customer_candidate_scan_ready"
-EXPECTED_ORDER_NAME = "#22620"
 EXPECTED_CANDIDATE_STATUS = "ready_next_trustpilot_repeat_customer_candidate"
 TARGET_DECISION = "trustpilot_gmail_candidate_dry_run"
 GMAIL_SEND_FROM = "info@kidstoylover.com"
@@ -74,7 +80,18 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task
     selected_candidate = _selected_candidate(source_report)
     source_summary = _source_summary(source_report, source_error)
     candidate_summary = _candidate_summary(selected_candidate)
-    guard_summary = _guard_summary(selected_candidate)
+    eligibility_context = build_trustpilot_eligibility_context(source_report_order_rows(source_report))
+    customer_level_duplicate = evaluate_customer_level_duplicate(
+        candidate_summary["order_name"],
+        candidate_summary["masked_email"],
+    )
+    eligibility_summary = evaluate_trustpilot_candidate_eligibility(
+        selected_candidate or candidate_summary,
+        eligibility_context,
+        customer_level_duplicate=customer_level_duplicate,
+        existing_blocking_reasons=candidate_summary["blocking_reasons"],
+    )
+    guard_summary = _guard_summary(selected_candidate, customer_level_duplicate, eligibility_summary)
     blocking_conditions = _blocking_conditions(
         source_report=source_report,
         source_error=source_error,
@@ -83,6 +100,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task
         source_summary=source_summary,
         candidate_summary=candidate_summary,
         guard_summary=guard_summary,
+        eligibility_summary=eligibility_summary,
     )
     status = blocking_conditions[0]["status"] if blocking_conditions else SUCCESS_STATUS
     payload = _build_payload(
@@ -91,6 +109,7 @@ def run_shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task
         source_privacy_scan=source_privacy_scan,
         candidate_summary=candidate_summary,
         guard_summary=guard_summary,
+        eligibility_summary=eligibility_summary,
         blocking_conditions=blocking_conditions,
         duration_seconds=round(time.time() - started, 3),
     )
@@ -176,7 +195,7 @@ def _candidate_summary(candidate: dict) -> dict:
     }
 
 
-def _guard_summary(candidate: dict) -> dict:
+def _guard_summary(candidate: dict, customer_level_duplicate: dict, eligibility_summary: dict) -> dict:
     candidate_summary = _candidate_summary(candidate)
     alias_coverage = _trustpilot_alias_coverage()
     matched_aliases = _matched_trustpilot_aliases(candidate, candidate_summary)
@@ -184,10 +203,6 @@ def _guard_summary(candidate: dict) -> dict:
         candidate_summary["existing_trustpilot_invitation_tag_detected"]
         or bool(matched_aliases)
         or candidate_summary["source_decision"] == "blocked_existing_trustpilot_invitation_tag"
-    )
-    customer_level_duplicate = evaluate_customer_level_duplicate(
-        candidate_summary["order_name"],
-        candidate_summary["masked_email"],
     )
     returned_triggered = _returned_package_guard_triggered(candidate_summary)
     risk_triggered = _risk_ticket_refund_cancel_dispute_blocker_detected(candidate_summary)
@@ -242,6 +257,8 @@ def _guard_summary(candidate: dict) -> dict:
         "risk_ticket_refund_cancel_dispute_blocker_detected": risk_triggered,
         "candidate_has_no_blocking_reasons": not candidate_summary["blocking_reasons"],
         "candidate_no_real_action_planned_in_source": no_real_action_planned,
+        "trustpilot_eligibility_passed": eligibility_summary.get("eligible_for_trustpilot") is True,
+        "trustpilot_eligibility_summary": eligibility_summary,
         "trustpilot_tag_matching_policy": {
             "canonical_write_tag_for_future_real_write_only": TRUSTPILOT_TAG,
             "current_task_write_tag": "",
@@ -260,6 +277,7 @@ def _blocking_conditions(
     source_summary: dict,
     candidate_summary: dict,
     guard_summary: dict,
+    eligibility_summary: dict,
 ) -> list[dict]:
     conditions = []
     if source_error:
@@ -276,12 +294,13 @@ def _blocking_conditions(
         conditions.append({"status": "blocked_next_candidate_not_selected", "detail": "next_candidate_selected is not true."})
     if _safe_int(source_report.get("next_candidate_count")) != 1:
         conditions.append({"status": "blocked_invalid_next_candidate_count", "detail": "next_candidate_count must equal 1."})
-    if source_summary["selected_order_name"] != EXPECTED_ORDER_NAME:
-        conditions.append({"status": "blocked_selected_order_mismatch", "detail": "source selected order is not #22620."})
+    if not source_summary["selected_order_name"]:
+        conditions.append({"status": "blocked_selected_order_missing", "detail": "source selected order is missing."})
     if not selected_candidate:
         conditions.append({"status": "blocked_missing_selected_candidate", "detail": "selected_candidate is missing."})
-    if candidate_summary["order_name"] != EXPECTED_ORDER_NAME:
-        conditions.append({"status": "blocked_selected_order_mismatch", "detail": "candidate selected order is not #22620."})
+    if source_summary["selected_order_name"] and candidate_summary["order_name"] != source_summary["selected_order_name"]:
+        conditions.append({"status": "blocked_selected_order_mismatch", "detail": "candidate selected order does not match source selected order."})
+    conditions.extend(eligibility_blocking_conditions(eligibility_summary))
     if not _is_masked_email(candidate_summary["masked_email"]):
         conditions.append({"status": "blocked_unmasked_email_detected", "detail": "candidate email is missing or not masked."})
     if candidate_summary["candidate_status"] != EXPECTED_CANDIDATE_STATUS:
@@ -342,6 +361,7 @@ def _build_payload(
     source_privacy_scan: dict,
     candidate_summary: dict,
     guard_summary: dict,
+    eligibility_summary: dict,
     blocking_conditions: list[dict],
     duration_seconds: float,
 ) -> dict:
@@ -404,6 +424,16 @@ def _build_payload(
         ],
         "candidate_has_no_blocking_reasons": guard_summary["candidate_has_no_blocking_reasons"],
         "candidate_no_real_action_planned_in_source": guard_summary["candidate_no_real_action_planned_in_source"],
+        "trustpilot_eligibility_passed": eligibility_summary.get("eligible_for_trustpilot") is True,
+        "trustpilot_eligibility_summary": eligibility_summary,
+        "selected_candidate_trustpilot_eligibility": eligibility_summary,
+        "delivered_tag_present": eligibility_summary.get("delivered_tag_present", False),
+        "canonical_review_request_tag_present": eligibility_summary.get("canonical_review_request_tag_present", False),
+        "review_request_tag_typo_detected": eligibility_summary.get("review_request_tag_typo_detected", False),
+        "merged_or_related_order_guard_status": eligibility_summary.get("merged_or_related_order_guard_status", ""),
+        "related_order_names": eligibility_summary.get("related_order_names", []),
+        "eligible_for_trustpilot": eligibility_summary.get("eligible_for_trustpilot", False),
+        "trustpilot_eligibility_policy": eligibility_policy_summary(),
         "trustpilot_tag_matching_policy": guard_summary["trustpilot_tag_matching_policy"],
         "draft_package_only": True,
         "preview_only": True,
@@ -505,6 +535,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         ],
         "returned_package_guard_confirmed": payload["returned_package_guard_confirmed"],
         "first_order_customer_block_confirmed": payload["first_order_customer_block_confirmed"],
+        "delivered_tag_present": payload["delivered_tag_present"],
+        "canonical_review_request_tag_present": payload["canonical_review_request_tag_present"],
+        "merged_or_related_order_guard_status": payload["merged_or_related_order_guard_status"],
+        "eligible_for_trustpilot": payload["eligible_for_trustpilot"],
         "blocking_condition_count": payload["blocking_condition_count"],
         "blocking_conditions": payload["blocking_conditions"],
         **payload["safety_summary"],
@@ -557,6 +591,10 @@ def _render_html_report(payload: dict) -> str:
                 "Risk/ticket/refund/cancel/dispute blocker detected",
                 "risk_ticket_refund_cancel_dispute_blocker_detected",
             ),
+            ("Delivered tag present", "delivered_tag_present"),
+            ("Canonical review-request tag present", "canonical_review_request_tag_present"),
+            ("Merged/related order guard", "merged_or_related_order_guard_status"),
+            ("Eligible for Trustpilot", "eligible_for_trustpilot"),
         )
     )
     return f"""<!doctype html>

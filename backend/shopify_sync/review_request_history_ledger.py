@@ -481,6 +481,18 @@ def _event_from_mapping(report, item, event_type, source_section):
             or _first_text(data, ("prior_trustpilot_order_name",)),
             max_length=80,
         ),
+        "delivered_tag_present": _source_bool(item, data, ("delivered_tag_present",)),
+        "canonical_review_request_tag_present": _source_bool(
+            item,
+            data,
+            ("canonical_review_request_tag_present",),
+        ),
+        "eligible_for_trustpilot": _source_bool(item, data, ("eligible_for_trustpilot",)),
+        "merged_or_related_order_guard_status": _safe_text(
+            _first_text(item, ("merged_or_related_order_guard_status",))
+            or _first_text(data, ("merged_or_related_order_guard_status",)),
+            max_length=80,
+        ),
     }
     if not any(
         (
@@ -542,6 +554,7 @@ def _summary(events, filtered_events, source_reports):
 
 def _focus_status(events, source_reports):
     order_22620_events = [event for event in events if event.get("order_name") == "#22620"]
+    order_22582_events = [event for event in events if event.get("order_name") == "#22582"]
     order_22620_block_events = [
         event
         for event in order_22620_events
@@ -574,6 +587,17 @@ def _focus_status(events, source_reports):
         ("prior_trustpilot_order_name",),
     )
     draft_should_not_send = any(event.get("draft_should_not_be_sent") for event in order_22620_events)
+    order_22582_block_event = _first_event(
+        event
+        for event in order_22582_events
+        if str(event.get("classification", "")).startswith("blocked")
+        or str(event.get("status", "")).startswith("blocked")
+        or str(event.get("blocker_reason", "")).startswith("blocked")
+    ) or _first_event(
+        event
+        for event in order_22582_events
+        if event.get("classification") or event.get("status") or event.get("blocker_reason")
+    )
     return {
         "order_22620": {
             "order_name": "#22620",
@@ -592,6 +616,26 @@ def _focus_status(events, source_reports):
             "order_name": next_candidate or "unavailable",
             "evidence_report_path": (next_candidate_event or {}).get("source_report_path", ""),
             "status": (next_candidate_event or {}).get("status", "unavailable"),
+        },
+        "order_22582": {
+            "order_name": "#22582",
+            "evidence_available": bool(order_22582_events),
+            "blocked_classification": _first_text(
+                order_22582_block_event or {},
+                ("classification", "status", "blocker_reason"),
+            )
+            or "unavailable",
+            "delivered_tag_present": any(event.get("delivered_tag_present") is True for event in order_22582_events),
+            "canonical_review_request_tag_present": any(
+                event.get("canonical_review_request_tag_present") is True for event in order_22582_events
+            ),
+            "eligible_for_trustpilot": any(event.get("eligible_for_trustpilot") is True for event in order_22582_events),
+            "merged_or_related_order_guard_status": _first_text(
+                next((event for event in order_22582_events if event.get("merged_or_related_order_guard_status")), {}),
+                ("merged_or_related_order_guard_status",),
+            )
+            or "unavailable",
+            "evidence_report_paths": _dedupe_text(event["source_report_path"] for event in order_22582_events),
         },
         "ali_reviews_api": {
             "status": ali_status or "unavailable",

@@ -274,6 +274,17 @@
                 <tr><th>Masked email</th><td>{{ wb.latest_scan.selected_masked_email|default:"-" }}</td></tr>
                 <tr><th>Eligible candidates</th><td>{{ wb.latest_scan.eligible_candidate_count }}</td></tr>
                 <tr><th>Next candidate count</th><td>{{ wb.latest_scan.next_candidate_count }}</td></tr>
+                <tr><th>Next candidate blocked reason</th><td>{{ wb.latest_scan.next_candidate_blocked_reason|default:"-" }}</td></tr>
+                <tr>
+                    <th>#22582 eligibility audit</th>
+                    <td>
+                        <span class="rrw-pill">delivered={{ wb.latest_scan.candidate_22582_audit.delivered_tag_present|yesno:"true,false" }}</span>
+                        <span class="rrw-pill">canonical_review={{ wb.latest_scan.candidate_22582_audit.canonical_review_request_tag_present|yesno:"true,false" }}</span>
+                        <span class="rrw-pill">merged={{ wb.latest_scan.candidate_22582_audit.merged_or_related_order_guard_status|default:"-" }}</span>
+                        <span class="rrw-pill">eligible={{ wb.latest_scan.candidate_22582_audit.eligible_for_trustpilot|yesno:"true,false" }}</span>
+                        <br><code>{{ wb.latest_scan.candidate_22582_audit.classification|default:"-" }}</code>
+                    </td>
+                </tr>
             </tbody>
         </table>
     </div>
@@ -309,6 +320,16 @@
                 <div class="rrw-card-note">
                     Source draft exists:
                     {{ wb.history_focus.order_22620.source_gmail_draft_created_detected|yesno:"true,false" }}.
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">#22582 eligibility</div>
+                <div class="rrw-card-value">{{ wb.history_focus.order_22582.blocked_classification }}</div>
+                <div class="rrw-card-note">
+                    Delivered {{ wb.history_focus.order_22582.delivered_tag_present|yesno:"true,false" }};
+                    canonical review {{ wb.history_focus.order_22582.canonical_review_request_tag_present|yesno:"true,false" }};
+                    merged {{ wb.history_focus.order_22582.merged_or_related_order_guard_status }};
+                    eligible {{ wb.history_focus.order_22582.eligible_for_trustpilot|yesno:"true,false" }}.
                 </div>
             </div>
             <div class="rrw-card">
@@ -460,7 +481,8 @@
     <div class="rrw-section">
         <h2>Candidate Scan Queue</h2>
         <p class="rrw-muted">
-            Ready repeat-customer candidates from local scan reports. No send or tag-write actions are available.
+            Ready repeat-customer candidates from local scan reports. Delivered / 妥投, exact canonical review-request tag,
+            merged/related order readiness, duplicate, return, and risk gates must all pass. No send or tag-write actions are available.
         </p>
         <table class="rrw-table">
             <thead>

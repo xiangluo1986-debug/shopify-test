@@ -29,6 +29,9 @@ FUTURE_TRACKING_STATUSES = (
     "review_detected",
     "blocked_existing_trustpilot_invitation_tag",
     "blocked_existing_trustpilot_invitation_customer_level",
+    "blocked_missing_delivered_tag",
+    "blocked_missing_review_request_tag",
+    "blocked_merged_order_group_not_ready",
     "blocked_returned_package",
     "blocked_first_order_customer",
     "blocked_risk_or_ticket",
@@ -49,6 +52,21 @@ TAG_FILTER_OPTIONS = (
 LIMIT_OPTIONS = (25, 50, 100)
 DEFAULT_LIMIT = 25
 BLOCKED_REASON_DEFINITIONS = (
+    (
+        "missing_delivered_tag",
+        "Missing delivered tag",
+        ("blocked_missing_delivered_tag", "missing delivered", "delivered tag is missing"),
+    ),
+    (
+        "missing_review_request_tag",
+        "Missing canonical review-request tag",
+        ("blocked_missing_review_request_tag", "canonical review", "review request tag is missing"),
+    ),
+    (
+        "merged_order_group_not_ready",
+        "Merged/related group not ready",
+        ("blocked_merged_order_group_not_ready", "merged", "related order group"),
+    ),
     (
         "returned_package",
         "Returned package",
@@ -579,9 +597,12 @@ def _row_from_top_level_report(data, source_label, source_path):
         "tags_summary": "No tag data in this summary row",
         "trustpilot_tags": [],
         "trustpilot_invitation_present": False,
+        "delivered_tag_present": False,
         "canonical_review_request_tag_present": False,
         "typo_review_request_tag_present": False,
         "review_request_tag_present": False,
+        "merged_or_related_order_guard_status": "",
+        "eligible_for_trustpilot": False,
         "blocking_reasons": [],
         "blocking_summary": "",
         "repeat_customer_detected": "",
@@ -638,9 +659,12 @@ def _row_from_mapping(item, source_label, source_path, source_section):
         "tags_summary": ", ".join(tags) if tags else "No tag data in row",
         "trustpilot_tags": trustpilot_tags,
         "trustpilot_invitation_present": bool(trustpilot_tags),
+        "delivered_tag_present": item.get("delivered_tag_present") is True or DELIVERED_TAG in tags or "妥投" in tags,
         "canonical_review_request_tag_present": CANONICAL_REVIEW_REQUEST_TAG in tags,
         "typo_review_request_tag_present": TYPO_REVIEW_REQUEST_TAG in tags,
         "review_request_tag_present": CANONICAL_REVIEW_REQUEST_TAG in tags,
+        "merged_or_related_order_guard_status": _safe_text(item.get("merged_or_related_order_guard_status")),
+        "eligible_for_trustpilot": item.get("eligible_for_trustpilot") is True,
         "blocking_reasons": blocking_reasons,
         "blocking_summary": ", ".join(blocking_reasons),
         "repeat_customer_detected": _safe_text(item.get("repeat_customer_detected")),
@@ -762,6 +786,8 @@ def _latest_scan_summary(report):
             or data.get("eligible_repeat_customer_candidate_count")
         ),
         "next_candidate_count": _int_or_zero(data.get("next_candidate_count")),
+        "next_candidate_blocked_reason": _first_text(data, ("next_candidate_blocked_reason",)),
+        "candidate_22582_audit": data.get("candidate_22582_audit") if isinstance(data.get("candidate_22582_audit"), dict) else {},
         "report_status": _first_text(
             data,
             ("next_repeat_customer_candidate_scan_status", "report_status", "status"),
@@ -1104,10 +1130,18 @@ def _attach_status_badges(rows, latest_scan):
         badges = []
         if selected_order and row.get("order_name") == selected_order:
             badges.append(_badge("Next candidate", "rrw-badge-ok"))
+        if row.get("delivered_tag_present"):
+            badges.append(_badge("Delivered", "rrw-badge-ok"))
+        elif _row_text_contains(row, ("blocked_missing_delivered_tag", "missing delivered")):
+            badges.append(_badge("Blocked: missing delivered", "rrw-badge-bad"))
         if row.get("canonical_review_request_tag_present"):
             badges.append(_badge("In review request queue", "rrw-badge-ok"))
+        elif _row_text_contains(row, ("blocked_missing_review_request_tag", "canonical review")):
+            badges.append(_badge("Blocked: missing review tag", "rrw-badge-bad"))
         if row.get("typo_review_request_tag_present"):
             badges.append(_badge("Typo tag: not canonical", "rrw-badge-warn"))
+        if _row_text_contains(row, ("blocked_merged_order_group_not_ready", "merged", "related order group")):
+            badges.append(_badge("Blocked: related group", "rrw-badge-bad"))
         if row.get("trustpilot_invitation_present"):
             badges.append(_badge("Trustpilot already sent", "rrw-badge-info"))
         if _row_has_returned_package(row):
@@ -1289,6 +1323,16 @@ def _summary(
         or _count_for_blocker(blocked_reason_counts, "duplicate_trustpilot_invitation")
         or _count_for_blocker(blocked_reason_counts, "customer_level_duplicate_trustpilot")
     )
+    blocked_missing_delivered = _int_or_zero(blocked_counts.get("blocked_missing_delivered_tag")) or _count_for_blocker(
+        blocked_reason_counts,
+        "missing_delivered_tag",
+    )
+    blocked_missing_review_tag = _int_or_zero(
+        blocked_counts.get("blocked_missing_review_request_tag")
+    ) or _count_for_blocker(blocked_reason_counts, "missing_review_request_tag")
+    blocked_merged_group = _int_or_zero(
+        blocked_counts.get("blocked_merged_order_group_not_ready")
+    ) or _count_for_blocker(blocked_reason_counts, "merged_order_group_not_ready")
     next_candidate = latest_scan.get("selected_order_name") or (
         candidate_queue[0]["order_name"] if candidate_queue else ""
     )
@@ -1310,6 +1354,21 @@ def _summary(
             "label": f"Canonical {CANONICAL_REVIEW_REQUEST_TAG}",
             "value": len(review_request_queue),
             "note": f"Exact canonical tag only; {TYPO_REVIEW_REQUEST_TAG} is listed separately as typo/not canonical.",
+        },
+        {
+            "label": "Missing delivered",
+            "value": blocked_missing_delivered,
+            "note": "Trustpilot candidates now require Delivered / 妥投 before packaging.",
+        },
+        {
+            "label": "Missing review tag",
+            "value": blocked_missing_review_tag,
+            "note": f"Trustpilot candidates now require exact {CANONICAL_REVIEW_REQUEST_TAG}.",
+        },
+        {
+            "label": "Merged group blocked",
+            "value": blocked_merged_group,
+            "note": "Related or merged order groups must be fully ready.",
         },
         {
             "label": "Blocked returned package",

@@ -11,6 +11,16 @@ from remote_approval.tasks.shopify_review_request_customer_level_duplicate_suppr
     evaluate_customer_level_duplicate,
     public_context_summary,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_eligibility import (
+    BLOCKED_MISSING_DELIVERED_TAG,
+    BLOCKED_MISSING_REVIEW_REQUEST_TAG,
+    BLOCKED_MERGED_ORDER_GROUP_NOT_READY,
+    CANONICAL_REVIEW_REQUEST_TAG,
+    TYPO_REVIEW_REQUEST_TAGS,
+    build_trustpilot_eligibility_context,
+    eligibility_policy_summary,
+    evaluate_trustpilot_candidate_eligibility,
+)
 from remote_approval.utils import LOG_DIR, utc_now_iso
 
 
@@ -38,6 +48,9 @@ GMAIL_SENDER_PLANNED = "info@kidstoylover.com"
 TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 
 DECISION_BUCKETS = [
+    BLOCKED_MISSING_DELIVERED_TAG,
+    BLOCKED_MISSING_REVIEW_REQUEST_TAG,
+    BLOCKED_MERGED_ORDER_GROUP_NOT_READY,
     "blocked_returned_package",
     "blocked_no_email",
     "blocked_refund_or_cancelled",
@@ -97,7 +110,7 @@ def _load_sources() -> tuple[dict, dict]:
             errors[name] = "missing_source_report"
             continue
         try:
-            sources[name] = json.loads(path.read_text(encoding="utf-8"))
+            sources[name] = json.loads(path.read_text(encoding="utf-8"), strict=False)
         except json.JSONDecodeError as exc:
             errors[name] = _sanitize_text(f"source_report_json_parse_error: {exc}")
     return sources, errors
@@ -114,8 +127,11 @@ def _build_payload(sources: dict, source_errors: dict, duration_seconds: float) 
             [_safe_text(order.get("order_name", "")) for order in orders if isinstance(order, dict)],
             extra_rows=[order for order in orders if isinstance(order, dict)],
         )
+        eligibility_context = build_trustpilot_eligibility_context(
+            [order for order in orders if isinstance(order, dict)]
+        )
         decisions = [
-            _decision_row(order, customer_duplicate_context)
+            _decision_row(order, customer_duplicate_context, eligibility_context)
             for order in orders
             if isinstance(order, dict)
         ]
@@ -137,6 +153,7 @@ def _build_payload(sources: dict, source_errors: dict, duration_seconds: float) 
         "total_orders_evaluated": len(decisions),
         "counts": counts,
         "trustpilot_tag_aliases": TRUSTPILOT_TAG_ALIASES,
+        "trustpilot_eligibility_policy": eligibility_policy_summary(),
         "ali_review_pending_tag": ALI_REVIEW_PENDING_TAG,
         "ali_review_sent_tag": ALI_REVIEW_SENT_TAG,
         "historical_ali_manual_tag": HISTORICAL_ALI_MANUAL_TAG,
@@ -217,7 +234,7 @@ def _source_report_status(sources: dict, source_errors: dict) -> dict:
     return result
 
 
-def _decision_row(order: dict, customer_duplicate_context: dict) -> dict:
+def _decision_row(order: dict, customer_duplicate_context: dict, eligibility_context: dict) -> dict:
     tags = [_safe_text(tag) for tag in order.get("tags", []) if str(tag).strip()]
     tag_set = set(tags)
     normalized_tags = {_normalize_tag(tag) for tag in tags}
@@ -232,6 +249,11 @@ def _decision_row(order: dict, customer_duplicate_context: dict) -> dict:
         _safe_text(order.get("order_name", "")),
         masked_email,
         customer_duplicate_context,
+    )
+    eligibility_summary = evaluate_trustpilot_candidate_eligibility(
+        order,
+        eligibility_context,
+        customer_level_duplicate=customer_level_duplicate,
     )
     has_returned_package_tag = _has_returned_package_tag(tags)
     has_review_sent = ALI_REVIEW_SENT_TAG in tag_set
@@ -251,9 +273,15 @@ def _decision_row(order: dict, customer_duplicate_context: dict) -> dict:
         decision = "blocked_existing_trustpilot_invitation_tag"
     elif customer_level_duplicate["customer_level_duplicate_block_applies"]:
         decision = CUSTOMER_LEVEL_DUPLICATE_CLASSIFICATION
+    elif eligibility_summary["classification"] in {
+        BLOCKED_MISSING_DELIVERED_TAG,
+        BLOCKED_MISSING_REVIEW_REQUEST_TAG,
+        BLOCKED_MERGED_ORDER_GROUP_NOT_READY,
+    }:
+        decision = eligibility_summary["classification"]
     elif has_review_sent:
         decision = "already_review_sent_skip"
-    elif repeat_detected and not has_trustpilot_tag:
+    elif repeat_detected and not has_trustpilot_tag and eligibility_summary["eligible_for_trustpilot"]:
         decision = "trustpilot_gmail_candidate_dry_run"
     elif has_delivered and has_ali_pending:
         decision = "ali_reviews_candidate_waiting_for_send_api"
@@ -285,6 +313,14 @@ def _decision_row(order: dict, customer_duplicate_context: dict) -> dict:
         "same_email_detected": customer_level_duplicate["same_email_detected"],
         "same_masked_email_detected": customer_level_duplicate["same_masked_email_detected"],
         "risk_summary": _risk_summary(order),
+        "delivered_tag_present": eligibility_summary["delivered_tag_present"],
+        "canonical_review_request_tag_present": eligibility_summary["canonical_review_request_tag_present"],
+        "review_request_tag_typo_detected": eligibility_summary["review_request_tag_typo_detected"],
+        "typo_review_request_tags_detected": eligibility_summary["typo_review_request_tags_detected"],
+        "merged_or_related_order_guard_status": eligibility_summary["merged_or_related_order_guard_status"],
+        "related_order_names": eligibility_summary["related_order_names"],
+        "eligible_for_trustpilot": eligibility_summary["eligible_for_trustpilot"],
+        "trustpilot_eligibility_summary": eligibility_summary,
         "decision": decision,
         "planned_next_action": _planned_next_action(decision),
         "tag_changes_planned_but_not_performed": _tag_plan(decision),
@@ -317,12 +353,16 @@ def _tags_summary(tags: list[str]) -> dict:
         "contains_historical_ali_manual_tag": HISTORICAL_ALI_MANUAL_TAG in tags,
         "contains_ali_review_pending_tag": ALI_REVIEW_PENDING_TAG in tags,
         "contains_ali_review_sent_tag": ALI_REVIEW_SENT_TAG in tags,
+        "contains_canonical_review_request_tag": CANONICAL_REVIEW_REQUEST_TAG in tags,
+        "contains_typo_review_request_tag": any(tag in TYPO_REVIEW_REQUEST_TAGS for tag in tags),
+        "contains_delivered_tag": any(tag in {"Delivered", "妥投"} for tag in tags),
         "contains_trustpilot_alias": any(_normalize_tag(alias) in {_normalize_tag(tag) for tag in tags} for alias in TRUSTPILOT_TAG_ALIASES),
         "matched_trustpilot_invitation_tags": _matched_trustpilot_tags_from_tags(tags),
         "tags_of_interest": [
             tag
             for tag in tags
             if tag in {HISTORICAL_ALI_MANUAL_TAG, ALI_REVIEW_PENDING_TAG, ALI_REVIEW_SENT_TAG}
+            or tag in {CANONICAL_REVIEW_REQUEST_TAG, *TYPO_REVIEW_REQUEST_TAGS, "Delivered", "妥投"}
             or _normalize_tag(tag) in {_normalize_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}
             or _has_returned_package_tag([tag])
         ],
@@ -354,6 +394,9 @@ def _risk_summary(order: dict) -> dict:
 
 def _planned_next_action(decision: str) -> str:
     actions = {
+        BLOCKED_MISSING_DELIVERED_TAG: "Do not create a draft or send; Delivered / 妥投 readiness is missing.",
+        BLOCKED_MISSING_REVIEW_REQUEST_TAG: f"Do not create a draft or send; canonical {CANONICAL_REVIEW_REQUEST_TAG} tag is missing.",
+        BLOCKED_MERGED_ORDER_GROUP_NOT_READY: "Do not create a draft or send; related or merged order group is not fully ready.",
         "blocked_no_email": "Do not send; no usable email.",
         "blocked_returned_package": "Do not send any review request; return/returned package tag indicates return-to-warehouse risk.",
         "blocked_refund_or_cancelled": "Do not send; refund, partial refund, dispute, or cancellation risk.",

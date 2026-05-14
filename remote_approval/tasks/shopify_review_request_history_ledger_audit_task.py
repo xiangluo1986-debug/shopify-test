@@ -88,6 +88,20 @@ def _build_payload(ledger: dict, duration_seconds: float) -> dict:
             "evidence_report_path": focus["next_candidate"]["evidence_report_path"],
             "candidate_22582_confirmed": focus["next_candidate"]["order_name"] == "#22582",
         },
+        "order_22582_audit": {
+            "audit_order_name": "#22582",
+            "evidence_available": focus["order_22582"]["evidence_available"],
+            "delivered_tag_present": focus["order_22582"]["delivered_tag_present"],
+            "canonical_review_request_tag_present": focus["order_22582"][
+                "canonical_review_request_tag_present"
+            ],
+            "merged_or_related_order_guard_status": focus["order_22582"][
+                "merged_or_related_order_guard_status"
+            ],
+            "eligible_for_trustpilot": focus["order_22582"]["eligible_for_trustpilot"],
+            "classification": focus["order_22582"]["blocked_classification"],
+            "evidence_report_paths": focus["order_22582"]["evidence_report_paths"],
+        },
         "ali_reviews_api_audit": {
             "status": focus["ali_reviews_api"]["status"],
             "vendor_api_documentation_missing": focus["ali_reviews_api"]["vendor_docs_missing"],
@@ -139,6 +153,10 @@ def _audit_event_row(event: dict) -> dict:
         "next_candidate_order_name": event.get("next_candidate_order_name", ""),
         "prior_trustpilot_order_name": event.get("prior_trustpilot_order_name", ""),
         "draft_should_not_be_sent": event.get("draft_should_not_be_sent") is True,
+        "delivered_tag_present": event.get("delivered_tag_present"),
+        "canonical_review_request_tag_present": event.get("canonical_review_request_tag_present"),
+        "merged_or_related_order_guard_status": event.get("merged_or_related_order_guard_status", ""),
+        "eligible_for_trustpilot": event.get("eligible_for_trustpilot"),
     }
 
 
@@ -213,6 +231,7 @@ def _write_html_report(payload: dict) -> Path:
 
 def _render_html_report(payload: dict) -> str:
     order_audit = payload["order_22620_audit"]
+    order_22582 = payload["order_22582_audit"]
     next_candidate = payload["next_candidate_audit"]
     ali = payload["ali_reviews_api_audit"]
     source_rows = "\n".join(
@@ -265,6 +284,11 @@ def _render_html_report(payload: dict) -> str:
     <tr><th>#22620 email sent confirmed false</th><td>{escape(str(order_audit["email_sent_confirmed_false"]))}</td></tr>
     <tr><th>#22620 draft should not be sent</th><td>{escape(str(order_audit["existing_unsent_gmail_draft_should_not_be_sent"]))}</td></tr>
     <tr><th>Prior Trustpilot order</th><td><code>{escape(order_audit["prior_trustpilot_order_name"])}</code></td></tr>
+    <tr><th>#22582 delivered tag present</th><td>{escape(str(order_22582["delivered_tag_present"]))}</td></tr>
+    <tr><th>#22582 canonical review tag present</th><td>{escape(str(order_22582["canonical_review_request_tag_present"]))}</td></tr>
+    <tr><th>#22582 merged/related guard</th><td><code>{escape(order_22582["merged_or_related_order_guard_status"])}</code></td></tr>
+    <tr><th>#22582 eligible for Trustpilot</th><td>{escape(str(order_22582["eligible_for_trustpilot"]))}</td></tr>
+    <tr><th>#22582 classification</th><td><code>{escape(order_22582["classification"])}</code></td></tr>
     <tr><th>Next candidate</th><td><code>{escape(next_candidate["next_candidate_order_name"])}</code></td></tr>
     <tr><th>Ali Reviews API status</th><td><code>{escape(ali["status"])}</code></td></tr>
   </tbody></table>
@@ -283,6 +307,7 @@ def _render_html_report(payload: dict) -> str:
 
 def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
     order_audit = payload["order_22620_audit"]
+    order_22582 = payload["order_22582_audit"]
     next_candidate = payload["next_candidate_audit"]
     ali = payload["ali_reviews_api_audit"]
     return {
@@ -304,6 +329,15 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
             "existing_unsent_gmail_draft_should_not_be_sent"
         ],
         "order_22620_prior_trustpilot_order_name": order_audit["prior_trustpilot_order_name"],
+        "order_22582_delivered_tag_present": order_22582["delivered_tag_present"],
+        "order_22582_canonical_review_request_tag_present": order_22582[
+            "canonical_review_request_tag_present"
+        ],
+        "order_22582_merged_or_related_order_guard_status": order_22582[
+            "merged_or_related_order_guard_status"
+        ],
+        "order_22582_eligible_for_trustpilot": order_22582["eligible_for_trustpilot"],
+        "order_22582_classification": order_22582["classification"],
         "next_candidate_order_name": next_candidate["next_candidate_order_name"],
         "candidate_22582_confirmed": next_candidate["candidate_22582_confirmed"],
         "ali_reviews_api_capability_discovery_status": ali["status"],
@@ -316,6 +350,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     order_audit = payload["order_22620_audit"]
+    order_22582 = payload["order_22582_audit"]
     next_candidate = payload["next_candidate_audit"]
     ali = payload["ali_reviews_api_audit"]
     return (
@@ -325,6 +360,11 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"#22620 email sent confirmed false: {order_audit['email_sent_confirmed_false']}\n"
         f"#22620 existing draft should not be sent: {order_audit['existing_unsent_gmail_draft_should_not_be_sent']}\n"
         f"Prior Trustpilot order: {order_audit['prior_trustpilot_order_name']}\n"
+        f"#22582 eligibility: delivered={order_22582['delivered_tag_present']}, "
+        f"canonical_review={order_22582['canonical_review_request_tag_present']}, "
+        f"merged_guard={order_22582['merged_or_related_order_guard_status']}, "
+        f"eligible={order_22582['eligible_for_trustpilot']}, "
+        f"classification={order_22582['classification']}\n"
         f"Next candidate: {next_candidate['next_candidate_order_name']}\n"
         f"Ali Reviews API status: {ali['status']}\n"
         "Safety: no Gmail draft create/send/delete, no Shopify write/tag change, no Trustpilot/Kudosi/Ali Reviews API call, and no tracking action.\n"
@@ -339,12 +379,14 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
 
 def _issue_summary(focus: dict) -> str:
     order_audit = focus["order_22620"]
+    order_22582 = focus["order_22582"]
     next_candidate = focus["next_candidate"]
     ali = focus["ali_reviews_api"]
     return (
         f"#22620 ledger status: {order_audit['blocked_classification']}; "
         f"email_sent={order_audit['email_sent']}; "
         f"draft_should_not_be_sent={order_audit['existing_unsent_gmail_draft_should_not_be_sent']}; "
+        f"#22582={order_22582['blocked_classification']}; "
         f"next_candidate={next_candidate['order_name']}; "
         f"ali_reviews_api_status={ali['status']}."
     )
