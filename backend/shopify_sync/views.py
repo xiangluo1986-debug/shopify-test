@@ -122,10 +122,14 @@ TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS = 1200
 TRANSLATION_CONSOLE_EDITOR_FILTERS = {
     "all",
     "untranslated",
+    "needs_translation",
     "outdated",
     "translated",
     "needs_review",
     "draft_only",
+    "seo",
+    "variants_options",
+    "metafields",
 }
 TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
     {
@@ -188,21 +192,21 @@ TRANSLATION_WORKSPACE_FIELD_COVERAGE_CORE_AREAS = [
     },
     {
         "area_key": "body_html",
-        "area_label": "Description / body HTML",
+        "area_label": "Product description",
         "group_label": "Basic",
         "field_keys": ("body_html", "description"),
         "note": "Full product description HTML for visual review.",
     },
     {
         "area_key": "meta_title",
-        "area_label": "SEO meta title",
+        "area_label": "SEO title",
         "group_label": "SEO",
         "field_keys": ("meta_title",),
         "note": "SEO title translation field.",
     },
     {
         "area_key": "meta_description",
-        "area_label": "SEO meta description",
+        "area_label": "SEO description",
         "group_label": "SEO",
         "field_keys": ("meta_description",),
         "note": "SEO description translation field.",
@@ -1364,6 +1368,13 @@ def translation_console(request):
             "manual_product_gid": manual_product_gid,
             "selected_locale": locale,
             "supported_locales": SUPPORTED_TRANSLATION_LOCALES,
+            "supported_locale_options": [
+                {
+                    "value": supported_locale,
+                    "label": _translation_editor_locale_label(supported_locale),
+                }
+                for supported_locale in SUPPORTED_TRANSLATION_LOCALES
+            ],
             "ui_mode": ui_mode,
             "editor_filter": editor_filter,
             "editor_search_query": editor_search_query,
@@ -2173,11 +2184,12 @@ def build_translation_console_editor_view(
     )
     filter_labels = [
         ("all", "All"),
-        ("untranslated", "Untranslated"),
-        ("outdated", "Outdated"),
-        ("draft_only", "Draft Only"),
-        ("translated", "Translated"),
-        ("needs_review", "Needs Review"),
+        ("untranslated", "Needs translation"),
+        ("needs_review", "Needs review"),
+        ("draft_only", "Draft only"),
+        ("seo", "SEO"),
+        ("variants_options", "Variants/options"),
+        ("metafields", "Metafields"),
     ]
     status_summary = {
         "visible": len(visible_rows),
@@ -2186,6 +2198,13 @@ def build_translation_console_editor_view(
                 row
                 for row in searched_rows
                 if _translation_editor_row_matches_filter(row, "untranslated")
+            ]
+        ),
+        "translated": len(
+            [
+                row
+                for row in searched_rows
+                if _translation_editor_row_matches_filter(row, "translated")
             ]
         ),
         "outdated": len(
@@ -2226,11 +2245,11 @@ def build_translation_console_editor_view(
         for value, label in filter_labels
     ]
     if not product_gid:
-        empty_message = "Select a product to view translation rows."
+        empty_message = "Choose a product to review its text."
     elif not rows:
-        empty_message = "No translatable rows found for this product."
+        empty_message = "No text was found for this product."
     elif not visible_rows:
-        empty_message = "No rows match this filter."
+        empty_message = "No text matches this filter."
     else:
         empty_message = ""
     return {
@@ -2630,8 +2649,17 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
             if existing_value
             else ("GPT draft" if draft_value else "")
         ),
+        "target_value_source_label": (
+            "Already translated"
+            if existing_value
+            else ("Draft only" if draft_value else "")
+        ),
         "translation_status": translation_status,
+        "translation_status_label": _translation_editor_status_label(translation_status),
         "status_badges": badges,
+        "status_badge_labels": [
+            _translation_editor_badge_label(badge) for badge in badges
+        ],
         "target_chars": target_chars,
         "char_limit": char_limit,
         "char_count_display": f"{target_chars}/{char_limit}" if char_limit else str(target_chars),
@@ -2645,6 +2673,31 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
         "needs_review": needs_review,
         "read_only": True,
     }
+
+
+def _translation_editor_status_label(status: str) -> str:
+    labels = {
+        "translated": "Already translated",
+        "outdated": "Needs review",
+        "needs_review": "Needs review",
+        "draft_only": "Draft only",
+        "skipped": "Needs review",
+        "untranslated": "Needs translation",
+    }
+    return labels.get(str(status or ""), _translation_editor_humanize_key(status))
+
+
+def _translation_editor_badge_label(badge: str) -> str:
+    labels = {
+        "existing translation": "Already translated",
+        "outdated": "Needs review",
+        "GPT draft": "Draft only",
+        "SEO warning": "Needs review",
+        "blocked": "Needs review",
+        "untranslated": "Needs translation",
+        "exceeds limit": "Too long",
+    }
+    return labels.get(str(badge or ""), _translation_editor_humanize_key(badge))
 
 
 def _translation_editor_row_matches_search(row: dict, query: str) -> bool:
@@ -2663,6 +2716,7 @@ def _translation_editor_row_matches_search(row: dict, query: str) -> bool:
             "source_value",
             "target_value_display",
             "translation_status",
+            "translation_status_label",
         ]
     ).lower()
     return query in haystack
@@ -2674,14 +2728,24 @@ def _translation_editor_row_matches_filter(row: dict, editor_filter: str) -> boo
         return True
     if editor_filter == "translated":
         return status == "translated"
-    if editor_filter == "untranslated":
+    if editor_filter in {"untranslated", "needs_translation"}:
         return status == "untranslated"
     if editor_filter == "outdated":
         return status == "outdated"
     if editor_filter == "draft_only":
         return status == "draft_only"
     if editor_filter == "needs_review":
-        return bool(row.get("needs_review")) or status in {"needs_review", "skipped"}
+        return bool(row.get("needs_review")) or status in {
+            "outdated",
+            "needs_review",
+            "skipped",
+        }
+    if editor_filter == "seo":
+        return row.get("section_key") == "seo"
+    if editor_filter == "variants_options":
+        return row.get("section_key") in {"options", "variants"}
+    if editor_filter == "metafields":
+        return row.get("section_key") in {"important_metafields", "technical_metafields"}
     return True
 
 
@@ -2713,13 +2777,13 @@ def _translation_editor_section_key(field_key: str) -> str:
 def _translation_editor_field_label(field_key: str) -> str:
     field_key = str(field_key or "")
     labels = {
-        "title": "Title",
-        "body_html": "Description",
-        "description": "Description",
+        "title": "Product title",
+        "body_html": "Product description",
+        "description": "Product description",
         "product_type": "Product type",
         "handle": "URL handle",
-        "meta_title": "Meta title",
-        "meta_description": "Meta description",
+        "meta_title": "SEO title",
+        "meta_description": "SEO description",
     }
     if field_key in labels:
         return labels[field_key]

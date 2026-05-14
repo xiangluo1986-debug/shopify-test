@@ -584,6 +584,23 @@
     font-size: 18px;
     font-weight: 700;
   }
+  .tw-next-steps {
+    margin-top: 12px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #fbfdff;
+    padding: 12px;
+  }
+  .tw-next-steps h3 {
+    margin-top: 0;
+  }
+  .tw-next-steps ol {
+    margin: 0;
+    padding-left: 20px;
+  }
+  .tw-next-steps li {
+    margin: 4px 0;
+  }
   .tw-advanced-details {
     margin-top: 12px;
     border-top: 1px solid #e5e7eb;
@@ -747,10 +764,10 @@
 <div id="content-main" class="translation-workspace">
   <div class="tw-hero">
     <div class="tw-hero-header">
-      <h1>Shopify Translation Workspace</h1>
+      <h1>Translate this product</h1>
       <span class="tw-safety">READ ONLY / NO WRITE</span>
     </div>
-    <p>Review source and target product translation fields. This page does not write Shopify data, run commands, or send emails.</p>
+    <p>Compare the original product text with the translated text. This page is for review only and cannot apply changes.</p>
   </div>
 
   {% if translation_console_warnings %}
@@ -763,15 +780,16 @@
 
   <div class="tw-mode-bar">
     <div class="tw-tabs">
-      <a class="tw-tab{% if ui_mode == 'editor' %} is-active{% endif %}" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Editor</a>
-      <a class="tw-tab{% if ui_mode == 'workbench' %} is-active{% endif %}" href="?ui_mode=workbench&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Workbench</a>
+      <a class="tw-tab{% if ui_mode == 'editor' %} is-active{% endif %}" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Simple editor</a>
+      <a class="tw-tab{% if ui_mode == 'workbench' %} is-active{% endif %}" href="?ui_mode=workbench&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Advanced workflow</a>
     </div>
-    <span class="tw-muted">{% if ui_mode == "editor" %}Daily editor view{% else %}Dry-run workflow workbench{% endif %}</span>
+    <span class="tw-muted">{% if ui_mode == "editor" %}Original vs translation review{% else %}Technical draft workflow{% endif %}</span>
   </div>
 
   {% if single_product_mvp %}
-  <div class="module" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Single Product Translation MVP</h2>
+  <details class="module tw-advanced-details" style="padding: 12px; margin-bottom: 16px;">
+    <summary>Advanced details for technical review</summary>
+    <h2>Translation coverage details</h2>
     <div class="tw-editor-summary">
       <div class="tw-summary-card">
         <div class="tw-summary-label">Selected product</div>
@@ -835,12 +853,12 @@
         <span class="tw-mvp-action">{{ action.label }}: {{ action.status }}</span>
       {% endfor %}
     </div>
-  </div>
+  </details>
   {% endif %}
 
   {% if ui_mode == "workbench" %}
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Workbench</h2>
+    <h2>Advanced workflow</h2>
     <table>
       <tbody>
         <tr><th>Current workflow status</th><td>{{ workbench_summary.workflow_status }}</td></tr>
@@ -1042,16 +1060,16 @@
 
   {% elif ui_mode == "editor" %}
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Editor</h2>
+    <h2>Choose product and language</h2>
     <form method="get" class="tw-toolbar tw-compact-form" style="margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="q" value="{{ product_search_text }}">
       <div class="tw-compact-field tw-product-field">
-        <label for="id_editor_selected_product_gid">Product</label><br>
+        <label for="id_editor_selected_product_gid">Choose product</label><br>
         <select id="id_editor_selected_product_gid" name="product_gid">
           {% if product_selector.product_options %}
             {% for product in product_selector.product_options %}
-              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }}</option>
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.product_type %} - {{ product.product_type }}{% endif %}</option>
             {% endfor %}
           {% else %}
             <option value="">No products available</option>
@@ -1059,19 +1077,19 @@
         </select>
       </div>
       <div class="tw-compact-field">
-        <label for="id_editor_locale">Target locale</label><br>
+        <label for="id_editor_locale">Choose language</label><br>
         <select id="id_editor_locale" name="target_locale">
-          {% for locale in supported_locales %}
-            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% for locale_option in supported_locale_options %}
+            <option value="{{ locale_option.value }}"{% if locale_option.value == selected_locale %} selected{% endif %}>{{ locale_option.label }} ({{ locale_option.value }})</option>
           {% endfor %}
         </select>
       </div>
       <div class="tw-compact-field">
-        <label for="id_editor_q">Search rows</label><br>
-        <input id="id_editor_q" type="text" name="editor_search" value="{{ editor_search_query }}" placeholder="title, SEO, phrase, status">
+        <label for="id_editor_q">Search text</label><br>
+        <input id="id_editor_q" type="text" name="editor_search" value="{{ editor_search_query }}" placeholder="word, field, or status">
       </div>
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-      <button type="submit" class="button">Open / Refresh</button>
+      <button type="submit" class="button">Show translation</button>
     </form>
     <div class="tw-filter-tabs" style="margin-bottom: 12px;">
       {% for tab in editor_view.filter_tabs %}
@@ -1080,16 +1098,16 @@
     </div>
     <div class="tw-metric-strip">
       <div class="tw-metric">
-        <div class="tw-metric-label">Visible rows</div>
+        <div class="tw-metric-label">Showing</div>
         <div class="tw-metric-value">{{ editor_view.status_summary.visible }} / {{ editor_view.editor_row_count }}</div>
       </div>
       <div class="tw-metric">
-        <div class="tw-metric-label">Untranslated</div>
+        <div class="tw-metric-label">Needs translation</div>
         <div class="tw-metric-value">{{ editor_view.status_summary.untranslated }}</div>
       </div>
       <div class="tw-metric">
-        <div class="tw-metric-label">Outdated</div>
-        <div class="tw-metric-value">{{ editor_view.status_summary.outdated }}</div>
+        <div class="tw-metric-label">Already translated</div>
+        <div class="tw-metric-value">{{ editor_view.status_summary.translated }}</div>
       </div>
       <div class="tw-metric">
         <div class="tw-metric-label">Needs review</div>
@@ -1100,8 +1118,106 @@
         <div class="tw-metric-value">{{ editor_view.status_summary.draft_only }}</div>
       </div>
     </div>
+    <div class="tw-next-steps">
+      <h3>What to do next</h3>
+      <ol>
+        <li>Choose product and language.</li>
+        <li>Review original vs translation.</li>
+        <li>Generate a draft in Advanced workflow if needed.</li>
+        <li>Apply later through the approved PowerShell command.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Original vs translation</h2>
+    {% if editor_view.editor_empty_message %}
+      <div class="tw-empty-state">{{ editor_view.editor_empty_message }}</div>
+    {% endif %}
+    {% if editor_view.product_gid and editor_view.editor_visible_row_count > 0 %}
+    {% for section in editor_view.sections %}
+      {% if section.has_rows %}
+      <details class="tw-section-panel{% if section.is_folded_noise_group %} is-folded{% endif %}"{% if not section.collapsed_by_default %} open{% endif %}>
+        <summary>
+          <span class="tw-section-heading">
+            <span class="tw-section-title">
+              <strong>{{ section.section_label }}</strong>
+              <span class="tw-section-hint">{{ section.section_hint }}</span>
+            </span>
+            <span class="tw-count-badge">{{ section.row_count }} text item{{ section.row_count|pluralize }}{% if section.is_folded_noise_group %} hidden by default{% endif %}</span>
+          </span>
+        </summary>
+        <div class="tw-editor-table-wrap">
+        <table class="tw-editor-table">
+          <thead>
+            <tr>
+              <th class="tw-resource-col">Field</th>
+              <th class="tw-source-col">Original</th>
+              <th class="tw-target-col">Translation</th>
+              <th class="tw-status-col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in section.rows %}
+              <tr class="tw-editor-row status-{{ row.translation_status }}">
+                <td>
+                  <div class="tw-field-label">{{ row.field_label }}</div>
+                  <div class="tw-resource-type">{{ row.resource_type_label }}</div>
+                  {% if row.resource_detail %}<div class="tw-resource-detail">{{ row.resource_detail }}</div>{% endif %}
+                  <details class="tw-cell-details">
+                    <summary>More details</summary>
+                    <div class="tw-resource-key">Raw key: {{ row.resource_key }}</div>
+                    {% if row.resource_note %}<div class="tw-resource-key">{{ row.resource_note }}</div>{% endif %}
+                  </details>
+                </td>
+                <td>
+                  <div class="tw-text-block">{{ row.source_value_preview }}</div>
+                </td>
+                <td>
+                  {% if row.target_value_display %}
+                    <div class="tw-text-block is-target">{{ row.target_value_preview }}</div>
+                  {% else %}
+                    <div class="tw-text-block is-target tw-target-empty">Needs translation</div>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="tw-status-badge is-{{ row.translation_status }}">{{ row.translation_status_label }}</span>
+                  {% if row.target_value_source_label or row.status_badge_labels %}
+                    <div class="tw-row-meta">
+                      {% if row.target_value_source_label %}
+                        <span class="tw-status-badge">{{ row.target_value_source_label }}</span>
+                      {% endif %}
+                      {% for badge in row.status_badge_labels %}
+                        <span class="tw-status-badge">{{ badge }}</span>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                  {% if row.seo_warning %}<div class="tw-warning">{{ row.seo_warning }}</div>{% endif %}
+                  {% if row.exceeds_limit %}<div class="tw-warning">Too long for the recommended limit.</div>{% endif %}
+                  <details class="tw-cell-details">
+                    <summary>More status info</summary>
+                    <div class="tw-row-meta">
+                      <span><strong>Length:</strong> {{ row.char_count_display }}</span>
+                      {% if row.char_limit %}<span>Recommended limit {{ row.char_limit }}</span>{% endif %}
+                    </div>
+                    {% if row.validation_status %}<div class="tw-resource-key">Validation: {{ row.validation_status }}</div>{% endif %}
+                    {% if row.seo_status %}<div class="tw-resource-key">SEO status: {{ row.seo_status }}</div>{% endif %}
+                  </details>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </details>
+      {% endif %}
+    {% endfor %}
+    {% endif %}
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <details class="tw-advanced-details">
-      <summary>Advanced: draft dry-run and coverage audit</summary>
+      <summary>Advanced details for technical review</summary>
       <form method="post" class="tw-editor-actions" style="margin: 8px 0 12px;">
         {% csrf_token %}
         <input type="hidden" name="ui_mode" value="editor">
@@ -1154,98 +1270,10 @@
       </div>
     </details>
   </div>
-
-  <div class="module" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Source / target table</h2>
-    {% if editor_view.editor_empty_message %}
-      <div class="tw-empty-state">{{ editor_view.editor_empty_message }}</div>
-    {% endif %}
-    {% if editor_view.product_gid and editor_view.editor_visible_row_count > 0 %}
-    {% for section in editor_view.sections %}
-      {% if section.has_rows %}
-      <details class="tw-section-panel{% if section.is_folded_noise_group %} is-folded{% endif %}"{% if not section.collapsed_by_default %} open{% endif %}>
-        <summary>
-          <span class="tw-section-heading">
-            <span class="tw-section-title">
-              <strong>{{ section.section_label }}</strong>
-              <span class="tw-section-hint">{{ section.section_hint }}</span>
-            </span>
-            <span class="tw-count-badge">{{ section.row_count }} rows{% if section.is_folded_noise_group %} folded{% endif %}</span>
-          </span>
-        </summary>
-        <div class="tw-editor-table-wrap">
-        <table class="tw-editor-table">
-          <thead>
-            <tr>
-              <th class="tw-resource-col">Resource / Field</th>
-              <th class="tw-source-col">Default language</th>
-              <th class="tw-target-col">Target language ({{ editor_view.editor_locale_label }})</th>
-              <th class="tw-status-col">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in section.rows %}
-              <tr class="tw-editor-row status-{{ row.translation_status }}">
-                <td>
-                  <div class="tw-field-label">{{ row.field_label }}</div>
-                  <div class="tw-resource-type">{{ row.resource_type_label }}</div>
-                  {% if row.resource_detail %}<div class="tw-resource-detail">{{ row.resource_detail }}</div>{% endif %}
-                  <details class="tw-cell-details">
-                    <summary>Details</summary>
-                    <div class="tw-resource-key">Raw key: {{ row.resource_key }}</div>
-                    {% if row.resource_note %}<div class="tw-resource-key">{{ row.resource_note }}</div>{% endif %}
-                  </details>
-                </td>
-                <td>
-                  <div class="tw-text-block">{{ row.source_value_preview }}</div>
-                </td>
-                <td>
-                  {% if row.target_value_display %}
-                    <div class="tw-text-block is-target">{{ row.target_value_preview }}</div>
-                  {% else %}
-                    <div class="tw-text-block is-target tw-target-empty">No target translation yet</div>
-                  {% endif %}
-                </td>
-                <td>
-                  <span class="tw-status-badge is-{{ row.translation_status }}">{{ row.translation_status }}</span>
-                  <div class="tw-row-meta">
-                    {% if row.target_value_source %}
-                      <span class="tw-status-badge">{{ row.target_value_source }}</span>
-                    {% else %}
-                      <span class="tw-status-badge">Empty</span>
-                    {% endif %}
-                    {% for badge in row.status_badges %}
-                      <span class="tw-status-badge">{{ badge }}</span>
-                    {% endfor %}
-                  </div>
-                  <div class="tw-row-meta">
-                    <span><strong>Chars:</strong> {{ row.char_count_display }}</span>
-                    {% if row.char_limit %}<span>Recommended limit {{ row.char_limit }}</span>{% endif %}
-                  </div>
-                  {% if row.seo_warning %}<div class="tw-warning">{{ row.seo_warning }}</div>{% endif %}
-                  {% if row.exceeds_limit %}<div class="tw-warning">Exceeds recommended character limit.</div>{% endif %}
-                  {% if row.validation_status or row.seo_status %}
-                    <details class="tw-cell-details">
-                      <summary>Validation</summary>
-                      {% if row.validation_status %}<div class="tw-resource-key">Validation: {{ row.validation_status }}</div>{% endif %}
-                      {% if row.seo_status %}<div class="tw-resource-key">SEO status: {{ row.seo_status }}</div>{% endif %}
-                    </details>
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        </div>
-      </details>
-      {% endif %}
-    {% endfor %}
-    {% endif %}
-  </div>
   {% endif %}
 
   <details style="margin-bottom: 16px;">
-    <summary><strong>Advanced / Developer Details</strong></summary>
+    <summary><strong>Advanced details for technical review</strong></summary>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Translation workflow status</h2>
