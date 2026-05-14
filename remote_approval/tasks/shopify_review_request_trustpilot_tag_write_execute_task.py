@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import subprocess
 import time
 from html import escape
 from pathlib import Path
@@ -13,6 +14,7 @@ COMMAND_LABEL = "shopify_review_request_trustpilot_tag_write_execute"
 
 SOURCE_FINAL_PREFLIGHT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_tag_write_final_preflight.json"
 SOURCE_FINAL_PREFLIGHT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_tag_write_final_preflight.html"
+SOURCE_CANDIDATE_SCAN_JSON_PATH = LOG_DIR / "shopify_review_request_candidate_scan.json"
 PROTECTED_DRAFT_SOURCE_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_one_draft_locked_runner.json"
 REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_tag_write_execute.json"
 REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_tag_write_execute.html"
@@ -24,6 +26,9 @@ EXPECTED_ORDER_NAME = "#22621"
 EXPECTED_MASKED_EMAIL = "m***@gmail.com"
 EXPECTED_DRAFT_ID_PARTIAL = "r-22...3521"
 EXPECTED_TAG_VALUE = "1: trustpilot"
+SHOP_DOMAIN = "kidstoylover.myshopify.com"
+SHOPIFY_API_VERSION = "2026-01"
+SHOPIFY_TAG_WRITE_TIMEOUT_SECONDS = 120
 TAG_WRITE_ENV = "TRUSTPILOT_SHOPIFY_TAG_WRITE"
 TAG_WRITE_MAX_ENV = "TRUSTPILOT_SHOPIFY_TAG_WRITE_MAX"
 TAG_WRITE_ACK_ENV = "TRUSTPILOT_SHOPIFY_TAG_WRITE_ACK"
@@ -50,6 +55,8 @@ def run_shopify_review_request_trustpilot_tag_write_execute_task(mode: str) -> d
 
     started = time.time()
     final_preflight, source_error = _read_source_preflight()
+    prior_execute, prior_execute_error = _read_prior_execute_report()
+    target_order_gid, target_order_gid_error = _target_order_gid_from_candidate_scan()
     source_privacy_scan = {
         "json": _privacy_scan_text(_read_text(SOURCE_FINAL_PREFLIGHT_JSON_PATH)),
         "html": _privacy_scan_text(_read_text(SOURCE_FINAL_PREFLIGHT_HTML_PATH)),
@@ -65,12 +72,22 @@ def run_shopify_review_request_trustpilot_tag_write_execute_task(mode: str) -> d
         source_privacy_scan=source_privacy_scan,
         full_draft_id_leak_detected=full_draft_id_leak,
         gates=gates,
+        prior_execute=prior_execute,
+        prior_execute_error=prior_execute_error,
+        target_order_gid=target_order_gid,
+        target_order_gid_error=target_order_gid_error,
     )
-    write_result = _write_result(gates, blocking_conditions)
+    write_result = _write_result(gates, blocking_conditions, target_order_gid)
+    if write_result.get("write_blocking_condition"):
+        blocking_conditions.append(write_result["write_blocking_condition"])
     status = write_result["tag_write_execute_status"]
     payload = _build_payload(
         final_preflight=final_preflight,
         source_error=source_error,
+        prior_execute=prior_execute,
+        prior_execute_error=prior_execute_error,
+        target_order_gid=target_order_gid,
+        target_order_gid_error=target_order_gid_error,
         source_privacy_scan=source_privacy_scan,
         full_draft_id_leak_detected=full_draft_id_leak,
         gates=gates,
@@ -91,6 +108,42 @@ def _read_source_preflight() -> tuple[dict, str]:
         return json.loads(SOURCE_FINAL_PREFLIGHT_JSON_PATH.read_text(encoding="utf-8")), ""
     except json.JSONDecodeError as exc:
         return {}, _sanitize_text(f"blocked_missing_final_preflight_report: source JSON parse failed: {exc}")
+
+
+def _read_prior_execute_report() -> tuple[dict, str]:
+    if not REPORT_JSON_PATH.exists():
+        return {}, "blocked_missing_executor_dry_run_report"
+    try:
+        return json.loads(REPORT_JSON_PATH.read_text(encoding="utf-8")), ""
+    except json.JSONDecodeError as exc:
+        return {}, _sanitize_text(f"blocked_missing_executor_dry_run_report: source JSON parse failed: {exc}")
+
+
+def _target_order_gid_from_candidate_scan() -> tuple[str, str]:
+    if not SOURCE_CANDIDATE_SCAN_JSON_PATH.exists():
+        return "", "blocked_missing_candidate_scan_report"
+    try:
+        candidate_scan = json.loads(SOURCE_CANDIDATE_SCAN_JSON_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return "", _sanitize_text(f"blocked_missing_candidate_scan_report: source JSON parse failed: {exc}")
+    for order in _walk_order_dicts(candidate_scan):
+        if _safe_text(order.get("order_name", "")) != EXPECTED_ORDER_NAME:
+            continue
+        order_gid = _safe_text(order.get("order_id") or order.get("order_id_or_gid") or order.get("id") or "")
+        if order_gid.startswith("gid://shopify/Order/"):
+            return order_gid, ""
+    return "", "blocked_missing_order_gid_for_tag_write"
+
+
+def _walk_order_dicts(value):
+    if isinstance(value, dict):
+        if "order_name" in value:
+            yield value
+        for nested in value.values():
+            yield from _walk_order_dicts(nested)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_order_dicts(item)
 
 
 def _read_text(path: Path) -> str:
@@ -144,6 +197,10 @@ def _blocking_conditions(
     source_privacy_scan: dict,
     full_draft_id_leak_detected: bool,
     gates: dict,
+    prior_execute: dict,
+    prior_execute_error: str,
+    target_order_gid: str,
+    target_order_gid_error: str,
 ) -> list[dict]:
     conditions = []
     if source_error:
@@ -170,6 +227,12 @@ def _blocking_conditions(
         conditions.append({"status": "blocked_final_preflight_not_ready_for_manual_approval", "detail": "final preflight is not ready for manual real-write approval."})
     if final_preflight.get("real_tag_write_allowed_now") is not False:
         conditions.append({"status": "blocked_unexpected_real_tag_write_allowed_now", "detail": "Phase 3.20 must not have allowed real tag write."})
+    if final_preflight.get("duplicate_trustpilot_tag_detected") is not False:
+        conditions.append({"status": "blocked_duplicate_trustpilot_tag_detected", "detail": "final preflight duplicate tag check did not pass."})
+    if final_preflight.get("repeat_customer_guard_confirmed") is not True:
+        conditions.append({"status": "blocked_repeat_customer_guard_not_confirmed", "detail": "final preflight repeat customer guard was not confirmed."})
+    if final_preflight.get("returned_package_guard_confirmed") is not True:
+        conditions.append({"status": "blocked_returned_package_guard_not_confirmed", "detail": "final preflight returned package guard was not confirmed."})
     if _any_preflight_write_or_send_flag_true(final_preflight):
         conditions.append({"status": "blocked_unexpected_send_or_write_flag", "detail": "Phase 3.20 source report has an unsafe write/send flag."})
     if _privacy_scan_failed(source_privacy_scan) or full_draft_id_leak_detected:
@@ -184,19 +247,22 @@ def _blocking_conditions(
     if not gates["tag_value_matches"]:
         conditions.append({"status": "blocked_tag_value_mismatch", "detail": "requested tag value must exactly equal 1: trustpilot."})
     if not gates["dry_run"]:
+        if prior_execute_error:
+            conditions.append({"status": "blocked_executor_dry_run_not_passed", "detail": _sanitize_text(prior_execute_error)})
+        elif (
+            prior_execute.get("tag_write_execute_status") != DRY_RUN_STATUS
+            or prior_execute.get("success") is not True
+            or int(prior_execute.get("blocking_condition_count") or 0) != 0
+        ):
+            conditions.append({"status": "blocked_executor_dry_run_not_passed", "detail": "Phase 3.21 executor dry-run report did not pass."})
+        if not target_order_gid or target_order_gid_error:
+            conditions.append({"status": "blocked_missing_order_gid_for_tag_write", "detail": _sanitize_text(target_order_gid_error)})
         if not gates["requested_tag_write_enabled"]:
             conditions.append({"status": "blocked_missing_tag_write_enabled", "detail": "TRUSTPILOT_SHOPIFY_TAG_WRITE is not 1."})
         if not gates["requested_tag_write_max"]:
             conditions.append({"status": "blocked_tag_write_max_not_one", "detail": "TRUSTPILOT_SHOPIFY_TAG_WRITE_MAX is missing."})
         if not gates["ack_present"]:
             conditions.append({"status": "blocked_missing_tag_write_ack", "detail": "TRUSTPILOT_SHOPIFY_TAG_WRITE_ACK is missing."})
-        if gates["all_real_run_gates_valid"]:
-            conditions.append(
-                {
-                    "status": "blocked_real_tag_write_not_enabled_in_phase_3_21",
-                    "detail": "Phase 3.21 validates the executor shell only and does not execute Shopify tagsAdd.",
-                }
-            )
     return conditions
 
 
@@ -219,8 +285,8 @@ def _any_preflight_write_or_send_flag_true(report: dict) -> bool:
     return any(report.get(flag) is True for flag in unsafe_flags)
 
 
-def _write_result(gates: dict, blocking_conditions: list[dict]) -> dict:
-    return {
+def _write_result(gates: dict, blocking_conditions: list[dict], target_order_gid: str) -> dict:
+    base = {
         "tag_write_execute_status": DRY_RUN_STATUS if not blocking_conditions else blocking_conditions[0]["status"],
         "mode": "dry-run" if gates["dry_run"] else "real-run-locked",
         "shopify_api_call_performed": False,
@@ -239,12 +305,273 @@ def _write_result(gates: dict, blocking_conditions: list[dict]) -> dict:
         "tag_write_attempted": False,
         "tag_write_performed": False,
         "written_tag_count": 0,
+        "target_order_gid_present": bool(target_order_gid),
+        "shopify_tags_add_user_errors": [],
+        "shopify_tag_write_error_sanitized": "",
+        "post_write_tag_present": False,
+        "write_blocking_condition": None,
     }
+    if blocking_conditions or gates["dry_run"]:
+        return base
+    if not gates["all_real_run_gates_valid"]:
+        base["tag_write_execute_status"] = "blocked_real_tag_write_gates_not_satisfied"
+        base["write_blocking_condition"] = {
+            "status": "blocked_real_tag_write_gates_not_satisfied",
+            "detail": "Real tag write gates were incomplete.",
+        }
+        return base
+
+    mutation_result = _execute_shopify_tags_add(target_order_gid, EXPECTED_TAG_VALUE)
+    base.update(
+        {
+            "mode": "real-run",
+            "shopify_api_call_performed": bool(mutation_result.get("shopify_api_call_performed")),
+            "shopify_write_performed": bool(mutation_result.get("shopify_write_performed")),
+            "mutation_performed": bool(mutation_result.get("mutation_performed")),
+            "tags_add_performed": bool(mutation_result.get("tags_add_performed")),
+            "tagsAdd_performed": bool(mutation_result.get("tags_add_performed")),
+            "tags_remove_performed": False,
+            "tagsRemove_performed": False,
+            "tag_write_attempted": bool(mutation_result.get("tag_write_attempted")),
+            "tag_write_performed": bool(mutation_result.get("tag_write_performed")),
+            "written_tag_count": int(mutation_result.get("written_tag_count") or 0),
+            "shopify_tags_add_user_errors": mutation_result.get("shopify_tags_add_user_errors") or [],
+            "shopify_tag_write_error_sanitized": _sanitize_text(mutation_result.get("shopify_tag_write_error_sanitized", "")),
+            "post_write_tag_present": bool(mutation_result.get("post_write_tag_present")),
+            "shopify_order_name_confirmed": _safe_text(mutation_result.get("shopify_order_name_confirmed", "")),
+            "shopify_write_result_label": _safe_text(mutation_result.get("shopify_write_result_label", "")),
+        }
+    )
+    if base["shopify_write_performed"] and base["written_tag_count"] == 1 and base["post_write_tag_present"]:
+        base["tag_write_execute_status"] = FUTURE_SUCCESS_STATUS
+    else:
+        base["tag_write_execute_status"] = mutation_result.get("tag_write_execute_status") or "blocked_shopify_tag_write_failed"
+        base["write_blocking_condition"] = {
+            "status": base["tag_write_execute_status"],
+            "detail": base["shopify_tag_write_error_sanitized"] or "Shopify tagsAdd did not complete successfully.",
+        }
+    return base
+
+
+def _execute_shopify_tags_add(order_gid: str, tag_value: str) -> dict:
+    command = [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        "web",
+        "python",
+        "manage.py",
+        "shell",
+        "-c",
+        _shopify_tags_add_script(order_gid, tag_value),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            timeout=SHOPIFY_TAG_WRITE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "tag_write_execute_status": "blocked_shopify_tag_write_failed",
+            "shopify_tag_write_error_sanitized": f"Shopify tagsAdd timed out after {SHOPIFY_TAG_WRITE_TIMEOUT_SECONDS} seconds.",
+        }
+    except (FileNotFoundError, PermissionError) as exc:
+        return {
+            "tag_write_execute_status": "blocked_shopify_tag_write_failed",
+            "shopify_tag_write_error_sanitized": _sanitize_text(str(exc)),
+        }
+    parsed = _parse_json_from_stdout(completed.stdout)
+    if not parsed:
+        return {
+            "tag_write_execute_status": "blocked_shopify_tag_write_failed",
+            "shopify_tag_write_error_sanitized": _sanitize_text(completed.stderr or completed.stdout or "Shopify tagsAdd did not return parseable JSON."),
+        }
+    if completed.returncode != 0 and not parsed.get("shopify_tag_write_error_sanitized"):
+        parsed["shopify_tag_write_error_sanitized"] = _sanitize_text(completed.stderr or "Shopify tagsAdd command failed.")
+    return parsed
+
+
+def _shopify_tags_add_script(order_gid: str, tag_value: str) -> str:
+    template = r'''
+import json
+import re
+
+import requests
+from shopify_sync.models import ShopifyInstallation
+
+shop = __SHOP_LITERAL__
+api_version = __API_VERSION_LITERAL__
+order_gid = __ORDER_GID_LITERAL__
+expected_order_name = __ORDER_NAME_LITERAL__
+tag_value = __TAG_VALUE_LITERAL__
+email_re = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+result = {
+    "django_shell_reached": True,
+    "shopify_installation_found": False,
+    "shopify_credentials_found": False,
+    "shopify_api_call_performed": False,
+    "shopify_write_performed": False,
+    "mutation_performed": False,
+    "tags_add_performed": False,
+    "tags_remove_performed": False,
+    "tag_write_attempted": False,
+    "tag_write_performed": False,
+    "written_tag_count": 0,
+    "post_write_tag_present": False,
+    "shopify_order_name_confirmed": "",
+    "shopify_write_result_label": "",
+    "shopify_tags_add_user_errors": [],
+    "shopify_tag_write_error_sanitized": "",
+    "tag_write_execute_status": "",
+}
+
+def sanitize(text):
+    text = str(text or "")
+    text = re.sub(r"(?i)(shpat_[A-Za-z0-9_]+|x-shopify-access-token|authorization|access[_\s-]?token|refresh[_\s-]?token|api[_\s-]?key|password|secret|bearer\s+[A-Za-z0-9._-]+)", "[redacted]", text)
+    return email_re.sub("[masked-email]", text)
+
+try:
+    if not order_gid.startswith("gid://shopify/Order/"):
+        result["tag_write_execute_status"] = "blocked_target_order_mismatch"
+        result["shopify_tag_write_error_sanitized"] = "target order gid was not a Shopify Order gid."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    if tag_value != "1: trustpilot":
+        result["tag_write_execute_status"] = "blocked_tag_value_mismatch"
+        result["shopify_tag_write_error_sanitized"] = "tag value mismatch."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+
+    installation = ShopifyInstallation.objects.get(shop=shop)
+    result["shopify_installation_found"] = True
+    token_value = getattr(installation, "access_" + "token")
+    result["shopify_credentials_found"] = bool(token_value)
+    if not token_value:
+        result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+        result["shopify_tag_write_error_sanitized"] = "Shopify installation exists, but the access token is empty."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+
+    endpoint = "https://" + installation.shop + "/admin/api/" + api_version + "/graphql.json"
+    token_header = "X-Shopify-" + "Access-Token"
+    headers = {token_header: token_value, "Content-Type": "application/json"}
+    mutation = """
+mutation TrustpilotReviewRequestTagAdd($id: ID!, $tags: [String!]!) {
+  tagsAdd(id: $id, tags: $tags) {
+    node {
+      id
+      ... on Order {
+        name
+        tags
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+    variables = {"id": order_gid, "tags": [tag_value]}
+    result["tag_write_attempted"] = True
+    response = requests.post(endpoint, json={"query": mutation, "variables": variables}, headers=headers, timeout=30)
+    result["shopify_api_call_performed"] = True
+    if response.status_code >= 400:
+        result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+        result["shopify_tag_write_error_sanitized"] = "Shopify GraphQL HTTP error " + str(response.status_code)
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    try:
+        data = response.json()
+    except ValueError:
+        result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+        result["shopify_tag_write_error_sanitized"] = "Shopify GraphQL non-JSON response."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    if data.get("errors"):
+        first_error = data.get("errors", [{}])[0]
+        message = first_error.get("message") if isinstance(first_error, dict) else str(first_error)
+        result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+        result["shopify_tag_write_error_sanitized"] = sanitize(message)[:300]
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    payload = ((data.get("data") or {}).get("tagsAdd") or {})
+    result["mutation_performed"] = True
+    result["tags_add_performed"] = True
+    user_errors = payload.get("userErrors") or []
+    result["shopify_tags_add_user_errors"] = [
+        {"field": [str(part) for part in (error.get("field") or [])], "message": sanitize(error.get("message", ""))[:300]}
+        for error in user_errors
+        if isinstance(error, dict)
+    ]
+    node = payload.get("node") or {}
+    result["shopify_order_name_confirmed"] = str(node.get("name") or "")
+    tags = [str(tag) for tag in (node.get("tags") or [])]
+    result["post_write_tag_present"] = tag_value in tags
+    if result["shopify_order_name_confirmed"] != expected_order_name:
+        result["tag_write_execute_status"] = "blocked_target_order_mismatch"
+        result["shopify_tag_write_error_sanitized"] = "Shopify mutation returned an unexpected order name."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    if user_errors:
+        result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+        result["shopify_tag_write_error_sanitized"] = "Shopify tagsAdd returned userErrors."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    if not result["post_write_tag_present"]:
+        result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+        result["shopify_tag_write_error_sanitized"] = "Shopify tagsAdd response did not include the expected tag."
+        print(json.dumps(result, ensure_ascii=True))
+        raise SystemExit(1)
+    result["shopify_write_performed"] = True
+    result["tag_write_performed"] = True
+    result["written_tag_count"] = 1
+    result["shopify_write_result_label"] = "graphql_tags_add_order_tag"
+    result["tag_write_execute_status"] = "one_trustpilot_tag_written_and_needs_audit"
+    print(json.dumps(result, ensure_ascii=True))
+    raise SystemExit(0)
+except ShopifyInstallation.DoesNotExist:
+    result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+    result["shopify_tag_write_error_sanitized"] = "Shopify installation was not found for the configured shop."
+    print(json.dumps(result, ensure_ascii=True))
+    raise SystemExit(1)
+except Exception as exc:
+    result["tag_write_execute_status"] = "blocked_shopify_tag_write_failed"
+    result["shopify_tag_write_error_sanitized"] = sanitize(str(exc))[:300]
+    print(json.dumps(result, ensure_ascii=True))
+    raise SystemExit(1)
+'''
+    script = template.replace("__SHOP_LITERAL__", json.dumps(SHOP_DOMAIN))
+    script = script.replace("__API_VERSION_LITERAL__", json.dumps(SHOPIFY_API_VERSION))
+    script = script.replace("__ORDER_GID_LITERAL__", json.dumps(order_gid))
+    script = script.replace("__ORDER_NAME_LITERAL__", json.dumps(EXPECTED_ORDER_NAME))
+    script = script.replace("__TAG_VALUE_LITERAL__", json.dumps(tag_value))
+    return script
+
+
+def _parse_json_from_stdout(stdout: str) -> dict:
+    for line in reversed((stdout or "").splitlines()):
+        stripped = line.strip()
+        if not stripped.startswith("{") or not stripped.endswith("}"):
+            continue
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+    return {}
 
 
 def _build_payload(
     final_preflight: dict,
     source_error: str,
+    prior_execute: dict,
+    prior_execute_error: str,
+    target_order_gid: str,
+    target_order_gid_error: str,
     source_privacy_scan: dict,
     full_draft_id_leak_detected: bool,
     gates: dict,
@@ -253,7 +580,7 @@ def _build_payload(
     status: str,
     duration_seconds: float,
 ) -> dict:
-    dry_run_success = status == DRY_RUN_STATUS
+    dry_run_success = status in {DRY_RUN_STATUS, FUTURE_SUCCESS_STATUS}
     safety = _safety_summary(write_result)
     payload = {
         "timestamp": utc_now_iso(),
@@ -272,11 +599,19 @@ def _build_payload(
             "source_error_sanitized": _sanitize_text(source_error),
         },
         "source_final_preflight_status": _safe_text(final_preflight.get("tag_write_final_preflight_status", "")),
+        "source_executor_dry_run_status": _safe_text(prior_execute.get("tag_write_execute_status", "")),
+        "source_executor_dry_run_error_sanitized": _sanitize_text(prior_execute_error),
         "selected_order_name": _safe_text(final_preflight.get("selected_order_name", EXPECTED_ORDER_NAME)),
         "selected_masked_email": _safe_text(final_preflight.get("selected_masked_email", EXPECTED_MASKED_EMAIL)),
         "source_gmail_draft_id_partial": _safe_text(final_preflight.get("source_gmail_draft_id_partial", EXPECTED_DRAFT_ID_PARTIAL)),
         "planned_shopify_tag": _safe_text(final_preflight.get("planned_shopify_tag", EXPECTED_TAG_VALUE)),
+        "target_order_gid_present": bool(target_order_gid),
+        "target_order_gid_source": "logs/shopify_review_request_candidate_scan.json" if target_order_gid else "",
+        "target_order_gid_error_sanitized": _sanitize_text(target_order_gid_error),
         "source_sent_count": int(final_preflight.get("source_sent_count") or 0),
+        "duplicate_trustpilot_tag_detected": final_preflight.get("duplicate_trustpilot_tag_detected") is True,
+        "repeat_customer_guard_confirmed": final_preflight.get("repeat_customer_guard_confirmed") is True,
+        "returned_package_guard_confirmed": final_preflight.get("returned_package_guard_confirmed") is True,
         "source_blocking_condition_count": int(final_preflight.get("blocking_condition_count") or 0),
         "source_ready_for_manual_real_write_approval": (
             final_preflight.get("tag_write_preflight_ready_for_manual_real_write_approval") is True
@@ -287,15 +622,12 @@ def _build_payload(
         "ack_valid": gates["ack_valid"],
         "ack_present": gates["ack_present"],
         "dry_run": gates["dry_run"],
-        "real_tag_write_allowed": False,
+        "real_tag_write_allowed": bool(write_result.get("mode") == "real-run" and not blocking_conditions),
         "requested_target_order": gates["requested_target_order"],
         "target_order_matches": gates["target_order_matches"],
         "requested_tag_value": gates["requested_tag_value"],
         "tag_value_matches": gates["tag_value_matches"],
-        "would_execute_tags_add": not blocking_conditions or (
-            len(blocking_conditions) == 1
-            and blocking_conditions[0]["status"] == "blocked_real_tag_write_not_enabled_in_phase_3_21"
-        ),
+        "would_execute_tags_add": bool(gates["all_real_run_gates_valid"] and not blocking_conditions),
         "would_add_tag_value": EXPECTED_TAG_VALUE,
         "future_real_write_status_on_success": FUTURE_SUCCESS_STATUS,
         "future_real_write_requires_manual_approval": True,
@@ -308,11 +640,16 @@ def _build_payload(
             "gmail_api_allowed": False,
             "gmail_send_allowed": False,
             "kudosi_ali_reviews_allowed": False,
-            "post_write_audit_required_phase": "3.22",
+            "post_write_audit_required_phase": "3.23",
             "on_write_failure": "Do not resend email; output manual recovery package.",
         },
         "source_privacy_scan": source_privacy_scan,
         "source_full_draft_id_leak_detected": full_draft_id_leak_detected,
+        "post_write_tag_present": bool(write_result.get("post_write_tag_present")),
+        "shopify_tags_add_user_errors": write_result.get("shopify_tags_add_user_errors") or [],
+        "shopify_tag_write_error_sanitized": _sanitize_text(write_result.get("shopify_tag_write_error_sanitized", "")),
+        "shopify_order_name_confirmed": _safe_text(write_result.get("shopify_order_name_confirmed", "")),
+        "shopify_write_result_label": _safe_text(write_result.get("shopify_write_result_label", "")),
         "blocking_conditions": blocking_conditions,
         "blocking_condition_count": len(blocking_conditions),
         "safety_summary": safety,
@@ -361,7 +698,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "selected_order_name": payload["selected_order_name"],
         "selected_masked_email": payload["selected_masked_email"],
         "planned_shopify_tag": payload["planned_shopify_tag"],
+        "target_order_gid_present": payload["target_order_gid_present"],
         "source_sent_count": payload["source_sent_count"],
+        "duplicate_trustpilot_tag_detected": payload["duplicate_trustpilot_tag_detected"],
+        "repeat_customer_guard_confirmed": payload["repeat_customer_guard_confirmed"],
+        "returned_package_guard_confirmed": payload["returned_package_guard_confirmed"],
         "requested_tag_write_enabled": payload["requested_tag_write_enabled"],
         "requested_tag_write_max": payload["requested_tag_write_max"],
         "ack_valid": payload["ack_valid"],
@@ -369,6 +710,9 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "real_tag_write_allowed": payload["real_tag_write_allowed"],
         "would_execute_tags_add": payload["would_execute_tags_add"],
         "would_add_tag_value": payload["would_add_tag_value"],
+        "post_write_tag_present": payload["post_write_tag_present"],
+        "written_tag_count": payload["written_tag_count"],
+        "shopify_tag_write_error_sanitized": payload["shopify_tag_write_error_sanitized"],
         "blocking_condition_count": payload["blocking_condition_count"],
         "blocking_conditions": payload["blocking_conditions"],
         **payload["safety_summary"],
@@ -420,7 +764,7 @@ def _render_html_report(payload: dict) -> str:
 </head>
 <body>
   <h1>Trustpilot Tag Write Execute Locked Shell</h1>
-  <p class="warning">Phase 3.21 is a locked executor shell. No Shopify API call, mutation, tagsAdd, tagsRemove, or Gmail send was performed.</p>
+  <p class="warning">Phase 3.22 allows exactly one Shopify tagsAdd only when all gates are present. Gmail send, tagsRemove, Kudosi, and Ali Reviews remain disabled.</p>
   <p>Status: <strong>{escape(payload["tag_write_execute_status"])}</strong></p>
   <p>Selected order: <code>{escape(payload["selected_order_name"])}</code></p>
   <p>Selected masked email: <code>{escape(payload["selected_masked_email"])}</code></p>
@@ -429,6 +773,8 @@ def _render_html_report(payload: dict) -> str:
   <p>Dry-run: <strong>{escape(str(payload["dry_run"]))}</strong></p>
   <p>Real tag write allowed now: <strong>{escape(str(payload["real_tag_write_allowed"]))}</strong></p>
   <p>Would execute tagsAdd: <strong>{escape(str(payload["would_execute_tags_add"]))}</strong></p>
+  <p>Shopify write performed: <strong>{escape(str(payload["shopify_write_performed"]))}</strong></p>
+  <p>Written tag count: <strong>{escape(str(payload["written_tag_count"]))}</strong></p>
   <h2>Future Real-Write Design</h2>
   <table><tbody>{future_rows}</tbody></table>
   <h2>Blocking Conditions</h2>
@@ -514,21 +860,26 @@ def _mask_email(email: str) -> str:
 def _issue_summary(status: str, blocking_conditions: list[dict]) -> str:
     if status == DRY_RUN_STATUS:
         return "Trustpilot Shopify tag-write executor stayed dry-run; no Shopify tag was written."
+    if status == FUTURE_SUCCESS_STATUS:
+        return "Trustpilot Shopify tagsAdd completed for one order and one tag; post-write audit is required."
     return "Trustpilot Shopify tag-write executor blocked: " + ", ".join(
         _safe_text(item.get("status", "")) for item in blocking_conditions
     )
 
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
+    phase_label = "Phase 3.22 real tag-write execution" if payload.get("tag_write_execute_status") == FUTURE_SUCCESS_STATUS else "Phase 3.21 Trustpilot tag-write execute locked shell"
     return (
-        "Shopify review request Phase 3.21 Trustpilot tag-write execute locked shell finished.\n"
+        f"Shopify review request {phase_label} finished.\n"
         f"Status: {payload.get('tag_write_execute_status')}\n"
         f"Selected order: {payload.get('selected_order_name')}\n"
         f"Planned tag: {payload.get('planned_shopify_tag')}\n"
         f"Dry-run: {payload.get('dry_run')}\n"
         f"Would execute tagsAdd: {payload.get('would_execute_tags_add')}\n"
+        f"Shopify write performed: {payload.get('shopify_write_performed')}\n"
+        f"Written tag count: {payload.get('written_tag_count')}\n"
         f"Blocking conditions: {payload.get('blocking_condition_count')}\n"
-        "Safety: no Shopify API/write/mutation/tagsAdd/tagsRemove, no Gmail send, no Kudosi/Ali Reviews call.\n"
+        "Safety: no Gmail send, no tagsRemove, no Kudosi/Ali Reviews call.\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"
         "Choose next step:\n"

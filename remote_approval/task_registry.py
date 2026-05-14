@@ -78,6 +78,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_tag_desi
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_design_dry_run_task import (
     run_shopify_review_request_trustpilot_tag_write_design_dry_run_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_audit_task import (
+    run_shopify_review_request_trustpilot_tag_write_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_execute_task import (
     run_shopify_review_request_trustpilot_tag_write_execute_task,
 )
@@ -315,6 +318,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_tag_write_design_dry_run": (
         run_shopify_review_request_trustpilot_tag_write_design_dry_run_task
+    ),
+    "shopify_review_request_trustpilot_tag_write_audit": (
+        run_shopify_review_request_trustpilot_tag_write_audit_task
     ),
     "shopify_review_request_trustpilot_tag_write_execute": (
         run_shopify_review_request_trustpilot_tag_write_execute_task
@@ -631,6 +637,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_trustpilot_tag_write_design_dry_run.json",
+    },
+    "shopify_review_request_trustpilot_tag_write_audit": {
+        "description": "Audit the Trustpilot Shopify tag write with read-only tag readback and tolerant legacy tag matching.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify tag readback; no mutations",
+        "review_file_path": "logs/shopify_review_request_trustpilot_tag_write_audit.json",
     },
     "shopify_review_request_trustpilot_tag_write_execute": {
         "description": "Validate the locked executor shell for a future one-tag Trustpilot Shopify tag write without writing.",
