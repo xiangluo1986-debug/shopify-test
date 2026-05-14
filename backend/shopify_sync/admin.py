@@ -51,6 +51,7 @@ MERGED_SETTLEMENT_BLOCKED_STATUSES = {
 }
 MERGED_GROUP_BATCH_ALLOWED_STATUSES = {"draft", "active"}
 MERGED_GROUP_BATCH_ALLOWED_SETTLEMENT_STATUSES = {"cost_confirmed", "pending_warehouse"}
+MERGED_GROUP_COST_LOCKED_SETTLEMENT_STATUSES = {"pending_payment", "payment_submitted", "paid"}
 MERGED_GROUP_BATCH_BLOCKED_ORDER_STATUSES = {
     "pending_payment",
     "payment_submitted",
@@ -3068,6 +3069,10 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             self.message_user(request, "只有 Finance 或超级管理员可以执行此操作。")
             return
         valid_orders = queryset.filter(settlement_status="cost_confirmed")
+        valid_orders, blocked_count = self._exclude_old_single_order_flow_blocked_orders(
+            request,
+            valid_orders,
+        )
         updated = valid_orders.update(settlement_status="pending_payment")
         if updated != queryset.count():
             self.message_user(
@@ -3077,6 +3082,13 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             )
         else:
             self.message_user(request, f"Admin/Finance 已审核 {updated} 个订单，状态已进入待结算。")
+
+        if blocked_count:
+            self.message_user(
+                request,
+                f"Blocked {blocked_count} orders from old single-order payment flow because they are covered by an active entry or merged group.",
+                level=messages.ERROR,
+            )
 
     mark_pending_payment.short_description = "Admin/Finance 审核订单 / 进入待结算"
 
@@ -3089,7 +3101,12 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             settlement_status="pending_payment",
             settlement_batch__isnull=False,
         )
-        skipped = queryset.count() - eligible_orders.count()
+        eligible_count_before_guard = eligible_orders.count()
+        eligible_orders, blocked_count = self._exclude_old_single_order_flow_blocked_orders(
+            request,
+            eligible_orders,
+        )
+        skipped = queryset.count() - eligible_count_before_guard
         order_ids = list(eligible_orders.values_list("pk", flat=True))
         updated = ShopifyOrder.objects.filter(pk__in=order_ids).update(settlement_status="payment_submitted")
         now = timezone.now()
@@ -3115,6 +3132,12 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 f"有 {skipped} 个订单未提交支付：必须是待支付状态，并且已加入结算批次。",
                 level=messages.WARNING,
             )
+        if blocked_count:
+            self.message_user(
+                request,
+                f"Blocked {blocked_count} orders from old single-order submit flow because they are covered by an active entry or merged group.",
+                level=messages.ERROR,
+            )
 
     submit_payment.short_description = "提交支付 / 等待深圳仓确认收款"
 
@@ -3124,9 +3147,14 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return
 
         eligible_orders = queryset.filter(settlement_status="payment_submitted")
+        eligible_count_before_guard = eligible_orders.count()
+        eligible_orders, blocked_count = self._exclude_old_single_order_flow_blocked_orders(
+            request,
+            eligible_orders,
+        )
         paid_order_ids = []
         skipped_missing_proof = 0
-        skipped_invalid = queryset.count() - eligible_orders.count()
+        skipped_invalid = queryset.count() - eligible_count_before_guard
         for order in eligible_orders.select_related("settlement_batch"):
             if not order.settlement_batch_id or not order.settlement_batch.payment_proof:
                 skipped_missing_proof += 1
@@ -3151,6 +3179,12 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             self.message_user(request, f"有 {skipped_missing_proof} 个订单未标记：结算批次缺少付款凭证。", level=messages.WARNING)
         if skipped_invalid:
             self.message_user(request, f"有 {skipped_invalid} 个订单未标记：必须先处于“已提交支付，待深圳仓确认收款”状态。", level=messages.WARNING)
+        if blocked_count:
+            self.message_user(
+                request,
+                f"Blocked {blocked_count} orders from old single-order paid flow because they are covered by an active entry or merged group.",
+                level=messages.ERROR,
+            )
 
     mark_paid.short_description = "深圳仓确认收款 / 标记已支付"
 
@@ -3183,6 +3217,28 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             )
 
         return None
+
+    def _exclude_old_single_order_flow_blocked_orders(self, request, queryset):
+        blocked_order_ids = []
+        guard_messages = []
+        for order in queryset:
+            guard_message = self._old_settlement_batch_guard_message(order)
+            if guard_message:
+                blocked_order_ids.append(order.pk)
+                guard_messages.append(guard_message)
+
+        if not blocked_order_ids:
+            return queryset, 0
+
+        for guard_message in guard_messages[:10]:
+            self.message_user(request, guard_message, level=messages.ERROR)
+        if len(guard_messages) > 10:
+            self.message_user(
+                request,
+                f"Another {len(guard_messages) - 10} orders were blocked by active entry coverage.",
+                level=messages.ERROR,
+            )
+        return queryset.exclude(pk__in=blocked_order_ids), len(blocked_order_ids)
 
     def add_to_settlement_batch(self, request, queryset):
         if not (self.is_finance_user(request) or self.is_super_admin(request)):
@@ -3515,6 +3571,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         if (
             obj
             and obj.status in {"draft", "active"}
+            and obj.settlement_status not in MERGED_GROUP_COST_LOCKED_SETTLEMENT_STATUSES
             and self._can_edit_merged_group_costs(request)
         ):
             readonly = [
@@ -3741,6 +3798,66 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         )
     address_snapshot_display.short_description = "Address snapshot"
 
+    def linked_batch_entries_display(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+        entries = (
+            obj.settlement_batch_entries.exclude(
+                status=SettlementBatchEntry.STATUS_CANCELLED,
+            )
+            .select_related("settlement_batch")
+            .order_by("-created_at", "-id")
+        )
+        total = entries.count()
+        if total == 0:
+            return "-"
+
+        rows = []
+        for entry in entries[:20]:
+            batch = entry.settlement_batch
+            url = reverse("admin:shopify_sync_settlementbatch_change", args=[batch.pk])
+            rows.append((
+                url,
+                batch.batch_no,
+                batch.status,
+                entry.status,
+                self._format_rmb(entry.amount_rmb),
+            ))
+        suffix = ""
+        if total > len(rows):
+            suffix = format_html(
+                '<div style="margin-top:4px;color:#667085;">Another {} entries not shown.</div>',
+                total - len(rows),
+            )
+        return format_html(
+            '<table style="line-height:1.5;">'
+            '<tr><th style="text-align:left;padding-right:12px;">Batch</th>'
+            '<th style="text-align:left;padding-right:12px;">Batch status</th>'
+            '<th style="text-align:left;padding-right:12px;">Entry status</th>'
+            '<th style="text-align:left;">Amount</th></tr>{}</table>{}',
+            format_html_join(
+                "",
+                '<tr><td style="padding-right:12px;"><a href="{}">{}</a></td>'
+                '<td style="padding-right:12px;">{}</td>'
+                '<td style="padding-right:12px;">{}</td><td>{}</td></tr>',
+                rows,
+            ),
+            suffix,
+        )
+    linked_batch_entries_display.short_description = "Linked batch entries"
+
+    def payment_lock_notice(self, obj):
+        if not obj or obj.settlement_status not in MERGED_GROUP_COST_LOCKED_SETTLEMENT_STATUSES:
+            return "-"
+        return format_html(
+            '<div style="padding:8px 10px;border:1px solid #fdb022;'
+            'background:#fffaeb;color:#93370d;border-radius:4px;font-weight:600;">'
+            'This merged group is in payment flow ({}) and costs/members are locked in admin.'
+            '</div>',
+            obj.settlement_status,
+        )
+    payment_lock_notice.short_description = "Payment lock"
+
     def merged_group_cost_summary(self, obj):
         if not obj or not obj.pk:
             return "-"
@@ -3753,6 +3870,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         rows = (
             ("合并组编号 group_no", obj.group_no or obj.pk),
             ("状态", obj.get_status_display()),
+            ("Settlement status", settlement_status_admin_label(obj.settlement_status)),
             ("成员订单数量", summary["member_order_count"]),
             ("深圳仓 item 数量", summary["shenzhen_item_count"]),
             ("产品成本合计 RMB", self._format_rmb(summary["group_product_cost_rmb"])),
@@ -3761,6 +3879,8 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             ("合并结算总成本 RMB", total_cost),
             ("成本完整性状态", self.group_cost_completed_display(obj)),
             ("成员订单号列表", self.member_order_list_display(obj)),
+            ("Linked batch entries", self.linked_batch_entries_display(obj)),
+            ("Payment lock", self.payment_lock_notice(obj)),
             ("地址快照", self.address_snapshot_display(obj)),
             (
                 "note",
@@ -4189,6 +4309,20 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             status=SettlementBatchEntry.STATUS_CANCELLED,
         )
         has_active_entries = active_entries.exists()
+        active_entries_count = active_entries.count()
+        paid_entries_count = active_entries.filter(
+            status=SettlementBatchEntry.STATUS_PAID,
+        ).count()
+        merged_group_entries = active_entries.filter(
+            entry_type=SettlementBatchEntry.ENTRY_TYPE_MERGED_GROUP,
+        )
+        merged_groups_count = merged_group_entries.count()
+        payment_submitted_groups_count = merged_group_entries.filter(
+            merged_group__settlement_status="payment_submitted",
+        ).count()
+        paid_groups_count = merged_group_entries.filter(
+            merged_group__settlement_status="paid",
+        ).count()
         old_order_ids = set(obj.orders.values_list("id", flat=True))
         old_orders_amount_total = sum(
             (order.total_locked_cost_rmb or ZERO)
@@ -4238,11 +4372,16 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
 
         rows = (
             ("汇总口径", summary_mode),
+            ("entries flow status", obj.status if has_active_entries else "-"),
             ("entries amount total", self._format_batch_amount(entries_amount_total)),
             ("old orders amount total", self._format_batch_amount(old_orders_amount_total)),
             ("current batch total", self._format_batch_amount(obj.total_amount_rmb)),
             ("old orders count", len(old_order_ids)),
-            ("active entries count", active_entries.count()),
+            ("active entries count", active_entries_count),
+            ("paid entries count", paid_entries_count),
+            ("merged groups count", merged_groups_count),
+            ("payment submitted groups count", payment_submitted_groups_count),
+            ("paid groups count", paid_groups_count),
             ("covered orders count", covered_orders_count),
             ("potential duplicate risk count", duplicate_count),
         )
@@ -4257,25 +4396,168 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         )
     settlement_entry_summary.short_description = "Settlement entry summary"
 
+    def _submit_entries_batch_payment(self, request, batch, now):
+        with transaction.atomic():
+            batch = SettlementBatch.objects.select_for_update().get(pk=batch.pk)
+            active_entries = list(
+                self._active_batch_entries(batch).select_for_update()
+            )
+            if not active_entries:
+                return {
+                    "entries_processed": 0,
+                    "merged_groups_updated": 0,
+                    "order_entries_updated": 0,
+                }
+
+            batch.status = "payment_submitted"
+            batch.payment_submitted_at = now
+            batch.payment_submitted_by = request.user.get_username()
+            batch.save(update_fields=["status", "payment_submitted_at", "payment_submitted_by"])
+
+            entries_processed = 0
+            merged_groups_updated = 0
+            order_entries_updated = 0
+            for entry in active_entries:
+                if entry.status == SettlementBatchEntry.STATUS_PAID:
+                    continue
+                entries_processed += 1
+                if (
+                    entry.entry_type == SettlementBatchEntry.ENTRY_TYPE_MERGED_GROUP
+                    and entry.merged_group_id
+                ):
+                    merged_groups_updated += ShenzhenMergedSettlementGroup.objects.filter(
+                        pk=entry.merged_group_id,
+                    ).exclude(
+                        settlement_status="paid",
+                    ).update(
+                        settlement_status="payment_submitted",
+                        updated_at=now,
+                    )
+                    continue
+                if entry.entry_type == SettlementBatchEntry.ENTRY_TYPE_ORDER and entry.order_id:
+                    order_entries_updated += ShopifyOrder.objects.filter(
+                        pk=entry.order_id,
+                        settlement_status="pending_payment",
+                    ).update(settlement_status="payment_submitted")
+
+            return {
+                "entries_processed": entries_processed,
+                "merged_groups_updated": merged_groups_updated,
+                "order_entries_updated": order_entries_updated,
+            }
+
+    def _mark_entries_batch_paid(self, batch, now):
+        with transaction.atomic():
+            batch = SettlementBatch.objects.select_for_update().get(pk=batch.pk)
+            active_entries = list(
+                self._active_batch_entries(batch).select_for_update()
+            )
+            if not active_entries:
+                return {
+                    "entries_paid": 0,
+                    "merged_groups_paid": 0,
+                    "order_entries_paid": 0,
+                }
+
+            batch.status = "paid"
+            batch.paid_at = now
+            batch.save(update_fields=["status", "paid_at"])
+
+            entry_ids_to_mark_paid = [
+                entry.pk
+                for entry in active_entries
+                if entry.status != SettlementBatchEntry.STATUS_PAID
+            ]
+            if entry_ids_to_mark_paid:
+                SettlementBatchEntry.objects.filter(
+                    pk__in=entry_ids_to_mark_paid,
+                ).update(
+                    status=SettlementBatchEntry.STATUS_PAID,
+                    updated_at=now,
+                )
+
+            merged_groups_paid = 0
+            order_entries_paid = 0
+            for entry in active_entries:
+                if (
+                    entry.entry_type == SettlementBatchEntry.ENTRY_TYPE_MERGED_GROUP
+                    and entry.merged_group_id
+                ):
+                    merged_groups_paid += ShenzhenMergedSettlementGroup.objects.filter(
+                        pk=entry.merged_group_id,
+                    ).exclude(
+                        settlement_status="paid",
+                    ).update(
+                        settlement_status="paid",
+                        updated_at=now,
+                    )
+                    continue
+                if entry.entry_type == SettlementBatchEntry.ENTRY_TYPE_ORDER and entry.order_id:
+                    order_entries_paid += ShopifyOrder.objects.filter(
+                        pk=entry.order_id,
+                    ).exclude(
+                        settlement_status="paid",
+                    ).update(settlement_status="paid")
+
+            return {
+                "entries_paid": len(entry_ids_to_mark_paid),
+                "merged_groups_paid": merged_groups_paid,
+                "order_entries_paid": order_entries_paid,
+            }
+
     def submit_batch_payment(self, request, queryset):
         if not (self.is_super_admin(request) or self.is_finance_user(request)):
             self.message_user(request, "只有 Finance 或超级管理员可以提交支付。", level=messages.WARNING)
             return
-        updated = 0
+        old_flow_updated = 0
+        entries_flow_updated = 0
+        entries_processed = 0
+        merged_groups_updated = 0
+        order_entries_updated = 0
         skipped = 0
+        mixed_batches = 0
         now = timezone.now()
         for batch in queryset:
             if batch.status != "pending_payment":
                 skipped += 1
                 continue
+            if self._active_batch_entries(batch).exists():
+                if batch.orders.exists():
+                    mixed_batches += 1
+                result = self._submit_entries_batch_payment(request, batch, now)
+                entries_flow_updated += 1
+                entries_processed += result["entries_processed"]
+                merged_groups_updated += result["merged_groups_updated"]
+                order_entries_updated += result["order_entries_updated"]
+                continue
+
             batch.status = "payment_submitted"
             batch.payment_submitted_at = now
             batch.payment_submitted_by = request.user.get_username()
             batch.save(update_fields=["status", "payment_submitted_at", "payment_submitted_by"])
             batch.orders.filter(settlement_status="pending_payment").update(settlement_status="payment_submitted")
-            updated += 1
-        if updated:
-            self.message_user(request, f"已提交支付 {updated} 个结算批次，相关订单进入“已提交支付，待深圳仓确认收款”。")
+            old_flow_updated += 1
+        if entries_flow_updated:
+            self.message_user(
+                request,
+                (
+                    f"Entries flow payment submitted for {entries_flow_updated} batches: "
+                    f"processed {entries_processed} entries, updated {merged_groups_updated} "
+                    f"merged groups and {order_entries_updated} order entries. Member orders in "
+                    "merged groups were not updated."
+                ),
+            )
+        if old_flow_updated:
+            self.message_user(request, f"已提交支付 {old_flow_updated} 个结算批次，相关订单进入“已提交支付，待深圳仓确认收款”。")
+        if mixed_batches:
+            self.message_user(
+                request,
+                (
+                    f"{mixed_batches} batches contain both old orders and entries; entries flow "
+                    "was used and old orders were not updated. Please confirm there is no duplicate settlement."
+                ),
+                level=messages.WARNING,
+            )
         if skipped:
             self.message_user(request, f"有 {skipped} 个结算批次未提交支付：必须是待支付状态。", level=messages.WARNING)
     submit_batch_payment.short_description = "提交支付 / 等待深圳仓确认收款"
@@ -4284,9 +4566,15 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         if not self.is_shenzhen_user(request):
             self.message_user(request, "只有 Shenzhen Warehouse 可以确认收款。", level=messages.WARNING)
             return
-        updated = 0
+        old_flow_updated = 0
+        entries_flow_updated = 0
+        entries_paid = 0
+        merged_groups_paid = 0
+        order_entries_paid = 0
         skipped_status = 0
         skipped_missing_proof = 0
+        mixed_batches = 0
+        now = timezone.now()
         for batch in queryset:
             if batch.status != "payment_submitted":
                 skipped_status += 1
@@ -4294,13 +4582,42 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             if not batch.payment_proof:
                 skipped_missing_proof += 1
                 continue
+            if self._active_batch_entries(batch).exists():
+                if batch.orders.exists():
+                    mixed_batches += 1
+                result = self._mark_entries_batch_paid(batch, now)
+                entries_flow_updated += 1
+                entries_paid += result["entries_paid"]
+                merged_groups_paid += result["merged_groups_paid"]
+                order_entries_paid += result["order_entries_paid"]
+                continue
+
             batch.status = "paid"
-            batch.paid_at = timezone.now()
+            batch.paid_at = now
             batch.save(update_fields=["status", "paid_at"])
             batch.orders.filter(settlement_status="payment_submitted").update(settlement_status="paid")
-            updated += 1
-        if updated:
-            self.message_user(request, f"深圳仓已确认收款，{updated} 个结算批次和对应订单已标记为已支付。")
+            old_flow_updated += 1
+        if entries_flow_updated:
+            self.message_user(
+                request,
+                (
+                    f"Entries flow marked paid for {entries_flow_updated} batches: "
+                    f"updated {entries_paid} entries, {merged_groups_paid} merged groups, "
+                    f"and {order_entries_paid} order entries. Member orders in merged groups "
+                    "were not updated."
+                ),
+            )
+        if old_flow_updated:
+            self.message_user(request, f"深圳仓已确认收款，{old_flow_updated} 个结算批次和对应订单已标记为已支付。")
+        if mixed_batches:
+            self.message_user(
+                request,
+                (
+                    f"{mixed_batches} batches contain both old orders and entries; entries flow "
+                    "was used and old orders were not updated. Please confirm there is no duplicate settlement."
+                ),
+                level=messages.WARNING,
+            )
         if skipped_status:
             self.message_user(request, f"有 {skipped_status} 个结算批次未确认：必须先提交支付。", level=messages.WARNING)
         if skipped_missing_proof:
