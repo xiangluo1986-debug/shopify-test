@@ -36,8 +36,8 @@ DECISION_BUCKETS = [
     "blocked_no_email",
     "blocked_refund_or_cancelled",
     "blocked_ticket_risk",
+    "blocked_existing_trustpilot_invitation_tag",
     "trustpilot_gmail_candidate_dry_run",
-    "trustpilot_already_requested_route_to_ali_if_eligible",
     "ali_reviews_candidate_waiting_for_send_api",
     "already_review_sent_skip",
     "existing_manual_review_request_tag_present",
@@ -209,7 +209,8 @@ def _decision_row(order: dict) -> dict:
     has_no_email = not bool(order.get("email_present")) or not masked_email
     has_refund_or_cancelled = _has_bucket(order, {"blocked_cancelled", "blocked_refunded_or_partially_refunded"})
     has_ticket_risk = _has_ticket_risk(order)
-    has_trustpilot_tag = any(_normalize_tag(alias) in normalized_tags for alias in TRUSTPILOT_TAG_ALIASES)
+    matched_trustpilot_tags = _matched_trustpilot_invitation_tags(order, tags)
+    has_trustpilot_tag = bool(matched_trustpilot_tags)
     has_returned_package_tag = _has_returned_package_tag(tags)
     has_review_sent = ALI_REVIEW_SENT_TAG in tag_set
     has_historical_manual = HISTORICAL_ALI_MANUAL_TAG in tag_set
@@ -224,10 +225,10 @@ def _decision_row(order: dict) -> dict:
         decision = "blocked_refund_or_cancelled"
     elif has_ticket_risk:
         decision = "blocked_ticket_risk"
+    elif has_trustpilot_tag:
+        decision = "blocked_existing_trustpilot_invitation_tag"
     elif has_review_sent:
         decision = "already_review_sent_skip"
-    elif repeat_detected and has_trustpilot_tag:
-        decision = "trustpilot_already_requested_route_to_ali_if_eligible"
     elif repeat_detected and not has_trustpilot_tag:
         decision = "trustpilot_gmail_candidate_dry_run"
     elif has_delivered and has_ali_pending:
@@ -244,6 +245,8 @@ def _decision_row(order: dict) -> dict:
         "repeat_customer_count": order.get("customer_repeat_count") if isinstance(order.get("customer_repeat_count"), int) else None,
         "repeat_customer_detected": repeat_detected,
         "safe_tags_summary": _tags_summary(tags),
+        "existing_trustpilot_invitation_tag_detected": has_trustpilot_tag,
+        "matched_trustpilot_invitation_tags": matched_trustpilot_tags,
         "risk_summary": _risk_summary(order),
         "decision": decision,
         "planned_next_action": _planned_next_action(decision),
@@ -278,6 +281,7 @@ def _tags_summary(tags: list[str]) -> dict:
         "contains_ali_review_pending_tag": ALI_REVIEW_PENDING_TAG in tags,
         "contains_ali_review_sent_tag": ALI_REVIEW_SENT_TAG in tags,
         "contains_trustpilot_alias": any(_normalize_tag(alias) in {_normalize_tag(tag) for tag in tags} for alias in TRUSTPILOT_TAG_ALIASES),
+        "matched_trustpilot_invitation_tags": _matched_trustpilot_tags_from_tags(tags),
         "tags_of_interest": [
             tag
             for tag in tags
@@ -317,8 +321,8 @@ def _planned_next_action(decision: str) -> str:
         "blocked_returned_package": "Do not send any review request; return/returned package tag indicates return-to-warehouse risk.",
         "blocked_refund_or_cancelled": "Do not send; refund, partial refund, dispute, or cancellation risk.",
         "blocked_ticket_risk": "Do not send; ticket/risk case requires resolution first.",
+        "blocked_existing_trustpilot_invitation_tag": "Do not create a draft, send Gmail, or write Shopify tag; an existing Trustpilot invitation tag already marks this order/customer history.",
         "trustpilot_gmail_candidate_dry_run": "Dry-run only: future Gmail Trustpilot invitation preview; no email sent.",
-        "trustpilot_already_requested_route_to_ali_if_eligible": "Do not send another Trustpilot request; route to Ali Reviews path if otherwise eligible.",
         "ali_reviews_candidate_waiting_for_send_api": "Wait for confirmed Ali Reviews/Kudosi send API before any product review request.",
         "already_review_sent_skip": "Skip; Review sent tag already present.",
         "existing_manual_review_request_tag_present": "Keep historical manual tag unchanged; manual Ali Reviews status check may be needed.",
@@ -343,6 +347,27 @@ def _tag_plan(decision: str) -> dict:
             "performed": False,
         }
     return {"future_after_success_only": False, "remove": [], "add": [], "performed": False}
+
+
+def _matched_trustpilot_invitation_tags(order: dict, current_order_tags: list[str]) -> list[str]:
+    matched = _matched_trustpilot_tags_from_tags(current_order_tags)
+    tag_summary = order.get("safe_tags_summary") if isinstance(order.get("safe_tags_summary"), dict) else {}
+    for key in ("tags_of_interest", "safe_tags", "exact_tags_of_interest", "matched_trustpilot_invitation_tags"):
+        matched.extend(_matched_trustpilot_tags_from_tags(tag_summary.get(key, []) or []))
+    for key in ("customer_history_tags", "customer_order_tags", "historical_order_tags", "customer_historical_order_tags"):
+        matched.extend(_matched_trustpilot_tags_from_tags(order.get(key, []) or []))
+    if order.get("contains_trustpilot_alias") is True or tag_summary.get("contains_trustpilot_alias") is True:
+        matched.append("trustpilot_alias_present_in_source_summary")
+    if order.get("existing_trustpilot_invitation_tag_detected") is True or order.get("customer_historical_trustpilot_tag_detected") is True:
+        matched.append("trustpilot_alias_present_in_customer_history")
+    return sorted(set(_safe_text(tag) for tag in matched if _safe_text(tag)))
+
+
+def _matched_trustpilot_tags_from_tags(tags) -> list[str]:
+    aliases = {_normalize_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}
+    if not isinstance(tags, list):
+        return []
+    return [_safe_text(tag) for tag in tags if _normalize_tag(tag) in aliases]
 
 
 def _first_trustpilot_preview_email(decisions: list[dict]) -> dict:

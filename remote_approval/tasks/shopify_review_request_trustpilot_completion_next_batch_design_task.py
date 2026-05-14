@@ -295,6 +295,16 @@ def _build_payload(
             "post_write_audit_passed": tag_write_audit.get("tag_write_audit_status") == EXPECTED_TAG_WRITE_AUDIT_STATUS,
             "canonical_tag_present": tag_write_audit.get("canonical_trustpilot_tag_present") is True,
             "legacy_typo_tag_detected": tag_write_audit.get("legacy_trustpilot_tag_detected") is True,
+            "already_completed_trustpilot_invitation": (
+                send_audit.get("email_sent_confirmed") is True
+                and tag_write_audit.get("canonical_trustpilot_tag_present") is True
+                and tag_write_audit.get("tag_write_audit_status") == EXPECTED_TAG_WRITE_AUDIT_STATUS
+            ),
+            "current_order_duplicate_classification_if_reprocessed": "blocked_existing_trustpilot_invitation_tag",
+            "existing_trustpilot_invitation_tag_alias_detected": (
+                tag_write_audit.get("canonical_trustpilot_tag_present") is True
+                or tag_write_audit.get("legacy_trustpilot_tag_detected") is True
+            ),
             "no_gmail_second_send_performed": not any(
                 report.get(flag) is True
                 for report in (tag_write_execute, tag_write_audit)
@@ -382,10 +392,22 @@ def _next_batch_safety_design() -> dict:
             "delivered_tag_does_not_override_return_block": True,
         },
         "duplicate_protection": {
-            "existing_trustpilot_alias_must_block_duplicate_send": True,
+            "existing_order_trustpilot_alias_must_block_duplicate_send": True,
+            "customer_history_trustpilot_alias_must_block_duplicate_send": True,
             "existing_trustpilot_alias_must_block_duplicate_tag_write": True,
+            "blocked_classification": "blocked_existing_trustpilot_invitation_tag",
+            "when_blocked_create_gmail_draft": False,
+            "when_blocked_send_gmail": False,
+            "when_blocked_write_shopify_tag": False,
             "alias_matching_normalizes_colon_spacing": True,
             "alias_matching_tolerates_trustpoilt_typo": True,
+            "current_phase_4_0_second_send_for_possible_missing_review_allowed": False,
+        },
+        "future_trustpilot_review_status_readback": {
+            "not_in_current_phase_4_0_scope": True,
+            "invitation_sent_and_reviewed": "permanently_block_future_trustpilot_invitation",
+            "invitation_sent_but_not_reviewed": "future_follow_up_candidate_only_after_separate_design",
+            "existing_invitation_tag_still_blocks_current_phase_duplicate_send": True,
         },
         "send_limits": {
             "max_gmail_sends_per_real_run": 1,
@@ -451,6 +473,8 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "post_write_audit_passed": summary["post_write_audit_passed"],
         "canonical_tag_present": summary["canonical_tag_present"],
         "legacy_typo_tag_detected": summary["legacy_typo_tag_detected"],
+        "already_completed_trustpilot_invitation": summary["already_completed_trustpilot_invitation"],
+        "current_order_duplicate_classification_if_reprocessed": summary["current_order_duplicate_classification_if_reprocessed"],
         "no_other_orders_processed": summary["no_other_orders_processed"],
         "blocking_condition_count": payload["blocking_condition_count"],
         "blocking_conditions": payload["blocking_conditions"],
@@ -522,6 +546,8 @@ def _render_html_report(payload: dict) -> str:
     <tr><th>Post-write audit passed</th><td>{escape(str(summary["post_write_audit_passed"]))}</td></tr>
     <tr><th>Canonical tag present</th><td>{escape(str(summary["canonical_tag_present"]))}</td></tr>
     <tr><th>Legacy typo tag detected</th><td>{escape(str(summary["legacy_typo_tag_detected"]))}</td></tr>
+    <tr><th>Already completed Trustpilot invitation</th><td>{escape(str(summary["already_completed_trustpilot_invitation"]))}</td></tr>
+    <tr><th>Duplicate classification if reprocessed</th><td><code>{escape(summary["current_order_duplicate_classification_if_reprocessed"])}</code></td></tr>
     <tr><th>No other orders processed</th><td>{escape(str(summary["no_other_orders_processed"]))}</td></tr>
   </tbody></table>
   <h2>Trustpilot Tag Alias Matching</h2>
@@ -625,6 +651,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Written tag count: {summary.get('written_tag_count')}\n"
         f"Canonical tag present: {summary.get('canonical_tag_present')}\n"
         f"Legacy typo tag detected: {summary.get('legacy_typo_tag_detected')}\n"
+        f"Already completed Trustpilot invitation: {summary.get('already_completed_trustpilot_invitation')}\n"
+        f"Duplicate classification if reprocessed: {summary.get('current_order_duplicate_classification_if_reprocessed')}\n"
         f"Blocking conditions: {payload.get('blocking_condition_count')}\n"
         "Safety: no Gmail API/draft/send, no Shopify API/write/mutation/tagsAdd/tagsRemove, no Kudosi/Ali Reviews call.\n"
         f"JSON report: {json_path}\n"

@@ -17,6 +17,7 @@ SOURCE_JSON_PATH = LOG_DIR / "shopify_review_request_unified_decision_engine_dry
 REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_draft_package.json"
 REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_gmail_draft_package.html"
 
+BLOCKED_EXISTING_TRUSTPILOT_INVITATION_TAG = "blocked_existing_trustpilot_invitation_tag"
 GMAIL_SEND_FROM = "info@kidstoylover.com"
 TRUSTPILOT_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 TRUSTPILOT_TAG = "1: trustpilot"
@@ -107,7 +108,7 @@ def _build_local_drafts(source_report: dict) -> list[dict]:
         if not isinstance(row, dict) or row.get("decision") != TARGET_DECISION:
             continue
         draft = _draft_from_decision_row(row)
-        if draft["blocked_reason"] == "blocked_existing_trustpilot_tag":
+        if draft["blocked_reason"] == BLOCKED_EXISTING_TRUSTPILOT_INVITATION_TAG:
             drafts.append(draft)
             continue
         if not draft["masked_email"]:
@@ -120,7 +121,7 @@ def _draft_from_decision_row(row: dict) -> dict:
     first_name = _safe_first_name(row)
     body = BODY_TEMPLATE.format(first_name=first_name)
     tag_summary = row.get("safe_tags_summary") if isinstance(row.get("safe_tags_summary"), dict) else {}
-    blocked_reason = "blocked_existing_trustpilot_tag" if _has_existing_trustpilot_tag(tag_summary) else ""
+    blocked_reason = BLOCKED_EXISTING_TRUSTPILOT_INVITATION_TAG if _has_existing_trustpilot_tag(tag_summary) else ""
     return {
         "order_name": _safe_text(row.get("order_name", "")),
         "order_id_or_gid": _safe_text(row.get("order_id_or_gid", "")),
@@ -364,15 +365,15 @@ def _draft_package_status(source_error: str, source_ready: bool, enabled: bool, 
 def _blocked_counts(local_drafts: list[dict], gmail_result: dict, enabled: bool) -> dict:
     counts = {
         "blocked_missing_email": 0,
-        "blocked_existing_trustpilot_tag": 0,
+        BLOCKED_EXISTING_TRUSTPILOT_INVITATION_TAG: 0,
         "blocked_missing_gmail_oauth": gmail_result["blocked_missing_gmail_oauth"] if enabled else 0,
         "blocked_gmail_draft_limit": gmail_result["blocked_gmail_draft_limit"] if enabled else 0,
     }
     for draft in local_drafts:
         if draft["blocked_reason"] == "blocked_missing_email":
             counts["blocked_missing_email"] += 1
-        elif draft["blocked_reason"] == "blocked_existing_trustpilot_tag":
-            counts["blocked_existing_trustpilot_tag"] += 1
+        elif draft["blocked_reason"] == BLOCKED_EXISTING_TRUSTPILOT_INVITATION_TAG:
+            counts[BLOCKED_EXISTING_TRUSTPILOT_INVITATION_TAG] += 1
     return counts
 
 
