@@ -2,6 +2,7 @@
 
 ## 2026-05-14
 
+- Added Phase C Shopify Orders admin action for creating draft Shenzhen merged settlement groups from selected eligible orders, with strict no-package, no-settlement-batch, exact-address, status, active-group, and item-level shipping/ordering-cost guards.
 - Added Phase B base models and read-only Admin display for Shenzhen merged settlement groups, keeping Shopify orders separate and leaving settlement cost formulas unchanged.
 
 ## 2026-05-12

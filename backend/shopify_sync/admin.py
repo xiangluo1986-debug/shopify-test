@@ -8,7 +8,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.auth.models import Group
 from django.core.exceptions import FieldError, ValidationError
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.forms.models import BaseInlineFormSet
 from django.http import HttpResponse, HttpResponseRedirect
 from django.middleware.csrf import get_token
@@ -30,6 +30,7 @@ from .models import (
     ShenzhenMergedSettlementGroupOrder,
     ShenzhenCountryShippingDefault,
     ShenzhenProductCountryShippingDefault,
+    build_shenzhen_address_match_key,
 )
 
 
@@ -37,6 +38,15 @@ SHENZHEN_ITEM_LOCATION = "shenzhen"
 ZERO = Decimal("0.00")
 SHENZHEN_COST_EDITABLE_STATUSES = {"pending_warehouse", "warehouse_fulfilled", "exception_review"}
 FINANCE_LOCKED_STATUSES = {"pending_payment", "payment_submitted", "paid"}
+MERGED_SETTLEMENT_ALLOWED_STATUSES = {"pending_warehouse", "warehouse_fulfilled", "exception_review"}
+MERGED_SETTLEMENT_BLOCKED_STATUSES = {
+    "pending_payment",
+    "payment_submitted",
+    "paid",
+    "cancelled",
+    "transferred",
+    "exception",
+}
 SETTLEMENT_STATUS_ADMIN_LABELS = {
     "cost_confirmed": "深圳仓已确认成本，待 Admin 确认",
     "admin_confirmed": "Admin 已确认",
@@ -1338,6 +1348,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "backfill_items_from_matched_products",
         "sync_filled_item_product_costs_to_products",
         "add_to_settlement_batch",
+        "merge_selected_orders_to_settlement_group",
         "save_order_item_shipping_as_product_country_default",
         "mark_cost_confirmed",
         "withdraw_cost_confirmation",
@@ -2548,6 +2559,160 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             )
         if synced_count:
             messages.info(request, f"已同步 {synced_count} 个订单产品行的资料到 ShopifyProduct。")
+
+    def _merge_order_label(self, order):
+        if order.order_name:
+            return order.order_name
+        if order.order_number:
+            return f"#{order.order_number}"
+        return f"Order ID {order.pk}"
+
+    def _order_address_match_key(self, order):
+        return build_shenzhen_address_match_key(
+            shipping_name=order.shipping_name,
+            shipping_phone=order.shipping_phone,
+            shipping_address1=order.shipping_address1,
+            shipping_address2=order.shipping_address2,
+            shipping_city=order.shipping_city,
+            shipping_province=order.shipping_province,
+            shipping_zip=order.shipping_zip,
+            shipping_country=order.shipping_country,
+        )
+
+    def _is_merge_candidate_shenzhen_order(self, order):
+        return bool(order.is_shenzhen_order or order.current_location == SHENZHEN_ITEM_LOCATION)
+
+    def _prefetched_shenzhen_items(self, order):
+        return [
+            item
+            for item in order.order_items.all()
+            if item.fulfillment_location == SHENZHEN_ITEM_LOCATION
+        ]
+
+    def _validate_orders_for_merged_settlement_group(self, orders):
+        errors = []
+        if len(orders) < 2:
+            return ["至少选择 2 个订单"], ""
+
+        first_order = orders[0]
+        first_label = self._merge_order_label(first_order)
+        first_address_key = self._order_address_match_key(first_order)
+
+        for order in orders:
+            order_errors = []
+            label = self._merge_order_label(order)
+
+            if not self._is_merge_candidate_shenzhen_order(order):
+                order_errors.append("不是深圳仓订单")
+
+            if order.settlement_batch_id:
+                order_errors.append("已加入 SettlementBatch")
+
+            if order.settlement_status in MERGED_SETTLEMENT_BLOCKED_STATUSES:
+                order_errors.append(f"状态 {order.settlement_status} 已进入后续结算、支付或异常同步保护")
+            elif order.settlement_status not in MERGED_SETTLEMENT_ALLOWED_STATUSES:
+                if order.settlement_status == "cost_confirmed":
+                    order_errors.append("cost_confirmed 暂不允许合并")
+                else:
+                    order_errors.append(
+                        "状态 "
+                        f"{order.settlement_status} 暂不允许合并；仅允许 "
+                        "pending_warehouse、warehouse_fulfilled、exception_review"
+                    )
+
+            active_group_labels = [
+                link.group.group_no or f"Group ID {link.group_id}"
+                for link in order.merged_settlement_group_links.all()
+                if link.group.status in ShenzhenMergedSettlementGroupOrder.ACTIVE_GROUP_STATUSES
+            ]
+            if active_group_labels:
+                order_errors.append(f"已属于未取消合并组 {', '.join(active_group_labels)}")
+
+            if list(order.packages.all()):
+                order_errors.append("已有 ShopifyOrderPackage")
+
+            shenzhen_items = self._prefetched_shenzhen_items(order)
+            if any(positive_decimal(item.locked_shipping_cost_rmb) for item in shenzhen_items):
+                order_errors.append("已填写 item 级运费")
+            if any(positive_decimal(item.handling_fee_rmb) for item in shenzhen_items):
+                order_errors.append("已填写 item 级拍单成本")
+
+            if self._order_address_match_key(order) != first_address_key:
+                order_errors.append(f"收货地址与首个订单 {first_label} 不完全匹配")
+
+            if order_errors:
+                errors.append(f"{label}: {'；'.join(order_errors)}")
+
+        return errors, first_address_key
+
+    def _message_merged_settlement_group_errors(self, request, errors):
+        visible_errors = errors[:12]
+        suffix = ""
+        if len(errors) > len(visible_errors):
+            suffix = f"；另有 {len(errors) - len(visible_errors)} 条错误未显示"
+        self.message_user(
+            request,
+            "未创建合并结算组：" + "；".join(visible_errors) + suffix,
+            level=messages.ERROR,
+        )
+
+    def merge_selected_orders_to_settlement_group(self, request, queryset):
+        if not self.is_role_allowed(request):
+            self.message_user(
+                request,
+                "只有 Admin、Finance、Superuser 或 Shenzhen Warehouse 可以创建合并结算组。",
+                level=messages.ERROR,
+            )
+            return
+
+        orders = list(
+            queryset.select_related("settlement_batch")
+            .prefetch_related("packages", "order_items", "merged_settlement_group_links__group")
+            .order_by("pk")
+        )
+        validation_errors, address_match_key = self._validate_orders_for_merged_settlement_group(orders)
+        if validation_errors:
+            self._message_merged_settlement_group_errors(request, validation_errors)
+            return
+
+        first_order = orders[0]
+        order_labels = [self._merge_order_label(order) for order in orders]
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+
+        try:
+            with transaction.atomic():
+                group = ShenzhenMergedSettlementGroup.objects.create(
+                    status="draft",
+                    shipping_name=first_order.shipping_name or "",
+                    shipping_phone=first_order.shipping_phone or "",
+                    shipping_address1=first_order.shipping_address1 or "",
+                    shipping_address2=first_order.shipping_address2 or "",
+                    shipping_city=first_order.shipping_city or "",
+                    shipping_province=first_order.shipping_province or "",
+                    shipping_zip=first_order.shipping_zip or "",
+                    shipping_country=first_order.shipping_country or "",
+                    address_match_key=address_match_key,
+                    created_by=user,
+                    note=f"Created from selected Shopify orders: {', '.join(order_labels)}",
+                )
+                for order in orders:
+                    ShenzhenMergedSettlementGroupOrder.objects.create(
+                        group=group,
+                        order=order,
+                        added_by=user,
+                        address_match_status="exact",
+                        address_match_key=group.address_match_key,
+                    )
+        except (IntegrityError, ValidationError) as exc:
+            self.message_user(request, f"未创建合并结算组：{exc}", level=messages.ERROR)
+            return
+
+        self.message_user(
+            request,
+            f"已创建合并结算组 {group.group_no}，包含 {len(orders)} 个订单：{', '.join(order_labels)}",
+            level=messages.SUCCESS,
+        )
+    merge_selected_orders_to_settlement_group.short_description = "合并选中订单为结算组"
 
     def get_actions(self, request):
         actions = super().get_actions(request)
