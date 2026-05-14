@@ -108,6 +108,42 @@ function Save-Lines {
     Set-Content -LiteralPath $Path -Value @($Lines) -Encoding UTF8
 }
 
+function Test-TextFileHasContent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+
+    $content = [System.IO.File]::ReadAllText($Path)
+    return -not [string]::IsNullOrWhiteSpace($content)
+}
+
+function Write-LastMessageFallback {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$FullOutputPath,
+
+        [Parameter(Mandatory = $true)]
+        [int]$ExitCode
+    )
+
+    $fallback = @(
+        "codex exec did not create a non-empty final report.",
+        "Exit code: $ExitCode",
+        "Review full output: $FullOutputPath",
+        "Review git status and safety warning files in the same run directory."
+    )
+
+    Set-Content -LiteralPath $Path -Value $fallback -Encoding UTF8
+}
+
 function Invoke-CompletionSound {
     param(
         [Parameter(Mandatory = $true)]
@@ -509,8 +545,10 @@ if (-not (Test-Path -LiteralPath $fullOutputPath)) {
     Set-Content -LiteralPath $fullOutputPath -Value "" -Encoding UTF8
 }
 
-if (-not (Test-Path -LiteralPath $lastMessagePath)) {
-    Set-Content -LiteralPath $lastMessagePath -Value "codex exec did not create last_message.txt" -Encoding UTF8
+$lastMessageFallbackUsed = $false
+if (-not (Test-TextFileHasContent -Path $lastMessagePath)) {
+    Write-LastMessageFallback -Path $lastMessagePath -FullOutputPath $fullOutputPath -ExitCode $codexExitCode
+    $lastMessageFallbackUsed = $true
 }
 
 $gitAfter = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("status", "--short", "--branch"))
@@ -518,12 +556,18 @@ $changedStatus = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("stat
 $stagedFiles = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("diff", "--cached", "--name-only"))
 $changedFiles = @(Get-StatusPaths -StatusLines $changedStatus)
 $warnings = @(New-SafetyWarnings -ChangedFiles $changedFiles -StagedFiles $stagedFiles)
+$runnerWarnings = New-Object System.Collections.Generic.List[string]
+if ($lastMessageFallbackUsed) {
+    $runnerWarnings.Add("WARNING: codex exec did not create a non-empty last_message.txt; fallback report was written.")
+}
+$allWarnings = @($runnerWarnings.ToArray()) + @($warnings)
 $hasSafetyWarnings = @($warnings | Where-Object { $_ -like "WARNING:*" }).Count -gt 0
+$hasRunnerWarnings = @($runnerWarnings | Where-Object { $_ -like "WARNING:*" }).Count -gt 0
 
 Save-Lines -Path $gitAfterPath -Lines $gitAfter
 Save-Lines -Path $changedFilesPath -Lines $changedStatus
 Save-Lines -Path $stagedFilesPath -Lines $stagedFiles
-Save-Lines -Path $warningsPath -Lines $warnings
+Save-Lines -Path $warningsPath -Lines $allWarnings
 
 Write-Host "Git status after written to: $gitAfterPath"
 Write-Host "Safety warnings written to: $warningsPath"
@@ -535,4 +579,4 @@ if ($codexExitCode -ne 0) {
 }
 
 Write-Host "codex exec completed. Review $lastMessagePath and $fullOutputPath."
-Invoke-CompletionSound -Warning $hasSafetyWarnings
+Invoke-CompletionSound -Warning ($hasSafetyWarnings -or $hasRunnerWarnings)
