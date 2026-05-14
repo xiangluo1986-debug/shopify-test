@@ -29,6 +29,16 @@ Example real local run:
 
 Copy a scoped Codex task to the Windows clipboard, then save and run it with the clipboard wrapper. The task name becomes `ai_project_manager/tasks/<Name>.md`; names may contain only letters, numbers, dash, underscore, and dot.
 
+The clipboard wrapper performs a preflight before saving or running anything:
+
+- shows the clipboard length, first five preview lines, `-Name`, task save path, and runner path
+- blocks short clipboard contents and command-like starts such as `cd`, `powershell`, `git`, `Get-Clipboard`, or `$taskPath`
+- warns if the task does not include recommended structure keywords such as `Goal`, `Allowed`, `Validation`, and `Final response`
+- asks `Proceed with this clipboard task? Type YES to continue`; only `YES` saves the task file and calls `run_codex_task.ps1`
+- writes trace metadata into the saved task file so `task_used.md` can be traced back to the matching `-Name` task file
+
+Use `-Force` only when intentionally skipping the interactive `YES` prompt. Basic clipboard safety checks still run. Use `-DryRun` to show the preview and intended paths without saving the task file or calling the Codex runner.
+
 Example clipboard dry run:
 
 ```powershell
