@@ -226,10 +226,22 @@ class ShenzhenMergedSettlementGroup(models.Model):
         ("active", "\u5df2\u542f\u7528"),
         ("cancelled", "\u5df2\u53d6\u6d88"),
     ]
+    SETTLEMENT_STATUS_CHOICES = [
+        ("pending_warehouse", "\u5f85\u6df1\u5733\u4ed3\u786e\u8ba4"),
+        ("cost_confirmed", "\u6df1\u5733\u4ed3\u5df2\u786e\u8ba4\u6210\u672c"),
+        ("pending_payment", "\u5f85\u652f\u4ed8"),
+        ("payment_submitted", "\u5df2\u63d0\u4ea4\u652f\u4ed8\uff0c\u5f85\u6df1\u5733\u4ed3\u786e\u8ba4\u6536\u6b3e"),
+        ("paid", "\u5df2\u652f\u4ed8"),
+    ]
     GROUP_NO_PREFIX = "SMG"
 
     group_no = models.CharField(max_length=50, unique=True, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")
+    settlement_status = models.CharField(
+        max_length=20,
+        choices=SETTLEMENT_STATUS_CHOICES,
+        default="pending_warehouse",
+    )
     shipping_name = models.CharField(max_length=255, blank=True, default="")
     shipping_phone = models.CharField(max_length=50, blank=True, default="")
     shipping_address1 = models.CharField(max_length=255, blank=True, default="")
@@ -906,3 +918,175 @@ class SettlementBatch(models.Model):
         )
         self.total_amount_rmb = total
         self.save(update_fields=['total_amount_rmb'])
+
+
+class SettlementBatchEntry(models.Model):
+    ENTRY_TYPE_ORDER = "order"
+    ENTRY_TYPE_MERGED_GROUP = "merged_group"
+    ENTRY_TYPE_CHOICES = [
+        (ENTRY_TYPE_ORDER, "\u5355\u8ba2\u5355"),
+        (ENTRY_TYPE_MERGED_GROUP, "\u5408\u5e76\u7ed3\u7b97\u7ec4"),
+    ]
+
+    STATUS_DRAFT = "draft"
+    STATUS_ACTIVE = "active"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_PAID = "paid"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "\u8349\u7a3f"),
+        (STATUS_ACTIVE, "\u751f\u6548"),
+        (STATUS_CANCELLED, "\u5df2\u53d6\u6d88"),
+        (STATUS_PAID, "\u5df2\u652f\u4ed8"),
+    ]
+
+    settlement_batch = models.ForeignKey(
+        SettlementBatch,
+        on_delete=models.CASCADE,
+        related_name="entries",
+    )
+    entry_type = models.CharField(max_length=20, choices=ENTRY_TYPE_CHOICES)
+    order = models.ForeignKey(
+        ShopifyOrder,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="settlement_batch_entries",
+    )
+    merged_group = models.ForeignKey(
+        ShenzhenMergedSettlementGroup,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="settlement_batch_entries",
+    )
+    amount_rmb = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    note = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_settlement_batch_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["settlement_batch", "created_at", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        entry_type="order",
+                        order__isnull=False,
+                        merged_group__isnull=True,
+                    )
+                    | models.Q(
+                        entry_type="merged_group",
+                        order__isnull=True,
+                        merged_group__isnull=False,
+                    )
+                ),
+                name="chk_batch_entry_target",
+            ),
+            models.UniqueConstraint(
+                fields=["settlement_batch", "order"],
+                condition=models.Q(entry_type="order", order__isnull=False),
+                name="uniq_batch_entry_order",
+            ),
+            models.UniqueConstraint(
+                fields=["settlement_batch", "merged_group"],
+                condition=models.Q(
+                    entry_type="merged_group",
+                    merged_group__isnull=False,
+                ),
+                name="uniq_batch_entry_mgroup",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+
+        if self.entry_type == self.ENTRY_TYPE_ORDER:
+            if not self.order_id:
+                errors["order"] = "Order entry requires an order."
+            if self.merged_group_id:
+                errors["merged_group"] = "Order entry cannot reference a merged group."
+        elif self.entry_type == self.ENTRY_TYPE_MERGED_GROUP:
+            if not self.merged_group_id:
+                errors["merged_group"] = "Merged group entry requires a merged group."
+            if self.order_id:
+                errors["order"] = "Merged group entry cannot reference an order."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        if self.entry_type == self.ENTRY_TYPE_ORDER and self.order_id:
+            target = self.order.order_name or self.order_id
+        elif self.entry_type == self.ENTRY_TYPE_MERGED_GROUP and self.merged_group_id:
+            target = self.merged_group.group_no or self.merged_group_id
+        else:
+            target = self.pk or "new"
+        return f"{self.settlement_batch} - {self.get_entry_type_display()} - {target}"
+
+
+class SettlementBatchEntryCoveredOrder(models.Model):
+    COVERAGE_TYPE_SINGLE_ORDER = "single_order"
+    COVERAGE_TYPE_MEMBER_ORDER = "member_order"
+    COVERAGE_TYPE_CHOICES = [
+        (COVERAGE_TYPE_SINGLE_ORDER, "\u5355\u8ba2\u5355"),
+        (COVERAGE_TYPE_MEMBER_ORDER, "\u5408\u5e76\u7ec4\u6210\u5458\u8ba2\u5355"),
+    ]
+
+    entry = models.ForeignKey(
+        SettlementBatchEntry,
+        on_delete=models.CASCADE,
+        related_name="covered_orders",
+    )
+    order = models.ForeignKey(
+        ShopifyOrder,
+        on_delete=models.PROTECT,
+        related_name="settlement_entry_coverages",
+    )
+    coverage_type = models.CharField(max_length=20, choices=COVERAGE_TYPE_CHOICES)
+    released_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["entry", "created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["entry", "order"],
+                name="uniq_entry_covered_order",
+            ),
+            models.UniqueConstraint(
+                fields=["order"],
+                condition=models.Q(released_at__isnull=True),
+                name="uniq_active_covered_order",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["order", "released_at"], name="entry_cov_order_rel_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.released_at is not None or not self.order_id:
+            return
+
+        active_coverages = SettlementBatchEntryCoveredOrder.objects.filter(
+            order_id=self.order_id,
+            released_at__isnull=True,
+        )
+        if self.pk:
+            active_coverages = active_coverages.exclude(pk=self.pk)
+        if active_coverages.exists():
+            raise ValidationError({
+                "order": "This order is already covered by an active settlement entry."
+            })
+
+    def __str__(self):
+        return f"{self.entry} covers {self.order}"

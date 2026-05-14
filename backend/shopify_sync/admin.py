@@ -26,6 +26,8 @@ from .models import (
     ShopifyOrderItem,
     ShippingCostRule,
     SettlementBatch,
+    SettlementBatchEntry,
+    SettlementBatchEntryCoveredOrder,
     ShenzhenMergedSettlementGroup,
     ShenzhenMergedSettlementGroupOrder,
     ShenzhenCountryShippingDefault,
@@ -3313,6 +3315,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
     list_display = (
         "group_no",
         "status",
+        "settlement_status",
         "shipping_country",
         "shipping_city",
         "members_count",
@@ -3323,7 +3326,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         "merged_ordering_cost_rmb",
         "created_at",
     )
-    list_filter = ("status", "shipping_country", "created_at")
+    list_filter = ("status", "settlement_status", "shipping_country", "created_at")
     search_fields = (
         "group_no",
         "shipping_name",
@@ -3341,6 +3344,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         "merged_group_cost_summary",
         "group_no",
         "status",
+        "settlement_status",
         "shipping_name",
         "shipping_phone",
         "shipping_address1",
@@ -3373,6 +3377,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
                 "fields": (
                     "group_no",
                     "status",
+                    "settlement_status",
                     "members_count",
                     "created_by",
                     "created_at",
@@ -3597,8 +3602,183 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
     merged_group_cost_summary.short_description = "Merged settlement cost summary"
 
 
+class SettlementEntryAdminAccessMixin(ShopifyRoleAdminMixin):
+    def _can_view_settlement_entries(self, request):
+        return self.is_super_admin(request) or self.is_finance_user(request)
+
+    def has_module_permission(self, request):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return self._can_view_settlement_entries(request)
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class SettlementBatchEntryCoveredOrderInline(SettlementEntryAdminAccessMixin, admin.TabularInline):
+    model = SettlementBatchEntryCoveredOrder
+    extra = 0
+    fields = (
+        "order_link",
+        "coverage_type",
+        "released_at",
+        "created_at",
+    )
+    readonly_fields = fields
+    can_delete = False
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("order")
+
+    def order_link(self, obj):
+        if not obj or not obj.order_id:
+            return "-"
+        url = reverse("admin:shopify_sync_shopifyorder_change", args=[obj.order_id])
+        return format_html('<a href="{}">{}</a>', url, obj.order.order_name or obj.order_id)
+    order_link.short_description = "Order"
+
+
+class SettlementBatchEntryInline(SettlementEntryAdminAccessMixin, admin.TabularInline):
+    model = SettlementBatchEntry
+    extra = 0
+    fields = (
+        "entry_type",
+        "order_link",
+        "merged_group_link",
+        "amount_rmb",
+        "status",
+        "covered_orders_count",
+        "created_at",
+        "note",
+    )
+    readonly_fields = fields
+    can_delete = False
+    show_change_link = True
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("order", "merged_group")
+            .prefetch_related("covered_orders")
+        )
+
+    def order_link(self, obj):
+        if not obj or not obj.order_id:
+            return "-"
+        url = reverse("admin:shopify_sync_shopifyorder_change", args=[obj.order_id])
+        return format_html('<a href="{}">{}</a>', url, obj.order.order_name or obj.order_id)
+    order_link.short_description = "Order"
+
+    def merged_group_link(self, obj):
+        if not obj or not obj.merged_group_id:
+            return "-"
+        url = reverse(
+            "admin:shopify_sync_shenzhenmergedsettlementgroup_change",
+            args=[obj.merged_group_id],
+        )
+        return format_html(
+            '<a href="{}">{}</a>',
+            url,
+            obj.merged_group.group_no or obj.merged_group_id,
+        )
+    merged_group_link.short_description = "Merged group"
+
+    def covered_orders_count(self, obj):
+        if not obj or not obj.pk:
+            return 0
+        return obj.covered_orders.count()
+    covered_orders_count.short_description = "Covered orders"
+
+
+@admin.register(SettlementBatchEntry)
+class SettlementBatchEntryAdmin(SettlementEntryAdminAccessMixin, admin.ModelAdmin):
+    inlines = [SettlementBatchEntryCoveredOrderInline]
+    list_display = (
+        "settlement_batch",
+        "entry_type",
+        "order",
+        "merged_group",
+        "amount_rmb",
+        "status",
+        "covered_orders_count",
+        "created_at",
+    )
+    list_filter = ("entry_type", "status", "created_at")
+    search_fields = (
+        "settlement_batch__batch_no",
+        "order__order_name",
+        "order__order_number",
+        "merged_group__group_no",
+        "note",
+    )
+    readonly_fields = (
+        "settlement_batch",
+        "entry_type",
+        "order",
+        "merged_group",
+        "amount_rmb",
+        "status",
+        "note",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "covered_orders_count",
+    )
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .select_related("settlement_batch", "order", "merged_group", "created_by")
+            .prefetch_related("covered_orders")
+        )
+
+    def covered_orders_count(self, obj):
+        if not obj or not obj.pk:
+            return 0
+        return obj.covered_orders.count()
+    covered_orders_count.short_description = "Covered orders"
+
+
+@admin.register(SettlementBatchEntryCoveredOrder)
+class SettlementBatchEntryCoveredOrderAdmin(SettlementEntryAdminAccessMixin, admin.ModelAdmin):
+    list_display = (
+        "entry",
+        "order",
+        "coverage_type",
+        "released_at",
+        "created_at",
+    )
+    list_filter = ("coverage_type", "released_at", "created_at")
+    search_fields = (
+        "entry__settlement_batch__batch_no",
+        "entry__merged_group__group_no",
+        "order__order_name",
+        "order__order_number",
+    )
+    readonly_fields = (
+        "entry",
+        "order",
+        "coverage_type",
+        "released_at",
+        "created_at",
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("entry", "order")
+
+
 @admin.register(SettlementBatch)
 class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
+    inlines = [SettlementBatchEntryInline]
     list_display = (
         "batch_no",
         "status",
