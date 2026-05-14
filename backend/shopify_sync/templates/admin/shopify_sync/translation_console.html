@@ -373,6 +373,41 @@
     border-radius: 8px;
     background: #fff;
   }
+  .tw-draft-card {
+    padding: 12px;
+    margin-bottom: 16px;
+  }
+  .tw-draft-card h2 {
+    margin-bottom: 6px;
+  }
+  .tw-draft-note {
+    margin-bottom: 12px;
+    color: #374151;
+  }
+  .tw-checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    margin: 10px 0 12px;
+  }
+  .tw-checkbox-option {
+    display: flex;
+    min-height: 36px;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #dbe1e8;
+    border-radius: 6px;
+    background: #ffffff;
+    padding: 7px 9px;
+    font-weight: 600;
+  }
+  .tw-inline-form {
+    display: inline-flex;
+    margin: 0;
+  }
+  .tw-results-table {
+    margin-top: 12px;
+  }
   .tw-compact-form {
     gap: 10px;
     align-items: flex-end;
@@ -1122,11 +1157,102 @@
       <h3>What to do next</h3>
       <ol>
         <li>Choose product and language.</li>
-        <li>Review original vs translation.</li>
-        <li>Generate a draft in Advanced workflow if needed.</li>
+        <li>Generate drafts for the languages you need.</li>
+        <li>Open each language preview and review original vs translation.</li>
         <li>Apply later through the approved PowerShell command.</li>
       </ol>
     </div>
+  </div>
+
+  <div class="module tw-draft-card">
+    <h2>Generate translation drafts</h2>
+    <p class="tw-draft-note">This only creates draft previews. It does not update Shopify.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="ui_mode" value="editor">
+      <input type="hidden" name="action" value="generate_multi_locale_drafts">
+      <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+      <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+      <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+      <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+      <div class="tw-checkbox-grid" aria-label="Target languages">
+        {% for locale_option in draft_locale_options %}
+          <label class="tw-checkbox-option">
+            <input type="checkbox" name="draft_target_locales" value="{{ locale_option.value }}"{% if locale_option.checked %} checked{% endif %}>
+            <span>{{ locale_option.label }} ({{ locale_option.value }})</span>
+          </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="button">Generate drafts</button>
+    </form>
+    <p class="tw-muted" style="margin-top: 10px;">Drafts include product title, product description/body, SEO title, and SEO description.</p>
+    <p class="tw-muted">Variants, options, and metafields are visible for review but not included in automatic drafts yet.</p>
+
+    {% if multi_locale_draft_result %}
+      <h3>Draft results</h3>
+      <p>{{ multi_locale_draft_result.message }}</p>
+      {% if multi_locale_draft_result.locale_results %}
+        <div class="tw-editor-table-wrap">
+          <table class="tw-results-table">
+            <thead>
+              <tr>
+                <th>Language</th>
+                <th>Status</th>
+                <th>Draft fields</th>
+                <th>Existing fields skipped</th>
+                <th>Preview</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in multi_locale_draft_result.locale_results %}
+                <tr>
+                  <td><strong>{{ row.locale_label }}</strong> ({{ row.locale }})</td>
+                  <td>
+                    <span class="tw-status-badge">{{ row.status_label }}</span>
+                    <div class="tw-muted">{{ row.message }}</div>
+                  </td>
+                  <td>{{ row.draft_field_count }}</td>
+                  <td>{{ row.skipped_existing_field_count }}</td>
+                  <td>
+                    {% if row.locale in supported_locales %}
+                      <form method="post" class="tw-inline-form">
+                        {% csrf_token %}
+                        <input type="hidden" name="ui_mode" value="editor">
+                        <input type="hidden" name="action" value="generate_multi_locale_drafts">
+                        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+                        <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
+                        <input type="hidden" name="target_locale" value="{{ row.locale }}">
+                        <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+                        <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+                        {% for selected_locale_code in multi_locale_draft_result.requested_locales %}
+                          <input type="hidden" name="draft_target_locales" value="{{ selected_locale_code }}">
+                        {% endfor %}
+                        <button type="submit" class="button">Open preview</button>
+                      </form>
+                    {% else %}
+                      <span class="tw-muted">Unavailable</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+      <details class="tw-advanced-details">
+        <summary>Advanced details for technical review</summary>
+        <table>
+          <tbody>
+            <tr><th>Selected languages</th><td>{{ multi_locale_draft_result.requested_locales|join:", " }}</td></tr>
+            <tr><th>Draft fields</th><td>{{ multi_locale_draft_result.field_scope_labels|join:", " }}</td></tr>
+            <tr><th>Total draft fields</th><td>{{ multi_locale_draft_result.summary.draft_field_count }}</td></tr>
+            <tr><th>Existing fields skipped</th><td>{{ multi_locale_draft_result.summary.skipped_existing_field_count }}</td></tr>
+            <tr><th>Review notes</th><td>{{ multi_locale_draft_result.summary.blocking_conditions|join:", " }}</td></tr>
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
   </div>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">

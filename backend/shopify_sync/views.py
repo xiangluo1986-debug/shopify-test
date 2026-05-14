@@ -119,6 +119,12 @@ TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
 TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS = 50
 TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS = 120
 TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS = 1200
+TRANSLATION_WORKSPACE_DRAFT_FIELDS = [
+    "title",
+    "body_html",
+    "meta_title",
+    "meta_description",
+]
 TRANSLATION_CONSOLE_EDITOR_FILTERS = {
     "all",
     "untranslated",
@@ -758,6 +764,7 @@ def translation_console(request):
     }
     is_locked_package_report_post = post_action == "generate_locked_package_dry_run_report"
     is_status_only_safe_action_post = is_refresh_status_post
+    is_multi_locale_draft_post = post_action == "generate_multi_locale_drafts"
     is_draft_post = post_action in {
         "generate_missing_translation_drafts",
         "generate_draft_dry_run",
@@ -776,6 +783,7 @@ def translation_console(request):
     )
     is_post_action = (
         is_draft_post
+        or is_multi_locale_draft_post
         or is_apply_plan_post
         or is_final_review_post
         or is_readiness_post
@@ -833,6 +841,16 @@ def translation_console(request):
     editor_search_query = (
         request_params.get("editor_search", "") or request_params.get("editor_q", "")
     ).strip()
+    requested_draft_locales, invalid_draft_locales = _translation_workspace_requested_draft_locales(
+        request,
+        is_multi_locale_draft_post=is_multi_locale_draft_post,
+    )
+    draft_locale_options = _translation_workspace_draft_locale_options(
+        selected_locale=locale,
+        requested_locales=(
+            requested_draft_locales if is_multi_locale_draft_post else [locale]
+        ),
+    )
     product_selector = _build_translation_console_product_selector(
         product_search_text=product_search_text,
         requested_product_gid=(
@@ -890,6 +908,7 @@ def translation_console(request):
     }
     error_message = ""
     draft_result = None
+    multi_locale_draft_result = None
     draft_error_message = ""
     apply_plan_result = None
     apply_plan_error_message = ""
@@ -925,6 +944,70 @@ def translation_console(request):
             installation = ShopifyInstallation.objects.first()
             if installation is None:
                 error_message = f"Shopify installation not found for {shop_domain}."
+            elif is_multi_locale_draft_post:
+                if not requested_draft_locales:
+                    multi_locale_draft_result = _translation_workspace_empty_multi_locale_result(
+                        product_id=action_product_query,
+                        selected_locale=locale,
+                        requested_locales=requested_draft_locales,
+                        invalid_locales=invalid_draft_locales,
+                    )
+                    draft_error_message = multi_locale_draft_result["message"]
+                    safe_action_result = _translation_console_safe_action_result(
+                        action=post_action,
+                        action_status=multi_locale_draft_result["action_status"],
+                        message=multi_locale_draft_result["message"],
+                        summary=multi_locale_draft_result["summary"],
+                    )
+                else:
+                    selected_product_id = _resolve_translation_console_product_id(
+                        installation, action_product_query, locale
+                    )
+                    if selected_product_id:
+                        workflow_product_id = selected_product_id
+                        result.update(
+                            fetch_translation_console_data(
+                                installation, selected_product_id, locale
+                            )
+                        )
+                        multi_locale_draft_result = _generate_translation_workspace_multi_locale_drafts(
+                            installation=installation,
+                            product_id=selected_product_id,
+                            selected_locale=locale,
+                            target_locales=requested_draft_locales,
+                            invalid_locales=invalid_draft_locales,
+                            product_search_text=product_search_text,
+                            editor_filter=editor_filter,
+                            editor_search_query=editor_search_query,
+                        )
+                        draft_result = multi_locale_draft_result.get(
+                            "selected_locale_draft_result"
+                        )
+                        if multi_locale_draft_result.get("blocking_conditions"):
+                            draft_error_message = multi_locale_draft_result["message"]
+                        safe_action_result = _translation_console_safe_action_result(
+                            action=post_action,
+                            action_status=multi_locale_draft_result["action_status"],
+                            message=multi_locale_draft_result["message"],
+                            summary=multi_locale_draft_result["summary"],
+                        )
+                    else:
+                        multi_locale_draft_result = _translation_workspace_empty_multi_locale_result(
+                            product_id=action_product_query,
+                            selected_locale=locale,
+                            requested_locales=requested_draft_locales,
+                            invalid_locales=[],
+                            message="Select a single Shopify product before generating drafts.",
+                            action_status="multi_locale_draft_blocked",
+                            blocking_conditions=["missing_selected_product"],
+                        )
+                        draft_error_message = multi_locale_draft_result["message"]
+                        safe_action_result = _translation_console_safe_action_result(
+                            action=post_action,
+                            action_status=multi_locale_draft_result["action_status"],
+                            message=multi_locale_draft_result["message"],
+                            summary=multi_locale_draft_result["summary"],
+                        )
             elif (
                 is_draft_post
                 or is_locked_package_preview_post
@@ -1303,6 +1386,26 @@ def translation_console(request):
                 "preview_only": True,
             },
         )
+    elif post_action == "generate_multi_locale_drafts" and safe_action_result is None:
+        multi_locale_draft_result = _translation_workspace_empty_multi_locale_result(
+            product_id=action_product_query,
+            selected_locale=locale,
+            requested_locales=requested_draft_locales,
+            invalid_locales=invalid_draft_locales,
+            message=(
+                draft_error_message
+                or error_message
+                or "Select a single Shopify product before generating drafts."
+            ),
+            action_status="multi_locale_draft_blocked",
+            blocking_conditions=["missing_or_unavailable_selected_product"],
+        )
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status=multi_locale_draft_result["action_status"],
+            message=multi_locale_draft_result["message"],
+            summary=multi_locale_draft_result["summary"],
+        )
     elif post_action == "generate_draft_dry_run" and safe_action_result is None:
         safe_action_result = _translation_console_safe_action_result(
             action=post_action,
@@ -1375,6 +1478,7 @@ def translation_console(request):
                 }
                 for supported_locale in SUPPORTED_TRANSLATION_LOCALES
             ],
+            "draft_locale_options": draft_locale_options,
             "ui_mode": ui_mode,
             "editor_filter": editor_filter,
             "editor_search_query": editor_search_query,
@@ -1392,6 +1496,7 @@ def translation_console(request):
             "workbench_summary": workbench_summary,
             "error_message": error_message,
             "draft_result": draft_result,
+            "multi_locale_draft_result": multi_locale_draft_result,
             "draft_error_message": draft_error_message,
             "apply_plan_result": apply_plan_result,
             "apply_plan_error_message": apply_plan_error_message,
@@ -1591,6 +1696,344 @@ def _translation_console_safe_action_result(
         "apply_performed": False,
         "real_apply_performed": False,
     }
+
+
+def _translation_workspace_requested_draft_locales(
+    request,
+    is_multi_locale_draft_post: bool,
+):
+    if not is_multi_locale_draft_post:
+        return [], []
+
+    raw_locales = request.POST.getlist("draft_target_locales")
+    if not raw_locales:
+        raw_locales = request.POST.getlist("target_locales")
+    allowed_locales = set(SUPPORTED_TRANSLATION_LOCALES)
+    requested = []
+    invalid = []
+    for raw_locale in raw_locales:
+        locale = str(raw_locale or "").strip()
+        if not locale:
+            continue
+        if locale not in allowed_locales:
+            if locale not in invalid:
+                invalid.append(locale)
+            continue
+        if locale not in requested:
+            requested.append(locale)
+    return requested, invalid
+
+
+def _translation_workspace_draft_locale_options(
+    selected_locale: str,
+    requested_locales: list[str] | None = None,
+):
+    checked_locales = set(requested_locales or [selected_locale])
+    return [
+        {
+            "value": locale,
+            "label": _translation_editor_locale_label(locale),
+            "checked": locale in checked_locales,
+        }
+        for locale in SUPPORTED_TRANSLATION_LOCALES
+    ]
+
+
+def _translation_workspace_empty_multi_locale_result(
+    product_id: str,
+    selected_locale: str,
+    requested_locales: list[str] | None,
+    invalid_locales: list[str] | None,
+    message: str = "",
+    action_status: str = "multi_locale_draft_blocked",
+    blocking_conditions: list[str] | None = None,
+):
+    requested_locales = list(requested_locales or [])
+    invalid_locales = list(invalid_locales or [])
+    blocking_conditions = list(blocking_conditions or [])
+    locale_results = []
+    if invalid_locales and "unsupported_target_language" not in blocking_conditions:
+        blocking_conditions.append("unsupported_target_language")
+    if not requested_locales and not invalid_locales:
+        blocking_conditions.append("no_target_language_selected")
+    for invalid_locale in invalid_locales:
+        locale_results.append(
+            {
+                "locale": invalid_locale,
+                "locale_label": invalid_locale,
+                "status": "skipped",
+                "status_label": "skipped",
+                "draft_field_count": 0,
+                "skipped_existing_field_count": 0,
+                "skipped_field_count": 0,
+                "message": "This target language is not supported.",
+                "blocking_conditions": ["unsupported_target_language"],
+            }
+        )
+    if not message:
+        if invalid_locales:
+            message = "Choose only supported target languages."
+        else:
+            message = "Choose at least one target language."
+    summary = _translation_workspace_multi_locale_summary(locale_results)
+    summary["blocking_conditions"] = blocking_conditions
+    return {
+        "action_status": action_status,
+        "message": message,
+        "product_id": product_id,
+        "selected_locale": selected_locale,
+        "requested_locales": requested_locales,
+        "invalid_locales": invalid_locales,
+        "locale_results": locale_results,
+        "selected_locale_draft_result": None,
+        "draft_fields": list(TRANSLATION_WORKSPACE_DRAFT_FIELDS),
+        "field_scope_labels": _translation_workspace_draft_field_labels(),
+        "summary": summary,
+        "blocking_conditions": blocking_conditions,
+        "read_only": True,
+        "shopify_write_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+    }
+
+
+def _generate_translation_workspace_multi_locale_drafts(
+    installation,
+    product_id: str,
+    selected_locale: str,
+    target_locales: list[str],
+    invalid_locales: list[str] | None = None,
+    product_search_text: str = "",
+    editor_filter: str = "all",
+    editor_search_query: str = "",
+):
+    locale_results = []
+    selected_locale_draft_result = None
+    for target_locale in target_locales:
+        try:
+            locale_draft_result = generate_selected_product_missing_translation_draft_package(
+                product_id=product_id,
+                target_locales=[target_locale],
+                fields=TRANSLATION_WORKSPACE_DRAFT_FIELDS,
+                installation=installation,
+            )
+            _attach_translation_console_draft_detail(locale_draft_result)
+        except Exception as exc:
+            locale_draft_result = {
+                "draft_status": "draft_generation_failed",
+                "failure_type": "unexpected_error",
+                "error": f"{type(exc).__name__}: draft generation failed",
+                "product_id": product_id,
+                "target_locales": [target_locale],
+                "requested_fields": list(TRANSLATION_WORKSPACE_DRAFT_FIELDS),
+                "blocking_conditions": ["draft_generation_failed"],
+                "translation_console_detail": {
+                    "summary_counts": {
+                        "draft_entry_count": 0,
+                        "skipped_entry_count": 0,
+                        "existing_translation_count": 0,
+                    }
+                },
+                "shopify_write_performed": False,
+                "publish_performed": False,
+                "apply_performed": False,
+                "rollback_performed": False,
+            }
+        locale_summary = _translation_workspace_draft_locale_summary(
+            locale=target_locale,
+            draft_result=locale_draft_result,
+            product_search_text=product_search_text,
+            product_id=product_id,
+            editor_filter=editor_filter,
+            editor_search_query=editor_search_query,
+        )
+        locale_results.append(locale_summary)
+        if target_locale == selected_locale:
+            selected_locale_draft_result = locale_draft_result
+
+    for invalid_locale in invalid_locales or []:
+        locale_results.append(
+            {
+                "locale": invalid_locale,
+                "locale_label": invalid_locale,
+                "status": "skipped",
+                "status_label": "skipped",
+                "draft_field_count": 0,
+                "skipped_existing_field_count": 0,
+                "skipped_field_count": 0,
+                "message": "This target language is not supported.",
+                "blocking_conditions": ["unsupported_target_language"],
+                "product_id": product_id,
+                "product_search_text": product_search_text,
+                "editor_filter": editor_filter,
+                "editor_search_query": editor_search_query,
+            }
+        )
+
+    summary = _translation_workspace_multi_locale_summary(locale_results)
+    action_status, message = _translation_workspace_multi_locale_status(summary)
+    return {
+        "action_status": action_status,
+        "message": message,
+        "product_id": product_id,
+        "selected_locale": selected_locale,
+        "requested_locales": list(target_locales),
+        "invalid_locales": list(invalid_locales or []),
+        "locale_results": locale_results,
+        "selected_locale_draft_result": selected_locale_draft_result,
+        "draft_fields": list(TRANSLATION_WORKSPACE_DRAFT_FIELDS),
+        "field_scope_labels": _translation_workspace_draft_field_labels(),
+        "summary": summary,
+        "blocking_conditions": summary.get("blocking_conditions", []),
+        "read_only": True,
+        "shopify_write_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+    }
+
+
+def _translation_workspace_draft_locale_summary(
+    locale: str,
+    draft_result: dict,
+    product_search_text: str,
+    product_id: str,
+    editor_filter: str,
+    editor_search_query: str,
+):
+    detail = (draft_result or {}).get("translation_console_detail") or {}
+    counts = detail.get("summary_counts") or {}
+    draft_status = (draft_result or {}).get("draft_status", "")
+    failure_type = (draft_result or {}).get("failure_type", "")
+    blocking_conditions = list((draft_result or {}).get("blocking_conditions") or [])
+    if failure_type == "missing_openai_api_key" or draft_status == "blocked_missing_openai_api_key":
+        status = "needs configuration"
+        message = "Draft generation could not run because OpenAI configuration is missing."
+    elif blocking_conditions:
+        status = "failed"
+        message = "Draft generation did not complete for this language."
+    elif int(counts.get("draft_entry_count") or 0):
+        status = "generated"
+        message = "Draft preview is ready for review."
+    elif draft_status == "no_missing_translations_found":
+        status = "skipped"
+        message = "No missing draft fields were found for this language."
+    elif (draft_result or {}).get("success"):
+        status = "skipped"
+        message = "No new draft fields were needed for this language."
+    else:
+        status = "failed"
+        message = "Draft generation did not complete for this language."
+
+    return {
+        "locale": locale,
+        "locale_label": _translation_editor_locale_label(locale),
+        "status": status,
+        "status_label": status,
+        "draft_field_count": int(
+            counts.get("draft_entry_count")
+            or (draft_result or {}).get("generated_draft_count")
+            or 0
+        ),
+        "skipped_existing_field_count": int(
+            counts.get("existing_translation_count")
+            or (draft_result or {}).get("skipped_existing_translation_count")
+            or 0
+        ),
+        "skipped_field_count": int(
+            counts.get("skipped_entry_count")
+            or (
+                int((draft_result or {}).get("skipped_existing_translation_count") or 0)
+                + int((draft_result or {}).get("skipped_outdated_translation_count") or 0)
+                + int((draft_result or {}).get("skipped_source_empty_count") or 0)
+            )
+        ),
+        "message": message,
+        "draft_status": draft_status,
+        "blocking_conditions": blocking_conditions,
+        "product_id": product_id,
+        "product_search_text": product_search_text,
+        "editor_filter": editor_filter,
+        "editor_search_query": editor_search_query,
+    }
+
+
+def _translation_workspace_multi_locale_summary(locale_results: list[dict]):
+    status_counts = {}
+    blocking_conditions = []
+    for row in locale_results or []:
+        status = row.get("status", "")
+        if status:
+            status_counts[status] = status_counts.get(status, 0) + 1
+        blocking_conditions.extend(row.get("blocking_conditions") or [])
+    return {
+        "locale_count": len(locale_results or []),
+        "status_counts": status_counts,
+        "generated_locale_count": status_counts.get("generated", 0),
+        "skipped_locale_count": status_counts.get("skipped", 0),
+        "failed_locale_count": status_counts.get("failed", 0),
+        "needs_configuration_locale_count": status_counts.get(
+            "needs configuration", 0
+        ),
+        "draft_field_count": sum(
+            int(row.get("draft_field_count") or 0) for row in locale_results or []
+        ),
+        "skipped_existing_field_count": sum(
+            int(row.get("skipped_existing_field_count") or 0)
+            for row in locale_results or []
+        ),
+        "blocking_conditions": list(dict.fromkeys(blocking_conditions)),
+        "shopify_write_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+    }
+
+
+def _translation_workspace_multi_locale_status(summary: dict):
+    locale_count = int(summary.get("locale_count") or 0)
+    generated = int(summary.get("generated_locale_count") or 0)
+    skipped = int(summary.get("skipped_locale_count") or 0)
+    failed = int(summary.get("failed_locale_count") or 0)
+    needs_configuration = int(summary.get("needs_configuration_locale_count") or 0)
+    has_blocking_conditions = bool(summary.get("blocking_conditions"))
+    if not locale_count:
+        return "multi_locale_draft_blocked", "Choose at least one target language."
+    if generated:
+        if failed or needs_configuration or has_blocking_conditions:
+            return (
+                "multi_locale_draft_completed_with_issues",
+                "Draft generation finished with issues. Review each language below.",
+            )
+        return (
+            "multi_locale_draft_completed",
+            "Draft previews are ready for review. Open each language below.",
+        )
+    if needs_configuration and needs_configuration == locale_count:
+        return (
+            "multi_locale_draft_needs_configuration",
+            "Draft generation could not run because OpenAI configuration is missing.",
+        )
+    if skipped and skipped == locale_count:
+        return (
+            "multi_locale_draft_skipped",
+            "No missing draft fields were found for the selected languages.",
+        )
+    return (
+        "multi_locale_draft_failed",
+        "Draft generation finished with issues. Review each language below.",
+    )
+
+
+def _translation_workspace_draft_field_labels():
+    labels = {
+        "title": "product title",
+        "body_html": "product description/body",
+        "meta_title": "SEO title",
+        "meta_description": "SEO description",
+    }
+    return [labels.get(field, field) for field in TRANSLATION_WORKSPACE_DRAFT_FIELDS]
 
 
 def build_apply_plan_preview_from_draft_result(draft_result: dict | None):
@@ -1881,7 +2324,7 @@ def build_translation_workspace_single_product_mvp(
         "selected_locale": locale,
         "selected_locale_label": _translation_editor_locale_label(locale),
         "supported_target_locales": list(supported_locales or []),
-        "draft_fields": list(TRANSLATION_DRAFT_FIELDS),
+        "draft_fields": list(TRANSLATION_WORKSPACE_DRAFT_FIELDS),
         "source_data_loaded": source_data_loaded,
         "translatable_content_count": int(
             translatable_resource.get("translatable_content_count") or 0
@@ -2049,7 +2492,7 @@ def _translation_workspace_mvp_area_label(area_key: str) -> str:
 
 def _translation_workspace_mvp_group_note(group_key: str) -> str:
     notes = {
-        "product_basics": "Title is draft-supported. Body HTML is kept visible for review unless a future safe mapping adds it.",
+        "product_basics": "Title and body HTML are draft-supported for local previews. Body HTML remains review-only for later approval steps.",
         "seo": "Meta title and meta description are draft-supported.",
         "options": "Option names or values are not drafted until Shopify row keys are mapped safely.",
         "variants": "Variant titles or labels are not drafted until Shopify row keys are mapped safely. SKU remains context only.",
@@ -2295,7 +2738,7 @@ def build_translation_workspace_field_coverage(
     locale = (locale or "ja").strip()
     normalized_draft_fields = {
         _translation_editor_normalize_field_key(field)
-        for field in TRANSLATION_DRAFT_FIELDS
+        for field in TRANSLATION_WORKSPACE_DRAFT_FIELDS
     }
     rows_by_key = {}
     for row in rows:
