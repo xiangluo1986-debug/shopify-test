@@ -14,7 +14,17 @@ logs/*.jsonl
 logs/*.html
 logs/*_review.json
 logs/*_review.html
+logs/codex_runs/
 backend/logs/shopify_translation_command_review.json
 
 backend/logs/
 backend/reviews/translation_product_ids.txt
+
+# Codex task runner local output
+codex_phase_*_last_message.txt
+
+# Local Codex CLI / runner artifacts
+logs/
+codex_phase_*.txt
+ai_project_manager/tasks/phase_*.md
+.codex/config.toml
