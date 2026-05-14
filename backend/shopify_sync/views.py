@@ -185,8 +185,6 @@ TRANSLATION_CONSOLE_EDITOR_SEO_LIMITS = {
     "title": 70,
     "meta_title": 60,
     "meta_description": 160,
-    "body_html": 320,
-    "description": 320,
 }
 TRANSLATION_WORKSPACE_FIELD_COVERAGE_CORE_AREAS = [
     {
