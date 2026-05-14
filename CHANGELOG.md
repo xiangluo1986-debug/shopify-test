@@ -2,6 +2,7 @@
 
 ## 2026-05-14
 
+- Added Phase D merged Shenzhen settlement group cost summaries: group-level shipping/ordering cost entry, product-only member item rollup, cost completeness checks, enhanced group Admin detail, member inline cost status, and Shopify Order group warning without changing single-order formulas.
 - Added Phase C Shopify Orders admin action for creating draft Shenzhen merged settlement groups from selected eligible orders, with strict no-package, no-settlement-batch, exact-address, status, active-group, and item-level shipping/ordering-cost guards.
 - Added Phase B base models and read-only Admin display for Shenzhen merged settlement groups, keeping Shopify orders separate and leaving settlement cost formulas unchanged.
 

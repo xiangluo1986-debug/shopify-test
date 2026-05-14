@@ -470,6 +470,35 @@ def shenzhen_item_cost_totals(items):
     }
 
 
+def shenzhen_item_product_cost_summary(order):
+    if not order:
+        return {
+            "items_count": 0,
+            "product_cost": ZERO,
+            "missing_product_cost_count": 0,
+            "cost_completed": False,
+        }
+
+    items = getattr(order, "_prefetched_shenzhen_items", None)
+    if items is None:
+        items = list(shenzhen_order_items(order))
+
+    product_cost = ZERO
+    missing_product_cost_count = 0
+    for item in items:
+        if item.locked_product_cost_rmb is None or item.locked_product_cost_rmb <= 0:
+            missing_product_cost_count += 1
+            continue
+        product_cost += item.locked_product_cost_rmb * item.quantity
+
+    return {
+        "items_count": len(items),
+        "product_cost": product_cost,
+        "missing_product_cost_count": missing_product_cost_count,
+        "cost_completed": bool(items) and missing_product_cost_count == 0,
+    }
+
+
 def package_cost_totals(package):
     if not package or not package.pk:
         shipping_cost = decimal_or_zero(getattr(package, "shipping_cost_rmb", None))
@@ -2046,6 +2075,17 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         rows = []
         for group_link in group_links:
             group = group_link.group
+            summary = group.group_cost_summary()
+            total_cost = (
+                f'{money(summary["group_total_cost_rmb"])} RMB'
+                if summary["cost_completed"]
+                else "未完成"
+            )
+            cost_detail = (
+                f'产品 {money(summary["group_product_cost_rmb"])} RMB + '
+                f'合并运费 {money(summary["group_shipping_cost_rmb"])} RMB - '
+                f'合并拍单 {money(summary["group_ordering_cost_rmb"])} RMB = {total_cost}'
+            )
             label = f"{group.group_no or group.pk} ({group.get_status_display()})"
             if can_link:
                 url = reverse("admin:shopify_sync_shenzhenmergedsettlementgroup_change", args=[group.pk])
@@ -2054,10 +2094,17 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 label_html = label
             rows.append((
                 label_html,
+                cost_detail,
                 group_link.get_address_match_status_display(),
                 group_link.added_at.strftime("%Y-%m-%d %H:%M") if group_link.added_at else "-",
             ))
-        return format_html_join("", "{} - {} - {}<br>", rows)
+        group_rows = format_html_join("", "{}<br>{}<br>{} - {}<br><br>", rows)
+        return format_html(
+            '<div style="line-height:1.6;">{}'
+            '<strong>Reminder:</strong> 该订单属于合并结算组，合并运费/拍单成本在组内维护，'
+            '不在单订单 item/package 中维护。</div>',
+            group_rows,
+        )
     merged_settlement_group_display.short_description = "Merged settlement group"
 
     def exception_review_summary(self, obj):
@@ -3168,6 +3215,8 @@ class ShenzhenMergedSettlementGroupOrderInline(admin.TabularInline):
         "shipping_country",
         "settlement_status_display",
         "total_locked_cost_rmb_display",
+        "member_product_cost_rmb",
+        "member_cost_completed",
         "item_count",
         "address_match_status",
         "address_match_key",
@@ -3183,6 +3232,15 @@ class ShenzhenMergedSettlementGroupOrderInline(admin.TabularInline):
             super()
             .get_queryset(request)
             .select_related("group", "order", "added_by")
+            .prefetch_related(
+                models.Prefetch(
+                    "order__order_items",
+                    queryset=ShopifyOrderItem.objects.filter(
+                        fulfillment_location=SHENZHEN_ITEM_LOCATION
+                    ).order_by("id"),
+                    to_attr="_prefetched_shenzhen_items",
+                )
+            )
         )
 
     def has_add_permission(self, request, obj=None):
@@ -3228,10 +3286,24 @@ class ShenzhenMergedSettlementGroupOrderInline(admin.TabularInline):
         return obj.order.total_locked_cost_rmb if obj.order.total_locked_cost_rmb is not None else "-"
     total_locked_cost_rmb_display.short_description = "Total locked cost RMB"
 
+    def member_product_cost_rmb(self, obj):
+        if not obj or not obj.order_id:
+            return "-"
+        summary = shenzhen_item_product_cost_summary(obj.order)
+        return f'{money(summary["product_cost"])} RMB'
+    member_product_cost_rmb.short_description = "Member product cost RMB"
+
+    def member_cost_completed(self, obj):
+        if not obj or not obj.order_id:
+            return False
+        return shenzhen_item_product_cost_summary(obj.order)["cost_completed"]
+    member_cost_completed.short_description = "Member product cost completed"
+    member_cost_completed.boolean = True
+
     def item_count(self, obj):
         if not obj or not obj.order_id:
             return "-"
-        return obj.order.order_items.filter(fulfillment_location=SHENZHEN_ITEM_LOCATION).count()
+        return shenzhen_item_product_cost_summary(obj.order)["items_count"]
     item_count.short_description = "Item count"
 
 
@@ -3244,6 +3316,9 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         "shipping_country",
         "shipping_city",
         "members_count",
+        "shenzhen_item_count",
+        "group_total_cost_rmb_display",
+        "group_cost_completed_display",
         "merged_shipping_cost_rmb",
         "merged_ordering_cost_rmb",
         "created_at",
@@ -3263,6 +3338,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         "group_orders__order__order_number",
     )
     readonly_fields = (
+        "merged_group_cost_summary",
         "group_no",
         "status",
         "shipping_name",
@@ -3283,6 +3359,14 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         "updated_at",
     )
     fieldsets = (
+        (
+            "Merged settlement summary",
+            {
+                "fields": (
+                    "merged_group_cost_summary",
+                )
+            },
+        ),
         (
             "Group",
             {
@@ -3327,6 +3411,9 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
     def _can_view_merged_groups(self, request):
         return self.is_super_admin(request) or self.is_finance_user(request)
 
+    def _can_edit_merged_group_costs(self, request):
+        return self._can_view_merged_groups(request)
+
     def has_module_permission(self, request):
         return self._can_view_merged_groups(request)
 
@@ -3337,16 +3424,177 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         return False
 
     def has_change_permission(self, request, obj=None):
-        return False
+        return self._can_edit_merged_group_costs(request)
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("group_orders")
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        editable_cost_fields = {
+            "merged_shipping_cost_rmb",
+            "merged_ordering_cost_rmb",
+            "note",
+        }
+        if (
+            obj
+            and obj.status in {"draft", "active"}
+            and self._can_edit_merged_group_costs(request)
+        ):
+            readonly = [
+                field for field in readonly
+                if field not in editable_cost_fields
+            ]
+        return tuple(dict.fromkeys(readonly))
+
+    def _group_cost_summary(self, obj):
+        if not obj or not obj.pk:
+            return {
+                "member_order_count": 0,
+                "shenzhen_item_count": 0,
+                "group_product_cost_rmb": ZERO,
+                "group_shipping_cost_rmb": ZERO,
+                "group_ordering_cost_rmb": ZERO,
+                "group_total_cost_rmb": None,
+                "cost_completed": False,
+                "missing_product_cost_count": 0,
+            }
+        if not hasattr(obj, "_admin_group_cost_summary"):
+            obj._admin_group_cost_summary = obj.group_cost_summary()
+        return obj._admin_group_cost_summary
+
+    def _format_rmb(self, value, empty_label="-"):
+        if value is None:
+            return empty_label
+        return f"{money(value)} RMB"
+
+    def _group_completion_text(self, summary):
+        if summary["cost_completed"]:
+            return "完整"
+        reasons = []
+        if summary["member_order_count"] <= 0:
+            reasons.append("没有成员订单")
+        if summary["shenzhen_item_count"] <= 0:
+            reasons.append("没有深圳仓 item")
+        if summary["missing_product_cost_count"]:
+            reasons.append(f'{summary["missing_product_cost_count"]} 个深圳仓 item 缺产品成本')
+        if summary["group_shipping_cost_rmb"] <= 0:
+            reasons.append("合并运费必须大于 0")
+        if summary["group_ordering_cost_rmb"] is None:
+            reasons.append("合并拍单成本不能为空")
+        return "未完成：" + "；".join(reasons)
+
+    def _address_snapshot_text(self, obj):
+        parts = [
+            ("Name", obj.shipping_name),
+            ("Phone", obj.shipping_phone),
+            ("Address1", obj.shipping_address1),
+            ("Address2", obj.shipping_address2),
+            ("City", obj.shipping_city),
+            ("Province", obj.shipping_province),
+            ("Zip", obj.shipping_zip),
+            ("Country", obj.shipping_country),
+        ]
+        lines = [f"{label}: {value}" for label, value in parts if value]
+        return "\n".join(lines) if lines else "-"
 
     def members_count(self, obj):
         if not obj or not obj.pk:
             return 0
         return obj.group_orders.count()
     members_count.short_description = "Members"
+
+    def shenzhen_item_count(self, obj):
+        return self._group_cost_summary(obj)["shenzhen_item_count"]
+    shenzhen_item_count.short_description = "Shenzhen item count"
+
+    def group_product_cost_rmb_display(self, obj):
+        summary = self._group_cost_summary(obj)
+        return self._format_rmb(summary["group_product_cost_rmb"])
+    group_product_cost_rmb_display.short_description = "Product cost RMB"
+
+    def group_total_cost_rmb_display(self, obj):
+        summary = self._group_cost_summary(obj)
+        if not summary["cost_completed"]:
+            return "未完成"
+        return self._format_rmb(summary["group_total_cost_rmb"])
+    group_total_cost_rmb_display.short_description = "Merged total cost RMB"
+
+    def group_cost_completed_display(self, obj):
+        summary = self._group_cost_summary(obj)
+        color = "#0a7f32" if summary["cost_completed"] else "#b42318"
+        return format_html(
+            '<span style="color:{};font-weight:600;">{}</span>',
+            color,
+            self._group_completion_text(summary),
+        )
+    group_cost_completed_display.short_description = "Cost completeness"
+
+    def member_order_list_display(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+        rows = []
+        for group_link in obj.group_orders.select_related("order").order_by("added_at", "id"):
+            order = group_link.order
+            label = order.order_name or order.order_number or order.pk
+            url = reverse("admin:shopify_sync_shopifyorder_change", args=[order.pk])
+            rows.append((url, label))
+        if not rows:
+            return "-"
+        return format_html_join("", '<a href="{}">{}</a><br>', rows)
+    member_order_list_display.short_description = "Member orders"
+
+    def address_snapshot_display(self, obj):
+        if not obj:
+            return "-"
+        return format_html(
+            '<span style="white-space:pre-line;">{}</span>',
+            self._address_snapshot_text(obj),
+        )
+    address_snapshot_display.short_description = "Address snapshot"
+
+    def merged_group_cost_summary(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+        summary = self._group_cost_summary(obj)
+        total_cost = (
+            self._format_rmb(summary["group_total_cost_rmb"])
+            if summary["cost_completed"]
+            else "未完成"
+        )
+        rows = (
+            ("合并组编号 group_no", obj.group_no or obj.pk),
+            ("状态", obj.get_status_display()),
+            ("成员订单数量", summary["member_order_count"]),
+            ("深圳仓 item 数量", summary["shenzhen_item_count"]),
+            ("产品成本合计 RMB", self._format_rmb(summary["group_product_cost_rmb"])),
+            ("合并运费 RMB", self._format_rmb(obj.merged_shipping_cost_rmb, "未填写")),
+            ("合并拍单成本 RMB", self._format_rmb(obj.merged_ordering_cost_rmb, "未填写")),
+            ("合并结算总成本 RMB", total_cost),
+            ("成本完整性状态", self.group_cost_completed_display(obj)),
+            ("成员订单号列表", self.member_order_list_display(obj)),
+            ("地址快照", self.address_snapshot_display(obj)),
+            (
+                "note",
+                format_html(
+                    '<span style="white-space:pre-line;">{}</span>',
+                    obj.note or "-",
+                ),
+            ),
+        )
+        return format_html(
+            '<table style="line-height:1.6;max-width:920px;">{}</table>',
+            format_html_join(
+                "",
+                '<tr><th style="text-align:left;vertical-align:top;padding:3px 16px 3px 0;">{}</th>'
+                '<td style="vertical-align:top;padding:3px 0;">{}</td></tr>',
+                rows,
+            ),
+        )
+    merged_group_cost_summary.short_description = "Merged settlement cost summary"
 
 
 @admin.register(SettlementBatch)

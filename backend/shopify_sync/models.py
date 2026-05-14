@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -295,6 +296,80 @@ class ShenzhenMergedSettlementGroup(models.Model):
             self.group_no = self.generate_group_no()
         self.sync_address_match_key()
         super().save(*args, **kwargs)
+
+    def _shenzhen_group_items(self):
+        if not self.pk:
+            return []
+        return list(
+            ShopifyOrderItem.objects.filter(
+                order__merged_settlement_group_links__group=self,
+                fulfillment_location="shenzhen",
+            )
+            .select_related("order")
+            .order_by("order_id", "id")
+        )
+
+    def group_cost_summary(self):
+        zero = Decimal("0.00")
+        shenzhen_items = self._shenzhen_group_items()
+        member_order_count = self.group_orders.count() if self.pk else 0
+        product_cost = zero
+        missing_product_cost_count = 0
+
+        for item in shenzhen_items:
+            if item.locked_product_cost_rmb is None or item.locked_product_cost_rmb <= 0:
+                missing_product_cost_count += 1
+                continue
+            product_cost += item.locked_product_cost_rmb * item.quantity
+
+        shipping_cost = self.merged_shipping_cost_rmb
+        ordering_cost = self.merged_ordering_cost_rmb
+        incomplete_reasons = []
+
+        if member_order_count <= 0:
+            incomplete_reasons.append("no member orders")
+        if not shenzhen_items:
+            incomplete_reasons.append("no Shenzhen items")
+        if missing_product_cost_count:
+            incomplete_reasons.append(
+                f"{missing_product_cost_count} Shenzhen item product costs missing"
+            )
+        if shipping_cost is None or shipping_cost <= 0:
+            incomplete_reasons.append("merged shipping cost missing")
+        if ordering_cost is None:
+            incomplete_reasons.append("merged ordering cost missing")
+
+        cost_completed = not incomplete_reasons
+        total_cost = None
+        if cost_completed:
+            total_cost = product_cost + shipping_cost - ordering_cost
+
+        return {
+            "member_order_count": member_order_count,
+            "shenzhen_item_count": len(shenzhen_items),
+            "group_product_cost_rmb": product_cost,
+            "group_shipping_cost_rmb": shipping_cost if shipping_cost is not None else zero,
+            "group_ordering_cost_rmb": ordering_cost,
+            "group_total_cost_rmb": total_cost,
+            "cost_completed": cost_completed,
+            "incomplete_reasons": incomplete_reasons,
+            "missing_product_cost_count": missing_product_cost_count,
+        }
+
+    def group_product_cost_rmb(self):
+        return self.group_cost_summary()["group_product_cost_rmb"]
+
+    def group_shipping_cost_rmb(self):
+        return self.merged_shipping_cost_rmb if self.merged_shipping_cost_rmb is not None else Decimal("0.00")
+
+    def group_ordering_cost_rmb(self):
+        return self.merged_ordering_cost_rmb
+
+    def group_total_cost_rmb(self):
+        return self.group_cost_summary()["group_total_cost_rmb"]
+
+    def group_cost_completed(self):
+        return self.group_cost_summary()["cost_completed"]
 
 
 class ShenzhenMergedSettlementGroupOrder(models.Model):
