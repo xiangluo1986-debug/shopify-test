@@ -2,6 +2,185 @@
 
 {% block content %}
 <style>
+  .translation-workspace {
+    color: #111827;
+    background: transparent;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .translation-workspace *,
+  .translation-workspace *::before,
+  .translation-workspace *::after {
+    box-sizing: border-box;
+  }
+  .translation-workspace h1,
+  .translation-workspace h2,
+  .translation-workspace h3,
+  .translation-workspace h4,
+  .translation-workspace p,
+  .translation-workspace li,
+  .translation-workspace label,
+  .translation-workspace summary,
+  .translation-workspace strong {
+    color: #111827;
+  }
+  .translation-workspace h1 {
+    margin: 0 0 8px;
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .translation-workspace h2 {
+    margin: 0 0 10px;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+  .translation-workspace h3 {
+    margin: 16px 0 8px;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .translation-workspace p {
+    margin: 0 0 10px;
+  }
+  .translation-workspace a {
+    color: #1d4ed8;
+  }
+  .translation-workspace .module,
+  .translation-workspace .tw-hero {
+    border: 1px solid #d1d9e6;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #111827;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  }
+  .translation-workspace .module {
+    overflow: visible;
+  }
+  .translation-workspace .module > h2,
+  .translation-workspace .module caption,
+  .translation-workspace .inline-group h2 {
+    background: transparent;
+    color: #111827;
+  }
+  .translation-workspace table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #111827;
+    overflow: hidden;
+  }
+  .translation-workspace th,
+  .translation-workspace td {
+    border-top: 1px solid #eef2f7;
+    color: #111827;
+    padding: 9px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .translation-workspace thead th,
+  .translation-workspace tbody th {
+    background: #f3f6fa;
+    color: #1f2937;
+    font-weight: 700;
+  }
+  .translation-workspace thead tr:first-child th,
+  .translation-workspace tbody tr:first-child th,
+  .translation-workspace tbody tr:first-child td {
+    border-top: 0;
+  }
+  .translation-workspace tbody tr:nth-child(even) td,
+  .translation-workspace tbody tr:nth-child(even) th {
+    background: #fbfdff;
+  }
+  .translation-workspace label {
+    display: inline-block;
+    margin-bottom: 4px;
+    font-weight: 700;
+  }
+  .translation-workspace input[type="text"],
+  .translation-workspace input[type="search"],
+  .translation-workspace input[type="number"],
+  .translation-workspace input[type="url"],
+  .translation-workspace input[type="email"],
+  .translation-workspace select,
+  .translation-workspace textarea {
+    min-height: 34px;
+    border: 1px solid #b6c2d1;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #111827;
+    padding: 6px 9px;
+    box-shadow: none;
+  }
+  .translation-workspace input::placeholder,
+  .translation-workspace textarea::placeholder {
+    color: #6b7280;
+    opacity: 1;
+  }
+  .translation-workspace input:focus,
+  .translation-workspace select:focus,
+  .translation-workspace textarea:focus {
+    border-color: #2563eb;
+    outline: 2px solid #bfdbfe;
+    outline-offset: 1px;
+  }
+  .translation-workspace .button,
+  .translation-workspace input[type="submit"],
+  .translation-workspace button {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #1d4ed8;
+    border-radius: 6px;
+    background: #1d4ed8;
+    color: #ffffff !important;
+    font-weight: 700;
+    line-height: 1.2;
+    padding: 7px 12px;
+    text-decoration: none;
+  }
+  .translation-workspace .button:hover,
+  .translation-workspace input[type="submit"]:hover,
+  .translation-workspace button:hover {
+    border-color: #1e40af;
+    background: #1e40af;
+    color: #ffffff !important;
+  }
+  .translation-workspace details {
+    color: #111827;
+  }
+  .translation-workspace summary {
+    padding: 6px 0;
+    font-weight: 700;
+  }
+  .translation-workspace pre,
+  .translation-workspace code {
+    border: 1px solid #dbe1e8;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #111827;
+  }
+  .translation-workspace pre {
+    padding: 10px;
+    overflow: auto;
+  }
+  .translation-workspace code {
+    padding: 2px 5px;
+  }
+  .translation-workspace .messagelist .warning,
+  .translation-workspace .warning {
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    background: #fffbeb;
+    color: #78350f;
+    padding: 8px 10px;
+  }
   .tw-hero {
     border: 1px solid #dbe1e8;
     border-radius: 8px;
@@ -316,8 +495,143 @@
     padding: 18px;
     color: #475467;
   }
+  .translation-workspace .tw-hero {
+    background: #ffffff;
+    padding: 18px;
+  }
+  .translation-workspace .tw-hero p {
+    color: #374151;
+    max-width: 980px;
+  }
+  .translation-workspace .tw-safety {
+    border: 1px solid #16a34a;
+    background: #dcfce7;
+    color: #14532d;
+  }
+  .translation-workspace .tw-tab,
+  .translation-workspace .tw-filter-tab {
+    border-color: #b6c2d1;
+    background: #ffffff;
+    color: #1f2937;
+    font-weight: 700;
+  }
+  .translation-workspace .tw-tab:hover,
+  .translation-workspace .tw-filter-tab:hover {
+    border-color: #2563eb;
+    background: #eff6ff;
+    color: #1e3a8a;
+  }
+  .translation-workspace .tw-tab.is-active,
+  .translation-workspace .tw-filter-tab.is-active {
+    border-color: #1d4ed8;
+    background: #1d4ed8;
+    color: #ffffff;
+  }
+  .translation-workspace .tw-toolbar,
+  .translation-workspace .tw-summary-card,
+  .translation-workspace .tw-coverage-pill,
+  .translation-workspace .tw-group-chip,
+  .translation-workspace .tw-text-block,
+  .translation-workspace .tw-empty-state {
+    background: #ffffff;
+    color: #111827;
+  }
+  .translation-workspace .tw-toolbar {
+    align-items: flex-end;
+  }
+  .translation-workspace .tw-summary-label,
+  .translation-workspace .tw-section-hint,
+  .translation-workspace .tw-muted,
+  .translation-workspace .tw-resource-key,
+  .translation-workspace .tw-target-empty {
+    color: #4b5563;
+  }
+  .translation-workspace .tw-summary-value,
+  .translation-workspace .tw-resource-detail,
+  .translation-workspace .tw-resource-type,
+  .translation-workspace .tw-row-meta {
+    color: #1f2937;
+  }
+  .translation-workspace .tw-section-heading {
+    border: 1px solid #cfd8e3;
+    background: #eef2f7;
+    color: #111827;
+  }
+  .translation-workspace .tw-section-panel.is-folded .tw-section-heading {
+    background: #f8fafc;
+  }
+  .translation-workspace .tw-count-badge,
+  .translation-workspace .tw-status-badge,
+  .translation-workspace .tw-coverage-status {
+    border: 1px solid #cfd8e3;
+    background: #eef2f7;
+    color: #1f2937;
+    font-weight: 700;
+  }
+  .translation-workspace .tw-status-badge.is-translated,
+  .translation-workspace .tw-coverage-status.is-visible {
+    border-color: #86efac;
+    background: #dcfce7;
+    color: #14532d;
+  }
+  .translation-workspace .tw-status-badge.is-outdated,
+  .translation-workspace .tw-status-badge.is-needs_review {
+    border-color: #facc15;
+    background: #fef9c3;
+    color: #713f12;
+  }
+  .translation-workspace .tw-status-badge.is-draft_only,
+  .translation-workspace .tw-coverage-status.is-available_hidden_by_filter,
+  .translation-workspace .tw-coverage-status.is-nested_only {
+    border-color: #93c5fd;
+    background: #dbeafe;
+    color: #1e3a8a;
+  }
+  .translation-workspace .tw-status-badge.is-untranslated,
+  .translation-workspace .tw-status-badge.is-skipped,
+  .translation-workspace .tw-coverage-status.is-missing,
+  .translation-workspace .tw-coverage-status.is-not_detected {
+    border-color: #d1d5db;
+    background: #f3f4f6;
+    color: #374151;
+  }
+  .translation-workspace .tw-editor-table,
+  .translation-workspace .tw-coverage-table {
+    background: #ffffff;
+    color: #111827;
+  }
+  .translation-workspace .tw-editor-table thead th,
+  .translation-workspace .tw-coverage-table thead th {
+    background: #e8edf5;
+    color: #111827;
+  }
+  .translation-workspace .tw-editor-table tbody td,
+  .translation-workspace .tw-coverage-table tbody td {
+    background: #ffffff;
+    color: #111827;
+  }
+  .translation-workspace .tw-editor-table tbody tr:hover td,
+  .translation-workspace .tw-coverage-table tbody tr:hover td {
+    background: #f8fbff;
+  }
+  .translation-workspace .tw-field-label {
+    color: #111827;
+  }
+  .translation-workspace .tw-text-block {
+    border-color: #cfd8e3;
+    background: #ffffff;
+    color: #111827;
+  }
+  .translation-workspace .tw-text-block.is-target {
+    border-color: #b6c2d1;
+    background: #f8fafc;
+    color: #111827;
+  }
+  .translation-workspace .tw-warning {
+    color: #713f12;
+  }
 </style>
-<div id="content-main">
+<div id="content-main" class="translation-workspace">
   <div class="tw-hero">
     <h1>Shopify Translation Workspace</h1>
     <p>This is a standalone internal tool for Shopify product translation review and preparation.</p>
