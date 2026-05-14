@@ -11,7 +11,9 @@ param(
 
     [string]$Model = "",
 
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    [switch]$Notify
 )
 
 Set-StrictMode -Version Latest
@@ -104,6 +106,31 @@ function Save-Lines {
     }
 
     Set-Content -LiteralPath $Path -Value @($Lines) -Encoding UTF8
+}
+
+function Invoke-CompletionSound {
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$Warning
+    )
+
+    if (-not $Notify) {
+        return
+    }
+
+    try {
+        if ($Warning) {
+            [console]::beep(392, 160)
+            [console]::beep(330, 220)
+            return
+        }
+
+        [console]::beep(523, 100)
+        [console]::beep(659, 100)
+        [console]::beep(784, 140)
+    } catch {
+        Write-Verbose "Completion sound could not be played: $($_.Exception.Message)"
+    }
 }
 
 function Get-StatusPaths {
@@ -398,6 +425,7 @@ if ($DryRun) {
     Write-Host "Would run:"
     Write-Host (Format-CommandLine -Executable $resolvedCodexCmd -Arguments $codexArgs)
     Write-Host "Prompt would be provided on stdin from SAFETY_RULES.md, the task file, and the final-response footer."
+    Invoke-CompletionSound -Warning $false
     return
 }
 
@@ -490,6 +518,7 @@ $changedStatus = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("stat
 $stagedFiles = @(Invoke-GitLines -Root $resolvedProjectRoot -Arguments @("diff", "--cached", "--name-only"))
 $changedFiles = @(Get-StatusPaths -StatusLines $changedStatus)
 $warnings = @(New-SafetyWarnings -ChangedFiles $changedFiles -StagedFiles $stagedFiles)
+$hasSafetyWarnings = @($warnings | Where-Object { $_ -like "WARNING:*" }).Count -gt 0
 
 Save-Lines -Path $gitAfterPath -Lines $gitAfter
 Save-Lines -Path $changedFilesPath -Lines $changedStatus
@@ -501,7 +530,9 @@ Write-Host "Safety warnings written to: $warningsPath"
 
 if ($codexExitCode -ne 0) {
     Write-Warning "codex exec exited with code $codexExitCode. Review $fullOutputPath and $lastMessagePath."
+    Invoke-CompletionSound -Warning $true
     exit $codexExitCode
 }
 
 Write-Host "codex exec completed. Review $lastMessagePath and $fullOutputPath."
+Invoke-CompletionSound -Warning $hasSafetyWarnings
