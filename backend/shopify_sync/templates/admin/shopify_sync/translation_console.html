@@ -597,6 +597,19 @@
     color: #8a4b00;
     font-weight: 600;
   }
+  .tw-identity-warning {
+    border: 1px solid #f97316;
+    border-radius: 6px;
+    background: #fff7ed;
+    color: #7c2d12;
+    padding: 8px 10px;
+  }
+  .tw-status-badge.is-blocked,
+  .tw-status-badge.is-blocked_draft {
+    border-color: #fca5a5;
+    background: #fee2e2;
+    color: #7f1d1d;
+  }
   .tw-empty-state {
     border: 1px dashed #cfd8e3;
     border-radius: 8px;
@@ -753,6 +766,12 @@
     border-color: #facc15;
     background: #fef9c3;
     color: #713f12;
+  }
+  .translation-workspace .tw-status-badge.is-blocked,
+  .translation-workspace .tw-status-badge.is-blocked_draft {
+    border-color: #fca5a5;
+    background: #fee2e2;
+    color: #7f1d1d;
   }
   .translation-workspace .tw-status-badge.is-draft_only,
   .translation-workspace .tw-coverage-status.is-available_hidden_by_filter,
@@ -1209,6 +1228,7 @@
                 <th>Language</th>
                 <th>Status</th>
                 <th>Draft fields</th>
+                <th>Blocked drafts</th>
                 <th>Existing fields skipped</th>
                 <th>Preview</th>
               </tr>
@@ -1223,6 +1243,12 @@
                     {% if row.failure_reason %}<div class="tw-warning">{{ row.failure_reason }}</div>{% endif %}
                   </td>
                   <td>{{ row.draft_field_count }}</td>
+                  <td>
+                    {{ row.blocked_draft_count }}
+                    {% if row.blocked_draft_count %}
+                      <div class="tw-warning">Possible wrong product name detected</div>
+                    {% endif %}
+                  </td>
                   <td>{{ row.skipped_existing_field_count }}</td>
                   <td>
                     {% if row.locale in supported_locales %}
@@ -1257,6 +1283,8 @@
             <tr><th>Selected languages</th><td>{{ multi_locale_draft_result.requested_locales|join:", " }}</td></tr>
             <tr><th>Draft fields</th><td>{{ multi_locale_draft_result.field_scope_labels|join:", " }}</td></tr>
             <tr><th>Total draft fields</th><td>{{ multi_locale_draft_result.summary.draft_field_count }}</td></tr>
+            <tr><th>Blocked drafts</th><td>{{ multi_locale_draft_result.summary.blocked_draft_count }}</td></tr>
+            <tr><th>Product identity mismatches</th><td>{{ multi_locale_draft_result.summary.product_identity_mismatch_count }}</td></tr>
             <tr><th>Existing fields skipped</th><td>{{ multi_locale_draft_result.summary.skipped_existing_field_count }}</td></tr>
             <tr><th>Review notes</th><td>{{ multi_locale_draft_result.summary.blocking_conditions|join:", " }}</td></tr>
           </tbody>
@@ -1325,11 +1353,18 @@
                         <span class="tw-status-badge">{{ row.target_value_source_label }}</span>
                       {% endif %}
                       {% for badge in row.status_badge_labels %}
-                        <span class="tw-status-badge">{{ badge }}</span>
+                        <span class="tw-status-badge{% if badge == 'Blocked draft' %} is-blocked{% endif %}">{{ badge }}</span>
                       {% endfor %}
                     </div>
                   {% endif %}
                   {% if row.seo_warning %}<div class="tw-warning">{{ row.seo_warning }}</div>{% endif %}
+                  {% if row.draft_blocked %}
+                    <div class="tw-warning tw-identity-warning">
+                      <strong>Possible wrong product name detected</strong><br>
+                      {{ row.identity_warning }}
+                      {% if row.suspicious_terms %}<br>Suspicious terms: {{ row.suspicious_terms }}{% endif %}
+                    </div>
+                  {% endif %}
                   {% if row.exceeds_limit %}<div class="tw-warning">Too long for the recommended limit.</div>{% endif %}
                   <details class="tw-cell-details">
                     <summary>More status info</summary>
@@ -1338,6 +1373,9 @@
                       {% if row.char_limit %}<span>Recommended limit {{ row.char_limit }}</span>{% endif %}
                     </div>
                     {% if row.validation_status %}<div class="tw-resource-key">Validation: {{ row.validation_status }}</div>{% endif %}
+                    {% if row.product_identity_validation_status %}<div class="tw-resource-key">Product identity: {{ row.product_identity_validation_status }}</div>{% endif %}
+                    {% if row.validation_reasons %}<div class="tw-resource-key">Review reasons: {{ row.validation_reasons }}</div>{% endif %}
+                    {% if row.suspicious_terms %}<div class="tw-resource-key">Suspicious terms: {{ row.suspicious_terms }}</div>{% endif %}
                     {% if row.seo_status %}<div class="tw-resource-key">SEO status: {{ row.seo_status }}</div>{% endif %}
                   </details>
                 </td>
@@ -1987,6 +2025,8 @@
           <tr><th>seo_warning_count</th><td>{{ draft_result.translation_console_detail.summary_counts.seo_warning_count }}</td></tr>
           <tr><th>ready_for_apply_plan_count</th><td>{{ draft_result.translation_console_detail.summary_counts.ready_for_apply_plan_count }}</td></tr>
           <tr><th>needs_manual_review_count</th><td>{{ draft_result.translation_console_detail.summary_counts.needs_manual_review_count }}</td></tr>
+          <tr><th>draft_blocked_count</th><td>{{ draft_result.translation_console_detail.summary_counts.draft_blocked_count }}</td></tr>
+          <tr><th>product_identity_mismatch_count</th><td>{{ draft_result.translation_console_detail.summary_counts.product_identity_mismatch_count }}</td></tr>
           <tr><th>existing_translation_count</th><td>{{ draft_result.translation_console_detail.summary_counts.existing_translation_count }}</td></tr>
           <tr><th>draft_ready_count</th><td>{{ draft_result.draft_ready_count }}</td></tr>
           <tr><th>draft_needs_manual_review_count</th><td>{{ draft_result.draft_needs_manual_review_count }}</td></tr>
@@ -2038,6 +2078,9 @@
               <th>Proposed translation preview</th>
               <th>Proposed chars</th>
               <th>Validation</th>
+              <th>Product identity</th>
+              <th>Suspicious terms</th>
+              <th>Warning</th>
               <th>SEO validation</th>
               <th>SEO warning</th>
               <th>Eligible for apply plan</th>
@@ -2055,6 +2098,16 @@
                 <td style="max-width: 320px; white-space: pre-wrap;">{{ entry.proposed_translation_preview }}</td>
                 <td>{{ entry.proposed_chars }}</td>
                 <td>{{ entry.validation_status }}</td>
+                <td>
+                  {{ entry.product_identity_validation_status }}
+                  {% if entry.draft_blocked %}<br><span class="tw-status-badge is-blocked">Blocked draft</span>{% endif %}
+                </td>
+                <td>{{ entry.suspicious_terms }}</td>
+                <td>
+                  {% if entry.identity_warning %}
+                    <div class="tw-warning tw-identity-warning">Possible wrong product name detected<br>{{ entry.identity_warning }}</div>
+                  {% endif %}
+                </td>
                 <td>{{ entry.seo_validation_status }}</td>
                 <td>{{ entry.seo_warning }}</td>
                 <td>{{ entry.eligible_for_apply_plan }}</td>

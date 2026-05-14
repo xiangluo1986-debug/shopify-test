@@ -142,6 +142,44 @@ KEYWORD_STUFFING_RE = re.compile(
     r"forcella connettore tirante)\b",
     flags=re.IGNORECASE,
 )
+PRODUCT_IDENTITY_WARNING_TEXT = (
+    "This draft may mention a different product. Please review before using."
+)
+PRODUCT_IDENTITY_BLOCKLIST_TERMS = (
+    "MOFLY",
+    "P-51D",
+    "Mustang",
+    "Corsair",
+    "Spitfire",
+    "F4U",
+    "F-16",
+    "SR22",
+    "Trainstar",
+    "Volantex",
+    "WLtoys",
+    "XK",
+    "Goosky",
+    "Yuxiang",
+)
+PRODUCT_IDENTITY_KNOWN_MODEL_TERMS = ("P-51D", "F4U", "F-16", "SR22")
+PRODUCT_IDENTITY_CATEGORY_TERMS = (
+    "Helicopter",
+    "Plane",
+    "Aircraft",
+    "Drone",
+    "Car",
+    "Boat",
+    "Truck",
+    "Battery",
+    "Motor",
+    "Connector",
+)
+PRODUCT_MODEL_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Z]{1,5}-?\d+[A-Z0-9-]*|\d+[A-Z]{1,4}[A-Z0-9-]*)(?![A-Za-z0-9])"
+)
+PRODUCT_UPPERCASE_PHRASE_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Z]{2,})(?:\s+[A-Z]{2,})+(?![A-Za-z0-9])"
+)
 
 LANGUAGE_NAMES = {
     "ja": "Japanese",
@@ -151,7 +189,7 @@ LANGUAGE_NAMES = {
     "it": "Italian",
 }
 LOCALE_TERM_GUIDANCE = {
-    "ja": "Use natural Japanese RC part terms. Preserve MOFLY, P-51D, 690mm, and RC.",
+    "ja": "Use natural Japanese RC part terms. Preserve source brand, model, dimensions, and RC terms exactly.",
     "de": "Use natural German terms: Querruder, Gabelkopf, Ersatzteil. Do not keep 'RC Plane Clevis'.",
     "fr": "Use natural French terms: aileron, chape, piece de rechange, piece RC.",
     "es": "Use natural Spanish terms: aleron, clevis or horquilla, repuesto RC.",
@@ -160,7 +198,7 @@ LOCALE_TERM_GUIDANCE = {
 FIELD_STYLE_GUIDANCE = {
     "title": "Short store title. Prefer brand/model + part name + spec/use.",
     "body_html": "Customer-facing product description. Preserve the source HTML structure, links, images, lists, specs, model names, and compatibility facts.",
-    "meta_title": "Short SEO title with MOFLY P-51D, one core part keyword, and RC spare/replacement meaning.",
+    "meta_title": "Short SEO title with the source brand/model, one core part keyword, and RC spare/replacement meaning.",
     "meta_description": "Natural SEO description with use, compatibility, part type, and one value point; no CTA.",
 }
 SEO_TERMS = {
@@ -241,6 +279,12 @@ def generate_selected_product_missing_translation_draft_package(
         product = data.get("product") or {}
         result["product_title"] = result["product_title"] or product.get("title", "")
         translatable_rows = data.get("translatable_rows", [])
+        source_identity_context = build_product_identity_context(
+            product=product,
+            translatable_rows=translatable_rows,
+        )
+        if not result["product_identity_context"]:
+            result["product_identity_context"] = source_identity_context
         rows_by_key = {
             row.get("key"): row for row in translatable_rows if row.get("key")
         }
@@ -268,6 +312,7 @@ def generate_selected_product_missing_translation_draft_package(
             else:
                 entry = _entry_template(locale, field, row, "missing_translation")
                 missing_by_locale.setdefault(locale, []).append(entry)
+            _attach_source_identity_context(entry, source_identity_context)
             result["entries"].append(entry)
             _count_entry(result, entry)
 
@@ -324,6 +369,8 @@ def _empty_result(product_id, target_locales, fields):
         "generated_draft_count": 0,
         "draft_ready_count": 0,
         "draft_needs_manual_review_count": 0,
+        "draft_blocked_count": 0,
+        "product_identity_mismatch_count": 0,
         "eligible_apply_plan_count": 0,
         "over_length_after_rewrite_count": 0,
         "seo_ready_count": 0,
@@ -339,6 +386,7 @@ def _empty_result(product_id, target_locales, fields):
         "per_field_results": {},
         "entries": [],
         "draft_entries": [],
+        "product_identity_context": {},
         "source_read_summary": {},
         "per_locale_draft_coverage": {},
         "draft_coverage_summary": _empty_draft_coverage_summary(fields),
@@ -636,6 +684,17 @@ def _entry_template(locale, field, row, reason):
         "recommended_min_chars": FIELD_RECOMMENDED_MIN_CHARS.get(field),
         "recommended_max_chars": FIELD_RECOMMENDED_MAX_CHARS.get(field),
         "validation_status": "skipped",
+        "product_identity_validation_status": "skipped",
+        "validation_reasons": [],
+        "suspicious_terms": [],
+        "identity_warning_text": "",
+        "warning_text": "",
+        "product_identity_mismatch": False,
+        "needs_review": False,
+        "draft_blocked": False,
+        "source_identity_terms": [],
+        "source_model_terms": [],
+        "source_identity_context": {},
         "seo_validation_status": "skipped",
         "skip_reason": reason,
         "eligible_for_apply_plan": False,
@@ -650,6 +709,225 @@ def _entry_template(locale, field, row, reason):
     }
 
 
+def build_product_identity_context(product=None, translatable_rows=None, source_values=None):
+    text_parts = []
+    product = product or {}
+    for key in ("title", "vendor", "product_type", "productType", "handle"):
+        value = str(product.get(key) or "").strip()
+        if value:
+            text_parts.append(value)
+    for row in translatable_rows or []:
+        if isinstance(row, dict):
+            value = str(row.get("source_value") or "").strip()
+            if value:
+                text_parts.append(value)
+    for value in source_values or []:
+        value = str(value or "").strip()
+        if value:
+            text_parts.append(value)
+
+    source_text = "\n".join(text_parts)
+    source_model_terms = _extract_model_tokens(source_text)
+    expected_terms = _extract_product_identity_terms(source_text, source_model_terms)
+    allowed_product_terms = [
+        term
+        for term in PRODUCT_IDENTITY_BLOCKLIST_TERMS
+        if _identity_term_in_text(term, source_text)
+    ]
+    return {
+        "expected_terms": expected_terms,
+        "source_model_terms": source_model_terms,
+        "allowed_product_terms": allowed_product_terms,
+    }
+
+
+def validate_product_identity_draft(source_identity_context, draft, field=""):
+    context = _normalize_product_identity_context(source_identity_context)
+    draft = str(draft or "")
+    allowed_product_norms = {
+        _identity_normalize_term(term)
+        for term in context.get("allowed_product_terms") or []
+    }
+    source_model_norms = {
+        _identity_normalize_term(term)
+        for term in context.get("source_model_terms") or []
+    }
+
+    unexpected_product_terms = []
+    for term in PRODUCT_IDENTITY_BLOCKLIST_TERMS:
+        if not _identity_term_in_text(term, draft):
+            continue
+        if _identity_normalize_term(term) not in allowed_product_norms:
+            unexpected_product_terms.append(term)
+
+    draft_model_tokens = _extract_model_tokens(draft)
+    unexpected_model_tokens = []
+    if source_model_norms:
+        for token in draft_model_tokens:
+            normalized = _identity_normalize_term(token)
+            if normalized in source_model_norms:
+                continue
+            if _is_known_foreign_model_token(token):
+                unexpected_model_tokens.append(token)
+
+    suspicious_terms = _unique(unexpected_product_terms + unexpected_model_tokens)
+    validation_reasons = []
+    if suspicious_terms:
+        validation_reasons.append("product_identity_mismatch")
+    if unexpected_product_terms:
+        validation_reasons.append("unexpected_product_term")
+    if unexpected_model_tokens:
+        validation_reasons.append("unexpected_model_token")
+    validation_reasons = _unique(validation_reasons)
+    status = "blocked" if validation_reasons else "ok"
+    return {
+        "validation_status": status,
+        "validation_reasons": validation_reasons,
+        "suspicious_terms": suspicious_terms,
+        "warning_text": PRODUCT_IDENTITY_WARNING_TEXT if validation_reasons else "",
+        "product_identity_mismatch": bool(validation_reasons),
+        "needs_review": bool(validation_reasons),
+        "draft_blocked": status == "blocked",
+        "source_identity_terms": context.get("expected_terms") or [],
+        "source_model_terms": context.get("source_model_terms") or [],
+        "draft_model_terms": draft_model_tokens,
+        "field": field,
+    }
+
+
+def _attach_source_identity_context(entry, source_identity_context):
+    context = _normalize_product_identity_context(source_identity_context)
+    entry["source_identity_context"] = context
+    entry["source_identity_terms"] = context.get("expected_terms") or []
+    entry["source_model_terms"] = context.get("source_model_terms") or []
+
+
+def _attach_product_identity_validation(entry, draft):
+    identity = validate_product_identity_draft(
+        entry.get("source_identity_context") or build_product_identity_context(
+            source_values=[entry.get("source_value", "")]
+        ),
+        draft,
+        field=entry.get("field", ""),
+    )
+    entry["product_identity_validation_status"] = identity["validation_status"]
+    entry["validation_reasons"] = identity["validation_reasons"]
+    entry["suspicious_terms"] = identity["suspicious_terms"]
+    entry["identity_warning_text"] = identity["warning_text"]
+    entry["warning_text"] = identity["warning_text"]
+    entry["product_identity_mismatch"] = identity["product_identity_mismatch"]
+    entry["needs_review"] = bool(entry.get("needs_review") or identity["needs_review"])
+    entry["draft_blocked"] = identity["draft_blocked"]
+    entry["source_identity_terms"] = identity["source_identity_terms"]
+    entry["source_model_terms"] = identity["source_model_terms"]
+    if identity["draft_blocked"]:
+        entry["validation_status"] = "blocked"
+        entry["eligible_for_apply_plan"] = False
+        notes = entry.setdefault("quality_notes", [])
+        for reason in identity["validation_reasons"]:
+            if reason not in notes:
+                notes.append(reason)
+
+
+def _normalize_product_identity_context(context):
+    if not isinstance(context, dict):
+        return build_product_identity_context(source_values=[])
+    if any(key in context for key in ("product", "translatable_rows", "source_values")):
+        return build_product_identity_context(
+            product=context.get("product"),
+            translatable_rows=context.get("translatable_rows"),
+            source_values=context.get("source_values"),
+        )
+    return {
+        "expected_terms": _unique(context.get("expected_terms") or []),
+        "source_model_terms": _unique(context.get("source_model_terms") or []),
+        "allowed_product_terms": _unique(context.get("allowed_product_terms") or []),
+    }
+
+
+def _identity_context_from_entries(entries):
+    for entry in entries or []:
+        context = entry.get("source_identity_context") if isinstance(entry, dict) else {}
+        if context:
+            return _normalize_product_identity_context(context)
+    return build_product_identity_context(
+        source_values=[
+            entry.get("source_value", "")
+            for entry in entries or []
+            if isinstance(entry, dict)
+        ]
+    )
+
+
+def _extract_product_identity_terms(source_text, source_model_terms):
+    terms = []
+    for phrase in PRODUCT_UPPERCASE_PHRASE_RE.findall(source_text or ""):
+        terms.append(phrase.strip())
+    terms.extend(source_model_terms or [])
+    for term in PRODUCT_IDENTITY_CATEGORY_TERMS:
+        if _identity_term_in_text(term, source_text):
+            terms.append(term)
+    for term in PRODUCT_IDENTITY_BLOCKLIST_TERMS:
+        if _identity_term_in_text(term, source_text):
+            terms.append(term)
+    return _unique(terms)[:30]
+
+
+def _extract_model_tokens(text):
+    return _unique(match.group(0) for match in PRODUCT_MODEL_TOKEN_RE.finditer(str(text or "")))
+
+
+def _is_known_foreign_model_token(token):
+    normalized = _identity_normalize_term(token)
+    return normalized in {
+        _identity_normalize_term(term)
+        for term in PRODUCT_IDENTITY_KNOWN_MODEL_TERMS
+    }
+
+
+def _identity_normalize_term(term):
+    return re.sub(r"[^A-Z0-9]+", "", str(term or "").upper())
+
+
+def _identity_term_in_text(term, text):
+    term = str(term or "").strip()
+    text = str(text or "")
+    if not term or not text:
+        return False
+    if len(term) <= 3 and term.isalnum():
+        return bool(
+            re.search(
+                rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+    return term.lower() in text.lower()
+
+
+def _identity_term_occurrence_count(term, text):
+    term = str(term or "").strip()
+    text = str(text or "")
+    if not term or not text:
+        return 0
+    if len(term) <= 3 and term.isalnum():
+        return len(
+            re.findall(
+                rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])",
+                text,
+                flags=re.IGNORECASE,
+            )
+        )
+    return text.lower().count(term.lower())
+
+
+def _format_identity_terms_for_prompt(identity_terms):
+    identity_terms = [str(term) for term in identity_terms or [] if str(term)]
+    if not identity_terms:
+        return "the source product brand/model terms"
+    return ", ".join(identity_terms[:12])
+
+
 def _summary_bucket(result, key, value):
     return result[key].setdefault(
         value,
@@ -657,6 +935,8 @@ def _summary_bucket(result, key, value):
             "generated_draft_count": 0,
             "draft_ready_count": 0,
             "draft_needs_manual_review_count": 0,
+            "draft_blocked_count": 0,
+            "product_identity_mismatch_count": 0,
             "eligible_apply_plan_count": 0,
             "over_length_after_rewrite_count": 0,
             "seo_ready_count": 0,
@@ -733,11 +1013,19 @@ def _request_openai(locale, missing_entries, result):
 
 
 def _openai_prompt(locale, missing_entries):
+    identity_context = _identity_context_from_entries(missing_entries)
+    identity_terms = identity_context.get("expected_terms") or []
+    model_terms = identity_context.get("source_model_terms") or []
+    identity_term_text = _format_identity_terms_for_prompt(identity_terms)
     return {
         "task": "Translate selected Shopify product fields into draft translations for manual review only.",
         "target_locale": locale,
         "target_language": LANGUAGE_NAMES.get(locale, locale),
         "draft_only": True,
+        "product_identity": {
+            "expected_terms": identity_terms,
+            "model_terms": model_terms,
+        },
         "fields": [
             {
                 "field": item["field"],
@@ -752,15 +1040,16 @@ def _openai_prompt(locale, missing_entries):
         "locale_term_guidance": LOCALE_TERM_GUIDANCE.get(locale, ""),
         "rules": [
             "Return JSON only with a translations object keyed by field.",
-            "Preserve MOFLY, P-51D, 690mm, RC, dimensions, and model numbers exactly.",
+            f"Preserve these source product identity terms when they appear in the source: {identity_term_text}.",
+            "Do not introduce a different product brand, product line, aircraft name, vehicle name, or model number.",
             "Localize part names naturally; do not mechanically keep English phrases such as RC Plane Clevis.",
             "Do not add Buy now, Shop now, Free shipping, Worldwide shipping, Made in China, Best, Cheap, guaranteed, official, original OEM, Herkunft, or Provenance.",
             "Product title must be 25-65 characters where possible, and never over 65 characters.",
             "SEO meta_title must be 30-60 characters where possible, and never over 60 characters.",
             "SEO meta_description must be 80-155 characters where possible, and never over 155 characters.",
-            "meta_title must naturally include MOFLY P-51D, one localized aileron clevis/core part keyword, and RC spare/replacement meaning.",
-            "meta_description must include use, compatibility with MOFLY P-51D or P-51D, localized part type, and one value point such as durable, precise, reliable, or control.",
-            "Do not repeat MOFLY P-51D more than once in the same field.",
+            "meta_title must naturally include the source product model when the source SEO title includes it, one localized core part keyword, and RC spare/replacement meaning.",
+            "meta_description must include use, source product compatibility, localized part type, and one value point such as durable, precise, reliable, or control.",
+            "Do not repeat the same model name more than once in the same field.",
             "Do not make title and meta_title exactly the same.",
             "For body_html, preserve the original HTML structure and translate only customer-facing text.",
         ],
@@ -776,6 +1065,12 @@ def _request_openai_rewrite(locale, entry, current_value, attempt, result):
         result["error"] = "OPENAI_API_KEY is not configured."
         result["blocking_conditions"].append("blocked_missing_openai_api_key")
         return None
+    identity_context = _normalize_product_identity_context(
+        entry.get("source_identity_context") or {}
+    )
+    identity_term_text = _format_identity_terms_for_prompt(
+        identity_context.get("expected_terms") or []
+    )
     payload = {
         "model": OPENAI_MODEL,
         "input": [
@@ -801,7 +1096,8 @@ def _request_openai_rewrite(locale, entry, current_value, attempt, result):
                             "Return JSON only with a value string.",
                             "Rewrite naturally; do not truncate crudely.",
                             "The value must be at or under max_chars.",
-                            "Preserve MOFLY, P-51D, 690mm, and RC exactly.",
+                            f"Preserve these source product identity terms when they appear in the source: {identity_term_text}.",
+                            "Do not introduce a different product brand, product line, aircraft name, vehicle name, or model number.",
                             "Do not add CTA, shipping, origin, Made in China, Best, Cheap, guaranteed, official, or original OEM claims.",
                         ],
                         "output_contract": {"type": "JSON object", "shape": {"value": "rewritten draft"}},
@@ -906,6 +1202,7 @@ def _attach_draft_quality(entry, draft, rewrite_attempts):
     entry["quality_notes"] = _quality_notes_for_draft(entry["field"], draft)
     entry["validation_status"] = _validate_draft(entry["field"], draft)
     entry["skip_reason"] = ""
+    _attach_product_identity_validation(entry, draft)
     _attach_seo_quality(entry)
 
 
@@ -941,7 +1238,10 @@ def _attach_seo_quality(entry):
     terms = SEO_TERMS.get(locale, {})
     seo_notes = _seo_notes_for_draft(entry, draft)
     entry["seo_notes"] = seo_notes
-    entry["contains_model"] = _contains_model(draft)
+    entry["contains_model"] = _contains_model(
+        draft,
+        entry.get("source_identity_context"),
+    )
     if field == "meta_title":
         entry["contains_core_keyword"] = _text_contains_any(draft, terms.get("core", []))
     elif field == "meta_description":
@@ -950,13 +1250,24 @@ def _attach_seo_quality(entry):
         entry["contains_core_keyword"] = _text_contains_any(draft, terms.get("core", []))
     entry["contains_forbidden_phrase"] = bool(FORBIDDEN_OUTPUT_RE.search(draft))
     entry["seo_validation_status"] = "seo_ready" if not seo_notes else "seo_needs_manual_review"
+    if entry.get("draft_blocked"):
+        entry["seo_validation_status"] = "seo_needs_manual_review"
     entry["seo_eligible_for_apply_plan"] = (
-        field != "body_html" and entry["seo_validation_status"] == "seo_ready"
+        field != "body_html"
+        and entry["seo_validation_status"] == "seo_ready"
+        and not entry.get("draft_blocked")
     )
     entry["eligible_for_apply_plan"] = (
         field != "body_html"
         and entry["validation_status"] == "draft_ready_for_manual_review"
         and entry["seo_validation_status"] == "seo_ready"
+        and not entry.get("draft_blocked")
+    )
+    entry["needs_review"] = bool(
+        entry.get("needs_review")
+        or entry.get("draft_blocked")
+        or entry["validation_status"] != "draft_ready_for_manual_review"
+        or entry["seo_validation_status"] != "seo_ready"
     )
 
 
@@ -973,17 +1284,18 @@ def _seo_notes_for_draft(entry, draft):
         notes.append("draft_over_max_chars")
     if FORBIDDEN_OUTPUT_RE.search(draft):
         notes.append("forbidden_marketing_or_shipping_phrase")
-    if _model_occurrence_count(draft) > 1 or KEYWORD_STUFFING_RE.search(draft):
+    identity_context = entry.get("source_identity_context")
+    if _model_occurrence_count(draft, identity_context) > 1 or KEYWORD_STUFFING_RE.search(draft):
         notes.append("keyword_stuffing_or_duplicate")
     if field == "meta_title":
-        if not _contains_model(draft):
+        if not _contains_model(draft, identity_context):
             notes.append("missing_model")
         if not _text_contains_any(draft, terms.get("core", [])):
             notes.append("missing_core_keyword")
         if not _text_contains_any(draft, terms.get("spare", [])):
             notes.append("missing_replacement_part_meaning")
     if field == "meta_description":
-        if not _contains_model(draft):
+        if not _contains_model(draft, identity_context):
             notes.append("missing_model")
         if not _text_contains_any(draft, terms.get("part_type", [])):
             notes.append("missing_part_type")
@@ -1016,6 +1328,8 @@ def _recalculate_quality_stats(result):
         "generated_draft_count",
         "draft_ready_count",
         "draft_needs_manual_review_count",
+        "draft_blocked_count",
+        "product_identity_mismatch_count",
         "eligible_apply_plan_count",
         "over_length_after_rewrite_count",
         "seo_ready_count",
@@ -1035,10 +1349,17 @@ def _recalculate_quality_stats(result):
         per_locale = result["per_locale_results"][entry["locale"]]
         per_field = result["per_field_results"][entry["field"]]
         _increment(result, per_locale, per_field, "generated_draft_count")
-        if entry.get("validation_status") == "draft_ready_for_manual_review":
+        if (
+            entry.get("validation_status") == "draft_ready_for_manual_review"
+            and not entry.get("draft_blocked")
+        ):
             _increment(result, per_locale, per_field, "draft_ready_count")
         else:
             _increment(result, per_locale, per_field, "draft_needs_manual_review_count")
+        if entry.get("draft_blocked"):
+            _increment(result, per_locale, per_field, "draft_blocked_count")
+        if entry.get("product_identity_mismatch"):
+            _increment(result, per_locale, per_field, "product_identity_mismatch_count")
         if entry.get("eligible_for_apply_plan"):
             _increment(result, per_locale, per_field, "eligible_apply_plan_count")
         if "draft_over_max_chars" in (entry.get("quality_notes") or []):
@@ -1069,11 +1390,21 @@ def _text_contains_any(text, terms):
     return any(str(term).lower() in lower_text for term in terms)
 
 
-def _model_occurrence_count(text):
+def _model_occurrence_count(text, identity_context=None):
+    context = _normalize_product_identity_context(identity_context or {})
+    model_terms = context.get("source_model_terms") or []
+    if model_terms:
+        return max(
+            [_identity_term_occurrence_count(term, text) for term in model_terms] or [0]
+        )
     return str(text or "").lower().count("mofly p-51d")
 
 
-def _contains_model(text):
+def _contains_model(text, identity_context=None):
+    context = _normalize_product_identity_context(identity_context or {})
+    model_terms = context.get("source_model_terms") or []
+    if model_terms:
+        return any(_identity_term_in_text(term, text) for term in model_terms)
     lower_text = str(text or "").lower()
     return "mofly p-51d" in lower_text or ("mofly" in lower_text and "p-51d" in lower_text)
 

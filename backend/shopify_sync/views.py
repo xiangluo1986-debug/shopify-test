@@ -1929,6 +1929,9 @@ def _translation_workspace_draft_locale_summary(
     elif blocking_conditions:
         status = "failed"
         message = "Draft generation did not complete for this language."
+    elif int((draft_result or {}).get("draft_blocked_count") or 0):
+        status = "needs review"
+        message = "Draft preview has blocked fields that may mention a different product."
     elif int(counts.get("draft_entry_count") or 0):
         status = "generated"
         message = "Draft preview is ready for review."
@@ -1951,6 +1954,16 @@ def _translation_workspace_draft_locale_summary(
         "draft_field_count": int(
             counts.get("draft_entry_count")
             or (draft_result or {}).get("generated_draft_count")
+            or 0
+        ),
+        "blocked_draft_count": int(
+            counts.get("draft_blocked_count")
+            or (draft_result or {}).get("draft_blocked_count")
+            or 0
+        ),
+        "product_identity_mismatch_count": int(
+            counts.get("product_identity_mismatch_count")
+            or (draft_result or {}).get("product_identity_mismatch_count")
             or 0
         ),
         "skipped_existing_field_count": int(
@@ -2074,6 +2087,7 @@ def _translation_workspace_multi_locale_summary(locale_results: list[dict]):
         "locale_count": len(locale_results or []),
         "status_counts": status_counts,
         "generated_locale_count": status_counts.get("generated", 0),
+        "needs_review_locale_count": status_counts.get("needs review", 0),
         "skipped_locale_count": status_counts.get("skipped", 0),
         "failed_locale_count": status_counts.get("failed", 0),
         "needs_configuration_locale_count": status_counts.get(
@@ -2081,6 +2095,13 @@ def _translation_workspace_multi_locale_summary(locale_results: list[dict]):
         ),
         "draft_field_count": sum(
             int(row.get("draft_field_count") or 0) for row in locale_results or []
+        ),
+        "blocked_draft_count": sum(
+            int(row.get("blocked_draft_count") or 0) for row in locale_results or []
+        ),
+        "product_identity_mismatch_count": sum(
+            int(row.get("product_identity_mismatch_count") or 0)
+            for row in locale_results or []
         ),
         "skipped_existing_field_count": sum(
             int(row.get("skipped_existing_field_count") or 0)
@@ -2097,14 +2118,15 @@ def _translation_workspace_multi_locale_summary(locale_results: list[dict]):
 def _translation_workspace_multi_locale_status(summary: dict):
     locale_count = int(summary.get("locale_count") or 0)
     generated = int(summary.get("generated_locale_count") or 0)
+    needs_review = int(summary.get("needs_review_locale_count") or 0)
     skipped = int(summary.get("skipped_locale_count") or 0)
     failed = int(summary.get("failed_locale_count") or 0)
     needs_configuration = int(summary.get("needs_configuration_locale_count") or 0)
     has_blocking_conditions = bool(summary.get("blocking_conditions"))
     if not locale_count:
         return "multi_locale_draft_blocked", "Choose at least one target language."
-    if generated:
-        if failed or needs_configuration or has_blocking_conditions:
+    if generated or needs_review:
+        if needs_review or failed or needs_configuration or has_blocking_conditions:
             return (
                 "multi_locale_draft_completed_with_issues",
                 "Draft generation finished with issues. Shopify was not updated. Review each language below.",
@@ -2251,6 +2273,10 @@ def build_translation_console_workbench_summary(
         ),
         "skipped_entry_count": skipped_entry_count,
         "needs_review_count": int(draft_counts.get("needs_manual_review_count") or 0),
+        "draft_blocked_count": int(draft_counts.get("draft_blocked_count") or 0),
+        "product_identity_mismatch_count": int(
+            draft_counts.get("product_identity_mismatch_count") or 0
+        ),
         "seo_warning_count": int(draft_counts.get("seo_warning_count") or 0),
         "has_apply_plan_preview": bool(apply_plan_preview_result),
         "apply_plan_candidate_count": int(
@@ -3125,6 +3151,15 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
     target_value = existing_value or draft_value
     seo_notes = _list_from_value(draft_entry.get("seo_notes"))
     quality_notes = _list_from_value(draft_entry.get("quality_notes"))
+    validation_reasons = _list_from_value(draft_entry.get("validation_reasons"))
+    suspicious_terms = _list_from_value(draft_entry.get("suspicious_terms"))
+    identity_warning = str(
+        draft_entry.get("identity_warning_text")
+        or draft_entry.get("warning_text")
+        or ""
+    ).strip()
+    draft_blocked = bool(draft_entry.get("draft_blocked"))
+    product_identity_mismatch = bool(draft_entry.get("product_identity_mismatch"))
     blocking_reasons = (
         _draft_entry_blocking_reasons(draft_entry, seo_notes, quality_notes)
         if draft_entry
@@ -3133,8 +3168,11 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
     validation_status = draft_entry.get("validation_status", "")
     seo_status = draft_entry.get("seo_validation_status", "")
     needs_review = bool(
-        seo_notes
+        draft_blocked
+        or product_identity_mismatch
+        or seo_notes
         or quality_notes
+        or validation_reasons
         or blocking_reasons
         or (
             draft_value
@@ -3165,6 +3203,10 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
         badges.append("GPT draft")
     if seo_notes:
         badges.append("SEO warning")
+    if product_identity_mismatch:
+        badges.append("wrong product")
+    if draft_blocked:
+        badges.append("blocked draft")
     if blocking_reasons:
         badges.append("blocked")
     if not target_value:
@@ -3211,6 +3253,14 @@ def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry:
         "char_count_display": f"{target_chars}/{char_limit}" if char_limit else str(target_chars),
         "exceeds_limit": exceeds_limit,
         "seo_warning": ", ".join(seo_notes),
+        "identity_warning": identity_warning,
+        "suspicious_terms": ", ".join(suspicious_terms),
+        "validation_reasons": ", ".join(validation_reasons),
+        "product_identity_validation_status": draft_entry.get(
+            "product_identity_validation_status", ""
+        ),
+        "product_identity_mismatch": product_identity_mismatch,
+        "draft_blocked": draft_blocked,
         "validation_status": validation_status,
         "seo_status": seo_status,
         "existing_translation_present": existing_translation_present,
@@ -3239,6 +3289,8 @@ def _translation_editor_badge_label(badge: str) -> str:
         "outdated": "Needs review",
         "GPT draft": "Draft only",
         "SEO warning": "Needs review",
+        "wrong product": "Possible wrong product",
+        "blocked draft": "Blocked draft",
         "blocked": "Needs review",
         "untranslated": "Needs translation",
         "exceeds limit": "Too long",
@@ -3261,6 +3313,9 @@ def _translation_editor_row_matches_search(row: dict, query: str) -> bool:
             "resource_key",
             "source_value",
             "target_value_display",
+            "identity_warning",
+            "suspicious_terms",
+            "validation_reasons",
             "translation_status",
             "translation_status_label",
         ]
@@ -3694,6 +3749,15 @@ def _normalize_apply_plan_preview_entry(entry: dict):
         "reason": ", ".join(reasons),
         "seo_warning": ", ".join(seo_notes),
         "validation_status": entry.get("validation_status", ""),
+        "product_identity_validation_status": entry.get(
+            "product_identity_validation_status", ""
+        ),
+        "validation_reasons": ", ".join(_list_from_value(entry.get("validation_reasons"))),
+        "suspicious_terms": ", ".join(_list_from_value(entry.get("suspicious_terms"))),
+        "identity_warning": entry.get("identity_warning_text")
+        or entry.get("warning_text", ""),
+        "product_identity_mismatch": bool(entry.get("product_identity_mismatch")),
+        "draft_blocked": bool(entry.get("draft_blocked")),
         "blocking_reasons": ", ".join(reasons),
         "current_translation_present": current_translation_present,
         "outdated": outdated,
@@ -3730,6 +3794,10 @@ def _translation_console_draft_summary(draft_result: dict):
         "ready_for_apply_plan_count": draft_result.get("eligible_apply_plan_count", 0),
         "needs_manual_review_count": draft_result.get(
             "draft_needs_manual_review_count", 0
+        ),
+        "draft_blocked_count": draft_result.get("draft_blocked_count", 0),
+        "product_identity_mismatch_count": draft_result.get(
+            "product_identity_mismatch_count", 0
         ),
         "existing_translation_count": draft_result.get(
             "skipped_existing_translation_count", 0
@@ -3796,6 +3864,15 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "proposed_translation_preview": _preview_text(entry.get("draft_value")),
         "proposed_chars": entry.get("draft_value_chars") or 0,
         "validation_status": entry.get("validation_status", ""),
+        "product_identity_validation_status": entry.get(
+            "product_identity_validation_status", ""
+        ),
+        "validation_reasons": ", ".join(_list_from_value(entry.get("validation_reasons"))),
+        "suspicious_terms": ", ".join(_list_from_value(entry.get("suspicious_terms"))),
+        "identity_warning": entry.get("identity_warning_text")
+        or entry.get("warning_text", ""),
+        "product_identity_mismatch": bool(entry.get("product_identity_mismatch")),
+        "draft_blocked": bool(entry.get("draft_blocked")),
         "seo_validation_status": entry.get("seo_validation_status", ""),
         "seo_warning": ", ".join(seo_notes),
         "eligible_for_apply_plan": bool(entry.get("eligible_for_apply_plan")),
@@ -3827,6 +3904,10 @@ def _translation_console_draft_detail_counts(
         "needs_manual_review_count": int(
             draft_result.get("draft_needs_manual_review_count") or 0
         ),
+        "draft_blocked_count": int(draft_result.get("draft_blocked_count") or 0),
+        "product_identity_mismatch_count": int(
+            draft_result.get("product_identity_mismatch_count") or 0
+        ),
         "existing_translation_count": int(
             draft_result.get("skipped_existing_translation_count") or 0
         ),
@@ -3837,8 +3918,13 @@ def _draft_entry_blocking_reasons(entry: dict, seo_notes: list[str], quality_not
     reasons = []
     if entry.get("skip_reason") and entry.get("skip_reason") != "missing_translation":
         reasons.append(str(entry.get("skip_reason")))
+    reasons.extend(_list_from_value(entry.get("validation_reasons")))
     reasons.extend(quality_notes)
     reasons.extend(seo_notes)
+    if entry.get("draft_blocked"):
+        reasons.append("draft_blocked")
+    if entry.get("product_identity_mismatch"):
+        reasons.append("product_identity_mismatch")
     if entry.get("validation_status") not in {
         "",
         "skipped",
