@@ -6,6 +6,9 @@ from remote_approval.tasks.git_safety_check_task import run_git_safety_check_tas
 from remote_approval.tasks.shopify_review_request_ali_reviews_capability_discovery_task import (
     run_shopify_review_request_ali_reviews_capability_discovery_task,
 )
+from remote_approval.tasks.shopify_review_request_ali_reviews_api_capability_discovery_task import (
+    run_shopify_review_request_ali_reviews_api_capability_discovery_task,
+)
 from remote_approval.tasks.shopify_review_request_candidate_scan_task import (
     run_shopify_review_request_candidate_scan_task,
 )
@@ -295,6 +298,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_ali_reviews_capability_discovery": (
         run_shopify_review_request_ali_reviews_capability_discovery_task
     ),
+    "shopify_review_request_ali_reviews_api_capability_discovery": (
+        run_shopify_review_request_ali_reviews_api_capability_discovery_task
+    ),
     "shopify_review_request_candidate_scan": run_shopify_review_request_candidate_scan_task,
     "shopify_review_request_customer_level_trustpilot_duplicate_audit": (
         run_shopify_review_request_customer_level_trustpilot_duplicate_audit_task
@@ -553,6 +559,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_ali_reviews_capability_discovery.json",
+    },
+    "shopify_review_request_ali_reviews_api_capability_discovery": {
+        "description": "Generate a read-only Phase 5.0 Ali Reviews / Kudosi API capability matrix from local code/docs and env-name presence.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none",
+        "review_file_path": "logs/shopify_review_request_ali_reviews_api_capability_discovery.json",
     },
     "shopify_review_request_candidate_scan": {
         "description": "Run a read-only Shopify review request candidate scan and local dry-run report.",
