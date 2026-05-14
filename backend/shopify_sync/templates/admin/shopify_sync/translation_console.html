@@ -6,6 +6,22 @@
   <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This page prepares drafts, previews, reports, and manual instructions only. No Shopify write is performed from this page. Real write requires manual PowerShell plus explicit ACK.</p>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>View Mode</h2>
+    <p>This page is read-only. Use Workbench Mode for the staged workflow, or Editor View for a Shopify-like source / target review.</p>
+    <p>
+      <a class="button" href="?view_mode=workbench&q={{ product_search_text|urlencode }}&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Workbench Mode</a>
+      <a class="button" href="?view_mode=editor&q={{ product_search_text|urlencode }}&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_q={{ editor_search_query|urlencode }}">Editor View</a>
+    </p>
+    <table>
+      <tbody>
+        <tr><th>Current mode</th><td>{% if ui_mode == "editor" %}Editor View{% else %}Workbench Mode{% endif %}</td></tr>
+        <tr><th>Safety</th><td>READ ONLY / NO WRITE FROM THIS PAGE</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  {% if ui_mode == "workbench" %}
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Normal Workbench Mode</h2>
     <table>
       <tbody>
@@ -202,6 +218,145 @@
       {% endif %}
     </details>
   </div>
+
+  {% elif ui_mode == "editor" %}
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Translation Editor View</h2>
+    <p><strong>READ ONLY / NO WRITE FROM THIS PAGE.</strong> This Shopify-like editor is visual review only. No store-saving action exists here.</p>
+    <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
+      <input type="hidden" name="view_mode" value="editor">
+      <input type="hidden" name="q" value="{{ product_search_text }}">
+      <div>
+        <label for="id_editor_selected_product_gid">Product</label><br>
+        <select id="id_editor_selected_product_gid" name="selected_product_gid" style="min-width: 580px;">
+          {% if product_selector.product_options %}
+            {% for product in product_selector.product_options %}
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }}</option>
+            {% endfor %}
+          {% else %}
+            <option value="">No products available</option>
+          {% endif %}
+        </select>
+      </div>
+      <div>
+        <label for="id_editor_locale">Target locale</label><br>
+        <select id="id_editor_locale" name="locale">
+          {% for locale in supported_locales %}
+            <option value="{{ locale }}"{% if locale == selected_locale %} selected{% endif %}>{{ locale }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="id_editor_q">Search fields</label><br>
+        <input id="id_editor_q" type="text" name="editor_q" value="{{ editor_search_query }}" style="min-width: 260px;" placeholder="title, SEO, phrase, status">
+      </div>
+      <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+      <button type="submit" class="button">Open Editor View</button>
+    </form>
+    <form method="post" style="margin-bottom: 12px;">
+      {% csrf_token %}
+      <input type="hidden" name="view_mode" value="editor">
+      <input type="hidden" name="action" value="generate_draft_dry_run">
+      <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="locale" value="{{ selected_locale }}">
+      <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+      <input type="hidden" name="editor_q" value="{{ editor_search_query }}">
+      <button type="submit" class="button">Generate draft package dry-run</button>
+    </form>
+    <table>
+      <tbody>
+        <tr><th>Product</th><td>{{ editor_view.product_title }}</td></tr>
+        <tr><th>Product gid</th><td>{{ editor_view.product_gid }}</td></tr>
+        <tr><th>Default language</th><td>English</td></tr>
+        <tr><th>Target language</th><td>{{ editor_view.editor_locale_label }} ({{ editor_view.editor_locale }})</td></tr>
+        <tr><th>Rows visible</th><td>{{ editor_view.editor_visible_row_count }} / {{ editor_view.editor_row_count }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Filters</h2>
+    <p>
+      {% for tab in editor_view.filter_tabs %}
+        <a class="button" href="?view_mode=editor&q={{ product_search_text|urlencode }}&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_q={{ editor_search_query|urlencode }}"{% if tab.active %} style="font-weight: bold;"{% endif %}>{{ tab.label }} ({{ tab.count }})</a>
+      {% endfor %}
+    </p>
+  </div>
+
+  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Dual-column translation editor</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 18%;">Resource / Field</th>
+          <th style="width: 38%;">Default Language (English)</th>
+          <th style="width: 44%;">Target Language ({{ editor_view.editor_locale_label }})</th>
+        </tr>
+      </thead>
+    </table>
+    {% for section in editor_view.sections %}
+      {% if section.section_key == "metafields" %}
+        <details style="margin-top: 12px;">
+          <summary>{{ section.section_label }} ({{ section.row_count }})</summary>
+      {% else %}
+        <div style="margin-top: 12px;">
+          <h3>{{ section.section_label }} ({{ section.row_count }})</h3>
+      {% endif %}
+      {% if section.rows %}
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 18%;">Resource / Field</th>
+              <th style="width: 38%;">Default Language (English)</th>
+              <th style="width: 44%;">Target Language ({{ editor_view.editor_locale_label }})</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in section.rows %}
+              <tr>
+                <td>
+                  <strong>{{ row.field_label }}</strong><br>
+                  <span style="color: #666;">{{ row.resource_key }}</span><br>
+                  <span>{{ row.translation_status }}</span>
+                </td>
+                <td>
+                  {% if row.field_key == "body_html" %}
+                    <div style="max-height: 220px; overflow: auto; white-space: pre-wrap;">{{ row.source_value_preview }}</div>
+                  {% else %}
+                    <div style="white-space: pre-wrap;">{{ row.source_value_preview }}</div>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.target_value_display %}
+                    <div style="white-space: pre-wrap;">{{ row.target_value_preview }}</div>
+                  {% else %}
+                    <em>No target translation yet</em>
+                  {% endif %}
+                  <div style="margin-top: 6px;">
+                    <strong>Status:</strong> {{ row.translation_status }}
+                    {% if row.status_badges %} | {{ row.status_badges|join:", " }}{% endif %}
+                  </div>
+                  <div><strong>Chars:</strong> {{ row.char_count_display }}</div>
+                  {% if row.seo_warning %}<div><strong>SEO warning:</strong> {{ row.seo_warning }}</div>{% endif %}
+                  {% if row.validation_status %}<div><strong>Validation:</strong> {{ row.validation_status }}</div>{% endif %}
+                  {% if row.seo_status %}<div><strong>SEO status:</strong> {{ row.seo_status }}</div>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No visible rows in this section for the current filter.</p>
+      {% endif %}
+      {% if section.section_key == "metafields" %}
+        </details>
+      {% else %}
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <details style="margin-bottom: 16px;">
     <summary><strong>Advanced / Developer Details</strong></summary>

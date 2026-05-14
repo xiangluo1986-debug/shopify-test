@@ -115,6 +115,27 @@ TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
 ]
 TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS = 50
 TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS = 120
+TRANSLATION_CONSOLE_EDITOR_FILTERS = {
+    "all",
+    "untranslated",
+    "outdated",
+    "translated",
+    "needs_review",
+}
+TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
+    ("basic", "Basic"),
+    ("seo", "SEO"),
+    ("options", "Product options"),
+    ("variants", "Variants"),
+    ("metafields", "Advanced Metafields"),
+]
+TRANSLATION_CONSOLE_EDITOR_SEO_LIMITS = {
+    "title": 70,
+    "meta_title": 60,
+    "meta_description": 160,
+    "body_html": 320,
+    "description": 320,
+}
 
 
 def _shopify_configured():
@@ -626,6 +647,24 @@ def translation_console(request):
     raw_post_product_query = request.POST.get("q", "") if is_post_action else ""
     raw_locale = request.POST.get("locale", "ja") if is_post_action else request.GET.get("locale", "ja")
     locale = ((raw_locale or "ja") or "ja").strip()
+    raw_ui_mode = (
+        request.POST.get("view_mode", "")
+        if is_post_action
+        else request.GET.get("view_mode", "")
+    )
+    ui_mode = "editor" if raw_ui_mode == "editor" else "workbench"
+    editor_filter = (
+        request.POST.get("editor_filter", "")
+        if is_post_action
+        else request.GET.get("editor_filter", "")
+    ).strip()
+    if editor_filter not in TRANSLATION_CONSOLE_EDITOR_FILTERS:
+        editor_filter = "all"
+    editor_search_query = (
+        request.POST.get("editor_q", "")
+        if is_post_action
+        else request.GET.get("editor_q", "")
+    ).strip()
     product_selector = _build_translation_console_product_selector(
         product_search_text=product_search_text,
         requested_product_gid=raw_selected_product_gid or raw_manual_product_gid,
@@ -689,6 +728,7 @@ def translation_console(request):
     should_run_translation_lookup = bool(action_product_query) and (
         (request.method == "POST" and not is_status_only_safe_action_post)
         or request.GET.get("fetch_read_only") == "1"
+        or (request.method == "GET" and ui_mode == "editor")
     )
 
     if should_run_translation_lookup:
@@ -1108,6 +1148,15 @@ def translation_console(request):
         locked_report_approval_checklist=locked_report_approval_checklist,
         manual_command_package=manual_command_package,
     )
+    editor_view = build_translation_console_editor_view(
+        product_selector=product_selector,
+        result=result,
+        draft_result=draft_result,
+        apply_plan_preview_result=apply_plan_preview_result,
+        locale=locale,
+        editor_filter=editor_filter,
+        editor_search_query=editor_search_query,
+    )
 
     return render(
         request,
@@ -1121,6 +1170,10 @@ def translation_console(request):
             "manual_product_gid": manual_product_gid,
             "selected_locale": locale,
             "supported_locales": SUPPORTED_TRANSLATION_LOCALES,
+            "ui_mode": ui_mode,
+            "editor_filter": editor_filter,
+            "editor_search_query": editor_search_query,
+            "editor_view": editor_view,
             "shop_domain": shop_domain,
             "result": result,
             "workflow_status": workflow_status,
@@ -1500,6 +1553,324 @@ def build_translation_console_workbench_summary(
         "translations_register_called": False,
         "rollback_performed": False,
     }
+
+
+def build_translation_console_editor_view(
+    product_selector: dict | None,
+    result: dict | None,
+    draft_result: dict | None,
+    apply_plan_preview_result: dict | None,
+    locale: str,
+    editor_filter: str = "all",
+    editor_search_query: str = "",
+):
+    product_selector = product_selector or {}
+    result = result or {}
+    draft_result = draft_result or {}
+    apply_plan_preview_result = apply_plan_preview_result or {}
+    locale = (locale or "ja").strip()
+    editor_filter = editor_filter if editor_filter in TRANSLATION_CONSOLE_EDITOR_FILTERS else "all"
+    editor_search_query = (editor_search_query or "").strip()
+    selected_product = product_selector.get("selected_product") or {}
+    product = result.get("product") or {}
+    product_gid = product.get("id") or product_selector.get("selected_product_gid", "")
+    product_title = product.get("title") or selected_product.get("title", "")
+
+    draft_entries = _translation_editor_draft_entries_by_key(draft_result, locale)
+    source_rows = _translation_editor_source_rows_by_key(result)
+    field_keys = list(dict.fromkeys(list(source_rows.keys()) + list(draft_entries.keys())))
+    if not field_keys:
+        field_keys = ["title", "body_html", "product_type", "handle", "meta_title", "meta_description"]
+    if "title" in field_keys and not source_rows.get("title") and product_title:
+        source_rows["title"] = {
+            "key": "title",
+            "source_value": product_title,
+            "digest": "",
+            "source_locale": "en",
+            "target_locale": locale,
+            "has_translation": False,
+            "translation_value": "",
+            "translation_outdated": False,
+        }
+
+    rows = [
+        _build_translation_editor_row(
+            field_key=field_key,
+            source_row=source_rows.get(field_key) or {},
+            draft_entry=draft_entries.get(field_key) or {},
+            locale=locale,
+        )
+        for field_key in field_keys
+    ]
+    searched_rows = [
+        row for row in rows if _translation_editor_row_matches_search(row, editor_search_query)
+    ]
+    visible_rows = [
+        row for row in searched_rows if _translation_editor_row_matches_filter(row, editor_filter)
+    ]
+    sections = []
+    for section_key, section_label in TRANSLATION_CONSOLE_EDITOR_SECTIONS:
+        section_rows = [row for row in visible_rows if row["section_key"] == section_key]
+        sections.append(
+            {
+                "section_key": section_key,
+                "section_label": section_label,
+                "rows": section_rows,
+                "row_count": len(section_rows),
+            }
+        )
+    filter_tabs = [
+        {
+            "value": value,
+            "label": label,
+            "active": editor_filter == value,
+            "count": len(
+                [
+                    row
+                    for row in searched_rows
+                    if _translation_editor_row_matches_filter(row, value)
+                ]
+            ),
+        }
+        for value, label in [
+            ("all", "All"),
+            ("untranslated", "Untranslated"),
+            ("outdated", "Outdated"),
+            ("translated", "Translated"),
+            ("needs_review", "Needs Review"),
+        ]
+    ]
+    return {
+        "editor_view_enabled": True,
+        "editor_locale": locale,
+        "editor_locale_label": _translation_editor_locale_label(locale),
+        "editor_filter": editor_filter,
+        "editor_search_query": editor_search_query,
+        "product_gid": product_gid,
+        "product_title": product_title,
+        "sections": sections,
+        "filter_tabs": filter_tabs,
+        "editor_row_count": len(rows),
+        "editor_visible_row_count": len(visible_rows),
+        "editor_search_result_count": len(searched_rows),
+        "has_draft_result": bool(draft_result),
+        "has_apply_plan_preview": bool(apply_plan_preview_result),
+        "read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "rollback_performed": False,
+    }
+
+
+def _translation_editor_draft_entries_by_key(draft_result: dict, locale: str):
+    entries = {}
+    for entry in draft_result.get("entries") or []:
+        if not isinstance(entry, dict) or entry.get("locale") != locale:
+            continue
+        field_key = _translation_editor_normalize_field_key(
+            entry.get("source_key") or entry.get("field")
+        )
+        if field_key:
+            entries[field_key] = entry
+    return entries
+
+
+def _translation_editor_source_rows_by_key(result: dict):
+    rows = {}
+    for row in result.get("translatable_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        field_key = _translation_editor_normalize_field_key(row.get("key"))
+        if field_key:
+            rows[field_key] = row
+    return rows
+
+
+def _build_translation_editor_row(field_key: str, source_row: dict, draft_entry: dict, locale: str):
+    field_key = _translation_editor_normalize_field_key(field_key)
+    source_value = str(
+        source_row.get("source_value")
+        or draft_entry.get("source_value")
+        or ""
+    )
+    existing_value = str(
+        source_row.get("translation_value")
+        or draft_entry.get("existing_translation_value")
+        or draft_entry.get("translation_value")
+        or ""
+    )
+    draft_value = str(draft_entry.get("draft_value") or "")
+    existing_translation_present = bool(
+        source_row.get("has_translation")
+        or draft_entry.get("existing_translation_present")
+        or existing_value
+    )
+    outdated = (
+        source_row.get("translation_outdated") is True
+        or draft_entry.get("existing_translation_outdated") is True
+    )
+    target_value = existing_value or draft_value
+    seo_notes = _list_from_value(draft_entry.get("seo_notes"))
+    quality_notes = _list_from_value(draft_entry.get("quality_notes"))
+    blocking_reasons = (
+        _draft_entry_blocking_reasons(draft_entry, seo_notes, quality_notes)
+        if draft_entry
+        else []
+    )
+    validation_status = draft_entry.get("validation_status", "")
+    seo_status = draft_entry.get("seo_validation_status", "")
+    needs_review = bool(
+        seo_notes
+        or quality_notes
+        or blocking_reasons
+        or (
+            draft_value
+            and validation_status
+            and validation_status != "draft_ready_for_manual_review"
+        )
+        or (draft_value and seo_status and seo_status != "seo_ready")
+    )
+    if existing_translation_present and outdated:
+        translation_status = "outdated"
+    elif existing_translation_present:
+        translation_status = "translated"
+    elif needs_review:
+        translation_status = "needs_review"
+    elif draft_value:
+        translation_status = "draft_only"
+    elif draft_entry.get("skip_reason"):
+        translation_status = "skipped"
+    else:
+        translation_status = "untranslated"
+
+    badges = []
+    if existing_translation_present:
+        badges.append("existing translation")
+    if outdated:
+        badges.append("outdated")
+    if draft_value and not existing_translation_present:
+        badges.append("GPT draft")
+    if seo_notes:
+        badges.append("SEO warning")
+    if blocking_reasons:
+        badges.append("blocked")
+    if not target_value:
+        badges.append("untranslated")
+    char_limit = TRANSLATION_CONSOLE_EDITOR_SEO_LIMITS.get(field_key)
+    target_chars = len(target_value)
+    exceeds_limit = bool(char_limit and target_chars > char_limit)
+    if exceeds_limit:
+        badges.append("exceeds limit")
+    return {
+        "section_key": _translation_editor_section_key(field_key),
+        "field_key": field_key,
+        "field_label": _translation_editor_field_label(field_key),
+        "resource_key": source_row.get("key") or draft_entry.get("source_key") or field_key,
+        "source_value": source_value,
+        "source_value_preview": _preview_text(source_value, 220),
+        "target_value_display": target_value,
+        "target_value_preview": _preview_text(target_value, 220),
+        "target_value_source": (
+            "existing translation"
+            if existing_value
+            else ("GPT draft" if draft_value else "")
+        ),
+        "translation_status": translation_status,
+        "status_badges": badges,
+        "target_chars": target_chars,
+        "char_limit": char_limit,
+        "char_count_display": f"{target_chars}/{char_limit}" if char_limit else str(target_chars),
+        "exceeds_limit": exceeds_limit,
+        "seo_warning": ", ".join(seo_notes),
+        "validation_status": validation_status,
+        "seo_status": seo_status,
+        "existing_translation_present": existing_translation_present,
+        "outdated": outdated,
+        "digest": source_row.get("digest") or draft_entry.get("source_digest") or "",
+        "needs_review": needs_review,
+        "read_only": True,
+    }
+
+
+def _translation_editor_row_matches_search(row: dict, query: str) -> bool:
+    if not query:
+        return True
+    query = query.lower()
+    haystack = " ".join(
+        str(row.get(key, ""))
+        for key in [
+            "field_label",
+            "field_key",
+            "resource_key",
+            "source_value",
+            "target_value_display",
+            "translation_status",
+        ]
+    ).lower()
+    return query in haystack
+
+
+def _translation_editor_row_matches_filter(row: dict, editor_filter: str) -> bool:
+    status = row.get("translation_status")
+    if editor_filter == "all":
+        return True
+    if editor_filter == "translated":
+        return status == "translated"
+    if editor_filter == "untranslated":
+        return status == "untranslated"
+    if editor_filter == "outdated":
+        return status == "outdated"
+    if editor_filter == "needs_review":
+        return bool(row.get("needs_review")) or status in {"needs_review", "skipped"}
+    return True
+
+
+def _translation_editor_normalize_field_key(value: str):
+    value = str(value or "").strip()
+    key = value.split(".", 1)[-1] if value.startswith("product.") else value
+    if key == "description":
+        return "body_html"
+    return key
+
+
+def _translation_editor_section_key(field_key: str) -> str:
+    key = field_key.lower()
+    if key in {"title", "body_html", "description", "product_type"}:
+        return "basic"
+    if key in {"handle", "meta_title", "meta_description"}:
+        return "seo"
+    if "option" in key:
+        return "options"
+    if "variant" in key:
+        return "variants"
+    if "metafield" in key or "." in key:
+        return "metafields"
+    return "basic"
+
+
+def _translation_editor_field_label(field_key: str) -> str:
+    labels = {
+        "title": "Title",
+        "body_html": "Description",
+        "description": "Description",
+        "product_type": "Product type",
+        "handle": "URL handle",
+        "meta_title": "Meta title",
+        "meta_description": "Meta description",
+    }
+    return labels.get(field_key, field_key.replace("_", " ").replace(".", " / ").title())
+
+
+def _translation_editor_locale_label(locale: str) -> str:
+    labels = {
+        "ja": "Japanese",
+        "de": "German",
+        "fr": "French",
+        "es": "Spanish",
+        "it": "Italian",
+    }
+    return labels.get(locale, locale)
 
 
 def _empty_apply_plan_preview_result(reason: str):
