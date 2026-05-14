@@ -144,6 +144,17 @@ Phase 0.2 automation decision:
 - Never assume Shopify tag `1: reveiw request` means Ali Reviews / Kudosi has
   sent or has not sent the email.
 
+#### Phase 5.1 History / Debug Ledger
+
+- [x] Keep Ali Reviews / Kudosi automation blocked until vendor request API
+  documentation is available.
+- [x] Use the Trustpilot/Gmail history ledger as a read-only debug surface for
+  candidate selection, duplicate blocks, draft evidence, send preflight,
+  send result, tag-write evidence, and API capability status.
+- [x] Keep ledger reports privacy-safe: masked emails only, partial Gmail IDs
+  only, no Gmail draft create/send/delete, no Shopify write/tag change, no
+  external review API call, and no tracking token or redirect.
+
 ### Shopify Admin API Tag Permissions
 
 - [ ] Confirm the app has the required `write_orders` scope before any order tag

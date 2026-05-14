@@ -31,6 +31,17 @@ Dry-run tasks must never become write tasks. If a write is needed later, create 
 
 If a task involves Shopify writes, create an independent write task and require a second confirmation after review.
 
+For Shopify review request history/debug ledger audit tasks:
+
+- Read local JSON/HTML reports only; do not call Shopify, Gmail, Trustpilot,
+  Kudosi, Ali Reviews, or any tracking service.
+- The task may write local JSON/HTML audit reports under `logs/`, but must not
+  create, send, update, or delete Gmail drafts/messages.
+- Reports must use masked customer emails only and partial Gmail draft/message
+  IDs only.
+- Top-level safety flags for Gmail draft creation, Gmail send/delete, Shopify
+  writes/tag changes, external review API calls, and tracking must remain false.
+
 For Shopify translation dry-run tasks:
 
 - Dry-run tasks must return before any Shopify mutation or `translationsRegister` write path.

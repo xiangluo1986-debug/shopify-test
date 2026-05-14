@@ -20,7 +20,7 @@
     }
     .rrw-filterbar {
         display: grid;
-        grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(140px, 1fr)) auto auto;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
         gap: 10px;
         align-items: end;
         border: 1px solid var(--border-color, #d6d6d6);
@@ -199,6 +199,38 @@
                 {% endfor %}
             </select>
         </div>
+        <div class="rrw-field">
+            <label for="rrw-channel">Ledger channel</label>
+            <select id="rrw-channel" name="channel">
+                {% for option in wb.history_channel_filter_options %}
+                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="rrw-field">
+            <label for="rrw-event-type">Ledger event</label>
+            <select id="rrw-event-type" name="event_type">
+                {% for option in wb.history_event_type_filter_options %}
+                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="rrw-field">
+            <label for="rrw-ledger-status">Ledger status</label>
+            <input id="rrw-ledger-status" type="search" name="ledger_status" value="{{ wb.history_filters.ledger_status }}" placeholder="blocked or sent">
+        </div>
+        <div class="rrw-field">
+            <label for="rrw-order">Ledger order</label>
+            <input id="rrw-order" type="search" name="order" value="{{ wb.history_filters.order }}" placeholder="#22620">
+        </div>
+        <div class="rrw-field">
+            <label for="rrw-ledger-limit">Ledger limit</label>
+            <select id="rrw-ledger-limit" name="ledger_limit">
+                {% for option in wb.history_limit_filter_options %}
+                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
         <button type="submit">Apply filters</button>
         <a class="rrw-link-button" href="{% url 'shopify_review_request_workbench' %}">Clear</a>
     </form>
@@ -208,6 +240,7 @@
         Trustpilot history rows {{ wb.filter_summary.visible_trustpilot_history_rows }},
         blocked rows {{ wb.filter_summary.visible_blocked_rows }},
         report rows {{ wb.filter_summary.visible_report_rows }},
+        ledger rows {{ wb.filter_summary.visible_history_rows }},
         row limit {{ wb.filter_summary.limit }}.
     </p>
 
@@ -243,6 +276,185 @@
                 <tr><th>Next candidate count</th><td>{{ wb.latest_scan.next_candidate_count }}</td></tr>
             </tbody>
         </table>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Review Request History &amp; Debug Ledger</h2>
+        <p class="rrw-muted">
+            Normalized from safe local JSON reports only. Missing reports are shown as unavailable; no Gmail, Shopify,
+            Trustpilot, Kudosi, Ali Reviews, or tracking action is available from this ledger.
+        </p>
+
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">#22620 block</div>
+                <div class="rrw-card-value">{{ wb.history_focus.order_22620.blocked_classification }}</div>
+                <div class="rrw-card-note">
+                    Block confirmed: {{ wb.history_focus.order_22620.blocked_confirmed|yesno:"true,false" }}.
+                    Evidence: {{ wb.history_focus.order_22620.evidence_available|yesno:"available,missing" }}.
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">#22620 email sent</div>
+                <div class="rrw-card-value">{{ wb.history_focus.order_22620.email_sent|yesno:"true,false" }}</div>
+                <div class="rrw-card-note">
+                    Confirmed false: {{ wb.history_focus.order_22620.email_sent_confirmed_false|yesno:"true,false" }}.
+                    Existing draft should not be sent:
+                    {{ wb.history_focus.order_22620.existing_unsent_gmail_draft_should_not_be_sent|yesno:"true,false" }}.
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Prior Trustpilot order</div>
+                <div class="rrw-card-value">{{ wb.history_focus.order_22620.prior_trustpilot_order_name }}</div>
+                <div class="rrw-card-note">
+                    Source draft exists:
+                    {{ wb.history_focus.order_22620.source_gmail_draft_created_detected|yesno:"true,false" }}.
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next candidate</div>
+                <div class="rrw-card-value">{{ wb.history_focus.next_candidate.order_name }}</div>
+                <div class="rrw-card-note">
+                    {{ wb.history_focus.next_candidate.status }}.
+                    {{ wb.history_focus.next_candidate.evidence_report_path }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Ali Reviews API</div>
+                <div class="rrw-card-value">{{ wb.history_focus.ali_reviews_api.status }}</div>
+                <div class="rrw-card-note">
+                    Vendor docs missing:
+                    {{ wb.history_focus.ali_reviews_api.vendor_docs_missing|yesno:"true,false" }}.
+                </div>
+            </div>
+        </div>
+
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Ledger events</div>
+                <div class="rrw-card-value">{{ wb.history_summary.total_event_count }}</div>
+                <div class="rrw-card-note">Filtered: {{ wb.history_summary.filtered_event_count }}.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Reports loaded</div>
+                <div class="rrw-card-value">{{ wb.history_summary.loaded_source_report_count }}</div>
+                <div class="rrw-card-note">
+                    Missing {{ wb.history_summary.missing_source_report_count }};
+                    unavailable {{ wb.history_summary.unavailable_source_report_count }}.
+                </div>
+            </div>
+        </div>
+
+        <h3>Event Counts</h3>
+        <p>
+            {% for item in wb.history_summary.by_event_type %}
+                <span class="rrw-pill">{{ item.key }}={{ item.count }}</span>
+            {% empty %}
+                <span class="rrw-muted">No ledger events loaded.</span>
+            {% endfor %}
+        </p>
+
+        <table class="rrw-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Channel / event</th>
+                    <th>Order</th>
+                    <th>Status</th>
+                    <th>Outcomes</th>
+                    <th>Evidence IDs</th>
+                    <th>Source</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in wb.history_ledger %}
+                    <tr>
+                        <td>{{ row.event_time|default:"-" }}</td>
+                        <td>
+                            <span class="rrw-badge {{ row.badge_class }}">{{ row.channel }}</span>
+                            <br><code>{{ row.event_type }}</code>
+                            {% if row.phase %}<br><span class="rrw-muted">Phase {{ row.phase }}</span>{% endif %}
+                        </td>
+                        <td>
+                            {{ row.order_name|default:"-" }}
+                            {% if row.masked_email %}<br><span class="rrw-muted">{{ row.masked_email }}</span>{% endif %}
+                            {% if row.next_candidate_order_name %}
+                                <br><span class="rrw-muted">Next: {{ row.next_candidate_order_name }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <code>{{ row.status|default:"-" }}</code>
+                            {% if row.classification %}<br><span class="rrw-muted">{{ row.classification }}</span>{% endif %}
+                            {% if row.blocker_reason %}<br><span class="rrw-muted">{{ row.blocker_reason }}</span>{% endif %}
+                            {% if row.draft_should_not_be_sent %}
+                                <br><span class="rrw-badge rrw-badge-bad">Existing draft should not be sent</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="rrw-pill">email_sent={{ row.email_sent|yesno:"true,false,unknown" }}</span>
+                            <span class="rrw-pill">draft_created={{ row.gmail_draft_created|yesno:"true,false,unknown" }}</span>
+                            <span class="rrw-pill">tag_written={{ row.shopify_tag_written|yesno:"true,false,unknown" }}</span>
+                            {% if row.prior_trustpilot_order_name %}
+                                <br><span class="rrw-muted">Prior Trustpilot: {{ row.prior_trustpilot_order_name }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.partial_draft_id %}<div>Draft: <code>{{ row.partial_draft_id }}</code></div>{% endif %}
+                            {% if row.partial_message_id %}<div>Message: <code>{{ row.partial_message_id }}</code></div>{% endif %}
+                            {% if not row.partial_draft_id and not row.partial_message_id %}
+                                <span class="rrw-muted">No ID evidence</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ row.source_report_label }}
+                            <br><span class="rrw-muted">{{ row.source_report_path }}</span>
+                            <br><span class="rrw-muted">{{ row.source_section }}</span>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7" class="rrw-muted">No history ledger events match the current filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h3>Ledger Report Sources</h3>
+        <table class="rrw-table">
+            <thead>
+                <tr>
+                    <th>Report</th>
+                    <th>Availability</th>
+                    <th>Status</th>
+                    <th>Path</th>
+                    <th>Modified</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for source in wb.history_source_reports %}
+                    <tr>
+                        <td>{{ source.label }}</td>
+                        <td>
+                            {% if source.loaded %}
+                                <span class="rrw-badge rrw-badge-ok">loaded</span>
+                            {% elif source.present %}
+                                <span class="rrw-badge rrw-badge-warn">unavailable</span>
+                            {% else %}
+                                <span class="rrw-badge rrw-badge-muted">missing</span>
+                            {% endif %}
+                        </td>
+                        <td><code>{{ source.status }}</code>{% if source.error %}<br><span class="rrw-muted">{{ source.error }}</span>{% endif %}</td>
+                        <td><code>{{ source.relative_path }}</code></td>
+                        <td>{{ source.modified_at|default:"-" }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h3>Future Improvements</h3>
+        <p>
+            {% for item in wb.history_recommendations %}
+                <span class="rrw-pill">{{ item }}</span>
+            {% endfor %}
+        </p>
     </div>
 
     <div class="rrw-section">

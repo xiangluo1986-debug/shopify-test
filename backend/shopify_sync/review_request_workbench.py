@@ -6,6 +6,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.urls import NoReverseMatch, reverse
 
+from .review_request_history_ledger import build_review_request_history_ledger
 from .models import ShopifyOrder
 
 
@@ -116,7 +117,31 @@ REPORT_DEFINITIONS = (
         "trustpilot_one_candidate_draft_package",
         "Trustpilot one-candidate draft package",
         "shopify_review_request_trustpilot_one_candidate_gmail_draft_package.json",
-        ("draft_package_status", "report_status", "status"),
+        ("one_candidate_gmail_draft_package_status", "draft_package_status", "report_status", "status"),
+    ),
+    (
+        "trustpilot_one_candidate_draft_create_locked_runner",
+        "Trustpilot one-candidate draft create locked runner",
+        "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
+        ("one_candidate_gmail_draft_create_locked_status", "report_status", "status"),
+    ),
+    (
+        "trustpilot_one_candidate_draft_create_execute",
+        "Trustpilot one-candidate draft create execute",
+        "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_execute.json",
+        ("one_candidate_gmail_draft_create_execute_status", "report_status", "status"),
+    ),
+    (
+        "trustpilot_one_candidate_draft_send_preflight",
+        "Trustpilot one-candidate draft send preflight",
+        "shopify_review_request_trustpilot_one_candidate_gmail_draft_send_preflight.json",
+        ("one_candidate_gmail_draft_send_preflight_status", "report_status", "status"),
+    ),
+    (
+        "trustpilot_one_candidate_draft_send_execute",
+        "Trustpilot one-candidate draft send execute",
+        "shopify_review_request_trustpilot_one_candidate_gmail_draft_send_execute.json",
+        ("one_candidate_gmail_draft_send_execute_status", "report_status", "status"),
     ),
     (
         "trustpilot_gmail_draft_package",
@@ -166,6 +191,12 @@ REPORT_DEFINITIONS = (
         "shopify_review_request_trustpilot_gmail_send_audit.json",
         ("send_audit_status", "report_status", "status"),
     ),
+    (
+        "ali_reviews_api_capability_discovery",
+        "Ali Reviews API capability discovery",
+        "shopify_review_request_ali_reviews_api_capability_discovery.json",
+        ("ali_reviews_api_capability_discovery_status", "report_status", "status"),
+    ),
 )
 
 SAFETY_FLAGS = (
@@ -174,10 +205,15 @@ SAFETY_FLAGS = (
     "tags_add_performed",
     "tags_remove_performed",
     "gmail_api_call_performed",
+    "gmail_draft_create_attempted",
     "gmail_draft_created",
+    "gmail_drafts_send_called",
+    "gmail_messages_send_called",
+    "gmail_send_performed",
     "email_sent",
     "kudosi_api_call_performed",
     "ali_reviews_api_call_performed",
+    "ali_reviews_write_api_call_performed",
     "trustpilot_api_call_performed",
     "tracking_redirect_enabled",
     "tracking_token_generated",
@@ -207,6 +243,7 @@ MAX_TABLE_ROWS = DEFAULT_LIMIT
 def build_review_request_workbench_context(params=None):
     filters = _normalize_filters(params)
     reports = _load_known_reports()
+    history_ledger = build_review_request_history_ledger(_log_dir(), params)
     all_rows = _dedupe_rows(_collect_report_rows(reports))
     latest_scan = _latest_scan_summary(reports.get("next_candidate_scan", {}))
     candidate_queue = _candidate_queue(reports)
@@ -277,6 +314,7 @@ def build_review_request_workbench_context(params=None):
                 visible_typo_review_request_rows,
                 visible_blocked_orders,
                 report_readiness,
+                history_ledger["events"],
             ),
             "latest_scan": latest_scan,
             "candidate_queue": visible_candidate_queue,
@@ -287,6 +325,16 @@ def build_review_request_workbench_context(params=None):
             "blocked_reason_counts": blocked_reason_counts,
             "report_readiness": report_readiness,
             "report_history": report_history,
+            "history_ledger": history_ledger["events"],
+            "history_filters": history_ledger["filters"],
+            "history_summary": history_ledger["summary"],
+            "history_focus": history_ledger["focus"],
+            "history_source_reports": history_ledger["source_reports"],
+            "history_filter_summary": history_ledger["filter_summary"],
+            "history_channel_filter_options": history_ledger["channel_filter_options"],
+            "history_event_type_filter_options": history_ledger["event_type_filter_options"],
+            "history_limit_filter_options": history_ledger["limit_filter_options"],
+            "history_recommendations": history_ledger["recommendations"],
             "safety_history": safety_history,
             "local_stats": local_stats,
             "tracking_design": _tracking_design(),
@@ -849,6 +897,7 @@ def _filter_summary(
     typo_review_request_rows,
     blocked_orders,
     report_readiness,
+    history_ledger,
 ):
     return {
         "active": filters["has_active_filters"],
@@ -858,6 +907,7 @@ def _filter_summary(
         "visible_trustpilot_history_rows": len(invitation_history),
         "visible_blocked_rows": len(blocked_orders),
         "visible_report_rows": len(report_readiness),
+        "visible_history_rows": len(history_ledger),
         "limit": filters["limit"],
     }
 
@@ -867,6 +917,11 @@ def _report_readiness(reports):
         ("next_candidate_scan", "Latest candidate scan"),
         ("candidate_scan", "Candidate scan"),
         ("trustpilot_one_candidate_draft_package", "One-candidate Gmail draft package"),
+        ("trustpilot_one_candidate_draft_create_execute", "One-candidate Gmail draft create execute"),
+        ("trustpilot_one_candidate_draft_send_preflight", "One-candidate Gmail send preflight"),
+        ("trustpilot_one_candidate_draft_send_execute", "One-candidate Gmail send execute"),
+        ("customer_level_duplicate_audit", "Customer-level duplicate audit"),
+        ("ali_reviews_api_capability_discovery", "Ali Reviews API capability discovery"),
         ("trustpilot_send_audit", "Future send audit"),
         ("trustpilot_tag_write_audit", "Future tag audit"),
     )
@@ -1310,10 +1365,16 @@ def _current_page_safety_confirmations():
         {"name": "tags_add_performed", "value": False},
         {"name": "tags_remove_performed", "value": False},
         {"name": "gmail_api_call_performed", "value": False},
+        {"name": "gmail_draft_create_attempted", "value": False},
         {"name": "gmail_draft_created", "value": False},
+        {"name": "gmail_drafts_send_called", "value": False},
+        {"name": "gmail_messages_send_called", "value": False},
+        {"name": "gmail_send_performed", "value": False},
+        {"name": "gmail_draft_deleted", "value": False},
         {"name": "email_sent", "value": False},
         {"name": "kudosi_api_call_performed", "value": False},
         {"name": "ali_reviews_api_call_performed", "value": False},
+        {"name": "ali_reviews_write_api_call_performed", "value": False},
         {"name": "trustpilot_api_call_performed", "value": False},
         {"name": "tracking_redirect_enabled", "value": False},
         {"name": "tracking_token_generated", "value": False},
