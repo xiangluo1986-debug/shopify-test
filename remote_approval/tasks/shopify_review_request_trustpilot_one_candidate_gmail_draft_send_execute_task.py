@@ -366,20 +366,31 @@ def _gmail_draft_send_result(source_summary: dict, gates: dict, blocking_conditi
 
     try:
         service = _build_gmail_service(gmail_env, result)
-        resolution = _resolve_runtime_gmail_draft_for_send(service, source_summary, result)
-        _apply_gmail_draft_resolution_report(result, resolution)
-        if not resolution["gmail_draft_resolved_for_send"]:
-            result["one_candidate_gmail_draft_send_execute_status"] = resolution[
-                "runtime_gmail_draft_resolution_status"
-            ]
-            result["real_gmail_send_allowed"] = False
-            result["real_gmail_send_blocked_reason"] = result["one_candidate_gmail_draft_send_execute_status"]
-            return result
+    except Exception as exc:  # pragma: no cover - real Gmail auth is only used behind explicit local gates.
+        result["one_candidate_gmail_draft_send_execute_status"] = "blocked_gmail_service_build_failed"
+        result["real_gmail_send_allowed"] = False
+        result["real_gmail_send_blocked_reason"] = result["one_candidate_gmail_draft_send_execute_status"]
+        result["gmail_error_sanitized"] = _safe_exception_summary(exc)
+        result["gmail_send_performed"] = False
+        result["email_sent"] = False
+        result["sent_count"] = 0
+        return result
 
-        draft_id = resolution["_full_draft_id_for_runtime_only"]
-        result["gmail_draft_send_attempted"] = True
-        result["gmail_drafts_send_called"] = True
-        result["gmail_api_call_performed"] = True
+    resolution = _resolve_runtime_gmail_draft_for_send(service, source_summary, result)
+    _apply_gmail_draft_resolution_report(result, resolution)
+    if not resolution["gmail_draft_resolved_for_send"]:
+        result["one_candidate_gmail_draft_send_execute_status"] = resolution[
+            "runtime_gmail_draft_resolution_status"
+        ]
+        result["real_gmail_send_allowed"] = False
+        result["real_gmail_send_blocked_reason"] = result["one_candidate_gmail_draft_send_execute_status"]
+        return result
+
+    draft_id = resolution["_full_draft_id_for_runtime_only"]
+    result["gmail_draft_send_attempted"] = True
+    result["gmail_drafts_send_called"] = True
+    result["gmail_api_call_performed"] = True
+    try:
         response = service.users().drafts().send(userId="me", body={"id": draft_id}).execute()
         result["one_candidate_gmail_draft_send_execute_status"] = FUTURE_SUCCESS_STATUS
         result["real_gmail_send_executed"] = True
@@ -394,6 +405,7 @@ def _gmail_draft_send_result(source_summary: dict, gates: dict, blocking_conditi
         result["real_gmail_send_allowed"] = False
         result["real_gmail_send_blocked_reason"] = result["one_candidate_gmail_draft_send_execute_status"]
         result["gmail_error_sanitized"] = _safe_exception_summary(exc)
+        result["gmail_send_error_sanitized"] = _safe_exception_summary(exc)
         result["gmail_send_performed"] = False
         result["email_sent"] = False
         result["sent_count"] = 0
@@ -415,10 +427,12 @@ def _base_send_result(mode: str = "dry-run") -> dict:
         "gmail_send_or_compose_scope_present": False,
         "gmail_missing_env_vars": [],
         "gmail_error_sanitized": "",
+        "gmail_send_error_sanitized": "",
         "gmail_draft_sent_and_verified": False,
         "gmail_message_id_partial": "",
         "gmail_runtime_resolver_used": False,
         "gmail_draft_list_attempted": False,
+        "gmail_draft_list_succeeded": False,
         "gmail_draft_get_attempted": False,
         "gmail_draft_get_count": 0,
         "gmail_drafts_scanned_count": 0,
@@ -438,67 +452,84 @@ def _base_send_result(mode: str = "dry-run") -> dict:
 
 def _resolve_runtime_gmail_draft_for_send(service, source_summary: dict, result: dict) -> dict:
     resolution = _base_gmail_draft_resolution_result()
+    _apply_gmail_draft_resolution_report(result, resolution)
     expected_partial = source_summary["gmail_draft_id_partial"]
-    markers = _runtime_draft_match_markers(source_summary)
-    resolution["gmail_resolver_subject_match_used"] = bool(markers["expected_subject"])
-    resolution["gmail_resolver_order_marker_match_required"] = markers["order_marker_required"]
-    resolution["gmail_resolver_match_strategy"] = _resolver_match_strategy(markers)
-    if not expected_partial:
-        resolution["runtime_gmail_draft_resolution_status"] = "blocked_missing_draft_id_partial"
-        return resolution
-
-    matches = []
-    page_token = None
     scanned_count = 0
-    while scanned_count < GMAIL_DRAFT_RESOLUTION_MAX_DRAFTS:
-        request = {
-            "userId": "me",
-            "maxResults": min(GMAIL_DRAFT_LIST_PAGE_SIZE, GMAIL_DRAFT_RESOLUTION_MAX_DRAFTS - scanned_count),
-        }
-        if page_token:
-            request["pageToken"] = page_token
-        resolution["gmail_draft_list_attempted"] = True
-        result["gmail_api_call_performed"] = True
-        page = service.users().drafts().list(**request).execute()
-        drafts = page.get("drafts") or []
-        if not drafts:
-            break
-        for draft_ref in drafts:
-            if scanned_count >= GMAIL_DRAFT_RESOLUTION_MAX_DRAFTS:
-                break
-            scanned_count += 1
-            draft_id = str(draft_ref.get("id") or "").strip()
-            if _partial_id(draft_id) != expected_partial:
-                continue
-            resolution["gmail_partial_draft_id_match_count"] += 1
-            resolution["gmail_draft_get_attempted"] = True
-            resolution["gmail_draft_get_count"] += 1
+    try:
+        markers = _runtime_draft_match_markers(source_summary)
+        resolution["gmail_resolver_subject_match_used"] = bool(markers["expected_subject"])
+        resolution["gmail_resolver_order_marker_match_required"] = markers["order_marker_required"]
+        resolution["gmail_resolver_match_strategy"] = _resolver_match_strategy(markers)
+        _apply_gmail_draft_resolution_report(result, resolution)
+        if not expected_partial:
+            resolution["runtime_gmail_draft_resolution_status"] = "blocked_missing_draft_id_partial"
+            return resolution
+
+        matches = []
+        page_token = None
+        while scanned_count < GMAIL_DRAFT_RESOLUTION_MAX_DRAFTS:
+            request = {
+                "userId": "me",
+                "maxResults": min(GMAIL_DRAFT_LIST_PAGE_SIZE, GMAIL_DRAFT_RESOLUTION_MAX_DRAFTS - scanned_count),
+            }
+            if page_token:
+                request["pageToken"] = page_token
+            resolution["gmail_draft_list_attempted"] = True
+            result["gmail_draft_list_attempted"] = True
             result["gmail_api_call_performed"] = True
-            detail = service.users().drafts().get(
-                userId="me",
-                id=draft_id,
-                format="metadata",
-                metadataHeaders=["To", "From", "Subject"],
-            ).execute()
-            if _gmail_draft_detail_matches_source(detail, source_summary, markers):
-                matches.append(draft_id)
-        page_token = page.get("nextPageToken")
-        if not page_token:
-            break
+            page = service.users().drafts().list(**request).execute()
+            resolution["gmail_draft_list_succeeded"] = True
+            result["gmail_draft_list_succeeded"] = True
+            drafts = page.get("drafts") or []
+            if not drafts:
+                break
+            for draft_ref in drafts:
+                if scanned_count >= GMAIL_DRAFT_RESOLUTION_MAX_DRAFTS:
+                    break
+                scanned_count += 1
+                draft_id = str(draft_ref.get("id") or "").strip()
+                if _partial_id(draft_id) != expected_partial:
+                    continue
+                resolution["gmail_partial_draft_id_match_count"] += 1
+                result["gmail_partial_draft_id_match_count"] = resolution["gmail_partial_draft_id_match_count"]
+                resolution["gmail_draft_get_attempted"] = True
+                resolution["gmail_draft_get_count"] += 1
+                result["gmail_draft_get_attempted"] = True
+                result["gmail_draft_get_count"] = resolution["gmail_draft_get_count"]
+                result["gmail_api_call_performed"] = True
+                detail = service.users().drafts().get(
+                    userId="me",
+                    id=draft_id,
+                    format="metadata",
+                    metadataHeaders=["To", "From", "Subject"],
+                ).execute()
+                if _gmail_draft_detail_matches_source(detail, source_summary, markers):
+                    matches.append(draft_id)
+                    resolution["gmail_resolved_draft_count"] = len(matches)
+                    result["gmail_resolved_draft_count"] = resolution["gmail_resolved_draft_count"]
+            page_token = page.get("nextPageToken")
+            if not page_token:
+                break
 
-    resolution["gmail_drafts_scanned_count"] = scanned_count
-    resolution["gmail_resolved_draft_count"] = len(matches)
-    if not matches:
-        resolution["runtime_gmail_draft_resolution_status"] = "blocked_runtime_gmail_draft_not_found"
-        return resolution
-    if len(matches) > 1:
-        resolution["runtime_gmail_draft_resolution_status"] = "blocked_runtime_multiple_matching_gmail_drafts"
-        return resolution
+        resolution["gmail_drafts_scanned_count"] = scanned_count
+        resolution["gmail_resolved_draft_count"] = len(matches)
+        if not matches:
+            resolution["runtime_gmail_draft_resolution_status"] = "blocked_runtime_gmail_draft_not_found"
+            return resolution
+        if len(matches) > 1:
+            resolution["runtime_gmail_draft_resolution_status"] = "blocked_runtime_multiple_matching_gmail_drafts"
+            return resolution
 
-    resolution["runtime_gmail_draft_resolution_status"] = "runtime_gmail_draft_resolved_for_send"
-    resolution["gmail_draft_resolved_for_send"] = True
-    resolution["_full_draft_id_for_runtime_only"] = matches[0]
-    return resolution
+        resolution["runtime_gmail_draft_resolution_status"] = "runtime_gmail_draft_resolved_for_send"
+        resolution["gmail_draft_resolved_for_send"] = True
+        resolution["_full_draft_id_for_runtime_only"] = matches[0]
+        return resolution
+    except Exception as exc:  # pragma: no cover - runtime Gmail calls require explicit local gates.
+        resolution["runtime_gmail_draft_resolution_status"] = "blocked_runtime_gmail_draft_resolver_failed"
+        resolution["gmail_resolver_error_sanitized"] = _safe_exception_summary(exc)
+        resolution["gmail_drafts_scanned_count"] = scanned_count
+        _apply_gmail_draft_resolution_report(result, resolution)
+        return resolution
 
 
 def _base_gmail_draft_resolution_result() -> dict:
@@ -506,6 +537,7 @@ def _base_gmail_draft_resolution_result() -> dict:
         "runtime_gmail_draft_resolution_status": "blocked_runtime_gmail_draft_not_found",
         "gmail_runtime_resolver_used": True,
         "gmail_draft_list_attempted": False,
+        "gmail_draft_list_succeeded": False,
         "gmail_draft_get_attempted": False,
         "gmail_draft_get_count": 0,
         "gmail_drafts_scanned_count": 0,
@@ -527,6 +559,7 @@ def _apply_gmail_draft_resolution_report(result: dict, resolution: dict) -> None
     safe_keys = (
         "gmail_runtime_resolver_used",
         "gmail_draft_list_attempted",
+        "gmail_draft_list_succeeded",
         "gmail_draft_get_attempted",
         "gmail_draft_get_count",
         "gmail_drafts_scanned_count",
@@ -720,7 +753,7 @@ def _build_payload(
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "4.8A",
+        "phase": "4.8B",
         "mode": send_result["mode"],
         "command_label": COMMAND_LABEL,
         "one_candidate_gmail_draft_send_execute_status": status,
@@ -749,6 +782,7 @@ def _build_payload(
         "gmail_message_id_partial": send_result["gmail_message_id_partial"],
         "gmail_runtime_resolver_used": send_result["gmail_runtime_resolver_used"],
         "gmail_draft_list_attempted": send_result["gmail_draft_list_attempted"],
+        "gmail_draft_list_succeeded": send_result["gmail_draft_list_succeeded"],
         "gmail_draft_get_attempted": send_result["gmail_draft_get_attempted"],
         "gmail_draft_get_count": send_result["gmail_draft_get_count"],
         "gmail_drafts_scanned_count": send_result["gmail_drafts_scanned_count"],
@@ -762,6 +796,7 @@ def _build_payload(
         "gmail_resolver_subject_match_used": send_result["gmail_resolver_subject_match_used"],
         "gmail_resolver_order_marker_match_required": send_result["gmail_resolver_order_marker_match_required"],
         "gmail_resolver_error_sanitized": send_result["gmail_resolver_error_sanitized"],
+        "gmail_send_error_sanitized": send_result["gmail_send_error_sanitized"],
         "safe_output_policy": {
             "masked_email_only": True,
             "raw_customer_email_output": False,
@@ -864,6 +899,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "gmail_full_message_id_exposed": payload["gmail_full_message_id_exposed"],
         "gmail_runtime_resolver_used": payload["gmail_runtime_resolver_used"],
         "gmail_draft_list_attempted": payload["gmail_draft_list_attempted"],
+        "gmail_draft_list_succeeded": payload["gmail_draft_list_succeeded"],
         "gmail_draft_get_attempted": payload["gmail_draft_get_attempted"],
         "gmail_draft_get_count": payload["gmail_draft_get_count"],
         "gmail_drafts_scanned_count": payload["gmail_drafts_scanned_count"],
@@ -920,7 +956,7 @@ def _render_html_report(payload: dict) -> str:
 </head>
 <body>
   <h1>Trustpilot One-Candidate Gmail Draft Send Execute</h1>
-  <p class="{'safe' if payload['success'] else 'warning'}">Phase 4.8A defaults to dry-run. A real send is locked to one existing Gmail draft for selected order #22620 and only after all local ACK gates match exactly.</p>
+  <p class="{'safe' if payload['success'] else 'warning'}">Phase 4.8B defaults to dry-run. A real send is locked to one existing Gmail draft for selected order #22620 and only after all local ACK gates match exactly.</p>
   <p>Status: <strong>{escape(payload["one_candidate_gmail_draft_send_execute_status"])}</strong></p>
   <p>Mode: <code>{escape(payload["mode"])}</code></p>
   <p>Selected order: <code>{escape(payload["selected_order_name"])}</code></p>
@@ -939,6 +975,10 @@ def _render_html_report(payload: dict) -> str:
     <tr><th>Real Gmail send executed</th><td>{escape(str(payload["real_gmail_send_executed"]))}</td></tr>
     <tr><th>Real Gmail send blocked reason</th><td>{escape(str(payload["real_gmail_send_blocked_reason"]))}</td></tr>
     <tr><th>Runtime resolver used</th><td>{escape(str(payload["gmail_runtime_resolver_used"]))}</td></tr>
+    <tr><th>Draft list attempted</th><td>{escape(str(payload["gmail_draft_list_attempted"]))}</td></tr>
+    <tr><th>Draft list succeeded</th><td>{escape(str(payload["gmail_draft_list_succeeded"]))}</td></tr>
+    <tr><th>Draft get attempted</th><td>{escape(str(payload["gmail_draft_get_attempted"]))}</td></tr>
+    <tr><th>Draft get count</th><td>{escape(str(payload["gmail_draft_get_count"]))}</td></tr>
     <tr><th>Draft resolved for send</th><td>{escape(str(payload["gmail_draft_resolved_for_send"]))}</td></tr>
     <tr><th>Resolved draft count</th><td>{escape(str(payload["gmail_resolved_draft_count"]))}</td></tr>
     <tr><th>Full draft id exposed</th><td>{escape(str(payload["gmail_full_draft_id_exposed"]))}</td></tr>
@@ -979,7 +1019,7 @@ def _apply_self_privacy_assertion(payload: dict) -> dict:
     payload["email_sent"] = False
     payload["sent_count"] = 0
     payload["blocking_conditions"].append(
-        {"status": "blocked_privacy_scan_failed", "detail": "Phase 4.8A report self privacy scan failed."}
+        {"status": "blocked_privacy_scan_failed", "detail": "Phase 4.8B report self privacy scan failed."}
     )
     payload["blocking_condition_count"] = len(payload["blocking_conditions"])
     payload["detected_issue_summary"] = _issue_summary(
@@ -1051,6 +1091,13 @@ def _safe_text(value) -> str:
 
 def _safe_exception_summary(exc: Exception) -> str:
     text = str(exc or "")
+    text = re.sub(r"(?i)(/drafts/)[A-Za-z0-9_-]{8,}", r"\1[redacted-gmail-draft-id]", text)
+    text = re.sub(r"(?i)(/messages/)[A-Za-z0-9_-]{8,}", r"\1[redacted-gmail-message-id]", text)
+    text = re.sub(
+        r"(?i)\b(draft(?:_?id)?|message(?:_?id)?|id)\s*[:=]\s*[\"']?[A-Za-z0-9_-]{8,}",
+        r"\1=[redacted-gmail-id]",
+        text,
+    )
     text = re.sub(r"\br-[A-Za-z0-9_-]{8,}\b", "[redacted-gmail-draft-id]", text)
     text = re.sub(r"\bmsg-[A-Za-z0-9_-]{8,}\b", "[redacted-gmail-message-id]", text)
     return _sanitize_text(f"{exc.__class__.__name__}: {text}")[:400]
@@ -1080,19 +1127,19 @@ def _safe_int(value) -> int:
 def _issue_summary(status: str, blocking_conditions: list[dict]) -> str:
     if status == DRY_RUN_STATUS:
         return (
-            "Phase 4.8A stayed in dry-run for selected order #22620; no Gmail send API call, email send, "
+            "Phase 4.8B stayed in dry-run for selected order #22620; no Gmail send API call, email send, "
             "new Gmail draft, Shopify write, external review API call, or tracking action was performed."
         )
     if status == FUTURE_SUCCESS_STATUS:
         return "Exactly one existing Gmail draft was sent for selected order #22620; post-send audit is required next."
-    return "Phase 4.8A Gmail draft send execute blocked: " + ", ".join(
+    return "Phase 4.8B Gmail draft send execute blocked: " + ", ".join(
         _safe_text(item.get("status", "")) for item in blocking_conditions
     )
 
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
-        "Shopify review request Phase 4.8A Trustpilot one-candidate Gmail draft send execute finished.\n"
+        "Shopify review request Phase 4.8B Trustpilot one-candidate Gmail draft send execute finished.\n"
         f"Status: {payload.get('one_candidate_gmail_draft_send_execute_status')}\n"
         f"Mode: {payload.get('mode')}\n"
         f"Selected order: {payload.get('selected_order_name')}\n"
