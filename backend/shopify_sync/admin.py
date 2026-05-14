@@ -49,6 +49,16 @@ MERGED_SETTLEMENT_BLOCKED_STATUSES = {
     "transferred",
     "exception",
 }
+MERGED_GROUP_BATCH_ALLOWED_STATUSES = {"draft", "active"}
+MERGED_GROUP_BATCH_ALLOWED_SETTLEMENT_STATUSES = {"cost_confirmed", "pending_warehouse"}
+MERGED_GROUP_BATCH_BLOCKED_ORDER_STATUSES = {
+    "pending_payment",
+    "payment_submitted",
+    "paid",
+    "cancelled",
+    "transferred",
+    "exception",
+}
 SETTLEMENT_STATUS_ADMIN_LABELS = {
     "cost_confirmed": "深圳仓已确认成本，待 Admin 确认",
     "admin_confirmed": "Admin 已确认",
@@ -3412,6 +3422,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             },
         ),
     )
+    actions = ["add_merged_groups_to_settlement_batch"]
 
     def _can_view_merged_groups(self, request):
         return self.is_super_admin(request) or self.is_finance_user(request)
@@ -3437,6 +3448,12 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related("group_orders")
 
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if not (self.is_super_admin(request) or self.is_finance_user(request)):
+            actions.pop("add_merged_groups_to_settlement_batch", None)
+        return actions
+
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj))
         editable_cost_fields = {
@@ -3454,6 +3471,118 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
                 if field not in editable_cost_fields
             ]
         return tuple(dict.fromkeys(readonly))
+
+    def _generate_batch_no(self):
+        now = timezone.now()
+        prefix = now.strftime("%Y%m")
+        latest = SettlementBatch.objects.filter(batch_no__startswith=prefix).order_by("-batch_no").first()
+        next_seq = 1
+        if latest and latest.batch_no:
+            try:
+                next_seq = int(latest.batch_no.split("-")[-1]) + 1
+            except ValueError:
+                next_seq = 1
+        return f"{prefix}-{next_seq:03d}"
+
+    def _order_label(self, order):
+        if order.order_name:
+            return order.order_name
+        if order.order_number:
+            return f"#{order.order_number}"
+        return f"Order ID {order.pk}"
+
+    def group_member_orders(self, group):
+        return [
+            group_link.order
+            for group_link in group.group_orders.select_related("order").order_by("added_at", "id")
+        ]
+
+    def group_has_active_batch_entry(self, group):
+        return group.settlement_batch_entries.exclude(
+            status=SettlementBatchEntry.STATUS_CANCELLED,
+        ).exists()
+
+    def order_has_active_coverage(self, order):
+        return SettlementBatchEntryCoveredOrder.objects.filter(
+            order=order,
+            released_at__isnull=True,
+        ).exists()
+
+    def group_total_cost_snapshot(self, group):
+        summary = group.group_cost_summary()
+        if not summary["cost_completed"] or summary["group_total_cost_rmb"] is None:
+            return None, summary
+        return money(summary["group_total_cost_rmb"]), summary
+
+    def validate_group_ready_for_batch(self, group):
+        errors = []
+        warnings = []
+        group_label = group.group_no or f"Group ID {group.pk}"
+        member_orders = self.group_member_orders(group)
+        amount_rmb, summary = self.group_total_cost_snapshot(group)
+
+        if group.status not in MERGED_GROUP_BATCH_ALLOWED_STATUSES:
+            errors.append(f"{group_label}: group status 必须是 draft 或 active，当前为 {group.status}")
+
+        if group.settlement_status not in MERGED_GROUP_BATCH_ALLOWED_SETTLEMENT_STATUSES:
+            errors.append(
+                f"{group_label}: settlement_status 必须是 cost_confirmed；"
+                f"当前为 {group.settlement_status}"
+            )
+        elif group.settlement_status == "pending_warehouse":
+            warnings.append(
+                f"{group_label}: 当前暂无合并组 cost_confirmed action，本次按成本完整性放行 pending_warehouse。"
+            )
+
+        if len(member_orders) < 2:
+            errors.append(f"{group_label}: 合并组至少需要 2 个成员订单")
+
+        if not summary["cost_completed"] or amount_rmb is None:
+            reasons = summary.get("incomplete_reasons") or [self._group_completion_text(summary)]
+            errors.append(f"{group_label}: 成本不完整（{'; '.join(reasons)}）")
+
+        if self.group_has_active_batch_entry(group):
+            errors.append(f"{group_label}: 已存在未取消的 SettlementBatchEntry")
+
+        old_batch_orders = [
+            self._order_label(order)
+            for order in member_orders
+            if order.settlement_batch_id
+        ]
+        if old_batch_orders:
+            errors.append(
+                f"{group_label}: 成员订单已被旧批次单独结算：{', '.join(old_batch_orders[:10])}"
+            )
+
+        active_coverage_orders = [
+            self._order_label(order)
+            for order in member_orders
+            if self.order_has_active_coverage(order)
+        ]
+        if active_coverage_orders:
+            errors.append(
+                f"{group_label}: 成员订单已被其它 active entry 覆盖：{', '.join(active_coverage_orders[:10])}"
+            )
+
+        blocked_status_orders = [
+            f"{self._order_label(order)}({order.settlement_status})"
+            for order in member_orders
+            if order.settlement_status in MERGED_GROUP_BATCH_BLOCKED_ORDER_STATUSES
+        ]
+        if blocked_status_orders:
+            errors.append(
+                f"{group_label}: 成员订单状态不可加入批次：{', '.join(blocked_status_orders[:10])}"
+            )
+
+        return {
+            "group": group,
+            "group_label": group_label,
+            "member_orders": member_orders,
+            "amount_rmb": amount_rmb,
+            "summary": summary,
+            "errors": errors,
+            "warnings": warnings,
+        }
 
     def _group_cost_summary(self, obj):
         if not obj or not obj.pk:
@@ -3600,6 +3729,101 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             ),
         )
     merged_group_cost_summary.short_description = "Merged settlement cost summary"
+
+    def add_merged_groups_to_settlement_batch(self, request, queryset):
+        if not (self.is_super_admin(request) or self.is_finance_user(request)):
+            self.message_user(request, "只有 Admin、Finance 或超级管理员可以把合并组加入结算批次。", level=messages.ERROR)
+            return
+
+        groups = list(
+            queryset.prefetch_related("group_orders__order")
+            .order_by("pk")
+        )
+        if not groups:
+            self.message_user(request, "请至少选择 1 个合并结算组。", level=messages.ERROR)
+            return
+
+        validations = [self.validate_group_ready_for_batch(group) for group in groups]
+        errors = [
+            error
+            for validation in validations
+            for error in validation["errors"]
+        ]
+        warnings = [
+            warning
+            for validation in validations
+            for warning in validation["warnings"]
+        ]
+        if errors:
+            visible_errors = errors[:12]
+            suffix = ""
+            if len(errors) > len(visible_errors):
+                suffix = f"；另有 {len(errors) - len(visible_errors)} 条错误未显示"
+            self.message_user(
+                request,
+                "未创建结算批次：" + "；".join(visible_errors) + suffix,
+                level=messages.ERROR,
+            )
+            return
+
+        batch_no = self._generate_batch_no()
+        group_labels = [validation["group_label"] for validation in validations]
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        covered_orders_count = 0
+
+        try:
+            with transaction.atomic():
+                batch = SettlementBatch.objects.create(
+                    batch_no=batch_no,
+                    created_by=request.user.get_username(),
+                    note=f"Created from merged settlement groups: {', '.join(group_labels)}",
+                )
+                for validation in validations:
+                    group = validation["group"]
+                    entry = SettlementBatchEntry(
+                        settlement_batch=batch,
+                        entry_type=SettlementBatchEntry.ENTRY_TYPE_MERGED_GROUP,
+                        merged_group=group,
+                        amount_rmb=validation["amount_rmb"],
+                        status=SettlementBatchEntry.STATUS_ACTIVE,
+                        created_by=user,
+                        note=group.note or f"Created from merged settlement group {validation['group_label']}",
+                    )
+                    entry.full_clean()
+                    entry.save()
+
+                    for order in validation["member_orders"]:
+                        covered_order = SettlementBatchEntryCoveredOrder(
+                            entry=entry,
+                            order=order,
+                            coverage_type=SettlementBatchEntryCoveredOrder.COVERAGE_TYPE_MEMBER_ORDER,
+                        )
+                        covered_order.full_clean()
+                        covered_order.save()
+                        covered_orders_count += 1
+
+                    group.settlement_status = "pending_payment"
+                    group.save(update_fields=["settlement_status", "updated_at"])
+        except (IntegrityError, ValidationError) as exc:
+            self.message_user(request, f"未创建结算批次：{exc}", level=messages.ERROR)
+            return
+
+        self.message_user(
+            request,
+            (
+                f"已创建结算批次 {batch.batch_no}；已加入 {len(validations)} 个合并组；"
+                f"覆盖 {covered_orders_count} 个订单。提醒：本阶段 batch total / CSV 仍未切换到 entries，"
+                "Phase E5 完成后才正式用于付款导出。"
+            ),
+            level=messages.SUCCESS,
+        )
+        if warnings:
+            self.message_user(
+                request,
+                "；".join(warnings[:8]) + " 后续会补 group 审核流。",
+                level=messages.WARNING,
+            )
+    add_merged_groups_to_settlement_batch.short_description = "加入结算批次"
 
 
 class SettlementEntryAdminAccessMixin(ShopifyRoleAdminMixin):
@@ -3793,6 +4017,8 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "batch_no",
         "status",
         "total_amount_rmb",
+        "settlement_entry_summary",
+        "old_orders_summary",
         "created_by",
         "created_at",
         "payment_proof",
@@ -3805,6 +4031,8 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     readonly_fields = (
         "status",
         "total_amount_rmb",
+        "settlement_entry_summary",
+        "old_orders_summary",
         "created_by",
         "created_at",
         "payment_proof_link",
@@ -3844,6 +4072,103 @@ class SettlementBatchAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return "-"
         return format_html('<a href="{}" target="_blank">查看付款凭证</a>', obj.payment_proof.url)
     payment_proof_link.short_description = "付款凭证"
+
+    def _batch_order_label(self, order):
+        if order.order_name:
+            return order.order_name
+        if order.order_number:
+            return f"#{order.order_number}"
+        return f"Order ID {order.pk}"
+
+    def old_orders_summary(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+
+        orders = obj.orders.all().order_by("order_created_at", "id")
+        old_orders_count = orders.count()
+        if old_orders_count == 0:
+            return "old orders count: 0"
+
+        rows = []
+        for order in orders[:50]:
+            url = reverse("admin:shopify_sync_shopifyorder_change", args=[order.pk])
+            rows.append((
+                url,
+                self._batch_order_label(order),
+                settlement_status_admin_label(order.settlement_status),
+                self._format_batch_amount(order.total_locked_cost_rmb),
+            ))
+        suffix_html = ""
+        if old_orders_count > len(rows):
+            suffix_html = format_html(
+                '<div style="margin-top:6px;color:#667085;">另有 {} 个 old orders 未在此摘要中展开。</div>',
+                old_orders_count - len(rows),
+            )
+
+        return format_html(
+            '<div style="margin-bottom:6px;">old orders count: {}</div>'
+            '<table style="line-height:1.6;max-width:920px;">'
+            '<tr><th style="text-align:left;padding-right:16px;">Order</th>'
+            '<th style="text-align:left;padding-right:16px;">Status</th>'
+            '<th style="text-align:left;">Total locked cost RMB</th></tr>'
+            '{}'
+            '</table>{}',
+            old_orders_count,
+            format_html_join(
+                "",
+                '<tr><td style="padding-right:16px;"><a href="{}">{}</a></td>'
+                '<td style="padding-right:16px;">{}</td><td>{}</td></tr>',
+                rows,
+            ),
+            suffix_html,
+        )
+    old_orders_summary.short_description = "Old orders"
+
+    def _format_batch_amount(self, value):
+        if value is None:
+            return "-"
+        return f"{money(value)}"
+
+    def settlement_entry_summary(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+
+        old_order_ids = set(obj.orders.values_list("id", flat=True))
+        entries_count = obj.entries.count()
+        covered_orders = SettlementBatchEntryCoveredOrder.objects.filter(
+            entry__settlement_batch=obj,
+        )
+        covered_orders_count = covered_orders.count()
+        covered_order_ids = set(covered_orders.values_list("order_id", flat=True))
+        duplicate_count = len(old_order_ids & covered_order_ids)
+
+        warning = ""
+        if duplicate_count:
+            warning = format_html(
+                '<div style="margin-top:8px;padding:8px 10px;border:1px solid #fecdca;'
+                'background:#fffbfa;color:#b42318;border-radius:4px;font-weight:600;">'
+                '存在重复结算风险：{} 个 old orders 同时出现在 entries covered orders 中。'
+                '本提示只读显示，不自动修复，不改变 total / CSV / payment flow。'
+                '</div>',
+                duplicate_count,
+            )
+
+        rows = (
+            ("old orders count", len(old_order_ids)),
+            ("new entries count", entries_count),
+            ("covered orders count", covered_orders_count),
+            ("potential duplicate risk count", duplicate_count),
+        )
+        return format_html(
+            '<table style="line-height:1.6;max-width:720px;">{}</table>{}',
+            format_html_join(
+                "",
+                '<tr><th style="text-align:left;padding:3px 16px 3px 0;">{}</th><td>{}</td></tr>',
+                rows,
+            ),
+            warning,
+        )
+    settlement_entry_summary.short_description = "Settlement entry summary"
 
     def submit_batch_payment(self, request, queryset):
         if not (self.is_super_admin(request) or self.is_finance_user(request)):
