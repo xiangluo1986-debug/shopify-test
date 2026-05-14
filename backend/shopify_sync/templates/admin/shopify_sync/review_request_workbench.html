@@ -9,13 +9,37 @@
     .rrw-nav {
         margin: 0 0 16px;
     }
-    .rrw-nav a {
+    .rrw-nav a,
+    .rrw-link-button {
         display: inline-block;
         padding: 6px 10px;
         border: 1px solid var(--border-color, #ccc);
         border-radius: 4px;
         text-decoration: none;
         background: var(--body-bg, #fff);
+    }
+    .rrw-filterbar {
+        display: grid;
+        grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(140px, 1fr)) auto auto;
+        gap: 10px;
+        align-items: end;
+        border: 1px solid var(--border-color, #d6d6d6);
+        border-radius: 6px;
+        padding: 12px;
+        margin: 0 0 18px;
+        background: var(--darkened-bg, #f8f8f8);
+    }
+    .rrw-field label {
+        display: block;
+        color: var(--body-quiet-color, #666);
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    .rrw-field input,
+    .rrw-field select {
+        width: 100%;
+        min-height: 32px;
     }
     .rrw-grid {
         display: grid;
@@ -47,7 +71,7 @@
         overflow-wrap: anywhere;
     }
     .rrw-section {
-        margin: 0 0 22px;
+        margin: 0 0 24px;
     }
     .rrw-section h2 {
         margin-bottom: 8px;
@@ -70,7 +94,8 @@
     .rrw-muted {
         color: var(--body-quiet-color, #666);
     }
-    .rrw-pill {
+    .rrw-pill,
+    .rrw-badge {
         display: inline-block;
         border: 1px solid var(--border-color, #d6d6d6);
         border-radius: 999px;
@@ -78,6 +103,30 @@
         margin: 1px 2px 1px 0;
         background: var(--darkened-bg, #f8f8f8);
         font-size: 12px;
+        line-height: 1.5;
+    }
+    .rrw-badge-ok {
+        border-color: #86efac;
+        background: #dcfce7;
+        color: #166534;
+    }
+    .rrw-badge-info {
+        border-color: #93c5fd;
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    .rrw-badge-warn {
+        border-color: #fbbf24;
+        background: #fef3c7;
+        color: #92400e;
+    }
+    .rrw-badge-bad {
+        border-color: #fca5a5;
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    .rrw-badge-muted {
+        color: var(--body-quiet-color, #666);
     }
     .rrw-warning {
         border-left: 4px solid #d97706;
@@ -94,6 +143,17 @@
         color: #991b1b;
         font-weight: 600;
     }
+    .rrw-actions {
+        white-space: nowrap;
+    }
+    @media (max-width: 900px) {
+        .rrw-filterbar {
+            grid-template-columns: 1fr;
+        }
+        .rrw-actions {
+            white-space: normal;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -106,8 +166,49 @@
 
     <h1>Review Request Workbench</h1>
     <p class="rrw-muted">
-        Read-only Phase 4.2 view. It reads local synced orders and local review-request reports only.
-        It does not send email, create Gmail drafts, write Shopify tags, call external review APIs, or enable tracking redirects.
+        Read-only Phase 4.3 daily review view. It reads local synced orders and local review-request reports only.
+        It does not send email, create Gmail drafts, write Shopify tags, call external review APIs, generate tracking tokens, or enable tracking redirects.
+    </p>
+
+    <form class="rrw-filterbar" method="get">
+        <div class="rrw-field">
+            <label for="rrw-q">Search order or masked email</label>
+            <input id="rrw-q" type="search" name="q" value="{{ wb.filters.q }}" placeholder="#22620 or m***@g***.com">
+        </div>
+        <div class="rrw-field">
+            <label for="rrw-status">Status</label>
+            <select id="rrw-status" name="status">
+                {% for option in wb.status_filter_options %}
+                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="rrw-field">
+            <label for="rrw-tag">Tag</label>
+            <select id="rrw-tag" name="tag">
+                {% for option in wb.tag_filter_options %}
+                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="rrw-field">
+            <label for="rrw-limit">Limit</label>
+            <select id="rrw-limit" name="limit">
+                {% for option in wb.limit_filter_options %}
+                    <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit">Apply filters</button>
+        <a class="rrw-link-button" href="{% url 'shopify_review_request_workbench' %}">Clear</a>
+    </form>
+
+    <p class="rrw-muted">
+        Filtered view: queue rows {{ wb.filter_summary.visible_queue_rows }},
+        Trustpilot history rows {{ wb.filter_summary.visible_trustpilot_history_rows }},
+        blocked rows {{ wb.filter_summary.visible_blocked_rows }},
+        report rows {{ wb.filter_summary.visible_report_rows }},
+        row limit {{ wb.filter_summary.limit }}.
     </p>
 
     <div class="rrw-grid">
@@ -126,9 +227,17 @@
             <tbody>
                 <tr><th>Report</th><td>{{ wb.latest_scan.relative_path }}</td></tr>
                 <tr><th>Present</th><td>{{ wb.latest_scan.present|yesno:"true,false" }}</td></tr>
-                <tr><th>Status</th><td><code>{{ wb.latest_scan.report_status|default:"missing" }}</code></td></tr>
-                <tr><th>Generated</th><td>{{ wb.latest_scan.generated_time|default:"-" }}</td></tr>
-                <tr><th>Selected order</th><td>{{ wb.latest_scan.selected_order_name|default:"-" }}</td></tr>
+                <tr><th>Status</th><td><span class="rrw-badge rrw-badge-info">{{ wb.latest_scan.report_status|default:"missing" }}</span></td></tr>
+                <tr><th>Generated / modified</th><td>{{ wb.latest_scan.generated_time|default:"-" }}</td></tr>
+                <tr>
+                    <th>Selected order</th>
+                    <td>
+                        {{ wb.latest_scan.selected_order_name|default:"-" }}
+                        {% if wb.latest_scan.local_order_url %}
+                            <br><a href="{{ wb.latest_scan.local_order_url }}">Open local order</a>
+                        {% endif %}
+                    </td>
+                </tr>
                 <tr><th>Masked email</th><td>{{ wb.latest_scan.selected_masked_email|default:"-" }}</td></tr>
                 <tr><th>Eligible candidates</th><td>{{ wb.latest_scan.eligible_candidate_count }}</td></tr>
                 <tr><th>Next candidate count</th><td>{{ wb.latest_scan.next_candidate_count }}</td></tr>
@@ -137,15 +246,16 @@
     </div>
 
     <div class="rrw-section">
-        <h2>Review Request Queue</h2>
+        <h2>Candidate Scan Queue</h2>
         <p class="rrw-muted">
-            Shows next repeat-customer candidates from the latest local scan report. No send or tag-write actions are available.
+            Ready repeat-customer candidates from local scan reports. No send or tag-write actions are available.
         </p>
         <table class="rrw-table">
             <thead>
                 <tr>
                     <th>Order</th>
                     <th>Masked email</th>
+                    <th>Labels</th>
                     <th>Status</th>
                     <th>Tags</th>
                     <th>Source</th>
@@ -154,8 +264,20 @@
             <tbody>
                 {% for row in wb.candidate_queue %}
                     <tr>
-                        <td>{{ row.order_name }}</td>
+                        <td>
+                            {{ row.order_name }}
+                            {% if row.local_order_url %}
+                                <br><a href="{{ row.local_order_url }}">{{ row.local_order_link_label }}</a>
+                            {% endif %}
+                        </td>
                         <td>{{ row.masked_email|default:"-" }}</td>
+                        <td>
+                            {% for badge in row.status_badges %}
+                                <span class="rrw-badge {{ badge.css_class }}">{{ badge.label }}</span>
+                            {% empty %}
+                                <span class="rrw-muted">No labels</span>
+                            {% endfor %}
+                        </td>
                         <td><code>{{ row.status }}</code></td>
                         <td>
                             {% for tag in row.tags %}
@@ -167,44 +289,94 @@
                         <td>{{ row.source }}<br><span class="rrw-muted">{{ row.source_path }}</span></td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="5" class="rrw-muted">No queued candidate rows found in local reports.</td></tr>
+                    <tr><td colspan="6" class="rrw-muted">No queued candidate rows match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
     <div class="rrw-section">
-        <h2>Blocked Orders</h2>
+        <h2>Canonical Review Request Queue</h2>
+        <p class="rrw-muted">
+            Exact canonical queue tag: <code>{{ wb.canonical_review_request_tag }}</code>.
+            The typo-like tag <code>{{ wb.typo_review_request_tag }}</code> is not treated as canonical.
+        </p>
         <table class="rrw-table">
             <thead>
                 <tr>
                     <th>Order</th>
                     <th>Masked email</th>
+                    <th>Labels</th>
                     <th>Status</th>
-                    <th>Reason</th>
+                    <th>Tags summary</th>
                     <th>Source</th>
                 </tr>
             </thead>
             <tbody>
-                {% for row in wb.blocked_orders %}
+                {% for row in wb.review_request_queue %}
                     <tr>
-                        <td>{{ row.order_name }}</td>
+                        <td>
+                            {{ row.order_name }}
+                            {% if row.local_order_url %}
+                                <br><a href="{{ row.local_order_url }}">{{ row.local_order_link_label }}</a>
+                            {% endif %}
+                        </td>
                         <td>{{ row.masked_email|default:"-" }}</td>
+                        <td>
+                            {% for badge in row.status_badges %}
+                                <span class="rrw-badge {{ badge.css_class }}">{{ badge.label }}</span>
+                            {% endfor %}
+                        </td>
                         <td><code>{{ row.status }}</code></td>
-                        <td>{{ row.blocking_summary|default:"-" }}</td>
+                        <td>{{ row.tags_summary }}</td>
                         <td>{{ row.source }}<br><span class="rrw-muted">{{ row.source_path }}</span></td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="5" class="rrw-muted">No blocked order rows found in local reports.</td></tr>
+                    <tr><td colspan="6" class="rrw-muted">No rows with the exact canonical review-request tag match the current filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <h3>Typo / Not Canonical</h3>
+        <table class="rrw-table">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Masked email</th>
+                    <th>Labels</th>
+                    <th>Tags summary</th>
+                    <th>Source</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in wb.typo_review_request_rows %}
+                    <tr>
+                        <td>
+                            {{ row.order_name }}
+                            {% if row.local_order_url %}
+                                <br><a href="{{ row.local_order_url }}">{{ row.local_order_link_label }}</a>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.masked_email|default:"-" }}</td>
+                        <td>
+                            {% for badge in row.status_badges %}
+                                <span class="rrw-badge {{ badge.css_class }}">{{ badge.label }}</span>
+                            {% endfor %}
+                        </td>
+                        <td>{{ row.tags_summary }}</td>
+                        <td>{{ row.source }}<br><span class="rrw-muted">{{ row.source_path }}</span></td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="5" class="rrw-muted">No typo-tag rows match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
     <div class="rrw-section">
-        <h2>Invitation History</h2>
+        <h2>Trustpilot Invitation History</h2>
         <p class="rrw-muted">
-            Trustpilot invitation detection uses the configured aliases below and preserves the exact tag text shown in reports.
+            Trustpilot invitation detection uses these alias tags and preserves the exact matched value from local reports.
         </p>
         <p>
             {% for alias in wb.trustpilot_aliases %}
@@ -216,7 +388,8 @@
                 <tr>
                     <th>Order</th>
                     <th>Masked email</th>
-                    <th>Trustpilot tag or alias</th>
+                    <th>Labels</th>
+                    <th>Alias matched</th>
                     <th>Tags summary</th>
                     <th>Created/processed</th>
                     <th>Source</th>
@@ -225,8 +398,18 @@
             <tbody>
                 {% for row in wb.invitation_history %}
                     <tr>
-                        <td>{{ row.order_name }}</td>
+                        <td>
+                            {{ row.order_name }}
+                            {% if row.local_order_url %}
+                                <br><a href="{{ row.local_order_url }}">{{ row.local_order_link_label }}</a>
+                            {% endif %}
+                        </td>
                         <td>{{ row.masked_email|default:"-" }}</td>
+                        <td>
+                            {% for badge in row.status_badges %}
+                                <span class="rrw-badge {{ badge.css_class }}">{{ badge.label }}</span>
+                            {% endfor %}
+                        </td>
                         <td>
                             {% for tag in row.trustpilot_tags %}
                                 <span class="rrw-pill">{{ tag }}</span>
@@ -237,69 +420,88 @@
                         <td>{{ row.source }}<br><span class="rrw-muted">{{ row.source_path }}</span></td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="6" class="rrw-muted">No Trustpilot alias-tagged rows found in local reports.</td></tr>
+                    <tr><td colspan="7" class="rrw-muted">No Trustpilot alias-tagged rows match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
     <div class="rrw-section">
-        <h2>Existing Review Request Tag</h2>
-        <p class="rrw-muted">
-            Exact Shopify tag used by existing automation reports: <code>{{ wb.exact_review_request_tag }}</code>.
-            The corrected spelling is not treated as equivalent.
-        </p>
+        <h2>Blocked Reasons</h2>
+        <div class="rrw-grid">
+            {% for item in wb.blocked_reason_counts %}
+                <div class="rrw-card">
+                    <div class="rrw-card-title">{{ item.label }}</div>
+                    <div class="rrw-card-value">{{ item.count }}</div>
+                    <div class="rrw-card-note">Local report blocker count.</div>
+                </div>
+            {% endfor %}
+        </div>
         <table class="rrw-table">
             <thead>
                 <tr>
                     <th>Order</th>
                     <th>Masked email</th>
+                    <th>Labels</th>
                     <th>Status</th>
-                    <th>Tags summary</th>
+                    <th>Reason</th>
                     <th>Source</th>
                 </tr>
             </thead>
             <tbody>
-                {% for row in wb.review_request_queue %}
+                {% for row in wb.blocked_orders %}
                     <tr>
-                        <td>{{ row.order_name }}</td>
+                        <td>
+                            {{ row.order_name }}
+                            {% if row.local_order_url %}
+                                <br><a href="{{ row.local_order_url }}">{{ row.local_order_link_label }}</a>
+                            {% endif %}
+                        </td>
                         <td>{{ row.masked_email|default:"-" }}</td>
+                        <td>
+                            {% for badge in row.status_badges %}
+                                <span class="rrw-badge {{ badge.css_class }}">{{ badge.label }}</span>
+                            {% endfor %}
+                        </td>
                         <td><code>{{ row.status }}</code></td>
-                        <td>{{ row.tags_summary }}</td>
+                        <td>{{ row.blocking_summary|default:"-" }}</td>
                         <td>{{ row.source }}<br><span class="rrw-muted">{{ row.source_path }}</span></td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="5" class="rrw-muted">No rows with the exact review-request tag were found in local reports.</td></tr>
+                    <tr><td colspan="6" class="rrw-muted">No blocked order rows match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
     <div class="rrw-section">
-        <h2>Dry-run And Local Reports</h2>
+        <h2>Report Readiness</h2>
+        <p class="rrw-muted">
+            Local report presence only. Paths and statuses are shown without raw customer data.
+        </p>
         <table class="rrw-table">
             <thead>
                 <tr>
                     <th>Report</th>
+                    <th>Readiness</th>
                     <th>Path</th>
-                    <th>Present</th>
                     <th>Status</th>
                     <th>Timestamp</th>
                     <th>Modified</th>
-                    <th>Success</th>
                 </tr>
             </thead>
             <tbody>
-                {% for row in wb.report_history %}
+                {% for row in wb.report_readiness %}
                     <tr>
                         <td>{{ row.label }}</td>
+                        <td><span class="rrw-badge {{ row.badge_class }}">{{ row.readiness_label }}</span></td>
                         <td><code>{{ row.relative_path }}</code></td>
-                        <td>{{ row.present|yesno:"true,false" }}</td>
-                        <td><code>{{ row.status }}</code>{% if row.error %}<br><span class="rrw-bad">{{ row.error }}</span>{% endif %}</td>
+                        <td><code>{{ row.status }}</code></td>
                         <td>{{ row.timestamp|default:"-" }}</td>
                         <td>{{ row.modified_at|default:"-" }}</td>
-                        <td>{{ row.success|default:"-" }}</td>
                     </tr>
+                {% empty %}
+                    <tr><td colspan="6" class="rrw-muted">No local report readiness rows match the current filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -346,12 +548,14 @@
     </div>
 
     <div class="rrw-section">
-        <h2>Tracking And Review Detection Readiness</h2>
+        <h2>Click/Review Tracking Readiness</h2>
         <div class="rrw-warning">{{ wb.tracking_design.limitations }}</div>
         <p>{{ wb.tracking_design.future_click_tracking }}</p>
         <p>{{ wb.tracking_design.future_review_detection }}</p>
+        <p><span class="rrw-badge rrw-badge-warn">Tracking not enabled</span></p>
         <p><strong>Tracking redirect enabled:</strong> {{ wb.tracking_design.tracking_redirect_enabled|yesno:"true,false" }}</p>
-        <h3>Future statuses</h3>
+        <p><strong>Tracking token generated:</strong> {{ wb.tracking_design.tracking_token_generated|yesno:"true,false" }}</p>
+        <h3>Proposed future statuses</h3>
         <p>
             {% for status in wb.tracking_design.future_statuses %}
                 <span class="rrw-pill">{{ status }}</span>

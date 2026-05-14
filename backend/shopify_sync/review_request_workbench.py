@@ -3,11 +3,14 @@ import re
 from pathlib import Path
 
 from django.conf import settings
+from django.db.models import Q
+from django.urls import NoReverseMatch, reverse
 
 from .models import ShopifyOrder
 
 
-EXACT_REVIEW_REQUEST_TAG = "1: reveiw request"
+CANONICAL_REVIEW_REQUEST_TAG = "1: review request"
+TYPO_REVIEW_REQUEST_TAG = "1: reveiw request"
 DELIVERED_TAG = "Delivered"
 TRUSTPILOT_TAG_ALIASES = (
     "1: trustpilot",
@@ -27,6 +30,39 @@ FUTURE_TRACKING_STATUSES = (
     "blocked_returned_package",
     "blocked_first_order_customer",
     "blocked_risk_or_ticket",
+)
+STATUS_FILTER_OPTIONS = (
+    ("all", "All"),
+    ("queue", "Queue"),
+    ("trustpilot_sent", "Trustpilot sent"),
+    ("blocked", "Blocked"),
+    ("report_ready", "Report ready"),
+)
+TAG_FILTER_OPTIONS = (
+    ("all", "All tags"),
+    ("review_request", "Review request tag"),
+    ("trustpilot_alias", "Trustpilot alias"),
+    ("returned_package", "Returned package"),
+)
+LIMIT_OPTIONS = (25, 50, 100)
+DEFAULT_LIMIT = 25
+BLOCKED_REASON_DEFINITIONS = (
+    (
+        "returned_package",
+        "Returned package",
+        ("returned package", "returned_package", "return package", "returned"),
+    ),
+    (
+        "duplicate_trustpilot_invitation",
+        "Duplicate Trustpilot invitation",
+        ("duplicate trustpilot", "existing_trustpilot", "trustpilot invitation"),
+    ),
+    ("first_order", "First order", ("first order", "first_order")),
+    (
+        "risk_ticket_refund_cancel_dispute",
+        "Risk / ticket / refund / cancel / dispute",
+        ("risk", "ticket", "refund", "cancel", "cancelled", "dispute", "chargeback"),
+    ),
 )
 
 REPORT_DEFINITIONS = (
@@ -132,6 +168,7 @@ SAFETY_FLAGS = (
     "ali_reviews_api_call_performed",
     "trustpilot_api_call_performed",
     "tracking_redirect_enabled",
+    "tracking_token_generated",
 )
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
@@ -152,20 +189,60 @@ CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 MAX_REPORT_BYTES = 4_000_000
 MAX_SOURCE_ROWS = 500
-MAX_TABLE_ROWS = 25
+MAX_TABLE_ROWS = DEFAULT_LIMIT
 
 
-def build_review_request_workbench_context():
+def build_review_request_workbench_context(params=None):
+    filters = _normalize_filters(params)
     reports = _load_known_reports()
     all_rows = _dedupe_rows(_collect_report_rows(reports))
     latest_scan = _latest_scan_summary(reports.get("next_candidate_scan", {}))
     candidate_queue = _candidate_queue(reports)
     invitation_history = _rows_with_trustpilot_tags(all_rows)
-    review_request_queue = _rows_with_exact_review_request_tag(all_rows)
+    review_request_queue = _rows_with_canonical_review_request_tag(all_rows)
+    typo_review_request_rows = _rows_with_typo_review_request_tag(all_rows)
     blocked_orders = _blocked_rows(reports, all_rows)
+    local_order_links = _local_order_link_map(
+        _dedupe_rows(
+            all_rows
+            + candidate_queue
+            + invitation_history
+            + review_request_queue
+            + typo_review_request_rows
+            + blocked_orders
+        ),
+        latest_scan,
+    )
+    for rows in (
+        all_rows,
+        candidate_queue,
+        invitation_history,
+        review_request_queue,
+        typo_review_request_rows,
+        blocked_orders,
+    ):
+        _attach_local_order_links(rows, local_order_links)
+        _attach_status_badges(rows, latest_scan)
+    _attach_latest_scan_local_order_link(latest_scan, local_order_links)
+
+    visible_candidate_queue = _filter_rows(candidate_queue, filters, "queue")
+    visible_invitation_history = _filter_rows(
+        invitation_history,
+        filters,
+        "trustpilot_sent",
+    )
+    visible_review_request_queue = _filter_rows(review_request_queue, filters, "queue")
+    visible_typo_review_request_rows = _filter_rows(
+        typo_review_request_rows,
+        filters,
+        "queue",
+    )
+    visible_blocked_orders = _filter_rows(blocked_orders, filters, "blocked")
+    report_readiness = _filter_report_readiness(_report_readiness(reports), filters)
     report_history = _report_history(reports)
     safety_history = _safety_history(reports)
     local_stats = _local_order_stats()
+    blocked_reason_counts = _blocked_reason_counts(blocked_orders)
 
     return {
         "review_request_workbench": {
@@ -177,19 +254,40 @@ def build_review_request_workbench_context():
                 blocked_orders=blocked_orders,
                 reports=reports,
                 local_stats=local_stats,
+                blocked_reason_counts=blocked_reason_counts,
+            ),
+            "filters": filters,
+            "filter_summary": _filter_summary(
+                filters,
+                visible_candidate_queue,
+                visible_invitation_history,
+                visible_review_request_queue,
+                visible_typo_review_request_rows,
+                visible_blocked_orders,
+                report_readiness,
             ),
             "latest_scan": latest_scan,
-            "candidate_queue": candidate_queue[:MAX_TABLE_ROWS],
-            "invitation_history": invitation_history[:MAX_TABLE_ROWS],
-            "review_request_queue": review_request_queue[:MAX_TABLE_ROWS],
-            "blocked_orders": blocked_orders[:MAX_TABLE_ROWS],
+            "candidate_queue": visible_candidate_queue,
+            "invitation_history": visible_invitation_history,
+            "review_request_queue": visible_review_request_queue,
+            "typo_review_request_rows": visible_typo_review_request_rows,
+            "blocked_orders": visible_blocked_orders,
+            "blocked_reason_counts": blocked_reason_counts,
+            "report_readiness": report_readiness,
             "report_history": report_history,
             "safety_history": safety_history,
             "local_stats": local_stats,
             "tracking_design": _tracking_design(),
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
-            "exact_review_request_tag": EXACT_REVIEW_REQUEST_TAG,
+            "canonical_review_request_tag": CANONICAL_REVIEW_REQUEST_TAG,
+            "typo_review_request_tag": TYPO_REVIEW_REQUEST_TAG,
             "delivered_tag": DELIVERED_TAG,
+            "status_filter_options": _selected_options(
+                STATUS_FILTER_OPTIONS,
+                filters["status"],
+            ),
+            "tag_filter_options": _selected_options(TAG_FILTER_OPTIONS, filters["tag"]),
+            "limit_filter_options": _selected_limit_options(filters["limit"]),
             "safety_confirmations": _current_page_safety_confirmations(),
         }
     }
@@ -421,6 +519,8 @@ def _row_from_top_level_report(data, source_label, source_path):
         "tags_summary": "No tag data in this summary row",
         "trustpilot_tags": [],
         "trustpilot_invitation_present": False,
+        "canonical_review_request_tag_present": False,
+        "typo_review_request_tag_present": False,
         "review_request_tag_present": False,
         "blocking_reasons": [],
         "blocking_summary": "",
@@ -478,7 +578,9 @@ def _row_from_mapping(item, source_label, source_path, source_section):
         "tags_summary": ", ".join(tags) if tags else "No tag data in row",
         "trustpilot_tags": trustpilot_tags,
         "trustpilot_invitation_present": bool(trustpilot_tags),
-        "review_request_tag_present": EXACT_REVIEW_REQUEST_TAG in tags,
+        "canonical_review_request_tag_present": CANONICAL_REVIEW_REQUEST_TAG in tags,
+        "typo_review_request_tag_present": TYPO_REVIEW_REQUEST_TAG in tags,
+        "review_request_tag_present": CANONICAL_REVIEW_REQUEST_TAG in tags,
         "blocking_reasons": blocking_reasons,
         "blocking_summary": ", ".join(blocking_reasons),
         "repeat_customer_detected": _safe_text(item.get("repeat_customer_detected")),
@@ -563,8 +665,12 @@ def _rows_with_trustpilot_tags(rows):
     return [row for row in rows if row.get("trustpilot_invitation_present")]
 
 
-def _rows_with_exact_review_request_tag(rows):
-    return [row for row in rows if row.get("review_request_tag_present")]
+def _rows_with_canonical_review_request_tag(rows):
+    return [row for row in rows if row.get("canonical_review_request_tag_present")]
+
+
+def _rows_with_typo_review_request_tag(rows):
+    return [row for row in rows if row.get("typo_review_request_tag_present")]
 
 
 def _latest_scan_summary(report):
@@ -595,6 +701,410 @@ def _latest_scan_summary(report):
         )
         or report.get("status", "missing"),
     }
+
+
+def _normalize_filters(params):
+    params = params or {}
+    q = _safe_text(_param_get(params, "q"), max_length=80)
+    status = _param_get(params, "status") or "all"
+    tag = _param_get(params, "tag") or "all"
+    if status not in {value for value, _label in STATUS_FILTER_OPTIONS}:
+        status = "all"
+    if tag not in {value for value, _label in TAG_FILTER_OPTIONS}:
+        tag = "all"
+    try:
+        limit = int(_param_get(params, "limit") or DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        limit = DEFAULT_LIMIT
+    if limit not in LIMIT_OPTIONS:
+        limit = DEFAULT_LIMIT
+    return {
+        "q": q,
+        "status": status,
+        "tag": tag,
+        "limit": limit,
+        "has_active_filters": bool(q or status != "all" or tag != "all" or limit != DEFAULT_LIMIT),
+    }
+
+
+def _param_get(params, key):
+    getter = getattr(params, "get", None)
+    if getter:
+        return getter(key, "")
+    return ""
+
+
+def _selected_options(options, selected_value):
+    return [
+        {"value": value, "label": label, "selected": value == selected_value}
+        for value, label in options
+    ]
+
+
+def _selected_limit_options(selected_limit):
+    return [
+        {"value": value, "label": str(value), "selected": value == selected_limit}
+        for value in LIMIT_OPTIONS
+    ]
+
+
+def _filter_rows(rows, filters, section_status):
+    matched = [
+        row
+        for row in rows
+        if _row_matches_query(row, filters["q"])
+        and _row_matches_status(row, filters["status"], section_status)
+        and _row_matches_tag(row, filters["tag"])
+    ]
+    return matched[: filters["limit"]]
+
+
+def _row_matches_query(row, query):
+    if not query:
+        return True
+    query = query.lower()
+    return query in " ".join(
+        (
+            _safe_text(row.get("order_name")).lower(),
+            _safe_text(row.get("masked_email")).lower(),
+        )
+    )
+
+
+def _row_matches_status(row, status, section_status):
+    if status == "all":
+        return True
+    if status == "queue":
+        return section_status == "queue" or row.get("canonical_review_request_tag_present")
+    if status == "trustpilot_sent":
+        return row.get("trustpilot_invitation_present")
+    if status == "blocked":
+        return section_status == "blocked" or _row_has_blocker(row)
+    if status == "report_ready":
+        return False
+    return True
+
+
+def _row_matches_tag(row, tag):
+    if tag == "all":
+        return True
+    if tag == "review_request":
+        return row.get("canonical_review_request_tag_present") or row.get(
+            "typo_review_request_tag_present"
+        )
+    if tag == "trustpilot_alias":
+        return row.get("trustpilot_invitation_present")
+    if tag == "returned_package":
+        return _row_has_returned_package(row)
+    return True
+
+
+def _filter_report_readiness(rows, filters):
+    if filters["status"] not in {"all", "report_ready"}:
+        return []
+    if filters["tag"] != "all":
+        return []
+    query = filters["q"].lower()
+    filtered = []
+    for row in rows:
+        haystack = " ".join(
+            (
+                row.get("label", ""),
+                row.get("relative_path", ""),
+                row.get("status", ""),
+            )
+        ).lower()
+        if query and query not in haystack:
+            continue
+        if filters["status"] == "report_ready" and not row.get("present"):
+            continue
+        filtered.append(row)
+    return filtered[: filters["limit"]]
+
+
+def _filter_summary(
+    filters,
+    candidate_queue,
+    invitation_history,
+    review_request_queue,
+    typo_review_request_rows,
+    blocked_orders,
+    report_readiness,
+):
+    return {
+        "active": filters["has_active_filters"],
+        "visible_queue_rows": len(candidate_queue)
+        + len(review_request_queue)
+        + len(typo_review_request_rows),
+        "visible_trustpilot_history_rows": len(invitation_history),
+        "visible_blocked_rows": len(blocked_orders),
+        "visible_report_rows": len(report_readiness),
+        "limit": filters["limit"],
+    }
+
+
+def _report_readiness(reports):
+    focus = (
+        ("next_candidate_scan", "Latest candidate scan"),
+        ("candidate_scan", "Candidate scan"),
+        ("trustpilot_one_candidate_draft_package", "One-candidate Gmail draft package"),
+        ("trustpilot_send_audit", "Future send audit"),
+        ("trustpilot_tag_write_audit", "Future tag audit"),
+    )
+    rows = []
+    for key, display_label in focus:
+        report = reports.get(key) or {}
+        present = bool(report.get("present"))
+        loaded = bool(report.get("loaded"))
+        rows.append(
+            {
+                "key": key,
+                "label": display_label,
+                "relative_path": report.get("relative_path", ""),
+                "present": present,
+                "loaded": loaded,
+                "status": _safe_text(report.get("status") or "missing"),
+                "timestamp": _safe_text(report.get("timestamp")),
+                "modified_at": _safe_text(report.get("modified_at")),
+                "readiness_label": (
+                    "Local report ready"
+                    if present and loaded
+                    else "Present but not loaded"
+                    if present
+                    else "Missing"
+                ),
+                "badge_class": (
+                    "rrw-badge-ok"
+                    if present and loaded
+                    else "rrw-badge-warn"
+                    if present
+                    else "rrw-badge-muted"
+                ),
+            }
+        )
+    return rows
+
+
+def _local_order_link_map(rows, latest_scan):
+    order_names = set()
+    order_numbers = set()
+    shopify_order_ids = set()
+    for row in rows:
+        _collect_order_lookup_values(
+            row.get("order_name"),
+            row.get("order_id"),
+            order_names,
+            order_numbers,
+            shopify_order_ids,
+        )
+    _collect_order_lookup_values(
+        latest_scan.get("selected_order_name"),
+        "",
+        order_names,
+        order_numbers,
+        shopify_order_ids,
+    )
+    if not (order_names or order_numbers or shopify_order_ids):
+        return {}
+
+    query = Q()
+    if order_names:
+        query |= Q(order_name__in=order_names)
+    if order_numbers:
+        query |= Q(order_number__in=order_numbers)
+    if shopify_order_ids:
+        query |= Q(shopify_order_id__in=shopify_order_ids)
+    if not query:
+        return {}
+
+    links = {}
+    try:
+        for order in ShopifyOrder.objects.filter(query).values(
+            "id",
+            "order_name",
+            "order_number",
+            "shopify_order_id",
+        )[: MAX_SOURCE_ROWS]:
+            try:
+                url = reverse("admin:shopify_sync_shopifyorder_change", args=[order["id"]])
+            except NoReverseMatch:
+                continue
+            link = {
+                "id": order["id"],
+                "url": url,
+                "label": "Open local order",
+            }
+            for key in _order_lookup_keys(
+                order.get("order_name"),
+                order.get("order_number"),
+                order.get("shopify_order_id"),
+            ):
+                links[key] = link
+    except Exception:
+        return {}
+    return links
+
+
+def _collect_order_lookup_values(order_name, order_id, order_names, order_numbers, shopify_order_ids):
+    name = _safe_text(order_name, max_length=120)
+    if name:
+        order_names.add(name)
+        stripped = name.lstrip("#")
+        if stripped and stripped != name:
+            order_numbers.add(stripped)
+    shopify_order_id = _extract_shopify_order_id(order_id)
+    if shopify_order_id:
+        shopify_order_ids.add(shopify_order_id)
+
+
+def _order_lookup_keys(order_name, order_number="", shopify_order_id=""):
+    keys = []
+    name = _safe_text(order_name, max_length=120)
+    number = _safe_text(order_number, max_length=120)
+    if name:
+        keys.append(f"name:{name}")
+        stripped = name.lstrip("#")
+        if stripped and stripped != name:
+            keys.append(f"number:{stripped}")
+    if number:
+        keys.append(f"number:{number}")
+        if not number.startswith("#"):
+            keys.append(f"name:#{number}")
+    if shopify_order_id:
+        keys.append(f"shopify_id:{shopify_order_id}")
+    return keys
+
+
+def _extract_shopify_order_id(value):
+    text = _safe_text(value, max_length=120)
+    if not text:
+        return ""
+    match = re.search(r"Order/(\d+)$", text)
+    if match:
+        return match.group(1)
+    if text.isdigit():
+        return text
+    return ""
+
+
+def _attach_local_order_links(rows, local_order_links):
+    for row in rows:
+        link = _find_local_order_link(row, local_order_links)
+        row["local_order_url"] = link.get("url", "") if link else ""
+        row["local_order_id"] = link.get("id", "") if link else ""
+        row["local_order_link_label"] = link.get("label", "") if link else ""
+
+
+def _attach_latest_scan_local_order_link(latest_scan, local_order_links):
+    link = _find_local_order_link(
+        {
+            "order_name": latest_scan.get("selected_order_name"),
+            "order_id": "",
+        },
+        local_order_links,
+    )
+    latest_scan["local_order_url"] = link.get("url", "") if link else ""
+    latest_scan["local_order_id"] = link.get("id", "") if link else ""
+    latest_scan["local_order_link_label"] = link.get("label", "") if link else ""
+
+
+def _find_local_order_link(row, local_order_links):
+    for key in _row_order_lookup_keys(row):
+        link = local_order_links.get(key)
+        if link:
+            return link
+    return None
+
+
+def _row_order_lookup_keys(row):
+    keys = _order_lookup_keys(row.get("order_name"))
+    shopify_order_id = _extract_shopify_order_id(row.get("order_id"))
+    if shopify_order_id:
+        keys.append(f"shopify_id:{shopify_order_id}")
+    return keys
+
+
+def _attach_status_badges(rows, latest_scan):
+    selected_order = latest_scan.get("selected_order_name")
+    for row in rows:
+        badges = []
+        if selected_order and row.get("order_name") == selected_order:
+            badges.append(_badge("Next candidate", "rrw-badge-ok"))
+        if row.get("canonical_review_request_tag_present"):
+            badges.append(_badge("In review request queue", "rrw-badge-ok"))
+        if row.get("typo_review_request_tag_present"):
+            badges.append(_badge("Typo tag: not canonical", "rrw-badge-warn"))
+        if row.get("trustpilot_invitation_present"):
+            badges.append(_badge("Trustpilot already sent", "rrw-badge-info"))
+        if _row_has_returned_package(row):
+            badges.append(_badge("Blocked: returned package", "rrw-badge-bad"))
+        if _row_has_duplicate_trustpilot(row):
+            badges.append(_badge("Blocked: duplicate Trustpilot invitation", "rrw-badge-bad"))
+        if _row_has_first_order(row):
+            badges.append(_badge("Blocked: first order", "rrw-badge-warn"))
+        if _row_has_risk_or_ticket(row):
+            badges.append(_badge("Blocked: risk/ticket/refund/cancel/dispute", "rrw-badge-bad"))
+        if not badges and row.get("source_section") in {
+            "ready_candidate_queue",
+            "repeat_customer_candidates",
+        }:
+            badges.append(_badge("In candidate scan queue", "rrw-badge-info"))
+        row["status_badges"] = badges
+
+
+def _badge(label, css_class):
+    return {"label": label, "css_class": css_class}
+
+
+def _blocked_reason_counts(blocked_orders):
+    counts = []
+    for key, label, needles in BLOCKED_REASON_DEFINITIONS:
+        count = sum(
+            1
+            for row in blocked_orders
+            if _row_text_contains(row, needles)
+            or (key == "duplicate_trustpilot_invitation" and row.get("trustpilot_invitation_present"))
+        )
+        counts.append({"key": key, "label": label, "count": count})
+    return counts
+
+
+def _row_has_blocker(row):
+    return bool(row.get("blocking_reasons")) or str(row.get("status", "")).startswith("blocked")
+
+
+def _row_has_returned_package(row):
+    return _row_text_contains(row, ("returned package", "returned_package", "return package", "returned"))
+
+
+def _row_has_duplicate_trustpilot(row):
+    return row.get("trustpilot_invitation_present") and (
+        _row_has_blocker(row)
+        or _row_text_contains(row, ("duplicate", "existing_trustpilot", "trustpilot invitation"))
+    )
+
+
+def _row_has_first_order(row):
+    return _row_text_contains(row, ("first order", "first_order"))
+
+
+def _row_has_risk_or_ticket(row):
+    return _row_text_contains(
+        row,
+        ("risk", "ticket", "refund", "cancel", "cancelled", "dispute", "chargeback"),
+    )
+
+
+def _row_text_contains(row, needles):
+    haystack = " ".join(
+        (
+            row.get("status", ""),
+            row.get("blocking_summary", ""),
+            row.get("tags_summary", ""),
+            row.get("source_section", ""),
+        )
+    ).lower()
+    return any(needle in haystack for needle in needles)
 
 
 def _report_history(reports):
@@ -660,6 +1170,7 @@ def _summary(
     blocked_orders,
     reports,
     local_stats,
+    blocked_reason_counts,
 ):
     candidate_data = (reports.get("candidate_scan") or {}).get("data") or {}
     next_data = (reports.get("next_candidate_scan") or {}).get("data") or {}
@@ -681,16 +1192,11 @@ def _summary(
     blocked_returned = (
         _int_or_zero(classification_counts.get("blocked_returned_package"))
         or _int_or_zero(blocked_counts.get("returned_package_tag_detected"))
-        or sum(
-            1
-            for row in blocked_orders
-            if "returned" in row.get("blocking_summary", "").lower()
-            or "return" in row.get("blocking_summary", "").lower()
-        )
+        or _count_for_blocker(blocked_reason_counts, "returned_package")
     )
     blocked_duplicate = (
         _int_or_zero(blocked_counts.get("existing_trustpilot_invitation_tag_or_alias_detected"))
-        or sum(1 for row in blocked_orders if row.get("trustpilot_invitation_present"))
+        or _count_for_blocker(blocked_reason_counts, "duplicate_trustpilot_invitation")
     )
     next_candidate = latest_scan.get("selected_order_name") or (
         candidate_queue[0]["order_name"] if candidate_queue else ""
@@ -710,9 +1216,9 @@ def _summary(
             "note": "Detected from Trustpilot alias tags in local reports.",
         },
         {
-            "label": f"Exact {EXACT_REVIEW_REQUEST_TAG}",
+            "label": f"Canonical {CANONICAL_REVIEW_REQUEST_TAG}",
             "value": len(review_request_queue),
-            "note": "Exact tag only; corrected spelling is not treated as equivalent.",
+            "note": f"Exact canonical tag only; {TYPO_REVIEW_REQUEST_TAG} is listed separately as typo/not canonical.",
         },
         {
             "label": "Blocked returned package",
@@ -732,9 +1238,17 @@ def _summary(
     ]
 
 
+def _count_for_blocker(blocked_reason_counts, key):
+    for item in blocked_reason_counts:
+        if item.get("key") == key:
+            return item.get("count", 0)
+    return 0
+
+
 def _tracking_design():
     return {
         "tracking_redirect_enabled": False,
+        "tracking_token_generated": False,
         "limitations": (
             "Gmail alone cannot reliably confirm whether a customer clicked a "
             "Trustpilot link or left a review.",
@@ -742,7 +1256,7 @@ def _tracking_design():
         "future_click_tracking": (
             "A future write phase could create a local invitation record and a "
             "unique redirect token per invitation. That redirect route is not "
-            "enabled in Phase 4.2."
+            "enabled in Phase 4.3."
         ),
         "future_review_detection": (
             "A future phase would need Trustpilot Business/API/export support "
@@ -766,6 +1280,7 @@ def _current_page_safety_confirmations():
         {"name": "ali_reviews_api_call_performed", "value": False},
         {"name": "trustpilot_api_call_performed", "value": False},
         {"name": "tracking_redirect_enabled", "value": False},
+        {"name": "tracking_token_generated", "value": False},
     ]
 
 

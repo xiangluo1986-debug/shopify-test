@@ -738,7 +738,7 @@ def review_request_workbench(request):
         return HttpResponseNotAllowed(["GET", "HEAD"])
 
     context = admin.site.each_context(request)
-    context.update(build_review_request_workbench_context())
+    context.update(build_review_request_workbench_context(request.GET))
     context["title"] = "Review Request Workbench"
     return render(request, "admin/shopify_sync/review_request_workbench.html", context)
 
@@ -1342,6 +1342,15 @@ def translation_console(request):
         editor_filter=editor_filter,
         editor_search_query=editor_search_query,
     )
+    single_product_mvp = build_translation_workspace_single_product_mvp(
+        product_selector=product_selector,
+        result=result,
+        editor_view=editor_view,
+        draft_result=draft_result,
+        apply_plan_preview_result=apply_plan_preview_result,
+        locale=locale,
+        supported_locales=SUPPORTED_TRANSLATION_LOCALES,
+    )
 
     return render(
         request,
@@ -1360,6 +1369,7 @@ def translation_console(request):
             "editor_search_query": editor_search_query,
             "translation_console_warnings": translation_console_warnings,
             "editor_view": editor_view,
+            "single_product_mvp": single_product_mvp,
             "shop_domain": shop_domain,
             "result": result,
             "workflow_status": workflow_status,
@@ -1602,6 +1612,7 @@ def build_apply_plan_preview_from_draft_result(draft_result: dict | None):
         "product_title": draft_result.get("product_title", ""),
         "configured_locale_scope": draft_result.get("target_locales") or [],
         "configured_fields": draft_result.get("requested_fields") or [],
+        "draft_coverage_summary": draft_result.get("draft_coverage_summary") or {},
         "apply_plan_candidate_count": len(candidate_entries),
         "blocked_or_needs_review_count": len(blocked_entries),
         "seo_warning_count": int(draft_result.get("seo_needs_manual_review_count") or 0),
@@ -1733,12 +1744,340 @@ def build_translation_console_workbench_summary(
         "manual_command_blocking_conditions": manual_command_package.get(
             "blocking_conditions", []
         ),
+        "draft_coverage_summary": draft_result.get("draft_coverage_summary") or {},
         "read_only": True,
         "shopify_write_performed": False,
         "mutation_performed": False,
         "translations_register_called": False,
         "rollback_performed": False,
     }
+
+
+def build_translation_workspace_single_product_mvp(
+    product_selector: dict | None,
+    result: dict | None,
+    editor_view: dict | None,
+    draft_result: dict | None,
+    apply_plan_preview_result: dict | None,
+    locale: str,
+    supported_locales,
+):
+    product_selector = product_selector or {}
+    result = result or {}
+    editor_view = editor_view or {}
+    draft_result = draft_result or {}
+    apply_plan_preview_result = apply_plan_preview_result or {}
+    selected_product = product_selector.get("selected_product") or {}
+    product = result.get("product") or {}
+    product_gid = (
+        editor_view.get("product_gid")
+        or product.get("id")
+        or product_selector.get("selected_product_gid", "")
+    )
+    product_title = (
+        editor_view.get("product_title")
+        or product.get("title")
+        or selected_product.get("title", "")
+    )
+    translatable_resource = result.get("translatable_resource") or {}
+    source_data_loaded = bool(
+        product.get("id")
+        or translatable_resource.get("translatable_content_count")
+        or draft_result.get("source_read_summary")
+    )
+    field_coverage = editor_view.get("field_coverage") or {}
+    coverage_by_area = {
+        entry.get("area_key"): entry
+        for entry in field_coverage.get("entries") or []
+        if isinstance(entry, dict)
+    }
+    draft_coverage_summary = draft_result.get("draft_coverage_summary") or {}
+    draft_coverage_by_group = {
+        group.get("group_key"): group
+        for group in draft_coverage_summary.get("groups") or []
+        if isinstance(group, dict)
+    }
+    groups = [
+        _translation_workspace_mvp_group(
+            "product_basics",
+            "Product basics",
+            ("title", "body_html"),
+            coverage_by_area,
+            draft_coverage_by_group,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        ),
+        _translation_workspace_mvp_group(
+            "seo",
+            "SEO",
+            ("meta_title", "meta_description"),
+            coverage_by_area,
+            draft_coverage_by_group,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        ),
+        _translation_workspace_mvp_group(
+            "options",
+            "Product options",
+            ("options",),
+            coverage_by_area,
+            draft_coverage_by_group,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        ),
+        _translation_workspace_mvp_group(
+            "variants",
+            "Variants",
+            ("variants",),
+            coverage_by_area,
+            draft_coverage_by_group,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        ),
+        _translation_workspace_mvp_group(
+            "important_metafields",
+            "Important metafields",
+            ("important_metafields",),
+            coverage_by_area,
+            draft_coverage_by_group,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        ),
+        _translation_workspace_mvp_group(
+            "technical_fields",
+            "Other technical fields",
+            ("technical_metafields",),
+            coverage_by_area,
+            draft_coverage_by_group,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        ),
+    ]
+    next_actions = _translation_workspace_mvp_next_actions(
+        product_gid=product_gid,
+        source_data_loaded=source_data_loaded,
+        draft_result=draft_result,
+        apply_plan_preview_result=apply_plan_preview_result,
+    )
+    return {
+        "summary_status": (
+            "ready_for_single_product_review"
+            if product_gid and source_data_loaded
+            else ("select_product_first" if not product_gid else "load_read_only_rows")
+        ),
+        "selected_product_title": product_title,
+        "selected_product_gid": product_gid,
+        "selected_locale": locale,
+        "selected_locale_label": _translation_editor_locale_label(locale),
+        "supported_target_locales": list(supported_locales or []),
+        "draft_fields": list(TRANSLATION_DRAFT_FIELDS),
+        "source_data_loaded": source_data_loaded,
+        "translatable_content_count": int(
+            translatable_resource.get("translatable_content_count") or 0
+        ),
+        "editor_row_count": int(editor_view.get("editor_row_count") or 0),
+        "groups": groups,
+        "next_actions": next_actions,
+        "has_draft_result": bool(draft_result),
+        "draft_status": draft_result.get("draft_status", ""),
+        "draft_coverage_summary_status": draft_coverage_summary.get(
+            "summary_status", "not_loaded"
+        ),
+        "read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "rollback_performed": False,
+    }
+
+
+def _translation_workspace_mvp_group(
+    group_key: str,
+    label: str,
+    area_keys: tuple[str, ...],
+    coverage_by_area: dict,
+    draft_coverage_by_group: dict,
+    product_gid: str,
+    source_data_loaded: bool,
+):
+    items = [
+        _translation_workspace_mvp_item(
+            coverage_by_area.get(area_key) or {},
+            fallback_area_key=area_key,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        )
+        for area_key in area_keys
+    ]
+    included_labels = [
+        item["label"] for item in items if item["mvp_status"] == "included"
+    ]
+    editor_only_labels = [
+        item["label"] for item in items if item["mvp_status"] == "editor_only"
+    ]
+    needs_mapping_labels = [
+        item["label"] for item in items if item["mvp_status"] == "needs_mapping"
+    ]
+    missing_labels = [
+        item["label"] for item in items if item["mvp_status"] == "missing"
+    ]
+    not_loaded_labels = [
+        item["label"] for item in items if item["mvp_status"] == "not_loaded"
+    ]
+    if not product_gid:
+        status_label = "Select product"
+        status_key = "select_product"
+    elif not source_data_loaded:
+        status_label = "Load read-only rows"
+        status_key = "not_loaded"
+    elif included_labels and not (editor_only_labels or needs_mapping_labels or missing_labels):
+        status_label = "Included in draft"
+        status_key = "included"
+    elif included_labels:
+        status_label = "Partially included"
+        status_key = "partially_included"
+    elif needs_mapping_labels:
+        status_label = "Needs mapping"
+        status_key = "needs_mapping"
+    elif editor_only_labels:
+        status_label = "Editor-only"
+        status_key = "editor_only"
+    else:
+        status_label = "Missing"
+        status_key = "missing"
+
+    draft_group = draft_coverage_by_group.get(group_key) or {}
+    return {
+        "group_key": group_key,
+        "label": label,
+        "status_key": status_key,
+        "status_label": status_label,
+        "items": items,
+        "included_labels": included_labels,
+        "editor_only_labels": editor_only_labels,
+        "needs_mapping_labels": needs_mapping_labels,
+        "missing_labels": missing_labels,
+        "not_loaded_labels": not_loaded_labels,
+        "source_row_count": sum(int(item.get("row_count") or 0) for item in items),
+        "visible_row_count": sum(
+            int(item.get("visible_row_count") or 0) for item in items
+        ),
+        "draft_source_row_count": int(draft_group.get("source_row_count") or 0),
+        "missing_translation_count": int(
+            draft_group.get("missing_translation_count") or 0
+        ),
+        "existing_translation_count": int(
+            draft_group.get("existing_translation_count") or 0
+        ),
+        "outdated_translation_count": int(
+            draft_group.get("outdated_translation_count") or 0
+        ),
+        "notes": draft_group.get("notes") or _translation_workspace_mvp_group_note(
+            group_key
+        ),
+    }
+
+
+def _translation_workspace_mvp_item(
+    entry: dict,
+    fallback_area_key: str,
+    product_gid: str,
+    source_data_loaded: bool,
+):
+    area_key = entry.get("area_key") or fallback_area_key
+    label = entry.get("area_label") or _translation_workspace_mvp_area_label(area_key)
+    coverage_status = entry.get("coverage_status", "")
+    support_status = entry.get("support_status", "")
+    row_count = int(entry.get("row_count") or 0)
+    visible_statuses = {"visible", "available_hidden_by_filter", "nested_only"}
+    if not product_gid:
+        mvp_status = "select_product"
+        status_label = "Select product"
+    elif not source_data_loaded:
+        mvp_status = "not_loaded"
+        status_label = "Not loaded"
+    elif coverage_status not in visible_statuses:
+        mvp_status = "missing"
+        status_label = "Missing"
+    elif support_status == "draft_supported":
+        mvp_status = "included"
+        status_label = "Included"
+    elif area_key in {"options", "variants"} and row_count:
+        mvp_status = "needs_mapping"
+        status_label = "Visible, needs mapping"
+    else:
+        mvp_status = "editor_only"
+        status_label = "Editor-only"
+    return {
+        "area_key": area_key,
+        "label": label,
+        "mvp_status": mvp_status,
+        "status_label": status_label,
+        "coverage_label": entry.get("coverage_label", ""),
+        "support_label": entry.get("support_label", ""),
+        "row_count": row_count,
+        "visible_row_count": int(entry.get("visible_row_count") or 0),
+        "field_keys": entry.get("field_keys") or [],
+        "notes": entry.get("notes", ""),
+    }
+
+
+def _translation_workspace_mvp_area_label(area_key: str) -> str:
+    labels = {
+        "title": "Product title",
+        "body_html": "Description / body HTML",
+        "meta_title": "SEO meta title",
+        "meta_description": "SEO meta description",
+        "options": "Product options",
+        "variants": "Variants",
+        "important_metafields": "Important metafields",
+        "technical_metafields": "Other technical fields",
+    }
+    return labels.get(area_key, _translation_editor_humanize_key(area_key))
+
+
+def _translation_workspace_mvp_group_note(group_key: str) -> str:
+    notes = {
+        "product_basics": "Title is draft-supported. Body HTML is kept visible for review unless a future safe mapping adds it.",
+        "seo": "Meta title and meta description are draft-supported.",
+        "options": "Option names or values are not drafted until Shopify row keys are mapped safely.",
+        "variants": "Variant titles or labels are not drafted until Shopify row keys are mapped safely. SKU remains context only.",
+        "important_metafields": "Important metafields are editor-only in this phase.",
+        "technical_fields": "Other technical fields stay collapsed and out of the MVP draft package.",
+    }
+    return notes.get(group_key, "")
+
+
+def _translation_workspace_mvp_next_actions(
+    product_gid: str,
+    source_data_loaded: bool,
+    draft_result: dict,
+    apply_plan_preview_result: dict,
+):
+    draft_ready = bool(draft_result)
+    candidate_count = int(apply_plan_preview_result.get("apply_plan_candidate_count") or 0)
+    return [
+        {
+            "label": "Generate draft package in Workbench",
+            "status": "ready" if product_gid else "select_product_first",
+        },
+        {
+            "label": "Review editor preview",
+            "status": "ready" if source_data_loaded else "open_or_refresh_editor",
+        },
+        {
+            "label": "Generate locked dry-run report",
+            "status": (
+                "ready_after_review"
+                if candidate_count
+                else ("draft_has_no_ready_candidates" if draft_ready else "generate_draft_first")
+            ),
+        },
+        {
+            "label": "Manual PowerShell write later",
+            "status": "outside_web_page_locked_step",
+        },
+    ]
 
 
 def build_translation_console_editor_view(
@@ -2785,6 +3124,7 @@ def _translation_console_draft_summary(draft_result: dict):
         "existing_translation_count": draft_result.get(
             "skipped_existing_translation_count", 0
         ),
+        "draft_coverage_summary": draft_result.get("draft_coverage_summary") or {},
         "blocking_conditions": draft_result.get("blocking_conditions") or [],
         "shopify_write_performed": draft_result.get("shopify_write_performed", False),
         "mutation_performed": draft_result.get("mutation_performed", False),
