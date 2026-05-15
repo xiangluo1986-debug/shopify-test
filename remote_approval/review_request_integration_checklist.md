@@ -804,3 +804,27 @@ Future tracking design note:
 - [x] The next phase can add a one-draft create locked runner only if scope and
   candidate preflight are ready, and that future phase still needs separate
   human approval.
+
+## Phase 5.19B Trustpilot Gmail One-Draft Create Locked Runner
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner`.
+- [x] Generate local JSON/HTML locked-runner reports only:
+  `logs/shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.json`
+  and
+  `logs/shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.html`.
+- [x] Explain missing requirements clearly before draft creation: Gmail
+  permission, exactly one safe eligible order, duplicate/risk checks, and final
+  local approval.
+- [x] Do not call Gmail network/API in this phase.
+- [x] Do not create, update, delete, or send a Gmail draft in this phase.
+- [x] Do not send email.
+- [x] Do not call Shopify APIs, write Shopify tags, or mutate Shopify data.
+- [x] Do not call Trustpilot, Kudosi, or Ali Reviews APIs.
+- [x] Future draft creation requires compose or send scope, exactly one
+  eligible candidate, duplicate/risk checks, and the explicit draft-create
+  approval flag
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_DRAFT_CREATE=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_DRAFT_CREATE`.
+- [x] Update the Review Requests dashboard with "Draft creation readiness" and
+  plain-language missing requirements while keeping technical fields in
+  Advanced details.

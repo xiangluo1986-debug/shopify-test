@@ -358,6 +358,36 @@ could create exactly one Gmail draft. This phase must not call Gmail, create or
 update a draft, send email, call Shopify, write tags, call Trustpilot/Kudosi/Ali
 Reviews, or call `translationsRegister`.
 
+## Review Request Trustpilot Gmail One-Draft Create Locked Runner
+
+`shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner` is a
+Phase 5.19B locked shell for the first future Trustpilot Gmail draft creation
+flow.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.json
+logs/shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.html
+```
+
+The task reads only local safe reports from the draft-only preflight, Gmail
+scope resolver, auto queue refresh, locked send readiness package, locked Gmail
+send gate, and real-send final preflight. It explains the missing requirements
+before a later phase can create exactly one Gmail draft: Gmail permission,
+exactly one safe eligible order, duplicate/risk checks, and explicit local
+draft-create approval. This phase must not call Gmail, create/update/delete a
+draft, send email, call Shopify, write tags, call Trustpilot/Kudosi/Ali Reviews,
+or call `translationsRegister`.
+
+Future draft creation requires the exact env flag:
+
+```text
+SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_DRAFT_CREATE=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_DRAFT_CREATE
+```
+
+Even if that flag is present, Phase 5.19B still creates no draft.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

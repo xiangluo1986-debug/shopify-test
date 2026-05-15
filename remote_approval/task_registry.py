@@ -147,6 +147,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_scope_compati
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_draft_only_preflight_task import (
     run_shopify_review_request_trustpilot_gmail_draft_only_preflight_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner_task import (
+    run_shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner_task,
+)
 from remote_approval.tasks.shopify_review_request_order_sync_auto_refresh_hook_audit_task import (
     run_shopify_review_request_order_sync_auto_refresh_hook_audit_task,
 )
@@ -463,6 +466,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_draft_only_preflight": (
         run_shopify_review_request_trustpilot_gmail_draft_only_preflight_task
+    ),
+    "shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner": (
+        run_shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner_task
     ),
     "shopify_review_request_order_sync_auto_refresh_hook_audit": (
         run_shopify_review_request_order_sync_auto_refresh_hook_audit_task
@@ -929,6 +935,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local draft-only preflight report only",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_draft_only_preflight.json",
+    },
+    "shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner": {
+        "description": "Explain missing requirements for one future Trustpilot Gmail draft creation without calling Gmail or creating a draft.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; locked shell report only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.json",
     },
     "shopify_review_request_order_sync_auto_refresh_hook_audit": {
         "description": "Audit the dry-run Trustpilot queue auto-refresh hook after Shopify order sync completion.",

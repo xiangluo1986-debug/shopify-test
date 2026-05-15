@@ -1202,6 +1202,82 @@
         </details>
     </div>
 
+    <div class="rrw-section">
+        <h2>Draft creation readiness</h2>
+        <p class="{% if dashboard.trustpilot_gmail_one_draft_create_locked_runner.draft_create_allowed_by_env %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.message }}
+        </p>
+        <p class="rrw-muted">
+            No Gmail network call was made, no draft was created, no email was sent, and no Shopify tag was written.
+        </p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Can create draft now</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.can_create_draft_now_label }}</div>
+                <div class="rrw-card-note">This phase is a locked shell only.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Missing</div>
+                <div class="rrw-card-value">
+                    {% if dashboard.trustpilot_gmail_one_draft_create_locked_runner.missing_requirement_labels %}
+                        {{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.missing_requirement_labels|join:", " }}
+                    {% else %}
+                        None
+                    {% endif %}
+                </div>
+                <div class="rrw-card-note">Draft creation stays disabled until every item is resolved.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected order:
+                    {{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.selected_candidate_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next action</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.locked_runner_status }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.next_admin_action }}</div>
+            </div>
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced technical details</summary>
+            {% if dashboard.trustpilot_gmail_one_draft_create_locked_runner.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.html_relative_path }}
+            </p>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>Locked runner status</th><td><code>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.locked_runner_status }}</code></td></tr>
+                    <tr><th>Draft preflight status</th><td><code>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.draft_preflight_status }}</code></td></tr>
+                    <tr><th>Scope status</th><td><code>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.scope_status }}</code></td></tr>
+                    <tr><th>Draft scope available</th><td>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.draft_scope_available_label }}</td></tr>
+                    <tr><th>Real-send scope available</th><td>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.real_send_scope_available_label }}</td></tr>
+                    <tr><th>Exactly one candidate</th><td>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.exactly_one_candidate|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Draft create requested</th><td>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.draft_create_requested|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Draft create allowed by preflight</th><td>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.draft_create_allowed_by_preflight|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Draft create allowed by env</th><td>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.draft_create_allowed_by_env|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Draft create performed</th><td>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.draft_create_performed|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Required future env flag</th><td><code>{{ dashboard.trustpilot_gmail_one_draft_create_locked_runner.required_future_env_flag_name }}</code></td></tr>
+                </tbody>
+            </table>
+            {% if dashboard.trustpilot_gmail_one_draft_create_locked_runner.missing_requirements_plain %}
+                <h3>Missing requirements plain</h3>
+                <ul>
+                    {% for requirement in dashboard.trustpilot_gmail_one_draft_create_locked_runner.missing_requirements_plain %}
+                        <li>{{ requirement }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </details>
+    </div>
+
     <details class="rrw-advanced-section">
         <summary>Sandbox Testing</summary>
         <p class="rrw-warning">

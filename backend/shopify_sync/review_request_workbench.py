@@ -220,6 +220,12 @@ REPORT_DEFINITIONS = (
         ("draft_preflight_status", "report_status", "status"),
     ),
     (
+        "trustpilot_gmail_one_draft_create_locked_runner",
+        "Trustpilot Gmail one-draft create locked runner",
+        "shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.json",
+        ("locked_runner_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -488,6 +494,13 @@ def build_review_request_workbench_context(params=None):
         trustpilot_auto_refresh,
         trustpilot_send_readiness,
     )
+    trustpilot_gmail_one_draft_create_locked_runner = (
+        _trustpilot_gmail_one_draft_create_locked_runner_status(
+            reports.get("trustpilot_gmail_one_draft_create_locked_runner", {}),
+            trustpilot_gmail_draft_only_preflight,
+            trustpilot_gmail_scope_compatibility_resolver,
+        )
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -514,6 +527,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_gmail_config_compatibility_audit=trustpilot_gmail_config_compatibility_audit,
         trustpilot_gmail_scope_compatibility_resolver=trustpilot_gmail_scope_compatibility_resolver,
         trustpilot_gmail_draft_only_preflight=trustpilot_gmail_draft_only_preflight,
+        trustpilot_gmail_one_draft_create_locked_runner=trustpilot_gmail_one_draft_create_locked_runner,
     )
 
     return {
@@ -577,6 +591,7 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_gmail_config_compatibility_audit": trustpilot_gmail_config_compatibility_audit,
             "trustpilot_gmail_scope_compatibility_resolver": trustpilot_gmail_scope_compatibility_resolver,
             "trustpilot_gmail_draft_only_preflight": trustpilot_gmail_draft_only_preflight,
+            "trustpilot_gmail_one_draft_create_locked_runner": trustpilot_gmail_one_draft_create_locked_runner,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -1684,6 +1699,7 @@ def _report_readiness(reports):
         ("trustpilot_gmail_config_compatibility_audit", "Trustpilot Gmail config compatibility audit"),
         ("trustpilot_gmail_scope_compatibility_resolver", "Trustpilot Gmail scope compatibility resolver"),
         ("trustpilot_gmail_draft_only_preflight", "Trustpilot Gmail draft-only preflight"),
+        ("trustpilot_gmail_one_draft_create_locked_runner", "Trustpilot Gmail one-draft create locked runner"),
         ("trustpilot_one_candidate_draft_package", "One-candidate Gmail draft package"),
         ("trustpilot_one_candidate_draft_create_execute", "One-candidate Gmail draft create execute"),
         ("trustpilot_one_candidate_draft_send_preflight", "One-candidate Gmail send preflight"),
@@ -3518,6 +3534,197 @@ def _trustpilot_gmail_draft_only_preflight_status(
     }
 
 
+def _trustpilot_gmail_one_draft_create_locked_runner_status(
+    report,
+    draft_preflight,
+    scope_resolver,
+):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    report_loaded = bool(report.get("loaded"))
+    locked_runner_status = _safe_text(
+        data.get("locked_runner_status") or report.get("status") or "missing",
+        max_length=120,
+    )
+    draft_preflight_status = _safe_text(
+        data.get("draft_preflight_status")
+        or draft_preflight.get("draft_preflight_status")
+        or "blocked_scope_missing",
+        max_length=120,
+    )
+    scope_status = _safe_text(
+        data.get("scope_status")
+        or draft_preflight.get("scope_status")
+        or scope_resolver.get("scope_resolver_status")
+        or "scope_missing",
+        max_length=120,
+    )
+    draft_scope_available = (
+        data.get("draft_scope_available") is True
+        or draft_preflight.get("draft_scope_available") is True
+        or scope_resolver.get("compose_scope_available") is True
+        or scope_resolver.get("real_send_scope_available") is True
+    )
+    real_send_scope_available = (
+        data.get("real_send_scope_available") is True
+        or draft_preflight.get("real_send_scope_available") is True
+        or scope_resolver.get("real_send_scope_available") is True
+    )
+    eligible_candidate_count = _int_or_zero(
+        data.get("eligible_candidate_count")
+        if "eligible_candidate_count" in data
+        else draft_preflight.get("eligible_candidate_count")
+    )
+    selected_candidate_order_name = _safe_text(
+        data.get("selected_candidate_order_name")
+        or draft_preflight.get("selected_candidate_order_name"),
+        max_length=80,
+    )
+    exactly_one_candidate = data.get("exactly_one_candidate") is True or (
+        not report_loaded and draft_preflight.get("exactly_one_candidate") is True
+    )
+    draft_create_requested = data.get("draft_create_requested") is True
+    draft_create_allowed_by_preflight = data.get("draft_create_allowed_by_preflight") is True
+    draft_create_allowed_by_env = data.get("draft_create_allowed_by_env") is True
+    draft_create_performed = data.get("draft_create_performed") is True
+    if not report_loaded:
+        locked_runner_status = "blocked_missing_requirements"
+    missing_requirements_plain = (
+        data.get("missing_requirements_plain")
+        if isinstance(data.get("missing_requirements_plain"), list)
+        else _draft_creation_missing_requirements_plain(
+            draft_scope_available=draft_scope_available,
+            eligible_candidate_count=eligible_candidate_count,
+            exactly_one_candidate=exactly_one_candidate,
+            draft_create_requested=draft_create_requested,
+        )
+    )
+    missing_requirement_labels = _draft_creation_missing_labels(
+        draft_scope_available=draft_scope_available,
+        eligible_candidate_count=eligible_candidate_count,
+        exactly_one_candidate=exactly_one_candidate,
+        draft_create_requested=draft_create_requested,
+    )
+    message = _safe_text(
+        data.get("dashboard_message")
+        or _draft_creation_readiness_message(scope_status, eligible_candidate_count),
+        max_length=300,
+    )
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.json",
+            max_length=160,
+        ),
+        "html_relative_path": "logs/shopify_review_request_trustpilot_gmail_one_draft_create_locked_runner.html",
+        "locked_runner_status": locked_runner_status,
+        "message": message,
+        "can_create_draft_now": False,
+        "can_create_draft_now_label": "No",
+        "draft_preflight_status": draft_preflight_status,
+        "scope_status": scope_status,
+        "draft_scope_available": draft_scope_available,
+        "draft_scope_available_label": _plain_yes_no(draft_scope_available),
+        "real_send_scope_available": real_send_scope_available,
+        "real_send_scope_available_label": _plain_yes_no(real_send_scope_available),
+        "eligible_candidate_count": eligible_candidate_count,
+        "selected_candidate_order_name": selected_candidate_order_name,
+        "selected_candidate_label": selected_candidate_order_name or "None",
+        "exactly_one_candidate": exactly_one_candidate,
+        "draft_create_requested": draft_create_requested,
+        "draft_create_allowed_by_preflight": draft_create_allowed_by_preflight,
+        "draft_create_allowed_by_env": draft_create_allowed_by_env,
+        "draft_create_performed": draft_create_performed,
+        "required_future_env_flag_name": _safe_text(
+            data.get("required_future_env_flag_name")
+            or "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_DRAFT_CREATE",
+            max_length=120,
+        ),
+        "missing_requirements_plain": [
+            _safe_text(item, max_length=240) for item in missing_requirements_plain if item
+        ],
+        "missing_requirement_labels": missing_requirement_labels,
+        "next_admin_action": _safe_text(
+            data.get("next_admin_action")
+            or _draft_creation_next_action(scope_status, eligible_candidate_count),
+            max_length=500,
+        ),
+        "blocking_conditions": (
+            data.get("blocking_conditions") if isinstance(data.get("blocking_conditions"), list) else []
+        ),
+        "privacy_scan_summary": (
+            data.get("privacy_scan_summary") if isinstance(data.get("privacy_scan_summary"), dict) else {}
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "raw_flags": {
+            "draft_create_performed": draft_create_performed,
+            "gmail_network_call_performed": data.get("gmail_network_call_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_send_performed": data.get("gmail_send_performed") is True,
+            "gmail_draft_create_performed": data.get("gmail_draft_create_performed") is True,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "shopify_tag_write_performed": data.get("shopify_tag_write_performed") is True,
+            "external_review_api_call_performed": data.get("external_review_api_call_performed") is True,
+        },
+    }
+
+
+def _draft_creation_missing_requirements_plain(
+    draft_scope_available,
+    eligible_candidate_count,
+    exactly_one_candidate,
+    draft_create_requested,
+):
+    missing = []
+    if not draft_scope_available:
+        missing.append("Gmail permission is not configured.")
+    if eligible_candidate_count == 0:
+        missing.append("No eligible order is available.")
+    if not exactly_one_candidate:
+        missing.append("The system needs exactly one safe order before creating a draft.")
+    if not draft_create_requested:
+        missing.append("Final approval is required before creating a draft.")
+    return missing
+
+
+def _draft_creation_missing_labels(
+    draft_scope_available,
+    eligible_candidate_count,
+    exactly_one_candidate,
+    draft_create_requested,
+):
+    labels = []
+    if not draft_scope_available:
+        labels.append("Gmail permission")
+    if eligible_candidate_count == 0 or not exactly_one_candidate:
+        labels.append("Eligible order")
+    if not draft_create_requested:
+        labels.append("Final approval")
+    return labels
+
+
+def _draft_creation_readiness_message(scope_status, eligible_candidate_count):
+    if scope_status == "scope_missing" and eligible_candidate_count == 0:
+        return "Draft creation is not ready yet. Gmail permission is not configured, and there is no eligible order."
+    if scope_status == "scope_missing":
+        return "Draft creation is not ready yet. Gmail permission is not configured."
+    if eligible_candidate_count == 0:
+        return "Draft creation is not ready yet. There is no eligible order."
+    return "Draft creation is not ready yet."
+
+
+def _draft_creation_next_action(scope_status, eligible_candidate_count):
+    if scope_status == "scope_missing" and eligible_candidate_count == 0:
+        return "Configure Gmail permission and wait for exactly one eligible safe order."
+    if scope_status == "scope_missing":
+        return "Configure Gmail compose or send permission before any future draft creation phase."
+    if eligible_candidate_count == 0:
+        return "Wait for exactly one eligible delivered Trustpilot candidate, then rerun the draft checks."
+    return "Review missing requirements before any future Gmail draft creation phase."
+
+
 def _gmail_draft_path_plain_message(scope_status, eligible_candidate_count, draft_preflight_status):
     if scope_status == "scope_missing" and eligible_candidate_count == 0:
         return "Draft path is not ready because there is no eligible order and Gmail permission is not configured."
@@ -3595,6 +3802,7 @@ def _operating_dashboard(
     trustpilot_gmail_config_compatibility_audit,
     trustpilot_gmail_scope_compatibility_resolver,
     trustpilot_gmail_draft_only_preflight,
+    trustpilot_gmail_one_draft_create_locked_runner,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
@@ -3673,6 +3881,7 @@ def _operating_dashboard(
         "gmail_setup_message": gmail_setup["status_message"],
         "gmail_setup_rows": gmail_setup["rows"],
         "gmail_draft_path": trustpilot_gmail_draft_only_preflight,
+        "gmail_draft_creation_readiness": trustpilot_gmail_one_draft_create_locked_runner,
         "pipeline_steps": _pipeline_steps(ready_count),
         "trustpilot_automation": trustpilot_automation_status,
         "trustpilot_send_readiness": trustpilot_send_readiness,
@@ -3687,6 +3896,7 @@ def _operating_dashboard(
         "trustpilot_gmail_config_compatibility_audit": trustpilot_gmail_config_compatibility_audit,
         "trustpilot_gmail_scope_compatibility_resolver": trustpilot_gmail_scope_compatibility_resolver,
         "trustpilot_gmail_draft_only_preflight": trustpilot_gmail_draft_only_preflight,
+        "trustpilot_gmail_one_draft_create_locked_runner": trustpilot_gmail_one_draft_create_locked_runner,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,
