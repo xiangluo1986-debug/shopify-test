@@ -44,6 +44,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("one_candidate_gmail_draft_package_status", "draft_package_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_automation_dry_run",
+        "label": "Trustpilot automation dry-run",
+        "filename": "shopify_review_request_trustpilot_automation_dry_run.json",
+        "channel": "trustpilot",
+        "event_type": "automation_dry_run",
+        "status_keys": ("automation_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -114,6 +122,7 @@ EVENT_TYPE_OPTIONS = (
     ("candidate_selected", "Candidate selected"),
     ("candidate_blocked", "Candidate blocked"),
     ("duplicate_block", "Duplicate block"),
+    ("automation_dry_run", "Automation dry-run"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
     ("draft_created", "Draft created"),

@@ -134,6 +134,12 @@ REPORT_DEFINITIONS = (
         ("decision_engine_status", "report_status", "status"),
     ),
     (
+        "trustpilot_automation_dry_run",
+        "Trustpilot automation dry-run",
+        "shopify_review_request_trustpilot_automation_dry_run.json",
+        ("automation_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -339,6 +345,10 @@ def build_review_request_workbench_context(params=None):
         candidate_queue=candidate_queue,
         history_focus=history_ledger["focus"],
     )
+    trustpilot_automation_status = _trustpilot_automation_status(
+        reports.get("trustpilot_automation_dry_run", {}),
+        candidate_queue_status,
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -352,6 +362,7 @@ def build_review_request_workbench_context(params=None):
         history_ledger=history_ledger,
         trustpilot_email_records=trustpilot_email_records,
         ali_reviews_status=ali_reviews_status,
+        trustpilot_automation_status=trustpilot_automation_status,
     )
 
     return {
@@ -402,6 +413,7 @@ def build_review_request_workbench_context(params=None):
             "local_stats": local_stats,
             "tracking_design": _tracking_design(),
             "candidate_queue_status": candidate_queue_status,
+            "trustpilot_automation_status": trustpilot_automation_status,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -990,6 +1002,7 @@ def _report_readiness(reports):
     focus = (
         ("next_candidate_scan", "Latest candidate scan"),
         ("candidate_scan", "Candidate scan"),
+        ("trustpilot_automation_dry_run", "Trustpilot automation dry-run"),
         ("trustpilot_one_candidate_draft_package", "One-candidate Gmail draft package"),
         ("trustpilot_one_candidate_draft_create_execute", "One-candidate Gmail draft create execute"),
         ("trustpilot_one_candidate_draft_send_preflight", "One-candidate Gmail send preflight"),
@@ -1453,6 +1466,82 @@ def _ali_reviews_status(history_focus):
     }
 
 
+def _trustpilot_automation_status(report, candidate_queue_status):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    eligible_count = _int_or_zero(data.get("eligible_candidate_count"))
+    selected_order = _safe_text(data.get("selected_candidate_order_name"), max_length=80)
+    automation_status = _safe_text(data.get("automation_status") or report.get("status") or "missing")
+    report_present = bool(report.get("present"))
+    report_loaded = bool(report.get("loaded"))
+    if report_loaded and eligible_count > 0:
+        message = (
+            f"{eligible_count} order is ready for Trustpilot email dry-run. "
+            "Review the locked send package before any real email is sent."
+            if eligible_count == 1
+            else (
+                f"{eligible_count} orders are ready for Trustpilot email dry-run. "
+                "Review the locked send package before any real email is sent."
+            )
+        )
+        next_step = "Review the locked send package before any real email is sent."
+    else:
+        message = (
+            "No Trustpilot email will be sent now. Waiting for an order that is delivered, "
+            f"has {CANONICAL_REVIEW_REQUEST_TAG}, and has no duplicate/customer risk."
+        )
+        next_step = "Nothing to send now."
+    order_22620 = data.get("order_22620_blocker_status") if isinstance(data.get("order_22620_blocker_status"), dict) else {}
+    order_22582 = data.get("order_22582_blocker_status") if isinstance(data.get("order_22582_blocker_status"), dict) else {}
+    return {
+        "report_present": report_present,
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(report.get("relative_path") or "logs/shopify_review_request_trustpilot_automation_dry_run.json"),
+        "status": automation_status,
+        "eligible_candidate_count": eligible_count,
+        "selected_candidate_order_name": selected_order,
+        "selected_candidate_allowed_for_future_send": data.get("selected_candidate_allowed_for_future_send") is True,
+        "message": message,
+        "next_step": next_step,
+        "order_22620_message": _safe_text(
+            order_22620.get("message")
+            or "Do not send. This customer already received a Trustpilot invitation via #22621.",
+            max_length=300,
+        ),
+        "order_22582_message": _safe_text(
+            order_22582.get("message")
+            or (
+                "Do not send yet. Order is not delivered, missing 1: review request, "
+                "and related order group #22582/#22581 is not ready."
+            ),
+            max_length=300,
+        ),
+        "gmail_future_action_status": _safe_text(
+            data.get("gmail_future_action_status") or "no_gmail_action_until_eligible_candidate"
+        ),
+        "shopify_tag_future_action_status": _safe_text(
+            data.get("shopify_tag_future_action_status")
+            or "no_shopify_tag_action_until_email_sent_and_verified"
+        ),
+        "ali_reviews_status": _safe_text(
+            data.get("ali_reviews_status") or "blocked_waiting_for_vendor_api_documentation"
+        ),
+        "blocking_reason": _safe_text(
+            data.get("blocking_reason") or candidate_queue_status.get("reason") or ""
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "raw_flags": {
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_draft_created": data.get("gmail_draft_created") is True,
+            "email_sent": data.get("email_sent") is True,
+            "trustpilot_api_call_performed": data.get("trustpilot_api_call_performed") is True,
+            "kudosi_api_call_performed": data.get("kudosi_api_call_performed") is True,
+            "ali_reviews_api_call_performed": data.get("ali_reviews_api_call_performed") is True,
+        },
+    }
+
+
 def _operating_dashboard(
     latest_scan,
     candidate_queue,
@@ -1461,11 +1550,16 @@ def _operating_dashboard(
     history_ledger,
     trustpilot_email_records,
     ali_reviews_status,
+    trustpilot_automation_status,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
     events = history_ledger.get("all_events") or []
-    ready_count = _ready_to_send_count(latest_scan, candidate_queue)
+    ready_count = (
+        _int_or_zero(trustpilot_automation_status.get("eligible_candidate_count"))
+        if trustpilot_automation_status.get("report_loaded")
+        else _ready_to_send_count(latest_scan, candidate_queue)
+    )
     blocked_count = _blocked_order_count(blocked_orders, summary, focus)
     sent_count = _trustpilot_sent_count(events, invitation_history, focus)
     return {
@@ -1512,6 +1606,7 @@ def _operating_dashboard(
             },
         ],
         "pipeline_steps": _pipeline_steps(ready_count),
+        "trustpilot_automation": trustpilot_automation_status,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,
@@ -1581,58 +1676,58 @@ def _pipeline_steps(ready_count):
     return [
         {
             "number": 1,
-            "label": "Order delivered",
+            "label": "Delivered order detected",
             "detail": f"Order has the {DELIVERED_TAG} tag.",
             "state_label": "Required",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 2,
-            "label": "Shopify tag added",
+            "label": f"Required Shopify tag present: {CANONICAL_REVIEW_REQUEST_TAG}",
             "detail": f"Order has the {CANONICAL_REVIEW_REQUEST_TAG} tag.",
             "state_label": "Required",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 3,
-            "label": "Eligibility check",
+            "label": "Duplicate/customer-level blocker check",
             "detail": "Duplicate, related-order, ticket, refund, return, and shipping risk checks pass.",
             "state_label": active_label,
             "state_class": "rrw-step-active",
         },
         {
             "number": 4,
-            "label": "Gmail draft created",
-            "detail": "Future locked phase only.",
-            "state_label": "Coming later",
+            "label": "Gmail draft/send readiness",
+            "detail": "Dry-run preparation only. No Gmail draft, delete, or send is active here.",
+            "state_label": "Dry-run only",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 5,
-            "label": "Admin reviews draft",
-            "detail": "Admin confirms the customer-facing message before send.",
-            "state_label": "Coming later",
+            "label": "Locked admin approval",
+            "detail": "Separate locked approval is required before any real email.",
+            "state_label": "Preparation only",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 6,
             "label": "Email sent",
-            "detail": "Future approved Gmail send phase only.",
-            "state_label": "Coming later",
+            "detail": "Future approved Gmail phase only. This workbench cannot send.",
+            "state_label": "Not active",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 7,
-            "label": "Shopify tag written",
-            "detail": "Future approved Shopify tag phase only.",
-            "state_label": "Coming later",
+            "label": "Shopify tag write: 1: trustpilot",
+            "detail": "Future approved Shopify tag phase only after send is verified.",
+            "state_label": "Not active",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 8,
-            "label": "History recorded",
+            "label": "History/debug recorded",
             "detail": "Result is recorded for duplicate prevention.",
-            "state_label": "Coming later",
+            "state_label": "Local reports",
             "state_class": "rrw-step-muted",
         },
     ]
@@ -1651,7 +1746,7 @@ def _next_actions(focus, ready_count):
             {
                 "title": "Nothing to send now",
                 "description": (
-                    f"Wait until an order is delivered and has the {CANONICAL_REVIEW_REQUEST_TAG} tag."
+                    "Nothing to send now."
                 ),
                 "items": [],
             }
@@ -1668,7 +1763,10 @@ def _next_actions(focus, ready_count):
         [
             {
                 "title": "#22582 is not ready",
-                "description": "Do not prepare a Trustpilot request for this order yet.",
+                "description": (
+                    f"Do not send yet. Order is not delivered, missing {CANONICAL_REVIEW_REQUEST_TAG}, "
+                    "and related order group #22582/#22581 is not ready."
+                ),
                 "items": [
                     "Not delivered",
                     f"Missing {CANONICAL_REVIEW_REQUEST_TAG}",
@@ -1678,8 +1776,7 @@ def _next_actions(focus, ready_count):
             {
                 "title": "#22620 should not be sent",
                 "description": (
-                    f"This customer already received Trustpilot via {prior_order}. "
-                    "The existing unsent Gmail draft should not be sent."
+                    f"Do not send. This customer already received a Trustpilot invitation via {prior_order}."
                 ),
                 "items": [],
             },

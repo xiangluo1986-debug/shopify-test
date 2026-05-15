@@ -42,6 +42,19 @@ For Shopify review request history/debug ledger audit tasks:
 - Top-level safety flags for Gmail draft creation, Gmail send/delete, Shopify
   writes/tag changes, external review API calls, and tracking must remain false.
 
+For Shopify review request Trustpilot automation dry-run orchestrator tasks:
+
+- Read local review-request JSON reports and local helper logic only; do not
+  call Shopify, Gmail, Trustpilot, Kudosi, Ali Reviews, or tracking services.
+- The task may write local JSON/HTML dry-run reports under `logs/`.
+- It must answer whether any eligible Trustpilot candidate exists, what the
+  next locked action would be, why blocked candidates are blocked, and which
+  safety gates are active.
+- It must keep Gmail draft/create/delete/send, Shopify tag write/mutation,
+  external review API calls, and tracking-token fields false.
+- It must show masked customer email only and must not output raw customer
+  email, full Gmail draft/message IDs, tokens, or secrets.
+
 For Shopify translation dry-run tasks:
 
 - Dry-run tasks must return before any Shopify mutation or `translationsRegister` write path.

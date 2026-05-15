@@ -306,6 +306,38 @@
     </div>
 
     <div class="rrw-section">
+        <h2>Trustpilot Automation</h2>
+        <p class="{% if dashboard.trustpilot_automation.eligible_candidate_count %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_automation.message }}
+        </p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Current state</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_automation.next_step }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_automation.status }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_automation.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected order:
+                    {{ dashboard.trustpilot_automation.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">#22620</div>
+                <div class="rrw-card-value">Do not send</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_automation.order_22620_message }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">#22582</div>
+                <div class="rrw-card-value">Do not send yet</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_automation.order_22582_message }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="rrw-section">
         <h2>Automation Pipeline</h2>
         <p class="rrw-current-state">{{ dashboard.current_state_label }}</p>
         <ol class="rrw-pipeline">
@@ -388,6 +420,25 @@
             Detailed ledger rows, source report paths, technical flags, queue tables, and safety evidence are kept here
             for admins who need to inspect the underlying local reports.
         </p>
+
+        <div class="rrw-advanced-section">
+            <h2>Trustpilot Automation Dry-Run</h2>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>Report</th><td><code>{{ dashboard.trustpilot_automation.relative_path }}</code></td></tr>
+                    <tr><th>Present</th><td>{{ dashboard.trustpilot_automation.report_present|yesno:"true,false" }}</td></tr>
+                    <tr><th>Loaded</th><td>{{ dashboard.trustpilot_automation.report_loaded|yesno:"true,false" }}</td></tr>
+                    <tr><th>Status</th><td><code>{{ dashboard.trustpilot_automation.status }}</code></td></tr>
+                    <tr><th>Blocking reason</th><td><code>{{ dashboard.trustpilot_automation.blocking_reason|default:"-" }}</code></td></tr>
+                    <tr><th>Gmail future action</th><td><code>{{ dashboard.trustpilot_automation.gmail_future_action_status }}</code></td></tr>
+                    <tr><th>Shopify tag future action</th><td><code>{{ dashboard.trustpilot_automation.shopify_tag_future_action_status }}</code></td></tr>
+                    <tr><th>Ali Reviews / Kudosi</th><td><code>{{ dashboard.trustpilot_automation.ali_reviews_status }}</code></td></tr>
+                    {% for name, value in dashboard.trustpilot_automation.raw_flags.items %}
+                        <tr><th>{{ name }}</th><td>{{ value|yesno:"true,false" }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
 
         <form class="rrw-filterbar" method="get">
             <div class="rrw-field">

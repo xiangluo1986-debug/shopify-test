@@ -421,3 +421,28 @@ Future tracking design note:
   send Gmail, delete Gmail drafts, write Shopify tags, remove Shopify tags,
   call Trustpilot/Kudosi/Ali Reviews APIs, enable tracking redirects, or
   generate tracking tokens.
+
+## Phase 5.6 Trustpilot Automation Dry-Run Orchestrator
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_automation_dry_run`.
+- [x] Orchestrate existing local review-request candidate logic, Trustpilot
+  eligibility checks, customer-level duplicate blockers, Gmail readiness, and
+  Shopify tag-write readiness into one dry-run report.
+- [x] Generate local JSON/HTML reports only:
+  `logs/shopify_review_request_trustpilot_automation_dry_run.json` and
+  `logs/shopify_review_request_trustpilot_automation_dry_run.html`.
+- [x] No email is sent.
+- [x] No Gmail draft is created, deleted, or sent.
+- [x] No Shopify tag is written and no Shopify mutation is called.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] Current blockers remain enforced:
+  `#22620` must not be sent because the same customer already received a
+  Trustpilot invitation via `#22621`; `#22582` must not be sent yet because it
+  is not delivered, is missing `1: review request`, and related order group
+  `#22582/#22581` is not ready.
+- [x] The Review Request workbench shows the Trustpilot automation status near
+  the top and keeps report paths, raw flags, and source details inside
+  collapsed Advanced debug details.
+- [x] The next phase should be a locked real-send package only after a truly
+  eligible candidate exists and a separate approval confirms the exact action.
