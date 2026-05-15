@@ -445,6 +445,10 @@
   .tw-product-dropdown-empty {
     margin: 4px;
   }
+  .tw-product-dropdown-empty[hidden],
+  .translation-workspace .tw-product-option[hidden] {
+    display: none !important;
+  }
   .translation-workspace .tw-product-option {
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr);
@@ -1397,6 +1401,7 @@
     <form method="get" class="tw-product-picker" data-product-picker style="margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="locale" value="{{ selected_locale }}" data-product-locale-hidden>
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
       <div class="tw-picker-controls">
         <div class="tw-compact-field tw-product-field">
@@ -1428,15 +1433,15 @@
                   </button>
                 {% endfor %}
               {% endif %}
-              <div class="tw-empty-state tw-product-dropdown-empty" data-product-picker-empty{% if product_selector.product_options and not product_selector.no_matching_products %} hidden{% endif %}>
-                {% if product_selector.no_products_available %}No products available.{% else %}No matching products in this list. Try another keyword.{% endif %}
+              <div class="tw-empty-state tw-product-dropdown-empty" data-product-picker-empty hidden>
+                No matching products
               </div>
             </div>
           </div>
         </div>
         <div class="tw-compact-field">
           <label for="id_editor_locale">Choose language</label><br>
-          <select id="id_editor_locale" name="target_locale">
+          <select id="id_editor_locale" name="target_locale" data-product-locale-select>
             {% for locale_option in supported_locale_options %}
               <option value="{{ locale_option.value }}"{% if locale_option.value == selected_locale %} selected{% endif %}>{{ locale_option.label }} ({{ locale_option.value }})</option>
             {% endfor %}
@@ -3600,29 +3605,48 @@
       var summary = picker.querySelector("[data-product-picker-summary]");
       var count = picker.querySelector("[data-product-picker-count]");
       var empty = picker.querySelector("[data-product-picker-empty]");
+      var localeSelect = picker.querySelector("[data-product-locale-select]");
+      var localeHidden = picker.querySelector("[data-product-locale-hidden]");
       if (!input || !dropdown) {
         return;
       }
 
-      function normalize(value) {
-        return String(value || "").toLowerCase().replace(/[\s_-]+/g, "");
+      function normalizeProductSearchText(value) {
+        return String(value || "")
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, "");
+      }
+
+      function rawProductSearchText(value) {
+        return String(value || "").toLowerCase().trim();
+      }
+
+      function hasSearchText() {
+        return Boolean(normalizeProductSearchText(input.value));
       }
 
       function queryTokens(value) {
         return String(value || "")
           .toLowerCase()
-          .split(/[\s_-]+/)
-          .map(function (token) { return normalize(token); })
+          .split(/[^a-z0-9]+/)
+          .map(function (token) { return normalizeProductSearchText(token); })
           .filter(Boolean);
       }
 
       function itemMatches(item, query) {
-        var normalizedQuery = normalize(query);
+        var rawQuery = rawProductSearchText(query);
+        var normalizedQuery = normalizeProductSearchText(query);
         if (!normalizedQuery) {
-          return true;
+          return false;
         }
         var rawSearch = String(item.getAttribute("data-search") || "").toLowerCase();
-        var normalizedSearch = item.getAttribute("data-search-normalized") || normalize(rawSearch);
+        var normalizedSearch = normalizeProductSearchText(
+          rawSearch + " " + String(item.getAttribute("data-search-normalized") || "")
+        );
+        if (rawQuery && rawSearch.indexOf(rawQuery) !== -1) {
+          return true;
+        }
         if (normalizedSearch.indexOf(normalizedQuery) !== -1) {
           return true;
         }
@@ -3632,39 +3656,36 @@
       }
 
       function setDropdownOpen(isOpen) {
-        dropdown.hidden = !isOpen;
-        input.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        var shouldOpen = Boolean(isOpen && hasSearchText());
+        dropdown.hidden = !shouldOpen;
+        input.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
       }
 
-      function applyProductFilter() {
-        var visibleCount = 0;
+      function filterProductRows() {
         var matchingCount = 0;
-        var hasQuery = Boolean(normalize(input.value));
+        var hasQuery = hasSearchText();
         items.forEach(function (item) {
-          var selected = item.classList.contains("is-selected");
           var matches = itemMatches(item, input.value);
-          var visible = selected || matches;
+          var visible = hasQuery && matches;
           item.hidden = !visible;
-          if (matches) {
+          if (hasQuery && matches) {
             matchingCount += 1;
-          }
-          if (visible) {
-            visibleCount += 1;
           }
         });
         if (summary) {
-          summary.textContent = hasQuery ? "Showing matching products" : "Showing latest products";
+          summary.textContent = hasQuery ? "Showing matching products" : "Search products";
         }
         if (count) {
-          count.textContent = String(hasQuery ? matchingCount : visibleCount);
+          count.textContent = String(hasQuery ? matchingCount : 0);
         }
         if (empty) {
-          empty.hidden = !(items.length === 0 || (hasQuery && matchingCount === 0));
+          empty.hidden = !hasQuery || matchingCount > 0;
         }
+        return matchingCount;
       }
 
       function openDropdown() {
-        applyProductFilter();
+        filterProductRows();
         setDropdownOpen(true);
       }
 
@@ -3672,10 +3693,20 @@
         setDropdownOpen(false);
       }
 
-      input.addEventListener("focus", openDropdown);
+      function syncLocaleParam() {
+        if (localeSelect && localeHidden) {
+          localeHidden.value = localeSelect.value;
+        }
+      }
+
+      input.addEventListener("focus", function () {
+        if (hasSearchText()) {
+          openDropdown();
+        }
+      });
       input.addEventListener("input", function () {
-        applyProductFilter();
-        setDropdownOpen(true);
+        filterProductRows();
+        setDropdownOpen(hasSearchText());
       });
       input.addEventListener("keydown", function (event) {
         if (event.key === "Escape") {
@@ -3686,25 +3717,41 @@
       if (selectedToggle) {
         selectedToggle.addEventListener("click", function () {
           input.focus();
-          openDropdown();
+          if (hasSearchText()) {
+            openDropdown();
+          } else {
+            closeDropdown();
+          }
         });
         selectedToggle.addEventListener("keydown", function (event) {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             input.focus();
-            openDropdown();
+            if (hasSearchText()) {
+              openDropdown();
+            } else {
+              closeDropdown();
+            }
           }
         });
       }
       items.forEach(function (item) {
-        item.addEventListener("click", closeDropdown);
+        item.addEventListener("click", function () {
+          syncLocaleParam();
+          closeDropdown();
+        });
       });
+      if (localeSelect) {
+        localeSelect.addEventListener("change", syncLocaleParam);
+      }
+      picker.addEventListener("submit", syncLocaleParam);
       document.addEventListener("click", function (event) {
         if (!picker.contains(event.target)) {
           closeDropdown();
         }
       });
-      applyProductFilter();
+      syncLocaleParam();
+      filterProductRows();
       closeDropdown();
     }());
   </script>
