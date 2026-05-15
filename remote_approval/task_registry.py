@@ -120,6 +120,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_auto_queue_refresh_
 from remote_approval.tasks.shopify_review_request_trustpilot_locked_gmail_send_gate_task import (
     run_shopify_review_request_trustpilot_locked_gmail_send_gate_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_executor_shell_task import (
+    run_shopify_review_request_trustpilot_gmail_send_executor_shell_task,
+)
 from remote_approval.tasks.shopify_review_request_order_sync_auto_refresh_hook_audit_task import (
     run_shopify_review_request_order_sync_auto_refresh_hook_audit_task,
 )
@@ -409,6 +412,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_locked_gmail_send_gate": (
         run_shopify_review_request_trustpilot_locked_gmail_send_gate_task
+    ),
+    "shopify_review_request_trustpilot_gmail_send_executor_shell": (
+        run_shopify_review_request_trustpilot_gmail_send_executor_shell_task
     ),
     "shopify_review_request_order_sync_auto_refresh_hook_audit": (
         run_shopify_review_request_order_sync_auto_refresh_hook_audit_task
@@ -821,6 +827,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local send gate report only",
         "review_file_path": "logs/shopify_review_request_trustpilot_locked_gmail_send_gate.json",
+    },
+    "shopify_review_request_trustpilot_gmail_send_executor_shell": {
+        "description": "Validate the no-send Trustpilot Gmail send executor shell from the locked gate report without calling Gmail, Shopify, or external review APIs.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; no-send executor shell report only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_send_executor_shell.json",
     },
     "shopify_review_request_order_sync_auto_refresh_hook_audit": {
         "description": "Audit the dry-run Trustpilot queue auto-refresh hook after Shopify order sync completion.",

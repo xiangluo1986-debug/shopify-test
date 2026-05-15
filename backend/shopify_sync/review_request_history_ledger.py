@@ -68,6 +68,22 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("refresh_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_locked_gmail_send_gate",
+        "label": "Trustpilot locked Gmail send gate",
+        "filename": "shopify_review_request_trustpilot_locked_gmail_send_gate.json",
+        "channel": "trustpilot",
+        "event_type": "send_gate",
+        "status_keys": ("gate_status", "report_status", "status"),
+    },
+    {
+        "key": "trustpilot_gmail_send_executor_shell",
+        "label": "Trustpilot Gmail send executor shell",
+        "filename": "shopify_review_request_trustpilot_gmail_send_executor_shell.json",
+        "channel": "trustpilot",
+        "event_type": "send_executor_shell",
+        "status_keys": ("executor_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -141,6 +157,8 @@ EVENT_TYPE_OPTIONS = (
     ("automation_dry_run", "Automation dry-run"),
     ("automation_refresh", "Automation refresh"),
     ("readiness_package", "Readiness package"),
+    ("send_gate", "Send gate"),
+    ("send_executor_shell", "Send executor shell"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
     ("draft_created", "Draft created"),
@@ -154,14 +172,17 @@ EVENT_TYPE_OPTIONS = (
 FALSE_REQUIRED_SAFETY_FLAGS = (
     "gmail_draft_created",
     "gmail_draft_create_attempted",
+    "gmail_draft_create_performed",
     "gmail_drafts_send_called",
     "gmail_messages_send_called",
     "gmail_send_performed",
     "email_sent",
     "shopify_write_performed",
+    "shopify_tag_write_performed",
     "mutation_performed",
     "tags_add_performed",
     "tags_remove_performed",
+    "external_review_api_call_performed",
     "trustpilot_api_call_performed",
     "kudosi_api_call_performed",
     "ali_reviews_api_call_performed",
@@ -331,6 +352,8 @@ def _events_from_report(report):
         events.extend(_readiness_package_events(report))
     elif key == "trustpilot_auto_queue_refresh":
         events.extend(_auto_refresh_events(report))
+    elif key in {"trustpilot_locked_gmail_send_gate", "trustpilot_gmail_send_executor_shell"}:
+        events.extend(_gate_executor_events(report))
 
     return [event for event in events if event]
 
@@ -429,6 +452,22 @@ def _auto_refresh_events(report):
     return events
 
 
+def _gate_executor_events(report):
+    data = report["data"]
+    events = []
+    for item in data.get("known_blockers_summary") or []:
+        if isinstance(item, dict):
+            event = _event_from_mapping(report, item, "candidate_blocked", "known_blockers_summary")
+            if event:
+                events.append(event)
+    for item in data.get("blocking_conditions") or []:
+        if isinstance(item, dict):
+            event = _event_from_mapping(report, item, report["event_type"], "blocking_conditions")
+            if event:
+                events.append(event)
+    return events
+
+
 def _event_from_mapping(report, item, event_type, source_section):
     if not isinstance(item, dict):
         return None
@@ -445,7 +484,10 @@ def _event_from_mapping(report, item, event_type, source_section):
         ),
     )
     if not order_name and source_section == "report_summary":
-        order_name = _first_text(data, ("selected_order_name", "next_candidate_order_name", "audit_order_a"))
+        order_name = _first_text(
+            data,
+            ("selected_candidate_order_name", "selected_order_name", "next_candidate_order_name", "audit_order_a"),
+        )
     masked_email = _first_text(
         item,
         (
@@ -522,6 +564,7 @@ def _event_from_mapping(report, item, event_type, source_section):
             (
                 "shopify_tag_written",
                 "shopify_write_performed",
+                "shopify_tag_write_performed",
                 "source_shopify_write_performed",
                 "tags_add_performed",
                 "source_tags_add_performed",

@@ -559,3 +559,24 @@ Future tracking design note:
 - [x] Future real Trustpilot Gmail send requires exactly one safe eligible
   candidate and explicit ACK
   `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_SEND`.
+
+## Phase 5.11 Trustpilot Gmail Send Executor Shell
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_send_executor_shell`.
+- [x] Generate local JSON/HTML executor shell reports only:
+  `logs/shopify_review_request_trustpilot_gmail_send_executor_shell.json` and
+  `logs/shopify_review_request_trustpilot_gmail_send_executor_shell.html`.
+- [x] Read the latest locked Gmail send gate report and report whether a future
+  real send implementation could proceed.
+- [x] Current executor remains blocked because no eligible Trustpilot candidate
+  exists: `executor_status=blocked_no_eligible_candidate`.
+- [x] No Gmail API is called.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No email is sent.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] Future real send requires the gate to be ready, exactly one eligible
+  candidate, and explicit ACK
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_SEND`.
+- [x] Current status remains blocked because no eligible candidate exists.

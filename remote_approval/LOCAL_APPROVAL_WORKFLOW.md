@@ -135,6 +135,25 @@ Shopify tags, calls Shopify mutations, calls Trustpilot/Kudosi/Ali Reviews APIs,
 or creates tracking tokens. Current send permission remains false even when the
 gate is ready for a future ACK.
 
+## Review Request Trustpilot Gmail Send Executor Shell
+
+`shopify_review_request_trustpilot_gmail_send_executor_shell` is a Phase 5.11
+no-send executor shell. It reads the latest locked Gmail send gate report and
+decides whether a future real Gmail send implementation could proceed.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_send_executor_shell.json
+logs/shopify_review_request_trustpilot_gmail_send_executor_shell.html
+```
+
+The executor shell never calls Gmail APIs, creates/updates/deletes drafts, sends
+email, writes Shopify tags, calls Shopify mutations, calls Trustpilot/Kudosi/Ali
+Reviews APIs, or creates tracking tokens. Even when exactly one candidate is
+gate-ready and the locked ACK is present, this phase only reports
+`ready_for_future_real_send_execute`; it does not send.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

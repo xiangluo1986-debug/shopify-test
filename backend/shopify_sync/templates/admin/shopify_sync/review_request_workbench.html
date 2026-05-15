@@ -529,6 +529,90 @@
     </div>
 
     <div class="rrw-section">
+        <h2>Trustpilot Send Executor</h2>
+        <p class="{% if dashboard.trustpilot_gmail_send_executor_shell.eligible_candidate_count %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_gmail_send_executor_shell.message }}
+        </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_gmail_send_executor_shell.future_send_message }}</p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Executor status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_executor_shell.executor_status }}</div>
+                <div class="rrw-card-note">No-send local shell only.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gate status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_executor_shell.gate_status }}</div>
+                <div class="rrw-card-note">Source: locked Gmail send gate report.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_executor_shell.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected candidate:
+                    {{ dashboard.trustpilot_gmail_send_executor_shell.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">ACK present</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_executor_shell.ack_present_label }}</div>
+                <div class="rrw-card-note">Required before any future real-send implementation.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gmail send performed</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_executor_shell.gmail_send_performed_label }}</div>
+                <div class="rrw-card-note">
+                    Draft create:
+                    {{ dashboard.trustpilot_gmail_send_executor_shell.gmail_draft_create_performed_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Shopify tag write performed</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_executor_shell.shopify_tag_write_performed_label }}</div>
+                <div class="rrw-card-note">
+                    External review API:
+                    {{ dashboard.trustpilot_gmail_send_executor_shell.external_review_api_call_performed_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">Locked executor review</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_send_executor_shell.next_admin_action }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Future real send allowed</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_executor_shell.future_real_send_allowed_if_implemented_label }}</div>
+                <div class="rrw-card-note">This phase still sends nothing.</div>
+            </div>
+        </div>
+        <div class="rrw-note">
+            Future real sending will require exactly one safe candidate and the locked ACK.
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_gmail_send_executor_shell.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_gmail_send_executor_shell.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_gmail_send_executor_shell.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_gmail_send_executor_shell.html_relative_path }}
+            </p>
+            <p class="rrw-muted">
+                Required ACK:
+                <code>{{ dashboard.trustpilot_gmail_send_executor_shell.required_ack }}</code>
+            </p>
+            <p class="rrw-muted">
+                Source gate:
+                {{ dashboard.trustpilot_gmail_send_executor_shell.source_gate_report.relative_path|default:"logs/shopify_review_request_trustpilot_locked_gmail_send_gate.json" }}
+                |
+                {{ dashboard.trustpilot_gmail_send_executor_shell.source_gate_report.status|default:"missing" }}
+            </p>
+        </details>
+    </div>
+
+    <div class="rrw-section">
         <h2>Automation Pipeline</h2>
         <p class="rrw-current-state">{{ dashboard.current_state_label }}</p>
         <ol class="rrw-pipeline">
