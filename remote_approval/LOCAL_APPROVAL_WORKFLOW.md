@@ -337,6 +337,25 @@ the broad mail scope), or missing/unknown. It must not call Gmail, create or
 send drafts, read token/credential files, print secret values, call Shopify,
 write tags, call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
 
+## Review Request Trustpilot Gmail Env Loading Audit
+
+`shopify_review_request_trustpilot_gmail_env_loading_audit` is a Phase 5.21
+local audit for diagnosing why Review Request Gmail tasks cannot see Gmail
+scope/config in the runner environment.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_env_loading_audit.json
+logs/shopify_review_request_trustpilot_gmail_env_loading_audit.html
+```
+
+The audit may check expected Gmail key presence in `os.environ`, read only
+`.env` key names before `=`, and scan selected Docker/Django/runner files for
+safe loader markers. It must not print values, read token or credential file
+contents, call Gmail, create/update/delete drafts, send email, call Shopify,
+write tags, call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 
 `shopify_review_request_trustpilot_gmail_draft_only_preflight` is a Phase

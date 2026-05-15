@@ -846,3 +846,32 @@ Future tracking design note:
 - [x] Do not call Shopify APIs, write Shopify tags, call
   Trustpilot/Kudosi/Ali Reviews APIs, or call `translationsRegister`.
 - [x] Do not add Send/Create/Write controls.
+
+## Phase 5.21 Trustpilot Gmail Env Loading Audit
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_env_loading_audit`.
+- [x] Generate local JSON/HTML audit reports only:
+  `logs/shopify_review_request_trustpilot_gmail_env_loading_audit.json`
+  and
+  `logs/shopify_review_request_trustpilot_gmail_env_loading_audit.html`.
+- [x] Check expected Gmail environment key presence in `os.environ` only;
+  report booleans and counts without printing values.
+- [x] Read `.env` key names only, never values, and report expected Gmail key
+  presence/missing status.
+- [x] Diagnose whether the runner process can see the Gmail scope key and
+  whether `.env` appears to contain a scope key that is not injected into the
+  runner environment.
+- [x] Scan selected Docker Compose, Django, runner, and Codex runner files for
+  safe loader markers only; do not print full lines or values.
+- [x] No Gmail network/API call, no Gmail draft create/update/delete, no Gmail
+  send, no Shopify API/write/tag mutation, no Trustpilot/Kudosi/Ali Reviews API
+  call, and no `translationsRegister`.
+- [x] Next step depends on the audit result:
+  - If `.env` has keys but the runner misses them, add safe env loading for
+    remote approval tasks or run the runner with required variables injected.
+  - If no keys exist, add Gmail scope configuration.
+  - If `gmail.compose` exists, move to the one-draft create path once exactly
+    one eligible candidate exists.
+  - If `gmail.send` exists, continue the real-send path carefully with final
+    preflight, exactly one eligible candidate, and explicit approvals.

@@ -106,6 +106,10 @@ ADMIN_STATUS_LABELS = {
     "blocked_candidate_safety_check_failed": "Safety check failed",
     "blocked_missing_vendor_api_documentation": "Waiting for API docs",
     "no_eligible_delivered_review_request_candidate": "No orders ready",
+    "env_file_has_gmail_scope_but_runner_env_missing": "Runner cannot see .env Gmail settings",
+    "gmail_scope_not_configured_anywhere_detected": "Gmail permission missing",
+    "gmail_compose_scope_available_in_runner_env": "Gmail draft permission available",
+    "gmail_send_scope_available_in_runner_env": "Gmail send permission available",
 }
 
 REPORT_DEFINITIONS = (
@@ -208,6 +212,12 @@ REPORT_DEFINITIONS = (
         "Trustpilot Gmail config compatibility audit",
         "shopify_review_request_trustpilot_gmail_config_compatibility_audit.json",
         ("compatibility_audit_status", "report_status", "status"),
+    ),
+    (
+        "trustpilot_gmail_env_loading_audit",
+        "Trustpilot Gmail env loading audit",
+        "shopify_review_request_trustpilot_gmail_env_loading_audit.json",
+        ("env_loading_audit_status", "audit_status", "report_status", "status"),
     ),
     (
         "trustpilot_gmail_scope_compatibility_resolver",
@@ -487,6 +497,9 @@ def build_review_request_workbench_context(params=None):
     trustpilot_gmail_config_compatibility_audit = _trustpilot_gmail_config_compatibility_audit_status(
         reports.get("trustpilot_gmail_config_compatibility_audit", {}),
     )
+    trustpilot_gmail_env_loading_audit = _trustpilot_gmail_env_loading_audit_status(
+        reports.get("trustpilot_gmail_env_loading_audit", {}),
+    )
     trustpilot_gmail_scope_compatibility_resolver = _trustpilot_gmail_scope_compatibility_resolver_status(
         reports.get("trustpilot_gmail_scope_compatibility_resolver", {}),
     )
@@ -527,6 +540,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_gmail_real_send_readiness_audit=trustpilot_gmail_real_send_readiness_audit,
         trustpilot_gmail_oauth_config_helper=trustpilot_gmail_oauth_config_helper,
         trustpilot_gmail_config_compatibility_audit=trustpilot_gmail_config_compatibility_audit,
+        trustpilot_gmail_env_loading_audit=trustpilot_gmail_env_loading_audit,
         trustpilot_gmail_scope_compatibility_resolver=trustpilot_gmail_scope_compatibility_resolver,
         trustpilot_gmail_draft_only_preflight=trustpilot_gmail_draft_only_preflight,
         trustpilot_gmail_one_draft_create_locked_runner=trustpilot_gmail_one_draft_create_locked_runner,
@@ -591,6 +605,7 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_gmail_real_send_readiness_audit": trustpilot_gmail_real_send_readiness_audit,
             "trustpilot_gmail_oauth_config_helper": trustpilot_gmail_oauth_config_helper,
             "trustpilot_gmail_config_compatibility_audit": trustpilot_gmail_config_compatibility_audit,
+            "trustpilot_gmail_env_loading_audit": trustpilot_gmail_env_loading_audit,
             "trustpilot_gmail_scope_compatibility_resolver": trustpilot_gmail_scope_compatibility_resolver,
             "trustpilot_gmail_draft_only_preflight": trustpilot_gmail_draft_only_preflight,
             "trustpilot_gmail_one_draft_create_locked_runner": trustpilot_gmail_one_draft_create_locked_runner,
@@ -1699,6 +1714,7 @@ def _report_readiness(reports):
         ("trustpilot_gmail_real_send_readiness_audit", "Trustpilot Gmail real-send readiness audit"),
         ("trustpilot_gmail_oauth_config_helper", "Trustpilot Gmail OAuth/config helper"),
         ("trustpilot_gmail_config_compatibility_audit", "Trustpilot Gmail config compatibility audit"),
+        ("trustpilot_gmail_env_loading_audit", "Trustpilot Gmail env loading audit"),
         ("trustpilot_gmail_scope_compatibility_resolver", "Trustpilot Gmail scope compatibility resolver"),
         ("trustpilot_gmail_draft_only_preflight", "Trustpilot Gmail draft-only preflight"),
         ("trustpilot_gmail_one_draft_create_locked_runner", "Trustpilot Gmail one-draft create locked runner"),
@@ -3359,6 +3375,85 @@ def _trustpilot_gmail_config_compatibility_audit_status(report):
     }
 
 
+def _trustpilot_gmail_env_loading_audit_status(report):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    report_loaded = bool(report.get("loaded"))
+    audit_status = _safe_text(
+        data.get("env_loading_audit_status")
+        or data.get("audit_status")
+        or report.get("status")
+        or "missing",
+        max_length=120,
+    )
+    message = _safe_text(
+        data.get("dashboard_message")
+        or _gmail_env_loading_plain_message(audit_status),
+        max_length=300,
+    )
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_gmail_env_loading_audit.json",
+            max_length=160,
+        ),
+        "html_relative_path": "logs/shopify_review_request_trustpilot_gmail_env_loading_audit.html",
+        "audit_status": audit_status,
+        "env_loading_audit_status": audit_status,
+        "message": message,
+        "dashboard_message": message,
+        "os_environ_legacy_gmail_key_count": _int_or_zero(
+            data.get("os_environ_legacy_gmail_key_count")
+        ),
+        "os_environ_new_gmail_key_count": _int_or_zero(data.get("os_environ_new_gmail_key_count")),
+        "dot_env_file_exists": data.get("dot_env_file_exists") is True,
+        "dot_env_legacy_gmail_key_count": _int_or_zero(data.get("dot_env_legacy_gmail_key_count")),
+        "dot_env_new_gmail_key_count": _int_or_zero(data.get("dot_env_new_gmail_key_count")),
+        "scope_key_detected_in_os_environ": data.get("scope_key_detected_in_os_environ") is True,
+        "scope_key_detected_in_dot_env": data.get("scope_key_detected_in_dot_env") is True,
+        "os_environ_compose_scope_detected": data.get("os_environ_compose_scope_detected") is True
+        or audit_status == "gmail_compose_scope_available_in_runner_env",
+        "os_environ_send_scope_detected": data.get("os_environ_send_scope_detected") is True
+        or audit_status == "gmail_send_scope_available_in_runner_env",
+        "os_environ_broad_mail_scope_detected": data.get("os_environ_broad_mail_scope_detected") is True,
+        "docker_compose_env_file_detected": data.get("docker_compose_env_file_detected") is True,
+        "django_dotenv_loader_detected": data.get("django_dotenv_loader_detected") is True,
+        "remote_approval_dotenv_loader_detected": data.get("remote_approval_dotenv_loader_detected") is True,
+        "codex_runner_env_forwarding_detected": data.get("codex_runner_env_forwarding_detected") is True,
+        "probable_missing_link": _safe_text(data.get("probable_missing_link"), max_length=160),
+        "recommendation": _safe_text(data.get("recommendation"), max_length=500),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "privacy_scan_summary": (
+            data.get("privacy_scan_summary") if isinstance(data.get("privacy_scan_summary"), dict) else {}
+        ),
+        "raw_flags": {
+            "gmail_network_call_performed": data.get("gmail_network_call_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_send_performed": data.get("gmail_send_performed") is True,
+            "gmail_draft_create_performed": data.get("gmail_draft_create_performed") is True,
+            "token_file_read": data.get("token_file_read") is True,
+            "credential_file_read": data.get("credential_file_read") is True,
+            "secret_value_printed": data.get("secret_value_printed") is True,
+            "dot_env_value_read_or_printed": data.get("dot_env_value_read_or_printed") is True,
+            "shopify_api_call_performed": data.get("shopify_api_call_performed") is True,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "external_review_api_call_performed": data.get("external_review_api_call_performed") is True,
+        },
+    }
+
+
+def _gmail_env_loading_plain_message(status):
+    if status == "env_file_has_gmail_scope_but_runner_env_missing":
+        return "Gmail settings may exist in `.env`, but the automation runner cannot see them yet."
+    if status == "gmail_compose_scope_available_in_runner_env":
+        return "Gmail draft permission is available."
+    if status == "gmail_send_scope_available_in_runner_env":
+        return "Gmail send permission is available."
+    return "Gmail permission is not configured yet."
+
+
 def _trustpilot_gmail_scope_compatibility_resolver_status(report):
     data = report.get("data") if report.get("loaded") else {}
     data = data if isinstance(data, dict) else {}
@@ -3802,6 +3897,7 @@ def _operating_dashboard(
     trustpilot_gmail_real_send_readiness_audit,
     trustpilot_gmail_oauth_config_helper,
     trustpilot_gmail_config_compatibility_audit,
+    trustpilot_gmail_env_loading_audit,
     trustpilot_gmail_scope_compatibility_resolver,
     trustpilot_gmail_draft_only_preflight,
     trustpilot_gmail_one_draft_create_locked_runner,
@@ -3826,6 +3922,7 @@ def _operating_dashboard(
         trustpilot_gmail_oauth_config_helper,
         trustpilot_gmail_config_compatibility_audit,
         trustpilot_gmail_scope_compatibility_resolver,
+        trustpilot_gmail_env_loading_audit,
     )
     setup_checklist = _setup_checklist(
         ready_count=ready_count,
@@ -3905,6 +4002,7 @@ def _operating_dashboard(
         "trustpilot_gmail_real_send_readiness_audit": trustpilot_gmail_real_send_readiness_audit,
         "trustpilot_gmail_oauth_config_helper": trustpilot_gmail_oauth_config_helper,
         "trustpilot_gmail_config_compatibility_audit": trustpilot_gmail_config_compatibility_audit,
+        "trustpilot_gmail_env_loading_audit": trustpilot_gmail_env_loading_audit,
         "trustpilot_gmail_scope_compatibility_resolver": trustpilot_gmail_scope_compatibility_resolver,
         "trustpilot_gmail_draft_only_preflight": trustpilot_gmail_draft_only_preflight,
         "trustpilot_gmail_one_draft_create_locked_runner": trustpilot_gmail_one_draft_create_locked_runner,
@@ -3993,9 +4091,10 @@ def _order_count_text(count, suffix):
     return f"{count} {noun} {suffix}"
 
 
-def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=None):
+def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=None, env_loading_audit=None):
     compatibility_audit = compatibility_audit or {}
     scope_resolver = scope_resolver or {}
+    env_loading_audit = env_loading_audit or {}
     dependencies_ready = (
         gmail_helper.get("gmail_dependencies_importable") is True
         or compatibility_audit.get("gmail_dependencies_importable") is True
@@ -4013,10 +4112,12 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         gmail_helper.get("gmail_send_scope_present") is True
         or compatibility_audit.get("gmail_send_scope_present") is True
         or scope_resolver.get("send_scope_available") is True
+        or env_loading_audit.get("os_environ_send_scope_detected") is True
     )
     broad_mail_scope_present = (
         gmail_helper.get("gmail_broad_mail_scope_present") is True
         or scope_resolver.get("broad_mail_scope_available") is True
+        or env_loading_audit.get("os_environ_broad_mail_scope_detected") is True
     )
     real_send_scope_available = (
         gmail_helper.get("real_send_scope_available") is True
@@ -4029,6 +4130,7 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         gmail_helper.get("gmail_compose_scope_present") is True
         or compatibility_audit.get("gmail_compose_scope_present") is True
         or scope_resolver.get("compose_scope_available") is True
+        or env_loading_audit.get("os_environ_compose_scope_detected") is True
     )
     ready = dependencies_ready and (new_config_ready or (legacy_config_detected and real_send_scope_available))
     required_scope = _safe_text(
@@ -4036,7 +4138,24 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         max_length=120,
     )
     scope_status = _safe_text(scope_resolver.get("scope_resolver_status"), max_length=120)
-    if scope_status == "scope_missing":
+    env_audit_status = _safe_text(env_loading_audit.get("env_loading_audit_status"), max_length=120)
+    env_audit_message = _safe_text(env_loading_audit.get("dashboard_message"), max_length=300)
+    if env_audit_status == "env_file_has_gmail_scope_but_runner_env_missing":
+        status_value = "Runner env missing"
+        status_message = "Gmail settings may exist in `.env`, but the automation runner cannot see them yet."
+    elif env_audit_status == "gmail_scope_not_configured_anywhere_detected":
+        status_value = "Permission needed"
+        status_message = "Gmail permission is not configured yet."
+    elif env_audit_status == "gmail_compose_scope_available_in_runner_env":
+        status_value = "Draft permission"
+        status_message = "Gmail draft permission is available."
+    elif env_audit_status == "gmail_send_scope_available_in_runner_env":
+        status_value = "Ready"
+        status_message = "Gmail send permission is available."
+    elif env_audit_message:
+        status_value = _admin_status_label(env_audit_status)
+        status_message = env_audit_message
+    elif scope_status == "scope_missing":
         status_value = "Permission needed"
         status_message = "Gmail permission is not configured yet."
     elif compose_scope_present and not real_send_scope_available:
@@ -4084,6 +4203,18 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
                     required_scope,
                     broad_mail_scope_present,
                 ),
+            },
+            {
+                "label": "Env loading audit",
+                "value": _admin_status_label(env_audit_status or "missing"),
+            },
+            {
+                "label": "Runner scope key found",
+                "value": _plain_yes_no(env_loading_audit.get("scope_key_detected_in_os_environ") is True),
+            },
+            {
+                "label": ".env scope key found",
+                "value": _plain_yes_no(env_loading_audit.get("scope_key_detected_in_dot_env") is True),
             },
             {
                 "label": "Scope resolver",

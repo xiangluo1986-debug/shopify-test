@@ -141,6 +141,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_oauth_config_
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_config_compatibility_audit_task import (
     run_shopify_review_request_trustpilot_gmail_config_compatibility_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_env_loading_audit_task import (
+    run_shopify_review_request_trustpilot_gmail_env_loading_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_scope_compatibility_resolver_task import (
     run_shopify_review_request_trustpilot_gmail_scope_compatibility_resolver_task,
 )
@@ -460,6 +463,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_config_compatibility_audit": (
         run_shopify_review_request_trustpilot_gmail_config_compatibility_audit_task
+    ),
+    "shopify_review_request_trustpilot_gmail_env_loading_audit": (
+        run_shopify_review_request_trustpilot_gmail_env_loading_audit_task
     ),
     "shopify_review_request_trustpilot_gmail_scope_compatibility_resolver": (
         run_shopify_review_request_trustpilot_gmail_scope_compatibility_resolver_task
@@ -923,6 +929,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local config-name compatibility report only",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_config_compatibility_audit.json",
+    },
+    "shopify_review_request_trustpilot_gmail_env_loading_audit": {
+        "description": "Audit Gmail env loading and scope injection for Trustpilot review requests without calling Gmail or reading secret values.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local env-key and loader-marker audit report only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_env_loading_audit.json",
     },
     "shopify_review_request_trustpilot_gmail_scope_compatibility_resolver": {
         "description": "Resolve configured Gmail scope compatibility for Trustpilot review requests without calling Gmail, creating drafts, or sending email.",
