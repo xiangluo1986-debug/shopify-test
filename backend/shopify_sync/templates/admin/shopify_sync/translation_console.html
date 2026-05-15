@@ -152,6 +152,13 @@
     background: #1e40af;
     color: #ffffff !important;
   }
+  .translation-workspace .button[disabled],
+  .translation-workspace input[type="submit"][disabled],
+  .translation-workspace button[disabled] {
+    border-color: #9ca3af;
+    background: #9ca3af;
+    cursor: not-allowed;
+  }
   .translation-workspace details {
     color: #111827;
   }
@@ -602,6 +609,35 @@
   .tw-results-table {
     margin-top: 12px;
   }
+  .translation-workspace .translation-job-progress-table {
+    min-width: 720px;
+    border-color: #cfd8e3;
+    background: #ffffff;
+    color: #111827;
+  }
+  .translation-workspace .translation-job-progress-table thead .translation-job-progress-header {
+    border-bottom: 1px solid #cfd8e3;
+    background: #e8edf5;
+    color: #111827;
+    font-weight: 700;
+  }
+  .translation-workspace .translation-job-progress-table tbody .translation-job-progress-row {
+    background: #ffffff;
+  }
+  .translation-workspace .translation-job-progress-table tbody .translation-job-progress-row:nth-child(even) {
+    background: #f8fbff;
+  }
+  .translation-workspace .translation-job-progress-table tbody .translation-job-progress-row:hover {
+    background: #eef6ff;
+  }
+  .translation-workspace .translation-job-progress-table .translation-job-progress-cell {
+    border-top: 1px solid #eef2f7;
+    background: inherit;
+    color: #111827;
+  }
+  .translation-workspace .translation-job-progress-table .translation-job-progress-cell strong {
+    color: #111827;
+  }
   .tw-run-banner {
     margin: 12px 0;
     border: 1px solid #cfd8e3;
@@ -618,6 +654,33 @@
   }
   .tw-run-banner.is-failed {
     border-left-color: #dc2626;
+  }
+  .tw-run-banner.is-running,
+  .tw-run-banner.is-pending {
+    border-left-color: #2563eb;
+  }
+  .tw-run-banner.is-stale,
+  .tw-run-banner.is-cancelled {
+    border-left-color: #6b7280;
+  }
+  .tw-progress {
+    height: 10px;
+    margin-top: 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #e5e7eb;
+  }
+  .tw-progress-bar {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: #2563eb;
+  }
+  .tw-job-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
   }
   .tw-run-header {
     display: flex;
@@ -744,6 +807,11 @@
     background: #e8f5e9;
     color: #185c25;
   }
+  .tw-status-badge.is-running,
+  .tw-status-badge.is-pending {
+    background: #eaf2ff;
+    color: #123f7a;
+  }
   .tw-status-badge.is-partial {
     background: #fff4e5;
     color: #8a4b00;
@@ -752,6 +820,11 @@
   .tw-status-badge.is-needs_configuration {
     background: #fff1f0;
     color: #8a1f11;
+  }
+  .tw-status-badge.is-stale,
+  .tw-status-badge.is-cancelled {
+    background: #f2f4f7;
+    color: #475467;
   }
   .tw-status-badge.is-untranslated,
   .tw-status-badge.is-skipped,
@@ -1723,9 +1796,201 @@
         <input type="hidden" name="target_locale" value="{{ selected_locale }}">
         <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
         <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-        <button type="submit" class="button">Translate all languages</button>
-        <div class="tw-muted" style="margin-top: 8px;">Generates local drafts for missing and outdated translations only. Does not write to Shopify.</div>
+        <button type="submit" class="button"{% if translation_background_job.is_active %} disabled{% endif %}>Translate all in background</button>
+        <div class="tw-muted" style="margin-top: 8px;">Starts a local background draft job for missing and outdated translations. The request returns quickly and does not write to Shopify.</div>
       </form>
+    {% endif %}
+    {% if selected_product_gid %}
+      <div id="translation-background-job" class="tw-run-banner is-{{ translation_background_job.status_key|default:'pending' }}">
+        <div class="tw-run-header">
+          <div>
+            <h3>Background translation job</h3>
+            {% if translation_background_job.exists %}
+              <p>{{ translation_background_job.status_message }}</p>
+            {% else %}
+              <p>No background draft job has been recorded for this product.</p>
+            {% endif %}
+          </div>
+          <span class="tw-status-badge is-{{ translation_background_job.status_key|default:'pending' }}">{{ translation_background_job.status_label|default:"Not started" }}</span>
+        </div>
+        <div class="tw-progress" aria-label="Translation job progress">
+          <span class="tw-progress-bar" style="width: {{ translation_background_job.progress_percent|default:0 }}%;"></span>
+        </div>
+        <div class="tw-run-grid">
+          <div class="tw-run-item">
+            <div class="tw-run-label">Progress</div>
+            <div class="tw-run-value">{{ translation_background_job.progress_percent|default:0 }}%</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Current locale</div>
+            <div class="tw-run-value">{{ translation_background_job.current_locale|default:"-" }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Current group</div>
+            <div class="tw-run-value">{{ translation_background_job.current_group|default:"-" }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Completed locales</div>
+            <div class="tw-run-value">{{ translation_background_job.counts.completed_locales|default:0 }} / {{ translation_background_job.counts.total_locales|default:5 }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Failed locales</div>
+            <div class="tw-run-value">{{ translation_background_job.counts.failed_locales|default:0 }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Generated drafts</div>
+            <div class="tw-run-value">{{ translation_background_job.counts.generated_draft_count|default:0 }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Skipped</div>
+            <div class="tw-run-value">{{ translation_background_job.counts.skipped_count|default:0 }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Last updated</div>
+            <div class="tw-run-value">{{ translation_background_job.updated_at|default:"-" }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Report path</div>
+            <div class="tw-run-value">{{ translation_background_job.report_path|default:"-" }}</div>
+          </div>
+        </div>
+        <div class="tw-job-actions">
+          <form method="post" action="{% url 'shopify_translation_console' %}" class="tw-inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="ui_mode" value="editor">
+            <input type="hidden" name="action" value="refresh_translation_job_status">
+            <input type="hidden" name="product_search" value="{{ product_search_text }}">
+            <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+            <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+            <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+            <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+            <button type="submit" class="button">Refresh status</button>
+          </form>
+          {% if translation_background_job.exists %}
+            <a class="button" href="#{{ translation_background_job.detail_anchor }}">Open last report details</a>
+          {% endif %}
+        </div>
+        {% if translation_background_job.exists %}
+          <h3>Per-language progress</h3>
+          <div class="tw-editor-table-wrap">
+            <table class="tw-results-table translation-job-progress-table">
+              <thead>
+                <tr>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Language</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Status</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Rows checked</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Missing drafts</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Outdated drafts</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Skipped</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Blocked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in translation_background_job.per_locale_status %}
+                  <tr class="translation-job-progress-row">
+                    <td class="translation-job-progress-cell"><strong>{{ row.locale_label }}</strong> ({{ row.locale }})</td>
+                    <td class="translation-job-progress-cell"><span class="tw-status-badge is-{{ row.status_key }}">{{ row.status_label }}</span></td>
+                    <td class="translation-job-progress-cell">{{ row.source_rows_checked }}</td>
+                    <td class="translation-job-progress-cell">{{ row.missing_draft_count }}</td>
+                    <td class="translation-job-progress-cell">{{ row.outdated_update_draft_count }}</td>
+                    <td class="translation-job-progress-cell">{{ row.already_translated_skipped_count|add:row.not_eligible_skipped_count }}</td>
+                    <td class="translation-job-progress-cell">{{ row.blocked_count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <h3>Per-content group progress</h3>
+          <div class="tw-editor-table-wrap">
+            <table class="tw-results-table translation-job-progress-table">
+              <thead>
+                <tr>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Group</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Status</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Rows checked</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Generated drafts</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Skipped existing</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Skipped not eligible</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Blocked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in translation_background_job.per_group_status %}
+                  <tr class="translation-job-progress-row">
+                    <td class="translation-job-progress-cell">{{ row.label }}</td>
+                    <td class="translation-job-progress-cell"><span class="tw-status-badge is-{{ row.status_key }}">{{ row.status_label }}</span></td>
+                    <td class="translation-job-progress-cell">{{ row.source_rows_checked }}</td>
+                    <td class="translation-job-progress-cell">{{ row.generated_draft_count }}</td>
+                    <td class="translation-job-progress-cell">{{ row.already_translated_skipped_count }}</td>
+                    <td class="translation-job-progress-cell">{{ row.not_eligible_skipped_count }}</td>
+                    <td class="translation-job-progress-cell">{{ row.blocked_count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <details id="{{ translation_background_job.detail_anchor }}" class="tw-advanced-details">
+            <summary>Last report details</summary>
+            <table>
+              <tbody>
+                <tr><th>job_id</th><td>{{ translation_background_job.job_id }}</td></tr>
+                <tr><th>product_gid</th><td>{{ translation_background_job.product_gid }}</td></tr>
+                <tr><th>selected_locales</th><td>{{ translation_background_job.selected_locales|join:", " }}</td></tr>
+                <tr><th>selected_groups</th><td>{{ translation_background_job.selected_groups|join:", " }}</td></tr>
+                <tr><th>shopify_read_only</th><td>{{ translation_background_job.shopify_read_only }}</td></tr>
+                <tr><th>shopify_write_performed</th><td>{{ translation_background_job.shopify_write_performed }}</td></tr>
+                <tr><th>mutation_performed</th><td>{{ translation_background_job.mutation_performed }}</td></tr>
+                <tr><th>translations_register_called</th><td>{{ translation_background_job.translations_register_called }}</td></tr>
+                <tr><th>publish_performed</th><td>{{ translation_background_job.publish_performed }}</td></tr>
+                <tr><th>apply_performed</th><td>{{ translation_background_job.apply_performed }}</td></tr>
+                <tr><th>rollback_performed</th><td>{{ translation_background_job.rollback_performed }}</td></tr>
+              </tbody>
+            </table>
+            {% if translation_background_job.errors %}
+              <h3>Sanitized errors</h3>
+              <ul>
+                {% for error in translation_background_job.errors %}
+                  <li>{{ error.stage }}{% if error.locale %} / {{ error.locale }}{% endif %}: {{ error.message }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+            {% if translation_background_job.detail_preview_rows %}
+              <h3>Compact row previews</h3>
+              <div class="tw-editor-table-wrap">
+                <table class="tw-results-table">
+                  <thead>
+                    <tr>
+                      <th>Locale</th>
+                      <th>Section</th>
+                      <th>Key</th>
+                      <th>Source preview</th>
+                      <th>Existing preview</th>
+                      <th>Draft preview</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in translation_background_job.detail_preview_rows %}
+                      <tr>
+                        <td>{{ row.locale }}</td>
+                        <td>{{ row.section }}</td>
+                        <td>{{ row.key }}</td>
+                        <td class="tw-preview-cell">{{ row.source_value_preview }}</td>
+                        <td class="tw-preview-cell">{{ row.existing_translation_preview }}</td>
+                        <td class="tw-preview-cell">{{ row.proposed_translation_preview }}</td>
+                        <td>{{ row.status }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              {% if translation_background_job.detail_preview_truncated %}
+                <p>Report row previews are capped in this page. Open the JSON report path for the compact local report.</p>
+              {% endif %}
+            {% endif %}
+          </details>
+        {% endif %}
+      </div>
     {% endif %}
     <form method="post" action="{% url 'shopify_translation_console' %}">
       {% csrf_token %}
