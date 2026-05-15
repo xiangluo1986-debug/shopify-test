@@ -986,8 +986,6 @@
             {{ dashboard.trustpilot_gmail_oauth_config_helper.message }}
         </p>
         <p class="rrw-muted">{{ dashboard.trustpilot_gmail_oauth_config_helper.safety_message }}</p>
-        <p class="rrw-muted">Gmail OAuth is not fully configured yet. No Gmail network call was made.</p>
-        <p class="rrw-muted">Do not enable real sending until OAuth config, final preflight, and readiness audit all pass.</p>
         <div class="rrw-grid">
             <div class="rrw-card">
                 <div class="rrw-card-title">Config helper status</div>
@@ -1017,11 +1015,11 @@
             <div class="rrw-card">
                 <div class="rrw-card-title">Required scope</div>
                 <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.required_scope_status }}</div>
-                <div class="rrw-card-note"><code>{{ dashboard.trustpilot_gmail_oauth_config_helper.required_scope_expected }}</code></div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_oauth_config_helper.gmail_scope_compatibility_result }}</div>
             </div>
             <div class="rrw-card">
                 <div class="rrw-card-title">Next admin action</div>
-                <div class="rrw-card-value">Configure OAuth paths</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.config_helper_status }}</div>
                 <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_oauth_config_helper.next_admin_action }}</div>
             </div>
         </div>
@@ -1058,6 +1056,60 @@
                     </tbody>
                 </table>
             {% endif %}
+        </details>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Gmail Scope Resolver</h2>
+        <p class="{% if dashboard.trustpilot_gmail_scope_compatibility_resolver.real_send_scope_available %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_gmail_scope_compatibility_resolver.message }}
+        </p>
+        <p class="rrw-muted">
+            Scope resolver report only. No Gmail network call was made, no email was sent, and no draft was created.
+        </p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Scope resolver status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.scope_resolver_status }}</div>
+                <div class="rrw-card-note">Local env-name presence only.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Draft-only mode</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.draft_only_mode|yesno:"Yes,No" }}</div>
+                <div class="rrw-card-note">Compose-only scope can support manual draft workflows.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Real-send scope</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.real_send_scope_available|yesno:"Available,Missing" }}</div>
+                <div class="rrw-card-note">Final approval is still required before any send.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.future_real_send_scope_blocker|yesno:"Scope needed,Review" }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.next_admin_action }}</div>
+            </div>
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_gmail_scope_compatibility_resolver.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_gmail_scope_compatibility_resolver.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_gmail_scope_compatibility_resolver.html_relative_path }}
+            </p>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>Legacy scope env present</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.legacy_scope_env_present|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>New scope env present</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.new_scope_env_present|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Compose scope available</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.compose_scope_available|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Send scope available</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.send_scope_available|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Broad mail scope available</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.broad_mail_scope_available|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Recommendation</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.compatibility_recommendation }}</td></tr>
+                </tbody>
+            </table>
         </details>
     </div>
 

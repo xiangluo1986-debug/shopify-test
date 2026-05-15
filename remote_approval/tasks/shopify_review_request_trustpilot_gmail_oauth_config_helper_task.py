@@ -43,6 +43,7 @@ REQUIRED_ACK_NAME = "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK"
 REQUIRED_EXECUTE_FLAG_NAME = "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE"
 REQUIRED_SCOPE_EXPECTED = "https://www.googleapis.com/auth/gmail.send"
 COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+BROAD_MAIL_SCOPE = "https://mail.google.com/"
 
 EXPECTED_ENV_PLACEHOLDERS = {
     GMAIL_SEND_FROM_EMAIL_ENV: "info@kidstoylover.com",
@@ -135,10 +136,15 @@ def _build_payload(duration_seconds: float) -> dict:
         "legacy_gmail_scopes_configured": env_status["legacy_gmail_scopes_configured"],
         "legacy_gmail_send_scope_present": env_status["legacy_gmail_send_scope_present"],
         "legacy_gmail_compose_scope_present": env_status["legacy_gmail_compose_scope_present"],
+        "legacy_gmail_broad_mail_scope_present": env_status["legacy_gmail_broad_mail_scope_present"],
         "legacy_gmail_scope_compatibility": env_status["legacy_gmail_scope_compatibility"],
         "gmail_scope_compatibility_result": env_status["gmail_scope_compatibility_result"],
         "gmail_send_scope_present": env_status["gmail_send_scope_present"],
         "gmail_compose_scope_present": env_status["gmail_compose_scope_present"],
+        "gmail_broad_mail_scope_present": env_status["gmail_broad_mail_scope_present"],
+        "draft_only_mode": env_status["draft_only_mode"],
+        "real_send_scope_available": env_status["real_send_scope_available"],
+        "future_real_send_scope_blocker": env_status["future_real_send_scope_blocker"],
         "required_scope_expected": REQUIRED_SCOPE_EXPECTED,
         "required_ack_name": REQUIRED_ACK_NAME,
         "required_execute_flag_name": REQUIRED_EXECUTE_FLAG_NAME,
@@ -234,18 +240,27 @@ def _gmail_config_status() -> dict:
         and client_secret_path_exists
         and token_file_configured
         and token_path_exists
-        and required_scope_matches_expected
+        and (required_scope_matches_expected or required_scope_status["broad_mail_scope_present"])
     )
     send_scope_present = (
         required_scope_matches_expected
         or legacy_scope_status["gmail_send_scope_present"]
         or required_scope_status["gmail_send_scope_present"]
     )
+    broad_mail_scope_present = (
+        legacy_scope_status["broad_mail_scope_present"]
+        or required_scope_status["broad_mail_scope_present"]
+    )
     compose_scope_present = (
         legacy_scope_status["gmail_compose_scope_present"]
         or required_scope_status["gmail_compose_scope_present"]
     )
-    scope_compatibility = _combined_scope_compatibility(send_scope_present, compose_scope_present)
+    scope_compatibility = _combined_scope_compatibility(
+        send_scope_present,
+        broad_mail_scope_present,
+        compose_scope_present,
+    )
+    real_send_scope_available = send_scope_present or broad_mail_scope_present
     return {
         "process_environment_only": True,
         "dotenv_read": False,
@@ -265,12 +280,17 @@ def _gmail_config_status() -> dict:
         "legacy_gmail_scopes_configured": legacy_scopes_configured,
         "legacy_gmail_send_scope_present": legacy_scope_status["gmail_send_scope_present"],
         "legacy_gmail_compose_scope_present": legacy_scope_status["gmail_compose_scope_present"],
+        "legacy_gmail_broad_mail_scope_present": legacy_scope_status["broad_mail_scope_present"],
         "legacy_gmail_scope_compatibility": legacy_scope_status["scope_compatibility"],
         "new_gmail_file_path_config_present": new_file_path_config_present,
         "gmail_oauth_config_status": _gmail_oauth_config_status(new_file_path_config_present, legacy_config_present),
         "gmail_token_config_status": _gmail_token_config_status(token_path_exists, legacy_refresh_token_configured),
         "gmail_send_scope_present": send_scope_present,
         "gmail_compose_scope_present": compose_scope_present,
+        "gmail_broad_mail_scope_present": broad_mail_scope_present,
+        "draft_only_mode": compose_scope_present and not real_send_scope_available,
+        "real_send_scope_available": real_send_scope_available,
+        "future_real_send_scope_blocker": not real_send_scope_available,
         "gmail_scope_compatibility_result": scope_compatibility,
         "new_env_var_name_status": [
             _env_var_name_status(GMAIL_SEND_FROM_EMAIL_ENV, from_configured),
@@ -325,20 +345,24 @@ def _scope_status(raw_value: str) -> dict:
     scopes = {item.strip() for item in re.split(r"[\s,]+", raw_value or "") if item.strip()}
     send_present = REQUIRED_SCOPE_EXPECTED in scopes
     compose_present = COMPOSE_SCOPE in scopes
+    broad_present = BROAD_MAIL_SCOPE in scopes
     return {
         "scope_configured": bool(scopes),
         "gmail_send_scope_present": send_present,
         "gmail_compose_scope_present": compose_present,
-        "scope_compatibility": _combined_scope_compatibility(send_present, compose_present),
+        "broad_mail_scope_present": broad_present,
+        "scope_compatibility": _combined_scope_compatibility(send_present, broad_present, compose_present),
         "scope_values_reported": False,
     }
 
 
-def _combined_scope_compatibility(send_present: bool, compose_present: bool) -> str:
+def _combined_scope_compatibility(send_present: bool, broad_present: bool, compose_present: bool) -> str:
     if send_present:
-        return "send_scope_present"
+        return "gmail_send_scope_available"
+    if broad_present:
+        return "broad_mail_scope_available"
     if compose_present:
-        return "compose_only_not_send_scope"
+        return "gmail_compose_only"
     return "scope_missing"
 
 
@@ -486,11 +510,11 @@ def _blocking_conditions(
                 ),
             )
         )
-    if not env_status["gmail_send_scope_present"]:
+    if not env_status["real_send_scope_available"]:
         if env_status["gmail_compose_scope_present"]:
             conditions.append(
                 _condition(
-                    "gmail_compose_only_not_send_scope",
+                    "gmail_compose_only",
                     "A Gmail compose scope was detected, but real sending requires gmail.send.",
                 )
             )
@@ -508,7 +532,11 @@ def _blocking_conditions(
                     "Configured Gmail scope names do not confirm gmail.send.",
                 )
             )
-    elif env_status["gmail_required_scope_configured"] and not env_status["gmail_required_scope_matches_expected"]:
+    elif (
+        env_status["gmail_required_scope_configured"]
+        and not env_status["gmail_required_scope_matches_expected"]
+        and not env_status["gmail_broad_mail_scope_present"]
+    ):
         conditions.append(
             _condition(
                 "gmail_required_scope_not_expected_but_legacy_send_scope_present",
@@ -542,22 +570,24 @@ def _config_helper_status(blocking_conditions: list[dict], dependency_status: di
     if not dependency_status["all_importable"]:
         return "blocked_missing_gmail_dependencies"
     if env_status["legacy_gmail_oauth_config_present"]:
-        if env_status["gmail_scope_compatibility_result"] == "compose_only_not_send_scope":
-            return "legacy_config_present_compose_only_not_send_scope"
+        if env_status["gmail_scope_compatibility_result"] == "gmail_compose_only":
+            return "legacy_config_present_gmail_compose_only"
+        if env_status["gmail_scope_compatibility_result"] == "broad_mail_scope_available":
+            return "legacy_config_present_broad_mail_scope_available"
         return "legacy_config_present_needs_final_scope_or_sender_check"
     return "blocked_missing_gmail_oauth_config"
 
 
 def _next_admin_action(env_status: dict) -> str:
     if env_status["legacy_gmail_oauth_config_present"]:
-        if env_status["gmail_send_scope_present"]:
+        if env_status["real_send_scope_available"]:
             return (
-                "Legacy Gmail config was detected safely. Rerun final preflight/readiness checks before any "
-                "future real send, and keep explicit human approval required."
+                "Legacy Gmail config was detected safely with real-send scope available. Rerun final "
+                "preflight/readiness checks and keep explicit human approval required."
             )
         return (
-            "Legacy Gmail config was detected safely, but gmail.send still needs verification before any "
-            "future real send."
+            "Legacy Gmail config was detected safely, but direct sending still needs gmail.send or an "
+            "approved equivalent scope before any future real send."
         )
     return (
         "Configure Gmail OAuth client secret file path and token file path, or confirm the older "
@@ -568,14 +598,19 @@ def _next_admin_action(env_status: dict) -> str:
 
 def _dashboard_message(env_status: dict) -> str:
     if env_status["legacy_gmail_oauth_config_present"]:
-        if env_status["gmail_scope_compatibility_result"] == "compose_only_not_send_scope":
-            return "Gmail can create drafts from the older email flow, but real sending may need gmail.send permission."
+        if env_status["gmail_scope_compatibility_result"] == "gmail_compose_only":
+            return "Gmail can prepare drafts, but direct sending needs extra permission."
+        if env_status["real_send_scope_available"]:
+            return "Gmail send permission is available. Final approval is still required before sending."
         return (
-            "Gmail configuration was found from the older email flow. It still needs final send-scope "
-            "verification before real sending."
+            "Gmail permission is not configured yet."
         )
     if env_status["new_gmail_file_path_config_present"]:
-        return "Gmail setup was found from the new file-path configuration. No Gmail network call was made."
+        if env_status["real_send_scope_available"]:
+            return "Gmail send permission is available. Final approval is still required before sending."
+        if env_status["gmail_scope_compatibility_result"] == "gmail_compose_only":
+            return "Gmail can prepare drafts, but direct sending needs extra permission."
+        return "Gmail permission is not configured yet."
     return "Gmail setup is not complete yet. No Gmail network call was made."
 
 
@@ -712,6 +747,9 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>Required scope configured</th><td>{payload["gmail_required_scope_configured"]}</td></tr>
       <tr><th>Required scope matches expected</th><td>{payload["gmail_required_scope_matches_expected"]}</td></tr>
       <tr><th>Scope compatibility</th><td><code>{escape(payload["gmail_scope_compatibility_result"])}</code></td></tr>
+      <tr><th>Draft-only mode</th><td>{payload["draft_only_mode"]}</td></tr>
+      <tr><th>Real-send scope available</th><td>{payload["real_send_scope_available"]}</td></tr>
+      <tr><th>Future real-send scope blocker</th><td>{payload["future_real_send_scope_blocker"]}</td></tr>
       <tr><th>Required scope expected</th><td><code>{escape(payload["required_scope_expected"])}</code></td></tr>
       <tr><th>Token file read</th><td>{payload["token_file_read"]}</td></tr>
       <tr><th>Credential file read</th><td>{payload["credential_file_read"]}</td></tr>
@@ -806,6 +844,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "gmail_scope_compatibility_result": payload["gmail_scope_compatibility_result"],
         "gmail_send_scope_present": payload["gmail_send_scope_present"],
         "gmail_compose_scope_present": payload["gmail_compose_scope_present"],
+        "gmail_broad_mail_scope_present": payload["gmail_broad_mail_scope_present"],
+        "draft_only_mode": payload["draft_only_mode"],
+        "real_send_scope_available": payload["real_send_scope_available"],
+        "future_real_send_scope_blocker": payload["future_real_send_scope_blocker"],
         "required_ack_name_documented": payload["required_ack_name_documented"],
         "required_execute_flag_name_documented": payload["required_execute_flag_name_documented"],
         "gmail_network_call_performed": False,
@@ -832,6 +874,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Gmail token config status: {payload.get('gmail_token_config_status')}\n"
         f"Legacy Gmail config present: {payload.get('legacy_gmail_oauth_config_present')}\n"
         f"Scope compatibility: {payload.get('gmail_scope_compatibility_result')}\n"
+        f"Draft-only mode: {payload.get('draft_only_mode')}\n"
+        f"Real-send scope available: {payload.get('real_send_scope_available')}\n"
         f"From email configured: {payload.get('gmail_send_from_email_configured')}\n"
         f"OAuth client secret path configured: {payload.get('gmail_oauth_client_secret_file_configured')}\n"
         f"OAuth token path configured: {payload.get('gmail_oauth_token_file_configured')}\n"

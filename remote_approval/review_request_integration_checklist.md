@@ -755,3 +755,26 @@ Future tracking design note:
   phase receives explicit human approval.
 - [x] Update the Review Requests dashboard to show legacy Gmail config status in
   plain language while keeping technical env names in Advanced details.
+
+## Phase 5.18B Trustpilot Gmail Scope Compatibility Resolver
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_scope_compatibility_resolver`.
+- [x] Generate local JSON/HTML resolver reports only:
+  `logs/shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.json`
+  and
+  `logs/shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.html`.
+- [x] Distinguish `gmail.compose` draft-only compatibility from `gmail.send`
+  real-send compatibility and the broad `mail.google.com` scope.
+- [x] Do not call Gmail network/API, create/update/delete Gmail drafts, or send
+  email.
+- [x] Do not call Shopify APIs, write Shopify tags, call
+  Trustpilot/Kudosi/Ali Reviews APIs, or call `translationsRegister`.
+- [x] Keep direct real send blocked unless `gmail.send` or an equivalent
+  approved scope is confirmed and a later phase receives explicit human
+  approval.
+- [x] If only `gmail.compose` exists, future workflow should use draft
+  creation/manual send or upgrade OAuth scope before any direct-send phase.
+- [x] Update the helper/readiness/dashboard wording so admins can see whether
+  Gmail permission is missing, draft-only, or real-send capable without showing
+  secret values.

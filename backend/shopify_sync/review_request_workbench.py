@@ -208,6 +208,12 @@ REPORT_DEFINITIONS = (
         ("compatibility_audit_status", "report_status", "status"),
     ),
     (
+        "trustpilot_gmail_scope_compatibility_resolver",
+        "Trustpilot Gmail scope compatibility resolver",
+        "shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.json",
+        ("scope_resolver_status", "scope_compatibility_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -466,6 +472,9 @@ def build_review_request_workbench_context(params=None):
     trustpilot_gmail_config_compatibility_audit = _trustpilot_gmail_config_compatibility_audit_status(
         reports.get("trustpilot_gmail_config_compatibility_audit", {}),
     )
+    trustpilot_gmail_scope_compatibility_resolver = _trustpilot_gmail_scope_compatibility_resolver_status(
+        reports.get("trustpilot_gmail_scope_compatibility_resolver", {}),
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -490,6 +499,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_gmail_real_send_readiness_audit=trustpilot_gmail_real_send_readiness_audit,
         trustpilot_gmail_oauth_config_helper=trustpilot_gmail_oauth_config_helper,
         trustpilot_gmail_config_compatibility_audit=trustpilot_gmail_config_compatibility_audit,
+        trustpilot_gmail_scope_compatibility_resolver=trustpilot_gmail_scope_compatibility_resolver,
     )
 
     return {
@@ -551,6 +561,7 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_gmail_real_send_readiness_audit": trustpilot_gmail_real_send_readiness_audit,
             "trustpilot_gmail_oauth_config_helper": trustpilot_gmail_oauth_config_helper,
             "trustpilot_gmail_config_compatibility_audit": trustpilot_gmail_config_compatibility_audit,
+            "trustpilot_gmail_scope_compatibility_resolver": trustpilot_gmail_scope_compatibility_resolver,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -2967,6 +2978,17 @@ def _trustpilot_gmail_real_send_readiness_audit_status(
     gmail_dependencies_importable = data.get("gmail_dependencies_importable") is True
     gmail_oauth_config_present = data.get("gmail_oauth_config_present") is True
     gmail_token_config_present = data.get("gmail_token_config_present") is True
+    gmail_send_scope_present = data.get("gmail_send_scope_present") is True
+    gmail_compose_scope_present = data.get("gmail_compose_scope_present") is True
+    gmail_broad_mail_scope_present = data.get("gmail_broad_mail_scope_present") is True
+    real_send_scope_available = (
+        data.get("real_send_scope_available") is True
+        or gmail_send_scope_present
+        or gmail_broad_mail_scope_present
+    )
+    draft_only_mode = data.get("draft_only_mode") is True or (
+        gmail_compose_scope_present and not real_send_scope_available
+    )
     single_send_limit_enforced = data.get("single_send_limit_enforced") is True
     duplicate_suppression_required = data.get("duplicate_suppression_required") is not False
     raw_email_output_blocked = data.get("raw_email_output_blocked") is not False
@@ -3003,6 +3025,13 @@ def _trustpilot_gmail_real_send_readiness_audit_status(
         "gmail_oauth_config_status": _present_missing_label(gmail_oauth_config_present, report_loaded),
         "gmail_token_config_present": gmail_token_config_present,
         "gmail_token_config_status": _present_missing_label(gmail_token_config_present, report_loaded),
+        "gmail_send_scope_present": gmail_send_scope_present,
+        "gmail_compose_scope_present": gmail_compose_scope_present,
+        "gmail_broad_mail_scope_present": gmail_broad_mail_scope_present,
+        "draft_only_mode": draft_only_mode,
+        "real_send_scope_available": real_send_scope_available,
+        "future_real_send_scope_blocker": data.get("future_real_send_scope_blocker") is True
+        or not real_send_scope_available,
         "eligible_candidate_count": eligible_count,
         "selected_candidate_order_name": selected_order,
         "latest_auto_refresh_status": latest_auto_refresh_status,
@@ -3102,6 +3131,18 @@ def _trustpilot_gmail_oauth_config_helper_status(report, trustpilot_gmail_real_s
     )
     gmail_send_scope_present = data.get("gmail_send_scope_present") is True
     gmail_compose_scope_present = data.get("gmail_compose_scope_present") is True
+    gmail_broad_mail_scope_present = data.get("gmail_broad_mail_scope_present") is True
+    real_send_scope_available = (
+        data.get("real_send_scope_available") is True
+        or gmail_send_scope_present
+        or gmail_broad_mail_scope_present
+    )
+    draft_only_mode = data.get("draft_only_mode") is True or (
+        gmail_compose_scope_present and not real_send_scope_available
+    )
+    future_real_send_scope_blocker = data.get("future_real_send_scope_blocker")
+    if future_real_send_scope_blocker is None:
+        future_real_send_scope_blocker = not real_send_scope_available
     required_scope = _safe_text(
         data.get("required_scope_expected") or "https://www.googleapis.com/auth/gmail.send",
         max_length=120,
@@ -3159,6 +3200,10 @@ def _trustpilot_gmail_oauth_config_helper_status(report, trustpilot_gmail_real_s
         "gmail_scope_compatibility_result": scope_compatibility_result,
         "gmail_send_scope_present": gmail_send_scope_present,
         "gmail_compose_scope_present": gmail_compose_scope_present,
+        "gmail_broad_mail_scope_present": gmail_broad_mail_scope_present,
+        "draft_only_mode": draft_only_mode,
+        "real_send_scope_available": real_send_scope_available,
+        "future_real_send_scope_blocker": future_real_send_scope_blocker is True,
         "required_ack_name_documented": required_ack_documented,
         "required_ack_name_documented_label": _yes_no_unknown(required_ack_documented, report_loaded),
         "required_execute_flag_name_documented": required_execute_documented,
@@ -3252,14 +3297,84 @@ def _trustpilot_gmail_config_compatibility_audit_status(report):
         "gmail_dependencies_importable": data.get("gmail_dependencies_importable") is True,
         "scope_compatibility_result": scope_compatibility,
         "gmail_send_scope_present": data.get("gmail_send_scope_present") is True
-        or scope_compatibility == "send_scope_present",
+        or scope_compatibility in {"send_scope_present", "gmail_send_scope_available"},
         "gmail_compose_scope_present": data.get("gmail_compose_scope_present") is True
-        or scope_compatibility == "compose_only_not_send_scope",
+        or scope_compatibility in {"compose_only_not_send_scope", "gmail_compose_only"},
+        "gmail_broad_mail_scope_present": data.get("gmail_broad_mail_scope_present") is True
+        or scope_compatibility == "broad_mail_scope_available",
         "compatibility_recommendation": _safe_text(
             data.get("compatibility_recommendation"),
             max_length=500,
         ),
         "suggested_helper_change": _safe_text(data.get("suggested_helper_change"), max_length=500),
+        "next_admin_action": _safe_text(data.get("next_admin_action"), max_length=500),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "privacy_scan_summary": (
+            data.get("privacy_scan_summary") if isinstance(data.get("privacy_scan_summary"), dict) else {}
+        ),
+        "raw_flags": {
+            "gmail_network_call_performed": data.get("gmail_network_call_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_send_performed": data.get("gmail_send_performed") is True,
+            "gmail_draft_create_performed": data.get("gmail_draft_create_performed") is True,
+            "token_file_read": data.get("token_file_read") is True,
+            "credential_file_read": data.get("credential_file_read") is True,
+            "secret_value_printed": data.get("secret_value_printed") is True,
+        },
+    }
+
+
+def _trustpilot_gmail_scope_compatibility_resolver_status(report):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    report_loaded = bool(report.get("loaded"))
+    status = _safe_text(
+        data.get("scope_resolver_status")
+        or data.get("scope_compatibility_status")
+        or report.get("status")
+        or "missing",
+        max_length=120,
+    )
+    compose_available = data.get("compose_scope_available") is True
+    send_available = data.get("send_scope_available") is True
+    broad_available = data.get("broad_mail_scope_available") is True
+    real_send_available = data.get("real_send_scope_available") is True or send_available or broad_available
+    draft_only = data.get("draft_only_mode") is True or (
+        compose_available and not real_send_available
+    )
+    future_blocker = data.get("future_real_send_scope_blocker")
+    if future_blocker is None:
+        future_blocker = not real_send_available
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.json",
+            max_length=160,
+        ),
+        "html_relative_path": "logs/shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.html",
+        "scope_resolver_status": status,
+        "scope_compatibility_status": _safe_text(
+            data.get("scope_compatibility_status") or status,
+            max_length=120,
+        ),
+        "message": _safe_text(
+            data.get("dashboard_message") or _gmail_scope_plain_message(status),
+            max_length=300,
+        ),
+        "legacy_scope_env_present": data.get("legacy_scope_env_present") is True,
+        "new_scope_env_present": data.get("new_scope_env_present") is True,
+        "compose_scope_available": compose_available,
+        "send_scope_available": send_available,
+        "broad_mail_scope_available": broad_available,
+        "draft_only_mode": draft_only,
+        "real_send_scope_available": real_send_available,
+        "future_real_send_scope_blocker": future_blocker is True,
+        "compatibility_recommendation": _safe_text(
+            data.get("compatibility_recommendation"),
+            max_length=500,
+        ),
         "next_admin_action": _safe_text(data.get("next_admin_action"), max_length=500),
         "source_error": _safe_text(report.get("error", ""), max_length=300),
         "privacy_scan_summary": (
@@ -3326,6 +3441,7 @@ def _operating_dashboard(
     trustpilot_gmail_real_send_readiness_audit,
     trustpilot_gmail_oauth_config_helper,
     trustpilot_gmail_config_compatibility_audit,
+    trustpilot_gmail_scope_compatibility_resolver,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
@@ -3346,6 +3462,7 @@ def _operating_dashboard(
     gmail_setup = _gmail_setup_summary(
         trustpilot_gmail_oauth_config_helper,
         trustpilot_gmail_config_compatibility_audit,
+        trustpilot_gmail_scope_compatibility_resolver,
     )
     return {
         "ready_to_send_count": ready_count,
@@ -3414,6 +3531,7 @@ def _operating_dashboard(
         "trustpilot_gmail_real_send_readiness_audit": trustpilot_gmail_real_send_readiness_audit,
         "trustpilot_gmail_oauth_config_helper": trustpilot_gmail_oauth_config_helper,
         "trustpilot_gmail_config_compatibility_audit": trustpilot_gmail_config_compatibility_audit,
+        "trustpilot_gmail_scope_compatibility_resolver": trustpilot_gmail_scope_compatibility_resolver,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,
@@ -3499,17 +3617,17 @@ def _order_count_text(count, suffix):
     return f"{count} {noun} {suffix}"
 
 
-def _gmail_setup_summary(gmail_helper, compatibility_audit=None):
+def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=None):
     compatibility_audit = compatibility_audit or {}
+    scope_resolver = scope_resolver or {}
     dependencies_ready = (
         gmail_helper.get("gmail_dependencies_importable") is True
         or compatibility_audit.get("gmail_dependencies_importable") is True
     )
-    new_config_ready = (
+    new_file_paths_ready = (
         gmail_helper.get("gmail_send_from_email_configured") is True
         and gmail_helper.get("gmail_oauth_client_secret_path_exists") is True
         and gmail_helper.get("gmail_oauth_token_path_exists") is True
-        and gmail_helper.get("gmail_required_scope_matches_expected") is True
     )
     legacy_config_detected = (
         gmail_helper.get("legacy_gmail_oauth_config_present") is True
@@ -3518,31 +3636,45 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None):
     send_scope_present = (
         gmail_helper.get("gmail_send_scope_present") is True
         or compatibility_audit.get("gmail_send_scope_present") is True
+        or scope_resolver.get("send_scope_available") is True
     )
+    broad_mail_scope_present = (
+        gmail_helper.get("gmail_broad_mail_scope_present") is True
+        or scope_resolver.get("broad_mail_scope_available") is True
+    )
+    real_send_scope_available = (
+        gmail_helper.get("real_send_scope_available") is True
+        or scope_resolver.get("real_send_scope_available") is True
+        or send_scope_present
+        or broad_mail_scope_present
+    )
+    new_config_ready = new_file_paths_ready and real_send_scope_available
     compose_scope_present = (
         gmail_helper.get("gmail_compose_scope_present") is True
         or compatibility_audit.get("gmail_compose_scope_present") is True
+        or scope_resolver.get("compose_scope_available") is True
     )
-    ready = dependencies_ready and (new_config_ready or (legacy_config_detected and send_scope_present))
+    ready = dependencies_ready and (new_config_ready or (legacy_config_detected and real_send_scope_available))
     required_scope = _safe_text(
         gmail_helper.get("required_scope_expected") or "https://www.googleapis.com/auth/gmail.send",
         max_length=120,
     )
-    if legacy_config_detected and not send_scope_present and compose_scope_present:
+    scope_status = _safe_text(scope_resolver.get("scope_resolver_status"), max_length=120)
+    if scope_status == "scope_missing":
+        status_value = "Permission needed"
+        status_message = "Gmail permission is not configured yet."
+    elif compose_scope_present and not real_send_scope_available:
         status_value = "Draft-only config"
-        status_message = "Gmail can create drafts, but real sending may need gmail.send permission."
+        status_message = "Gmail can prepare drafts, but direct sending needs extra permission."
+    elif real_send_scope_available:
+        status_value = "Ready"
+        status_message = "Gmail send permission is available. Final approval is still required before sending."
     elif legacy_config_detected:
         status_value = "Legacy config found"
-        status_message = (
-            "Gmail configuration was found from the older email flow. It still needs final "
-            "send-scope verification before real sending."
-        )
-    elif ready:
-        status_value = "Ready"
-        status_message = "Gmail setup looks complete."
+        status_message = "Gmail permission is not configured yet."
     else:
         status_value = "Setup needed"
-        status_message = "Gmail setup is not complete yet."
+        status_message = "Gmail permission is not configured yet."
     return {
         "ready": ready,
         "status_value": status_value,
@@ -3570,7 +3702,16 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None):
             },
             {
                 "label": "Required permission",
-                "value": _gmail_permission_label(send_scope_present, compose_scope_present, required_scope),
+                "value": _gmail_permission_label(
+                    send_scope_present,
+                    compose_scope_present,
+                    required_scope,
+                    broad_mail_scope_present,
+                ),
+            },
+            {
+                "label": "Scope resolver",
+                "value": _admin_status_label(scope_resolver.get("scope_resolver_status") or "missing"),
             },
             {
                 "label": "Compatibility audit",
@@ -3586,12 +3727,24 @@ def _plain_yes_no(value):
     return "Yes" if value else "No"
 
 
-def _gmail_permission_label(send_scope_present, compose_scope_present, required_scope):
+def _gmail_permission_label(send_scope_present, compose_scope_present, required_scope, broad_mail_scope_present=False):
     if send_scope_present:
         return "gmail.send"
+    if broad_mail_scope_present:
+        return "mail.google.com"
     if compose_scope_present:
         return "gmail.compose only"
     return "gmail.send" if required_scope.endswith("/gmail.send") else required_scope
+
+
+def _gmail_scope_plain_message(status):
+    if status == "scope_missing":
+        return "Gmail permission is not configured yet."
+    if status == "gmail_compose_only":
+        return "Gmail can prepare drafts, but direct sending needs extra permission."
+    if status in {"gmail_send_scope_available", "broad_mail_scope_available"}:
+        return "Gmail send permission is available. Final approval is still required before sending."
+    return "Gmail permission is not configured yet."
 
 
 def _current_blockers(ready_count, gmail_ready):

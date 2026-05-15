@@ -316,6 +316,27 @@ If legacy config is detected, the helper may report
 `legacy_config_present`, but real sending still requires final `gmail.send`
 verification and a later explicitly approved write/send phase.
 
+## Review Request Trustpilot Gmail Scope Compatibility Resolver
+
+`shopify_review_request_trustpilot_gmail_scope_compatibility_resolver` is a
+Phase 5.18B local resolver for classifying configured Gmail scope compatibility
+for Trustpilot review request emails.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.json
+logs/shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.html
+```
+
+The resolver may inspect only `GOOGLE_GMAIL_SCOPES` and
+`GMAIL_REQUIRED_SCOPE` from the process environment, plus safe scope
+placeholders in `.env.example` and helper task constants. It reports whether
+the config is draft-only (`gmail.compose`), real-send capable (`gmail.send` or
+the broad mail scope), or missing/unknown. It must not call Gmail, create or
+send drafts, read token/credential files, print secret values, call Shopify,
+write tags, call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

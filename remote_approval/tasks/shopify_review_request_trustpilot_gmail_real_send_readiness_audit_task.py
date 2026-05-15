@@ -39,6 +39,7 @@ GMAIL_DEPENDENCY_MODULES = (
 
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+BROAD_MAIL_SCOPE = "https://mail.google.com/"
 NEW_GMAIL_OAUTH_ENV_NAMES = (
     "GMAIL_SEND_FROM_EMAIL",
     "GMAIL_OAUTH_CLIENT_SECRET_FILE",
@@ -249,6 +250,10 @@ def _build_payload(sources: dict, duration_seconds: float) -> dict:
         "gmail_scope_compatibility_result": env_status["scope_compatibility"],
         "gmail_send_scope_present": env_status["gmail_send_scope_present"],
         "gmail_compose_scope_present": env_status["gmail_compose_scope_present"],
+        "gmail_broad_mail_scope_present": env_status["gmail_broad_mail_scope_present"],
+        "draft_only_mode": env_status["draft_only_mode"],
+        "real_send_scope_available": env_status["real_send_scope_available"],
+        "future_real_send_scope_blocker": env_status["future_real_send_scope_blocker"],
         "gmail_local_config_name_audit": env_status,
         "gmail_network_call_performed": False,
         "gmail_api_call_performed": False,
@@ -359,9 +364,9 @@ def _gmail_env_status() -> dict:
         legacy_oauth_present_by_role["client_credential_name"]
         and legacy_token_present_by_role["refresh_credential_name"]
     )
-    new_file_path_config_present = all(new_name_presence.values()) and new_scope_status[
-        "gmail_send_scope_present"
-    ]
+    new_file_path_config_present = all(new_name_presence.values()) and (
+        new_scope_status["gmail_send_scope_present"] or new_scope_status["broad_mail_scope_present"]
+    )
     oauth_present = legacy_oauth_config_present or new_file_path_config_present
     token_present = (
         legacy_token_present_by_role["refresh_credential_name"]
@@ -374,10 +379,18 @@ def _gmail_env_status() -> dict:
     gmail_send_scope_present = legacy_scope_status["gmail_send_scope_present"] or new_scope_status[
         "gmail_send_scope_present"
     ]
+    gmail_broad_mail_scope_present = legacy_scope_status["broad_mail_scope_present"] or new_scope_status[
+        "broad_mail_scope_present"
+    ]
     gmail_compose_scope_present = legacy_scope_status["gmail_compose_scope_present"] or new_scope_status[
         "gmail_compose_scope_present"
     ]
-    scope_compatibility = _combined_scope_compatibility(gmail_send_scope_present, gmail_compose_scope_present)
+    real_send_scope_available = gmail_send_scope_present or gmail_broad_mail_scope_present
+    scope_compatibility = _combined_scope_compatibility(
+        gmail_send_scope_present,
+        gmail_broad_mail_scope_present,
+        gmail_compose_scope_present,
+    )
     return {
         "presence_only": True,
         "process_environment_only": True,
@@ -415,6 +428,10 @@ def _gmail_env_status() -> dict:
         ),
         "gmail_send_scope_present": gmail_send_scope_present,
         "gmail_compose_scope_present": gmail_compose_scope_present,
+        "gmail_broad_mail_scope_present": gmail_broad_mail_scope_present,
+        "draft_only_mode": gmail_compose_scope_present and not real_send_scope_available,
+        "real_send_scope_available": real_send_scope_available,
+        "future_real_send_scope_blocker": not real_send_scope_available,
         "legacy_scope_compatibility": legacy_scope_status["scope_compatibility"],
         "new_scope_compatibility": new_scope_status["scope_compatibility"],
         "scope_compatibility": scope_compatibility,
@@ -429,20 +446,24 @@ def _scope_status(raw_value: str) -> dict:
     scopes = {item.strip() for item in str(raw_value or "").replace(",", " ").split() if item.strip()}
     send_present = GMAIL_SEND_SCOPE in scopes
     compose_present = GMAIL_COMPOSE_SCOPE in scopes
+    broad_present = BROAD_MAIL_SCOPE in scopes
     return {
         "scope_configured": bool(scopes),
         "gmail_send_scope_present": send_present,
         "gmail_compose_scope_present": compose_present,
-        "scope_compatibility": _combined_scope_compatibility(send_present, compose_present),
+        "broad_mail_scope_present": broad_present,
+        "scope_compatibility": _combined_scope_compatibility(send_present, broad_present, compose_present),
         "scope_values_reported": False,
     }
 
 
-def _combined_scope_compatibility(send_present: bool, compose_present: bool) -> str:
+def _combined_scope_compatibility(send_present: bool, broad_present: bool, compose_present: bool) -> str:
     if send_present:
-        return "send_scope_present"
+        return "gmail_send_scope_available"
+    if broad_present:
+        return "broad_mail_scope_available"
     if compose_present:
-        return "compose_only_not_send_scope"
+        return "gmail_compose_only"
     return "scope_missing"
 
 
@@ -682,7 +703,11 @@ def _readiness_checklist(
         _checklist_row("gmail_dependencies_importable", dependency_status["all_importable"], dependency_status["status"]),
         _checklist_row("gmail_oauth_config_present", env_status["oauth_config_present"], env_status["oauth_config_status"]),
         _checklist_row("gmail_token_config_present", env_status["token_config_present"], env_status["token_config_status"]),
-        _checklist_row("gmail_send_scope_present", env_status["gmail_send_scope_present"], env_status["scope_compatibility"]),
+        _checklist_row(
+            "gmail_real_send_scope_available",
+            env_status["real_send_scope_available"],
+            env_status["scope_compatibility"],
+        ),
         _checklist_row("explicit_ack_required", True, REQUIRED_ACK_NAME),
         _checklist_row("explicit_real_send_execute_flag_required", True, REQUIRED_REAL_SEND_EXECUTE_FLAG_NAME),
         _checklist_row("single_send_limit_required", True, "exactly one candidate only"),
@@ -835,6 +860,9 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>Legacy Gmail config</th><td>{payload["legacy_gmail_oauth_config_present"]}</td></tr>
       <tr><th>New Gmail file-path config</th><td>{payload["new_gmail_file_path_config_present"]}</td></tr>
       <tr><th>Gmail scope compatibility</th><td><code>{escape(payload["gmail_scope_compatibility_result"])}</code></td></tr>
+      <tr><th>Draft-only mode</th><td>{payload["draft_only_mode"]}</td></tr>
+      <tr><th>Real-send scope available</th><td>{payload["real_send_scope_available"]}</td></tr>
+      <tr><th>Future real-send scope blocker</th><td>{payload["future_real_send_scope_blocker"]}</td></tr>
       <tr><th>Eligible candidate count</th><td>{payload["eligible_candidate_count"]}</td></tr>
       <tr><th>Selected candidate</th><td>{escape(selected_candidate)}</td></tr>
       <tr><th>Latest auto refresh status</th><td><code>{escape(payload["latest_auto_refresh_status"])}</code></td></tr>
@@ -920,6 +948,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "gmail_scope_compatibility_result": payload["gmail_scope_compatibility_result"],
         "gmail_send_scope_present": payload["gmail_send_scope_present"],
         "gmail_compose_scope_present": payload["gmail_compose_scope_present"],
+        "gmail_broad_mail_scope_present": payload["gmail_broad_mail_scope_present"],
+        "draft_only_mode": payload["draft_only_mode"],
+        "real_send_scope_available": payload["real_send_scope_available"],
+        "future_real_send_scope_blocker": payload["future_real_send_scope_blocker"],
         "latest_auto_refresh_status": payload["latest_auto_refresh_status"],
         "latest_preflight_status": payload["latest_preflight_status"],
         "latest_execute_status": payload["latest_execute_status"],
@@ -959,6 +991,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Gmail token config status: {payload['gmail_token_config_status']}\n"
         f"Legacy Gmail config present: {payload['legacy_gmail_oauth_config_present']}\n"
         f"Scope compatibility: {payload['gmail_scope_compatibility_result']}\n"
+        f"Draft-only mode: {payload['draft_only_mode']}\n"
+        f"Real-send scope available: {payload['real_send_scope_available']}\n"
         f"Latest preflight status: {payload['latest_preflight_status']}\n"
         f"Latest execute status: {payload['latest_execute_status']}\n"
         f"Eligible candidate count: {payload['eligible_candidate_count']}\n"
