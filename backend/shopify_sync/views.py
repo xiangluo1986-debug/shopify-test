@@ -163,6 +163,7 @@ TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS = {
     "h3",
     "hr",
     "i",
+    "iframe",
     "li",
     "ol",
     "p",
@@ -172,11 +173,32 @@ TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS = {
 TRANSLATION_CONSOLE_HTML_PREVIEW_VOID_TAGS = {"br", "hr"}
 TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS = {
     "embed",
-    "iframe",
     "object",
     "script",
     "style",
 }
+TRANSLATION_CONSOLE_HTML_PREVIEW_IFRAME_ATTRS = {
+    "allow",
+    "allowfullscreen",
+    "frameborder",
+    "height",
+    "loading",
+    "referrerpolicy",
+    "src",
+    "title",
+    "width",
+}
+TRANSLATION_CONSOLE_HTML_PREVIEW_VIDEO_HOSTS = {
+    "player.vimeo.com",
+    "www.youtube-nocookie.com",
+    "www.youtube.com",
+    "youtu.be",
+    "youtube-nocookie.com",
+    "youtube.com",
+}
+TRANSLATION_CONSOLE_HTML_PREVIEW_BLOCKED_IFRAME_PLACEHOLDER = (
+    '<div class="tw-video-embed-placeholder">Video embed hidden for safety</div>'
+)
 TRANSLATION_CONSOLE_HTML_PREVIEW_SAFE_URL_SCHEMES = {
     "",
     "http",
@@ -4623,10 +4645,21 @@ class _TranslationConsoleHtmlPreviewSanitizer(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         normalized_tag = str(tag or "").lower()
+        if self._drop_stack:
+            if (
+                normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS
+                or normalized_tag == "iframe"
+            ):
+                self._drop_stack.append(normalized_tag)
+            return
+        if normalized_tag == "iframe":
+            self._append_iframe_or_placeholder(attrs)
+            self._drop_stack.append(normalized_tag)
+            return
         if normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS:
             self._drop_stack.append(normalized_tag)
             return
-        if self._drop_stack or normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS:
+        if normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS:
             return
         attr_text = _translation_editor_sanitized_html_preview_attrs(
             normalized_tag,
@@ -4639,11 +4672,14 @@ class _TranslationConsoleHtmlPreviewSanitizer(HTMLParser):
 
     def handle_startendtag(self, tag, attrs):
         normalized_tag = str(tag or "").lower()
-        if (
-            self._drop_stack
-            or normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS
-            or normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS
-        ):
+        if self._drop_stack:
+            return
+        if normalized_tag == "iframe":
+            self._append_iframe_or_placeholder(attrs)
+            return
+        if normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_DROP_CONTENT_TAGS:
+            return
+        if normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS:
             return
         attr_text = _translation_editor_sanitized_html_preview_attrs(
             normalized_tag,
@@ -4664,6 +4700,8 @@ class _TranslationConsoleHtmlPreviewSanitizer(HTMLParser):
                     : self._drop_stack.index(normalized_tag)
                 ]
             return
+        if normalized_tag == "iframe":
+            return
         if (
             normalized_tag in TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS
             and normalized_tag not in TRANSLATION_CONSOLE_HTML_PREVIEW_VOID_TAGS
@@ -4674,8 +4712,45 @@ class _TranslationConsoleHtmlPreviewSanitizer(HTMLParser):
         if not self._drop_stack:
             self._parts.append(str(escape(data)))
 
+    def _append_iframe_or_placeholder(self, attrs):
+        attr_text = _translation_console_safe_iframe_attrs(attrs)
+        if not attr_text:
+            self._parts.append(TRANSLATION_CONSOLE_HTML_PREVIEW_BLOCKED_IFRAME_PLACEHOLDER)
+            return
+        self._parts.append(f"<iframe{attr_text}></iframe>")
+
     def get_html(self):
         return "".join(self._parts)
+
+
+def _translation_console_safe_iframe_attrs(attrs) -> str:
+    sanitized = []
+    seen_names = set()
+    has_safe_src = False
+    for raw_name, raw_value in attrs or []:
+        name = str(raw_name or "").lower()
+        value = "" if raw_value is None else str(raw_value)
+        if (
+            not name
+            or name in seen_names
+            or name.startswith("on")
+            or name not in TRANSLATION_CONSOLE_HTML_PREVIEW_IFRAME_ATTRS
+        ):
+            continue
+        seen_names.add(name)
+        if name == "src":
+            value = value.strip()
+            if not _translation_console_is_safe_video_url(value):
+                continue
+            has_safe_src = True
+            sanitized.append(f' src="{escape(value)}"')
+        elif name == "allowfullscreen":
+            sanitized.append(" allowfullscreen")
+        elif value:
+            sanitized.append(f' {name}="{escape(value)}"')
+    if not has_safe_src:
+        return ""
+    return "".join(sanitized)
 
 
 def _translation_editor_sanitized_html_preview_attrs(tag: str, attrs) -> str:
@@ -4709,6 +4784,20 @@ def _translation_editor_html_preview_url_is_safe(value: str) -> bool:
         return False
     parsed = urllib.parse.urlparse(compact_href)
     return parsed.scheme.lower() in TRANSLATION_CONSOLE_HTML_PREVIEW_SAFE_URL_SCHEMES
+
+
+def _translation_console_is_safe_video_url(value: str) -> bool:
+    src = str(value or "").strip()
+    if not src:
+        return False
+    compact_src = re.sub(r"[\x00-\x20]+", "", src).lower()
+    if compact_src.startswith(("javascript:", "data:", "vbscript:")):
+        return False
+    parsed = urllib.parse.urlparse(compact_src)
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").rstrip(".").lower()
+    return bool(host and host in TRANSLATION_CONSOLE_HTML_PREVIEW_VIDEO_HOSTS)
 
 
 def _translation_editor_sanitize_html_preview(value):
