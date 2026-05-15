@@ -729,3 +729,29 @@ Future tracking design note:
   added.
 - [x] No Shopify API call, Shopify tag write, Shopify mutation, Trustpilot API
   call, Kudosi API call, or Ali Reviews API call is added.
+
+## Phase 5.18A Trustpilot Gmail Config Compatibility Audit
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_config_compatibility_audit`.
+- [x] Generate local JSON/HTML audit reports only:
+  `logs/shopify_review_request_trustpilot_gmail_config_compatibility_audit.json`
+  and
+  `logs/shopify_review_request_trustpilot_gmail_config_compatibility_audit.html`.
+- [x] Detect legacy `GOOGLE_GMAIL_*` config names safely by code reference and
+  process environment presence only.
+- [x] Do not print secret values, read Gmail token contents, read credential
+  file contents, or read `.env`.
+- [x] Do not call Gmail network/API, create/update/delete Gmail drafts, or send
+  email.
+- [x] Do not call Shopify APIs, write Shopify tags, call
+  Trustpilot/Kudosi/Ali Reviews APIs, or call `translationsRegister`.
+- [x] Explain why Phase 5.16 could show missing even though the earlier Gmail
+  flow worked: the older Trustpilot Gmail flow used legacy `GOOGLE_GMAIL_*`
+  names while the new helper checked `GMAIL_*` file-path names.
+- [x] Add safe legacy fallback detection to the Gmail helper/readiness audit so
+  legacy config can be recognized without exposing values.
+- [x] Keep real send blocked unless `gmail.send` scope is confirmed and a later
+  phase receives explicit human approval.
+- [x] Update the Review Requests dashboard to show legacy Gmail config status in
+  plain language while keeping technical env names in Advanced details.

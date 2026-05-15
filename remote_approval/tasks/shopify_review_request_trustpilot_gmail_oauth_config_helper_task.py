@@ -27,9 +27,22 @@ GMAIL_SEND_FROM_EMAIL_ENV = "GMAIL_SEND_FROM_EMAIL"
 GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV = "GMAIL_OAUTH_CLIENT_SECRET_FILE"
 GMAIL_OAUTH_TOKEN_FILE_ENV = "GMAIL_OAUTH_TOKEN_FILE"
 GMAIL_REQUIRED_SCOPE_ENV = "GMAIL_REQUIRED_SCOPE"
+LEGACY_GMAIL_SEND_FROM_ENV = "GMAIL_SEND_FROM"
+LEGACY_GMAIL_CLIENT_ID_ENV = "GOOGLE_GMAIL_CLIENT_ID"
+LEGACY_GMAIL_CLIENT_SECRET_ENV = "GOOGLE_GMAIL_CLIENT_SECRET"
+LEGACY_GMAIL_REFRESH_TOKEN_ENV = "GOOGLE_GMAIL_REFRESH_TOKEN"
+LEGACY_GMAIL_SCOPES_ENV = "GOOGLE_GMAIL_SCOPES"
+LEGACY_GMAIL_ENV_NAMES = (
+    LEGACY_GMAIL_SEND_FROM_ENV,
+    LEGACY_GMAIL_CLIENT_ID_ENV,
+    LEGACY_GMAIL_CLIENT_SECRET_ENV,
+    LEGACY_GMAIL_REFRESH_TOKEN_ENV,
+    LEGACY_GMAIL_SCOPES_ENV,
+)
 REQUIRED_ACK_NAME = "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK"
 REQUIRED_EXECUTE_FLAG_NAME = "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE"
 REQUIRED_SCOPE_EXPECTED = "https://www.googleapis.com/auth/gmail.send"
+COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 
 EXPECTED_ENV_PLACEHOLDERS = {
     GMAIL_SEND_FROM_EMAIL_ENV: "info@kidstoylover.com",
@@ -46,6 +59,8 @@ SETUP_STEPS = [
     "Configure GMAIL_OAUTH_TOKEN_FILE to point at the local Gmail OAuth token JSON file.",
     "Configure GMAIL_SEND_FROM_EMAIL for the authorized sender.",
     f"Configure GMAIL_REQUIRED_SCOPE to {REQUIRED_SCOPE_EXPECTED}.",
+    "If the older GOOGLE_GMAIL_* flow is already configured, the helper can detect its presence without printing values.",
+    "If the older flow only has gmail.compose scope, verify gmail.send before any future real-send phase.",
     "Rerun this helper and confirm OAuth config, final preflight, and readiness audit all pass before any future real send.",
 ]
 
@@ -85,6 +100,7 @@ def _build_payload(duration_seconds: float) -> dict:
         required_ack_documented=required_ack_documented,
         required_execute_documented=required_execute_documented,
     )
+    config_helper_status = _config_helper_status(blocking_conditions, dependency_status, env_status)
     generated_at = utc_now_iso()
     payload = {
         "timestamp": generated_at,
@@ -97,9 +113,11 @@ def _build_payload(duration_seconds: float) -> dict:
         "dry_run": True,
         "command_label": COMMAND_LABEL,
         "success": True,
-        "config_helper_status": _config_helper_status(blocking_conditions, dependency_status),
+        "config_helper_status": config_helper_status,
         "gmail_dependencies_importable": dependency_status["all_importable"],
         "gmail_dependency_status": dependency_status,
+        "gmail_oauth_config_status": env_status["gmail_oauth_config_status"],
+        "gmail_token_config_status": env_status["gmail_token_config_status"],
         "gmail_send_from_email_configured": env_status["gmail_send_from_email_configured"],
         "gmail_oauth_client_secret_file_configured": env_status[
             "gmail_oauth_client_secret_file_configured"
@@ -109,12 +127,27 @@ def _build_payload(duration_seconds: float) -> dict:
         "gmail_oauth_token_path_exists": env_status["gmail_oauth_token_path_exists"],
         "gmail_required_scope_configured": env_status["gmail_required_scope_configured"],
         "gmail_required_scope_matches_expected": env_status["gmail_required_scope_matches_expected"],
+        "legacy_gmail_oauth_config_present": env_status["legacy_gmail_oauth_config_present"],
+        "legacy_gmail_sender_configured": env_status["legacy_gmail_sender_configured"],
+        "legacy_gmail_client_id_configured": env_status["legacy_gmail_client_id_configured"],
+        "legacy_gmail_client_secret_configured": env_status["legacy_gmail_client_secret_configured"],
+        "legacy_gmail_refresh_token_configured": env_status["legacy_gmail_refresh_token_configured"],
+        "legacy_gmail_scopes_configured": env_status["legacy_gmail_scopes_configured"],
+        "legacy_gmail_send_scope_present": env_status["legacy_gmail_send_scope_present"],
+        "legacy_gmail_compose_scope_present": env_status["legacy_gmail_compose_scope_present"],
+        "legacy_gmail_scope_compatibility": env_status["legacy_gmail_scope_compatibility"],
+        "gmail_scope_compatibility_result": env_status["gmail_scope_compatibility_result"],
+        "gmail_send_scope_present": env_status["gmail_send_scope_present"],
+        "gmail_compose_scope_present": env_status["gmail_compose_scope_present"],
         "required_scope_expected": REQUIRED_SCOPE_EXPECTED,
         "required_ack_name": REQUIRED_ACK_NAME,
         "required_execute_flag_name": REQUIRED_EXECUTE_FLAG_NAME,
         "required_ack_name_documented": required_ack_documented,
         "required_execute_flag_name_documented": required_execute_documented,
         "env_var_name_status": env_status["env_var_name_status"],
+        "legacy_env_var_name_status": env_status["legacy_env_var_name_status"],
+        "new_env_var_name_status": env_status["new_env_var_name_status"],
+        "gmail_config_detection_summary": env_status["gmail_config_detection_summary"],
         "env_example_placeholder_status": env_example_status,
         "gmail_network_call_performed": False,
         "gmail_api_call_performed": False,
@@ -137,11 +170,8 @@ def _build_payload(duration_seconds: float) -> dict:
         "translations_register_called": False,
         "setup_steps": SETUP_STEPS,
         "blocking_conditions": blocking_conditions,
-        "next_admin_action": (
-            "Configure Gmail OAuth client secret file path and token file path, then rerun the helper. "
-            "Do not enable real send until final preflight and real-send readiness pass."
-        ),
-        "dashboard_message": "Gmail OAuth is not fully configured yet. No Gmail network call was made.",
+        "next_admin_action": _next_admin_action(env_status),
+        "dashboard_message": _dashboard_message(env_status),
         "safety_message": (
             "Do not enable real sending until OAuth config, final preflight, and readiness audit all pass."
         ),
@@ -151,7 +181,7 @@ def _build_payload(duration_seconds: float) -> dict:
             "html": f"logs/{REPORT_HTML_PATH.name}",
         },
         "duration_seconds": duration_seconds,
-        "detected_issue_summary": _detected_issue_summary(blocking_conditions),
+        "detected_issue_summary": _detected_issue_summary(blocking_conditions, env_status),
     }
     return _safe_payload(payload)
 
@@ -187,25 +217,94 @@ def _gmail_config_status() -> dict:
     required_scope_matches_expected = (
         os.environ.get(GMAIL_REQUIRED_SCOPE_ENV, "").strip() == REQUIRED_SCOPE_EXPECTED
     )
+    client_secret_path_exists = _path_exists_from_env(GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV)
+    token_path_exists = _path_exists_from_env(GMAIL_OAUTH_TOKEN_FILE_ENV)
+
+    legacy_sender_configured = _env_configured(LEGACY_GMAIL_SEND_FROM_ENV)
+    legacy_client_id_configured = _env_configured(LEGACY_GMAIL_CLIENT_ID_ENV)
+    legacy_client_secret_configured = _env_configured(LEGACY_GMAIL_CLIENT_SECRET_ENV)
+    legacy_refresh_token_configured = _env_configured(LEGACY_GMAIL_REFRESH_TOKEN_ENV)
+    legacy_scopes_configured = _env_configured(LEGACY_GMAIL_SCOPES_ENV)
+    legacy_scope_status = _scope_status(os.environ.get(LEGACY_GMAIL_SCOPES_ENV, ""))
+    required_scope_status = _scope_status(os.environ.get(GMAIL_REQUIRED_SCOPE_ENV, ""))
+    legacy_config_present = legacy_client_secret_configured and legacy_refresh_token_configured
+    new_file_path_config_present = (
+        from_configured
+        and client_secret_file_configured
+        and client_secret_path_exists
+        and token_file_configured
+        and token_path_exists
+        and required_scope_matches_expected
+    )
+    send_scope_present = (
+        required_scope_matches_expected
+        or legacy_scope_status["gmail_send_scope_present"]
+        or required_scope_status["gmail_send_scope_present"]
+    )
+    compose_scope_present = (
+        legacy_scope_status["gmail_compose_scope_present"]
+        or required_scope_status["gmail_compose_scope_present"]
+    )
+    scope_compatibility = _combined_scope_compatibility(send_scope_present, compose_scope_present)
     return {
         "process_environment_only": True,
         "dotenv_read": False,
         "values_reported": False,
         "gmail_send_from_email_configured": from_configured,
         "gmail_oauth_client_secret_file_configured": client_secret_file_configured,
-        "gmail_oauth_client_secret_path_exists": _path_exists_from_env(GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV),
+        "gmail_oauth_client_secret_path_exists": client_secret_path_exists,
         "gmail_oauth_token_file_configured": token_file_configured,
-        "gmail_oauth_token_path_exists": _path_exists_from_env(GMAIL_OAUTH_TOKEN_FILE_ENV),
+        "gmail_oauth_token_path_exists": token_path_exists,
         "gmail_required_scope_configured": required_scope_configured,
         "gmail_required_scope_matches_expected": required_scope_matches_expected,
+        "legacy_gmail_oauth_config_present": legacy_config_present,
+        "legacy_gmail_sender_configured": legacy_sender_configured,
+        "legacy_gmail_client_id_configured": legacy_client_id_configured,
+        "legacy_gmail_client_secret_configured": legacy_client_secret_configured,
+        "legacy_gmail_refresh_token_configured": legacy_refresh_token_configured,
+        "legacy_gmail_scopes_configured": legacy_scopes_configured,
+        "legacy_gmail_send_scope_present": legacy_scope_status["gmail_send_scope_present"],
+        "legacy_gmail_compose_scope_present": legacy_scope_status["gmail_compose_scope_present"],
+        "legacy_gmail_scope_compatibility": legacy_scope_status["scope_compatibility"],
+        "new_gmail_file_path_config_present": new_file_path_config_present,
+        "gmail_oauth_config_status": _gmail_oauth_config_status(new_file_path_config_present, legacy_config_present),
+        "gmail_token_config_status": _gmail_token_config_status(token_path_exists, legacy_refresh_token_configured),
+        "gmail_send_scope_present": send_scope_present,
+        "gmail_compose_scope_present": compose_scope_present,
+        "gmail_scope_compatibility_result": scope_compatibility,
+        "new_env_var_name_status": [
+            _env_var_name_status(GMAIL_SEND_FROM_EMAIL_ENV, from_configured),
+            _env_var_name_status(GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV, client_secret_file_configured),
+            _env_var_name_status(GMAIL_OAUTH_TOKEN_FILE_ENV, token_file_configured),
+            _env_var_name_status(GMAIL_REQUIRED_SCOPE_ENV, required_scope_configured),
+        ],
+        "legacy_env_var_name_status": [
+            _env_var_name_status(LEGACY_GMAIL_SEND_FROM_ENV, legacy_sender_configured),
+            _env_var_name_status(LEGACY_GMAIL_CLIENT_ID_ENV, legacy_client_id_configured),
+            _env_var_name_status(LEGACY_GMAIL_CLIENT_SECRET_ENV, legacy_client_secret_configured),
+            _env_var_name_status(LEGACY_GMAIL_REFRESH_TOKEN_ENV, legacy_refresh_token_configured),
+            _env_var_name_status(LEGACY_GMAIL_SCOPES_ENV, legacy_scopes_configured),
+        ],
         "env_var_name_status": [
             _env_var_name_status(GMAIL_SEND_FROM_EMAIL_ENV, from_configured),
             _env_var_name_status(GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV, client_secret_file_configured),
             _env_var_name_status(GMAIL_OAUTH_TOKEN_FILE_ENV, token_file_configured),
             _env_var_name_status(GMAIL_REQUIRED_SCOPE_ENV, required_scope_configured),
+            _env_var_name_status(LEGACY_GMAIL_SEND_FROM_ENV, legacy_sender_configured),
+            _env_var_name_status(LEGACY_GMAIL_CLIENT_ID_ENV, legacy_client_id_configured),
+            _env_var_name_status(LEGACY_GMAIL_CLIENT_SECRET_ENV, legacy_client_secret_configured),
+            _env_var_name_status(LEGACY_GMAIL_REFRESH_TOKEN_ENV, legacy_refresh_token_configured),
+            _env_var_name_status(LEGACY_GMAIL_SCOPES_ENV, legacy_scopes_configured),
             _env_var_name_status(REQUIRED_ACK_NAME, _env_configured(REQUIRED_ACK_NAME)),
             _env_var_name_status(REQUIRED_EXECUTE_FLAG_NAME, _env_configured(REQUIRED_EXECUTE_FLAG_NAME)),
         ],
+        "gmail_config_detection_summary": {
+            "new_file_path_config_present": new_file_path_config_present,
+            "legacy_config_present": legacy_config_present,
+            "legacy_config_fallback_supported": True,
+            "scope_values_reported": False,
+            "secret_values_reported": False,
+        },
     }
 
 
@@ -220,6 +319,43 @@ def _env_var_name_status(name: str, configured: bool) -> dict:
         "status": "configured" if configured else "not_configured",
         "value_reported": False,
     }
+
+
+def _scope_status(raw_value: str) -> dict:
+    scopes = {item.strip() for item in re.split(r"[\s,]+", raw_value or "") if item.strip()}
+    send_present = REQUIRED_SCOPE_EXPECTED in scopes
+    compose_present = COMPOSE_SCOPE in scopes
+    return {
+        "scope_configured": bool(scopes),
+        "gmail_send_scope_present": send_present,
+        "gmail_compose_scope_present": compose_present,
+        "scope_compatibility": _combined_scope_compatibility(send_present, compose_present),
+        "scope_values_reported": False,
+    }
+
+
+def _combined_scope_compatibility(send_present: bool, compose_present: bool) -> str:
+    if send_present:
+        return "send_scope_present"
+    if compose_present:
+        return "compose_only_not_send_scope"
+    return "scope_missing"
+
+
+def _gmail_oauth_config_status(new_file_path_config_present: bool, legacy_config_present: bool) -> str:
+    if new_file_path_config_present:
+        return "new_file_path_config_present"
+    if legacy_config_present:
+        return "legacy_config_present"
+    return "missing"
+
+
+def _gmail_token_config_status(new_token_path_exists: bool, legacy_refresh_token_present: bool) -> str:
+    if new_token_path_exists:
+        return "new_token_file_present"
+    if legacy_refresh_token_present:
+        return "legacy_refresh_token_present"
+    return "missing"
 
 
 def _path_exists_from_env(name: str) -> bool:
@@ -286,6 +422,16 @@ def _blocking_conditions(
     required_execute_documented: bool,
 ) -> list[dict]:
     conditions = []
+    legacy_config_present = env_status["legacy_gmail_oauth_config_present"]
+    sender_configured = (
+        env_status["gmail_send_from_email_configured"] or env_status["legacy_gmail_sender_configured"]
+    )
+    client_secret_available = (
+        env_status["gmail_oauth_client_secret_path_exists"] or legacy_config_present
+    )
+    token_available = env_status["gmail_oauth_token_path_exists"] or env_status[
+        "legacy_gmail_refresh_token_configured"
+    ]
     if not dependency_status["all_importable"]:
         conditions.append(
             _condition(
@@ -293,40 +439,83 @@ def _blocking_conditions(
                 "One or more Gmail dependency modules are not importable locally.",
             )
         )
-    if not env_status["gmail_send_from_email_configured"]:
-        conditions.append(_condition("missing_gmail_send_from_email", f"{GMAIL_SEND_FROM_EMAIL_ENV} is not configured."))
-    if not env_status["gmail_oauth_client_secret_file_configured"]:
+    if not sender_configured:
+        conditions.append(
+            _condition(
+                "missing_gmail_sender",
+                f"Neither {GMAIL_SEND_FROM_EMAIL_ENV} nor legacy {LEGACY_GMAIL_SEND_FROM_ENV} is configured.",
+            )
+        )
+    if not client_secret_available and not env_status["gmail_oauth_client_secret_file_configured"]:
         conditions.append(
             _condition(
                 "missing_gmail_oauth_client_secret_file",
-                f"{GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV} is not configured.",
+                (
+                    f"{GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV} is not configured and legacy "
+                    f"{LEGACY_GMAIL_CLIENT_SECRET_ENV}/{LEGACY_GMAIL_REFRESH_TOKEN_ENV} config was not detected."
+                ),
             )
         )
-    elif not env_status["gmail_oauth_client_secret_path_exists"]:
+    elif not client_secret_available and not env_status["gmail_oauth_client_secret_path_exists"]:
         conditions.append(
             _condition(
                 "missing_gmail_oauth_client_secret_path",
-                f"{GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV} is configured, but the path does not exist.",
+                (
+                    f"{GMAIL_OAUTH_CLIENT_SECRET_FILE_ENV} is configured, but the path does not exist "
+                    "and no legacy fallback config was detected."
+                ),
             )
         )
-    if not env_status["gmail_oauth_token_file_configured"]:
+    if not token_available and not env_status["gmail_oauth_token_file_configured"]:
         conditions.append(
-            _condition("missing_gmail_oauth_token_file", f"{GMAIL_OAUTH_TOKEN_FILE_ENV} is not configured.")
+            _condition(
+                "missing_gmail_oauth_token_file",
+                (
+                    f"{GMAIL_OAUTH_TOKEN_FILE_ENV} is not configured and legacy "
+                    f"{LEGACY_GMAIL_REFRESH_TOKEN_ENV} was not detected."
+                ),
+            )
         )
-    elif not env_status["gmail_oauth_token_path_exists"]:
+    elif not token_available and not env_status["gmail_oauth_token_path_exists"]:
         conditions.append(
             _condition(
                 "missing_gmail_oauth_token_path",
-                f"{GMAIL_OAUTH_TOKEN_FILE_ENV} is configured, but the path does not exist.",
+                (
+                    f"{GMAIL_OAUTH_TOKEN_FILE_ENV} is configured, but the path does not exist "
+                    "and no legacy refresh-token fallback was detected."
+                ),
             )
         )
-    if not env_status["gmail_required_scope_configured"]:
-        conditions.append(_condition("missing_gmail_required_scope", f"{GMAIL_REQUIRED_SCOPE_ENV} is not configured."))
-    elif not env_status["gmail_required_scope_matches_expected"]:
+    if not env_status["gmail_send_scope_present"]:
+        if env_status["gmail_compose_scope_present"]:
+            conditions.append(
+                _condition(
+                    "gmail_compose_only_not_send_scope",
+                    "A Gmail compose scope was detected, but real sending requires gmail.send.",
+                )
+            )
+        elif not env_status["gmail_required_scope_configured"] and not env_status["legacy_gmail_scopes_configured"]:
+            conditions.append(
+                _condition(
+                    "missing_gmail_required_scope",
+                    f"Neither {GMAIL_REQUIRED_SCOPE_ENV} nor legacy {LEGACY_GMAIL_SCOPES_ENV} is configured.",
+                )
+            )
+        else:
+            conditions.append(
+                _condition(
+                    "gmail_required_scope_not_expected",
+                    "Configured Gmail scope names do not confirm gmail.send.",
+                )
+            )
+    elif env_status["gmail_required_scope_configured"] and not env_status["gmail_required_scope_matches_expected"]:
         conditions.append(
             _condition(
-                "gmail_required_scope_not_expected",
-                f"{GMAIL_REQUIRED_SCOPE_ENV} must match the required gmail.send scope.",
+                "gmail_required_scope_not_expected_but_legacy_send_scope_present",
+                (
+                    f"{GMAIL_REQUIRED_SCOPE_ENV} does not match gmail.send, but another configured "
+                    "scope source confirms gmail.send."
+                ),
             )
         )
     if not required_ack_documented:
@@ -345,17 +534,62 @@ def _condition(status: str, detail: str) -> dict:
     return {"status": status, "detail": detail}
 
 
-def _config_helper_status(blocking_conditions: list[dict], dependency_status: dict) -> str:
+def _config_helper_status(blocking_conditions: list[dict], dependency_status: dict, env_status: dict) -> str:
     if not blocking_conditions:
+        if env_status["gmail_oauth_config_status"] == "legacy_config_present":
+            return "legacy_gmail_oauth_config_ready_for_preflight"
         return "gmail_oauth_config_ready_for_preflight"
     if not dependency_status["all_importable"]:
         return "blocked_missing_gmail_dependencies"
+    if env_status["legacy_gmail_oauth_config_present"]:
+        if env_status["gmail_scope_compatibility_result"] == "compose_only_not_send_scope":
+            return "legacy_config_present_compose_only_not_send_scope"
+        return "legacy_config_present_needs_final_scope_or_sender_check"
     return "blocked_missing_gmail_oauth_config"
 
 
-def _detected_issue_summary(blocking_conditions: list[dict]) -> str:
+def _next_admin_action(env_status: dict) -> str:
+    if env_status["legacy_gmail_oauth_config_present"]:
+        if env_status["gmail_send_scope_present"]:
+            return (
+                "Legacy Gmail config was detected safely. Rerun final preflight/readiness checks before any "
+                "future real send, and keep explicit human approval required."
+            )
+        return (
+            "Legacy Gmail config was detected safely, but gmail.send still needs verification before any "
+            "future real send."
+        )
+    return (
+        "Configure Gmail OAuth client secret file path and token file path, or confirm the older "
+        "GOOGLE_GMAIL_* config in the host environment. Do not enable real send until final preflight "
+        "and real-send readiness pass."
+    )
+
+
+def _dashboard_message(env_status: dict) -> str:
+    if env_status["legacy_gmail_oauth_config_present"]:
+        if env_status["gmail_scope_compatibility_result"] == "compose_only_not_send_scope":
+            return "Gmail can create drafts from the older email flow, but real sending may need gmail.send permission."
+        return (
+            "Gmail configuration was found from the older email flow. It still needs final send-scope "
+            "verification before real sending."
+        )
+    if env_status["new_gmail_file_path_config_present"]:
+        return "Gmail setup was found from the new file-path configuration. No Gmail network call was made."
+    return "Gmail setup is not complete yet. No Gmail network call was made."
+
+
+def _detected_issue_summary(blocking_conditions: list[dict], env_status: dict) -> str:
     if not blocking_conditions:
+        if env_status["legacy_gmail_oauth_config_present"]:
+            return "Legacy Gmail config presence was detected without reading or printing secret values."
         return "Gmail OAuth/config helper passed local config presence checks without Gmail network calls."
+    if env_status["legacy_gmail_oauth_config_present"]:
+        return (
+            "Legacy Gmail config presence was detected, but real send remains blocked until gmail.send "
+            "scope and final approval checks pass. No Gmail network call, draft creation, send, Shopify "
+            "write, or external review API call was performed."
+        )
     return (
         "Gmail OAuth/config helper is blocked by missing local Gmail config. "
         "No Gmail network call, draft creation, send, Shopify write, or external review API call was performed."
@@ -467,13 +701,17 @@ def _render_html_report(payload: dict) -> str:
   <table>
     <tbody>
       <tr><th>Gmail dependencies importable</th><td>{payload["gmail_dependencies_importable"]}</td></tr>
+      <tr><th>OAuth config status</th><td><code>{escape(payload["gmail_oauth_config_status"])}</code></td></tr>
+      <tr><th>Token config status</th><td><code>{escape(payload["gmail_token_config_status"])}</code></td></tr>
       <tr><th>From email configured</th><td>{payload["gmail_send_from_email_configured"]}</td></tr>
       <tr><th>OAuth client secret path configured</th><td>{payload["gmail_oauth_client_secret_file_configured"]}</td></tr>
       <tr><th>OAuth client secret path exists</th><td>{payload["gmail_oauth_client_secret_path_exists"]}</td></tr>
       <tr><th>OAuth token path configured</th><td>{payload["gmail_oauth_token_file_configured"]}</td></tr>
       <tr><th>OAuth token path exists</th><td>{payload["gmail_oauth_token_path_exists"]}</td></tr>
+      <tr><th>Legacy config detected</th><td>{payload["legacy_gmail_oauth_config_present"]}</td></tr>
       <tr><th>Required scope configured</th><td>{payload["gmail_required_scope_configured"]}</td></tr>
       <tr><th>Required scope matches expected</th><td>{payload["gmail_required_scope_matches_expected"]}</td></tr>
+      <tr><th>Scope compatibility</th><td><code>{escape(payload["gmail_scope_compatibility_result"])}</code></td></tr>
       <tr><th>Required scope expected</th><td><code>{escape(payload["required_scope_expected"])}</code></td></tr>
       <tr><th>Token file read</th><td>{payload["token_file_read"]}</td></tr>
       <tr><th>Credential file read</th><td>{payload["credential_file_read"]}</td></tr>
@@ -554,6 +792,8 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "html_trustpilot_gmail_oauth_config_helper_path": str(html_path),
         "config_helper_status": payload["config_helper_status"],
         "gmail_dependencies_importable": payload["gmail_dependencies_importable"],
+        "gmail_oauth_config_status": payload["gmail_oauth_config_status"],
+        "gmail_token_config_status": payload["gmail_token_config_status"],
         "gmail_send_from_email_configured": payload["gmail_send_from_email_configured"],
         "gmail_oauth_client_secret_file_configured": payload["gmail_oauth_client_secret_file_configured"],
         "gmail_oauth_client_secret_path_exists": payload["gmail_oauth_client_secret_path_exists"],
@@ -561,6 +801,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "gmail_oauth_token_path_exists": payload["gmail_oauth_token_path_exists"],
         "gmail_required_scope_configured": payload["gmail_required_scope_configured"],
         "gmail_required_scope_matches_expected": payload["gmail_required_scope_matches_expected"],
+        "legacy_gmail_oauth_config_present": payload["legacy_gmail_oauth_config_present"],
+        "legacy_gmail_scope_compatibility": payload["legacy_gmail_scope_compatibility"],
+        "gmail_scope_compatibility_result": payload["gmail_scope_compatibility_result"],
+        "gmail_send_scope_present": payload["gmail_send_scope_present"],
+        "gmail_compose_scope_present": payload["gmail_compose_scope_present"],
         "required_ack_name_documented": payload["required_ack_name_documented"],
         "required_execute_flag_name_documented": payload["required_execute_flag_name_documented"],
         "gmail_network_call_performed": False,
@@ -583,6 +828,10 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         "Shopify review request Phase 5.16 Gmail OAuth/config helper finished.\n"
         f"Status: {payload.get('config_helper_status')}\n"
         f"Gmail dependencies importable: {payload.get('gmail_dependencies_importable')}\n"
+        f"Gmail OAuth config status: {payload.get('gmail_oauth_config_status')}\n"
+        f"Gmail token config status: {payload.get('gmail_token_config_status')}\n"
+        f"Legacy Gmail config present: {payload.get('legacy_gmail_oauth_config_present')}\n"
+        f"Scope compatibility: {payload.get('gmail_scope_compatibility_result')}\n"
         f"From email configured: {payload.get('gmail_send_from_email_configured')}\n"
         f"OAuth client secret path configured: {payload.get('gmail_oauth_client_secret_file_configured')}\n"
         f"OAuth token path configured: {payload.get('gmail_oauth_token_file_configured')}\n"

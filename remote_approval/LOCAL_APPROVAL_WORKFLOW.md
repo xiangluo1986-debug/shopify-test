@@ -293,6 +293,29 @@ Required placeholder names for future setup are
 `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK`, and
 `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE`.
 
+## Review Request Trustpilot Gmail Config Compatibility Audit
+
+`shopify_review_request_trustpilot_gmail_config_compatibility_audit` is a
+Phase 5.18A local audit for comparing the older `GOOGLE_GMAIL_*` Trustpilot
+Gmail flow with the newer `GMAIL_*` helper names.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_config_compatibility_audit.json
+logs/shopify_review_request_trustpilot_gmail_config_compatibility_audit.html
+```
+
+The audit may scan source files and safe documentation/config placeholders for
+variable names, and may check process environment presence booleans. It must
+not read `.env`, token files, credential files, or secret values. It must not
+call Gmail, create/update/delete drafts, send email, call Shopify, write tags,
+call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
+If legacy config is detected, the helper may report
+`legacy_config_present`, but real sending still requires final `gmail.send`
+verification and a later explicitly approved write/send phase.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

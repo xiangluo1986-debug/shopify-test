@@ -37,6 +37,14 @@ GMAIL_DEPENDENCY_MODULES = (
     "google.auth.transport.requests",
 )
 
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+NEW_GMAIL_OAUTH_ENV_NAMES = (
+    "GMAIL_SEND_FROM_EMAIL",
+    "GMAIL_OAUTH_CLIENT_SECRET_FILE",
+    "GMAIL_OAUTH_TOKEN_FILE",
+    "GMAIL_REQUIRED_SCOPE",
+)
 GMAIL_OAUTH_ENV_NAMES = (
     "GMAIL_SEND_FROM",
     "GOOGLE_GMAIL_CLIENT_ID",
@@ -233,9 +241,14 @@ def _build_payload(sources: dict, duration_seconds: float) -> dict:
         "gmail_dependencies_importable": dependency_status["all_importable"],
         "gmail_dependency_status": dependency_status,
         "gmail_oauth_config_present": env_status["oauth_config_present"],
-        "gmail_oauth_config_status": _status_label(env_status["oauth_config_present"]),
+        "gmail_oauth_config_status": env_status["oauth_config_status"],
         "gmail_token_config_present": env_status["token_config_present"],
-        "gmail_token_config_status": _status_label(env_status["token_config_present"]),
+        "gmail_token_config_status": env_status["token_config_status"],
+        "legacy_gmail_oauth_config_present": env_status["legacy_oauth_config_present"],
+        "new_gmail_file_path_config_present": env_status["new_file_path_config_present"],
+        "gmail_scope_compatibility_result": env_status["scope_compatibility"],
+        "gmail_send_scope_present": env_status["gmail_send_scope_present"],
+        "gmail_compose_scope_present": env_status["gmail_compose_scope_present"],
         "gmail_local_config_name_audit": env_status,
         "gmail_network_call_performed": False,
         "gmail_api_call_performed": False,
@@ -326,47 +339,127 @@ def _gmail_dependency_status() -> dict:
 
 
 def _gmail_env_status() -> dict:
-    oauth_present_by_role = {
+    legacy_oauth_present_by_role = {
         "sender_name": _any_env_present(("GMAIL_SEND_FROM",)),
         "client_id_name": _any_env_present(("GOOGLE_GMAIL_CLIENT_ID",)),
         "client_credential_name": _any_env_present(("GOOGLE_GMAIL_CLIENT_SECRET",)),
         "scope_name": _any_env_present(("GOOGLE_GMAIL_SCOPES",)),
     }
-    token_present_by_role = {
+    legacy_token_present_by_role = {
         "refresh_credential_name": _any_env_present(("GOOGLE_GMAIL_REFRESH_TOKEN",)),
         "token_file_path_name": _any_env_present(("GOOGLE_GMAIL_TOKEN_PATH", "GMAIL_TOKEN_PATH")),
         "credential_file_path_name": _any_env_present(
             ("GOOGLE_GMAIL_CREDENTIALS_PATH", "GMAIL_CREDENTIALS_PATH")
         ),
     }
-    oauth_present = all(oauth_present_by_role.values())
-    token_present = any(token_present_by_role.values())
-    configured_oauth_name_count = sum(1 for value in oauth_present_by_role.values() if value)
-    configured_token_name_count = sum(1 for value in token_present_by_role.values() if value)
+    new_name_presence = {name: _any_env_present((name,)) for name in NEW_GMAIL_OAUTH_ENV_NAMES}
+    legacy_scope_status = _scope_status(os.environ.get("GOOGLE_GMAIL_SCOPES", ""))
+    new_scope_status = _scope_status(os.environ.get("GMAIL_REQUIRED_SCOPE", ""))
+    legacy_oauth_config_present = (
+        legacy_oauth_present_by_role["client_credential_name"]
+        and legacy_token_present_by_role["refresh_credential_name"]
+    )
+    new_file_path_config_present = all(new_name_presence.values()) and new_scope_status[
+        "gmail_send_scope_present"
+    ]
+    oauth_present = legacy_oauth_config_present or new_file_path_config_present
+    token_present = (
+        legacy_token_present_by_role["refresh_credential_name"]
+        or new_name_presence["GMAIL_OAUTH_TOKEN_FILE"]
+        or legacy_token_present_by_role["token_file_path_name"]
+    )
+    configured_legacy_oauth_name_count = sum(1 for value in legacy_oauth_present_by_role.values() if value)
+    configured_legacy_token_name_count = sum(1 for value in legacy_token_present_by_role.values() if value)
+    configured_new_name_count = sum(1 for value in new_name_presence.values() if value)
+    gmail_send_scope_present = legacy_scope_status["gmail_send_scope_present"] or new_scope_status[
+        "gmail_send_scope_present"
+    ]
+    gmail_compose_scope_present = legacy_scope_status["gmail_compose_scope_present"] or new_scope_status[
+        "gmail_compose_scope_present"
+    ]
+    scope_compatibility = _combined_scope_compatibility(gmail_send_scope_present, gmail_compose_scope_present)
     return {
         "presence_only": True,
         "process_environment_only": True,
         "dotenv_read": False,
         "values_reported": False,
         "oauth_config_present": oauth_present,
-        "oauth_config_status": _status_label(oauth_present),
-        "oauth_config_name_count": len(oauth_present_by_role),
-        "configured_oauth_name_count": configured_oauth_name_count,
+        "oauth_config_status": _oauth_config_status(new_file_path_config_present, legacy_oauth_config_present),
+        "oauth_config_name_count": len(legacy_oauth_present_by_role) + len(new_name_presence),
+        "configured_oauth_name_count": configured_legacy_oauth_name_count + configured_new_name_count,
         "token_config_present": token_present,
-        "token_config_status": _status_label(token_present),
-        "token_config_name_count": len(token_present_by_role),
-        "configured_token_name_count": configured_token_name_count,
-        "oauth_name_presence_by_role": oauth_present_by_role,
-        "token_name_presence_by_role": token_present_by_role,
+        "token_config_status": _token_config_status(
+            new_name_presence["GMAIL_OAUTH_TOKEN_FILE"],
+            legacy_token_present_by_role["refresh_credential_name"],
+        ),
+        "token_config_name_count": len(legacy_token_present_by_role) + 1,
+        "configured_token_name_count": configured_legacy_token_name_count
+        + (1 if new_name_presence["GMAIL_OAUTH_TOKEN_FILE"] else 0),
+        "legacy_oauth_config_present": legacy_oauth_config_present,
+        "new_file_path_config_present": new_file_path_config_present,
+        "legacy_oauth_name_presence_by_role": legacy_oauth_present_by_role,
+        "legacy_token_name_presence_by_role": legacy_token_present_by_role,
+        "new_name_presence": {
+            name: {
+                "present": present,
+                "status": "present" if present else "missing",
+                "value_reported": False,
+            }
+            for name, present in new_name_presence.items()
+        },
+        "oauth_name_presence_by_role": legacy_oauth_present_by_role,
+        "token_name_presence_by_role": legacy_token_present_by_role,
         "credential_path_name_config_present": any(
-            token_present_by_role[key]
+            legacy_token_present_by_role[key]
             for key in ("token_file_path_name", "credential_file_path_name")
         ),
+        "gmail_send_scope_present": gmail_send_scope_present,
+        "gmail_compose_scope_present": gmail_compose_scope_present,
+        "legacy_scope_compatibility": legacy_scope_status["scope_compatibility"],
+        "new_scope_compatibility": new_scope_status["scope_compatibility"],
+        "scope_compatibility": scope_compatibility,
     }
 
 
 def _any_env_present(names: tuple[str, ...]) -> bool:
     return any(bool((os.environ.get(name) or "").strip()) for name in names)
+
+
+def _scope_status(raw_value: str) -> dict:
+    scopes = {item.strip() for item in str(raw_value or "").replace(",", " ").split() if item.strip()}
+    send_present = GMAIL_SEND_SCOPE in scopes
+    compose_present = GMAIL_COMPOSE_SCOPE in scopes
+    return {
+        "scope_configured": bool(scopes),
+        "gmail_send_scope_present": send_present,
+        "gmail_compose_scope_present": compose_present,
+        "scope_compatibility": _combined_scope_compatibility(send_present, compose_present),
+        "scope_values_reported": False,
+    }
+
+
+def _combined_scope_compatibility(send_present: bool, compose_present: bool) -> str:
+    if send_present:
+        return "send_scope_present"
+    if compose_present:
+        return "compose_only_not_send_scope"
+    return "scope_missing"
+
+
+def _oauth_config_status(new_file_path_config_present: bool, legacy_oauth_config_present: bool) -> str:
+    if new_file_path_config_present:
+        return "new_file_path_config_present"
+    if legacy_oauth_config_present:
+        return "legacy_config_present"
+    return "missing"
+
+
+def _token_config_status(new_token_file_present: bool, legacy_refresh_token_present: bool) -> str:
+    if new_token_file_present:
+        return "new_token_file_present"
+    if legacy_refresh_token_present:
+        return "legacy_refresh_token_present"
+    return "missing"
 
 
 def _source_data(report: dict | None) -> dict:
@@ -589,6 +682,7 @@ def _readiness_checklist(
         _checklist_row("gmail_dependencies_importable", dependency_status["all_importable"], dependency_status["status"]),
         _checklist_row("gmail_oauth_config_present", env_status["oauth_config_present"], env_status["oauth_config_status"]),
         _checklist_row("gmail_token_config_present", env_status["token_config_present"], env_status["token_config_status"]),
+        _checklist_row("gmail_send_scope_present", env_status["gmail_send_scope_present"], env_status["scope_compatibility"]),
         _checklist_row("explicit_ack_required", True, REQUIRED_ACK_NAME),
         _checklist_row("explicit_real_send_execute_flag_required", True, REQUIRED_REAL_SEND_EXECUTE_FLAG_NAME),
         _checklist_row("single_send_limit_required", True, "exactly one candidate only"),
@@ -738,6 +832,9 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>Gmail dependencies</th><td>{escape(payload["gmail_dependency_status"]["status"])}</td></tr>
       <tr><th>Gmail OAuth config</th><td>{escape(payload["gmail_oauth_config_status"])}</td></tr>
       <tr><th>Gmail token config</th><td>{escape(payload["gmail_token_config_status"])}</td></tr>
+      <tr><th>Legacy Gmail config</th><td>{payload["legacy_gmail_oauth_config_present"]}</td></tr>
+      <tr><th>New Gmail file-path config</th><td>{payload["new_gmail_file_path_config_present"]}</td></tr>
+      <tr><th>Gmail scope compatibility</th><td><code>{escape(payload["gmail_scope_compatibility_result"])}</code></td></tr>
       <tr><th>Eligible candidate count</th><td>{payload["eligible_candidate_count"]}</td></tr>
       <tr><th>Selected candidate</th><td>{escape(selected_candidate)}</td></tr>
       <tr><th>Latest auto refresh status</th><td><code>{escape(payload["latest_auto_refresh_status"])}</code></td></tr>
@@ -818,6 +915,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "gmail_oauth_config_status": payload["gmail_oauth_config_status"],
         "gmail_token_config_present": payload["gmail_token_config_present"],
         "gmail_token_config_status": payload["gmail_token_config_status"],
+        "legacy_gmail_oauth_config_present": payload["legacy_gmail_oauth_config_present"],
+        "new_gmail_file_path_config_present": payload["new_gmail_file_path_config_present"],
+        "gmail_scope_compatibility_result": payload["gmail_scope_compatibility_result"],
+        "gmail_send_scope_present": payload["gmail_send_scope_present"],
+        "gmail_compose_scope_present": payload["gmail_compose_scope_present"],
         "latest_auto_refresh_status": payload["latest_auto_refresh_status"],
         "latest_preflight_status": payload["latest_preflight_status"],
         "latest_execute_status": payload["latest_execute_status"],
@@ -855,6 +957,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Gmail dependencies importable: {payload['gmail_dependencies_importable']}\n"
         f"Gmail OAuth config status: {payload['gmail_oauth_config_status']}\n"
         f"Gmail token config status: {payload['gmail_token_config_status']}\n"
+        f"Legacy Gmail config present: {payload['legacy_gmail_oauth_config_present']}\n"
+        f"Scope compatibility: {payload['gmail_scope_compatibility_result']}\n"
         f"Latest preflight status: {payload['latest_preflight_status']}\n"
         f"Latest execute status: {payload['latest_execute_status']}\n"
         f"Eligible candidate count: {payload['eligible_candidate_count']}\n"
