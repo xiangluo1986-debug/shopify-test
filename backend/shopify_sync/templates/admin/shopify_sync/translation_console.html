@@ -206,6 +206,176 @@
     font-weight: 600;
     font-size: 12px;
   }
+  .tw-workspace-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .tw-workspace-header h2 {
+    margin-bottom: 8px;
+  }
+  .tw-workspace-header-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 1.4fr) minmax(220px, 0.8fr) minmax(280px, 1fr);
+    gap: 10px;
+    align-items: stretch;
+  }
+  .tw-header-card {
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 10px;
+  }
+  .tw-header-card h3 {
+    margin: 0 0 6px;
+  }
+  .tw-header-action form {
+    margin: 0;
+  }
+  .tw-header-status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .tw-header-status-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #f8fafc;
+    padding: 6px 8px;
+  }
+  .tw-header-status-label {
+    color: #4b5563;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .tw-header-status-value {
+    margin-top: 2px;
+    color: #111827;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+  .tw-workspace-shell {
+    margin-bottom: 16px;
+  }
+  .tw-workspace-nav {
+    position: sticky;
+    top: 128px;
+    z-index: 15;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #ffffff;
+  }
+  .tw-workspace-tab,
+  .tw-language-tab,
+  .tw-group-tab {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #cfd8e3;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #1f2937 !important;
+    cursor: pointer;
+    font-weight: 700;
+    padding: 7px 12px;
+  }
+  .tw-workspace-tab.is-active,
+  .tw-language-tab.is-active,
+  .tw-group-tab.is-active {
+    border-color: #1d4ed8;
+    background: #1d4ed8;
+    color: #ffffff !important;
+  }
+  .tw-workspace-tab.is-active .tw-status-badge,
+  .tw-language-tab.is-active .tw-status-badge,
+  .tw-group-tab.is-active .tw-status-badge {
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+  }
+  .tw-workspace-tab-panel {
+    display: grid;
+    gap: 12px;
+  }
+  .tw-workspace-tab-panel[hidden],
+  .tw-language-panel[hidden],
+  .tw-group-panel[hidden] {
+    display: none !important;
+  }
+  .tw-language-tabs,
+  .tw-group-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+  }
+  .tw-language-tab {
+    align-items: flex-start;
+    border-radius: 8px;
+    text-align: left;
+  }
+  .tw-language-tab-main,
+  .tw-language-tab-counts {
+    display: block;
+  }
+  .tw-language-tab-counts {
+    font-size: 12px;
+    font-weight: 600;
+    opacity: 0.86;
+  }
+  .tw-update-entry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 8px;
+    margin: 10px 0;
+  }
+  .tw-update-entry {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    min-height: 52px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #111827;
+    padding: 8px;
+  }
+  .tw-update-entry input {
+    margin-top: 3px;
+  }
+  .tw-update-entry-title,
+  .tw-update-entry-value {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+  .tw-update-entry-title {
+    font-weight: 700;
+  }
+  .tw-update-entry-value {
+    margin-top: 3px;
+    color: #374151;
+    font-size: 12px;
+  }
+  @media (max-width: 1100px) {
+    .tw-workspace-header {
+      position: static;
+    }
+    .tw-workspace-nav {
+      position: static;
+    }
+    .tw-workspace-header-grid {
+      grid-template-columns: 1fr;
+    }
+  }
   .tw-hero-header,
   .tw-mode-bar,
   .tw-metric-strip,
@@ -1820,8 +1990,8 @@
   </div>
 
   {% elif ui_mode == "editor" %}
-  <div class="module" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Choose product and language</h2>
+  <div class="module tw-workspace-header" data-workspace-header>
+    <h2>Translation workspace</h2>
     <form method="get" action="{% url 'shopify_translation_console' %}" class="tw-product-picker" data-product-picker data-product-search-url="{% url 'shopify_translation_console_product_search' %}" data-selected-product-gid="{{ selected_product_gid }}" style="margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}" data-selected-product-input>
@@ -1907,7 +2077,8 @@
           </div>
         {% endif %}
       </div>
-      <div class="tw-library-note">
+      <details class="tw-library-note tw-advanced-details">
+        <summary>Product library status</summary>
         <div class="tw-library-note-title">Product library source</div>
         <div class="tw-muted">Source: {{ product_library_status.source }}.</div>
         <div class="tw-muted">Sync: {{ product_library_status.sync }}.</div>
@@ -1921,13 +2092,185 @@
           <span class="tw-library-chip">Last success {{ product_library_status.sync_last_success_at|default:"-" }}</span>
           <span class="tw-library-chip">Last error {{ product_library_status.sync_last_error|default:"-" }}</span>
         </div>
-      </div>
+      </details>
       <p class="tw-muted" style="margin: 12px 0 0;" data-product-search-status>
         <span data-product-search-status-text>{% if product_search_text %}Matching local products: {{ product_selector.matching_result_count }}.{% else %}Search the local product library to show product matches.{% endif %}</span>
         <span data-product-search-query-line{% if not product_search_text %} hidden{% endif %}>Search results for: <strong data-product-current-query>{{ product_search_text }}</strong>.</span>
         <span data-product-selected-note{% if not product_search_text or not product_selector.selected_product %} hidden{% endif %}>Current selected product is shown separately and is not added to nonmatching search results.</span>
       </p>
     </form>
+    <div class="tw-workspace-header-grid">
+      <div class="tw-header-card tw-header-action">
+        <h3>Main action</h3>
+        <p class="tw-draft-note">Preview only - Shopify has not been updated yet.</p>
+        {% if selected_product_gid %}
+          <form method="post" action="{% url 'shopify_translation_console' %}">
+            {% csrf_token %}
+            <input type="hidden" name="ui_mode" value="editor">
+            <input type="hidden" name="action" value="translate_all_languages_all_content">
+            <input type="hidden" name="product_search" value="{{ product_search_text }}">
+            <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+            <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+            <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+            <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+            <button type="submit" class="button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Translate all in background</button>
+          </form>
+        {% else %}
+          <p class="tw-muted">Select a product before starting translation.</p>
+        {% endif %}
+      </div>
+      <div class="tw-header-card">
+        <h3>Status</h3>
+        <span class="tw-status-badge is-{{ translation_background_job.status_key|default:'pending' }}" data-job-status-badge>{{ translation_background_job.status_label|default:"Not started" }}</span>
+        <div class="tw-progress" aria-label="Translation job progress">
+          <span class="tw-progress-bar" data-job-progress-bar style="width: {{ translation_background_job.progress_percent|default:0 }}%;"></span>
+        </div>
+        <div class="tw-header-status-grid">
+          <div class="tw-header-status-item">
+            <div class="tw-header-status-label">Progress</div>
+            <div class="tw-header-status-value" data-job-field="progress_percent">{{ translation_background_job.progress_percent|default:0 }}%</div>
+          </div>
+          <div class="tw-header-status-item">
+            <div class="tw-header-status-label">Last updated</div>
+            <div class="tw-header-status-value" data-job-field="updated_at">{{ translation_background_job.updated_at|default:"-" }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="tw-header-card">
+        <h3>Result summary</h3>
+        <div class="tw-header-status-grid">
+          <div class="tw-header-status-item">
+            <div class="tw-header-status-label">Generated</div>
+            <div class="tw-header-status-value" data-job-field="generated_draft_count">{{ translation_background_job.counts.generated_draft_count|default:0 }}</div>
+          </div>
+          <div class="tw-header-status-item">
+            <div class="tw-header-status-label">Needs review</div>
+            <div class="tw-header-status-value" data-job-field="blocked_count">{{ translation_background_job.counts.blocked_count|default:0 }}</div>
+          </div>
+          <div class="tw-header-status-item">
+            <div class="tw-header-status-label">Skipped</div>
+            <div class="tw-header-status-value" data-job-field="skipped_count">{{ translation_background_job.counts.skipped_count|default:0 }}</div>
+          </div>
+          <div class="tw-header-status-item">
+            <div class="tw-header-status-label">Current locale</div>
+            <div class="tw-header-status-value" data-job-field="current_locale">{{ translation_background_job.current_locale|default:"-" }}</div>
+          </div>
+        </div>
+        <span class="tw-safety">Preview only - Shopify has not been updated yet</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tw-workspace-shell" data-workspace-shell data-initial-tab="{% if translation_background_job.show_translation_results %}results{% else %}overview{% endif %}">
+    <div class="tw-workspace-nav" role="tablist" aria-label="Translation workspace sections">
+      <button type="button" class="tw-workspace-tab" data-workspace-tab="overview" role="tab">Overview</button>
+      <button type="button" class="tw-workspace-tab" data-workspace-tab="results" role="tab">Translation results</button>
+      <button type="button" class="tw-workspace-tab" data-workspace-tab="update" role="tab">Shopify update preparation</button>
+      <button type="button" class="tw-workspace-tab" data-workspace-tab="technical" role="tab">Technical details</button>
+    </div>
+    <section class="tw-workspace-tab-panel" data-workspace-panel="overview" role="tabpanel" aria-label="Overview"></section>
+    <section class="tw-workspace-tab-panel" data-workspace-panel="results" role="tabpanel" aria-label="Translation results"></section>
+    <section class="tw-workspace-tab-panel" data-workspace-panel="update" role="tabpanel" aria-label="Shopify update preparation"></section>
+    <section class="tw-workspace-tab-panel" data-workspace-panel="technical" role="tabpanel" aria-label="Technical details"></section>
+  </div>
+
+  {% if translation_background_job.show_translation_results %}
+    <div id="translation-results" class="module tw-translation-results" data-workspace-section="results" data-translation-results-section data-language-switcher>
+      <div class="tw-run-header">
+        <div>
+          <h3>Translation results</h3>
+          <p><strong>{{ translation_background_job.translation_result_status_label }}</strong></p>
+          <p class="tw-draft-note">Preview only - Shopify has not been updated yet. Nothing has been written to Shopify.</p>
+        </div>
+        <span class="tw-count-badge">{{ translation_background_job.translation_result_count }} result item{{ translation_background_job.translation_result_count|pluralize }}</span>
+      </div>
+      <div class="tw-language-tabs" role="tablist" aria-label="Translation result languages">
+        {% for language_group in translation_background_job.translation_result_groups %}
+          <button type="button" class="tw-language-tab{% if language_group.is_default %} is-active{% endif %}" data-language-tab="{{ language_group.language }}" data-language-default="{% if language_group.is_default %}true{% else %}false{% endif %}" role="tab">
+            <span>
+              <span class="tw-language-tab-main">{{ language_group.language_label }} ({{ language_group.language }})</span>
+              <span class="tw-language-tab-counts">{{ language_group.translated_count }} translated / {{ language_group.needs_review_count }} needs review / {{ language_group.skipped_count }} skipped</span>
+            </span>
+            <span class="tw-status-badge is-{{ language_group.status_key }}">{{ language_group.status_label }}</span>
+          </button>
+        {% endfor %}
+      </div>
+      {% for language_group in translation_background_job.translation_result_groups %}
+        <section class="tw-language-panel" data-language-panel="{{ language_group.language }}"{% if not language_group.is_default %} hidden{% endif %}>
+          {% if language_group.count == 0 %}
+            <div class="tw-empty-state">{{ language_group.empty_message }}</div>
+          {% else %}
+            {% for content_group in language_group.groups %}
+              <details class="tw-section-panel tw-group-panel"{% if content_group.is_primary %} open{% endif %} data-group-panel="{{ content_group.group_key }}">
+                <summary>
+                  <span class="tw-section-heading">
+                    <span class="tw-section-title">
+                      <strong>{{ content_group.tab_label }}</strong>
+                      <span class="tw-section-hint">{{ content_group.group_key }}</span>
+                    </span>
+                    <span class="tw-count-badge">{{ content_group.count }} item{{ content_group.count|pluralize }}</span>
+                  </span>
+                </summary>
+                <div class="tw-result-list">
+                  {% for row in content_group.rows %}
+                    <article class="tw-result-card" data-result-card data-locale="{{ language_group.language }}" data-group="{{ content_group.group_key }}">
+                      <div class="tw-result-card-header">
+                        <div>
+                          <div class="tw-result-eyebrow">{{ row.group_label }} / {{ row.language_label }} ({{ row.language }})</div>
+                          <h4 class="tw-result-title">{{ row.field_label }}</h4>
+                          {% if row.context_label %}<div class="tw-muted">{{ row.context_label }}</div>{% endif %}
+                        </div>
+                        <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
+                      </div>
+                      <div class="tw-result-main{% if row.main_value_is_reason %} is-reason{% endif %}">
+                        <div class="tw-result-main-label">{{ row.main_value_label }}</div>
+                        <div class="tw-result-main-value">{{ row.main_value_display|default:"-" }}</div>
+                      </div>
+                      {% if row.result_reason_labels %}
+                        <div class="tw-result-reasons">
+                          {% for reason_label in row.result_reason_labels %}
+                            <span class="tw-reason-chip">{{ reason_label }}</span>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                      <details class="tw-result-details">
+                        <summary>Compare original/current translation</summary>
+                        <div class="tw-result-compare-grid">
+                          <div>
+                            <div class="tw-result-detail-label">Original text</div>
+                            <div class="tw-result-text">{{ row.source_value_display|default:"-" }}</div>
+                          </div>
+                          <div>
+                            <div class="tw-result-detail-label">Existing translation</div>
+                            <div class="tw-result-text">{{ row.existing_translation_display|default:"-" }}</div>
+                          </div>
+                        </div>
+                      </details>
+                      <details class="tw-result-details">
+                        <summary>Technical details</summary>
+                        <dl class="tw-technical-list">
+                          <dt>Field key</dt><dd>{{ row.key|default:"-" }}</dd>
+                          <dt>Resource ID</dt><dd>{{ row.resource_id|default:"-" }}</dd>
+                          <dt>Resource key</dt><dd>{{ row.resource_key|default:"-" }}</dd>
+                          <dt>Digest</dt><dd>{{ row.digest|default:"-" }}</dd>
+                          <dt>Status</dt><dd>{{ row.status|default:"-" }}</dd>
+                          <dt>Raw reasons</dt><dd>{{ row.raw_reason_text|default:"-" }}</dd>
+                          <dt>Write eligibility</dt><dd>{{ row.write_eligibility|default:"-" }}</dd>
+                        </dl>
+                      </details>
+                    </article>
+                  {% endfor %}
+                </div>
+              </details>
+            {% endfor %}
+          {% endif %}
+        </section>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="module" data-workspace-section="overview" style="padding: 12px; margin-bottom: 16px;">
+    <h2>Overview</h2>
     <details class="tw-advanced-details" style="margin-bottom: 12px;">
       <summary>Fallback product dropdown</summary>
       <form method="get" class="tw-toolbar tw-compact-form" style="margin-top: 8px;">
@@ -1999,23 +2342,9 @@
     </div>
   </div>
 
-  <div class="module tw-draft-card">
-    <h2>Translate product</h2>
+  <div class="module tw-draft-card" data-workspace-section="overview">
+    <h2>Progress</h2>
     <p class="tw-draft-note">Preview only - Shopify has not been updated yet. Nothing has been written to Shopify.</p>
-    {% if selected_product_gid %}
-      <form method="post" action="{% url 'shopify_translation_console' %}" style="margin-bottom: 14px;">
-        {% csrf_token %}
-        <input type="hidden" name="ui_mode" value="editor">
-        <input type="hidden" name="action" value="translate_all_languages_all_content">
-        <input type="hidden" name="product_search" value="{{ product_search_text }}">
-        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
-        <input type="hidden" name="target_locale" value="{{ selected_locale }}">
-        <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-        <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-        <button type="submit" class="button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Translate all in background</button>
-        <div class="tw-muted" style="margin-top: 8px;">Starts background translation for new and updated content. The request returns quickly and does not write to Shopify.</div>
-      </form>
-    {% endif %}
     {% if selected_product_gid %}
       <div id="translation-background-job" class="tw-run-banner is-{{ translation_background_job.status_key|default:'pending' }}" data-translation-job-panel data-job-status-url="{% url 'shopify_translation_console_job_status' %}" data-job-id="{{ translation_background_job.job_id|default:'' }}" data-product-gid="{{ selected_product_gid }}" data-job-initial-status="{{ translation_background_job.status|default:'not_started' }}" data-poll-interval-ms="3000">
         <div class="tw-run-header">
@@ -2070,10 +2399,6 @@
             <div class="tw-run-label">Last updated</div>
             <div class="tw-run-value" data-job-field="updated_at">{{ translation_background_job.updated_at|default:"-" }}</div>
           </div>
-          <div class="tw-run-item">
-            <div class="tw-run-label">Report path</div>
-            <div class="tw-run-value" data-job-field="report_path">{{ translation_background_job.report_path|default:"-" }}</div>
-          </div>
         </div>
         <div class="tw-job-actions">
           <form method="post" action="{% url 'shopify_translation_console' %}" class="tw-inline-form">
@@ -2095,6 +2420,8 @@
           {% endif %}
         </div>
         {% if translation_background_job.exists %}
+          <details class="tw-advanced-details tw-progress-breakdown">
+            <summary>Progress breakdown</summary>
           <h3>Per-language progress</h3>
           <div class="tw-editor-table-wrap">
             <table class="tw-results-table translation-job-progress-table">
@@ -2153,95 +2480,8 @@
               </tbody>
             </table>
           </div>
-          {% if translation_background_job.show_translation_results %}
-            <div id="translation-results" class="tw-translation-results" data-translation-results-section>
-              <div class="tw-run-header">
-                <div>
-                  <h3>Translation results</h3>
-                  <p><strong>{{ translation_background_job.translation_result_status_label }}</strong></p>
-                  <p class="tw-draft-note">Preview only - Shopify has not been updated yet. Nothing has been written to Shopify.</p>
-                </div>
-                <span class="tw-count-badge">{{ translation_background_job.translation_result_count }} result item{{ translation_background_job.translation_result_count|pluralize }}</span>
-              </div>
-              {% for language_group in translation_background_job.translation_result_groups %}
-                <details class="tw-section-panel" open>
-                  <summary>
-                    <span class="tw-section-heading">
-                      <span class="tw-section-title">
-                        <strong>{{ language_group.language_label }}</strong>
-                        <span class="tw-section-hint">{{ language_group.language }}</span>
-                      </span>
-                      <span class="tw-count-badge">{{ language_group.count }} result item{{ language_group.count|pluralize }}</span>
-                    </span>
-                  </summary>
-                  {% for content_group in language_group.groups %}
-                    <details class="tw-section-panel"{% if content_group.is_primary %} open{% endif %}>
-                      <summary>
-                        <span class="tw-section-heading">
-                          <span class="tw-section-title">
-                            <strong>{{ content_group.group_label }}</strong>
-                            <span class="tw-section-hint">{{ content_group.group_key }}</span>
-                          </span>
-                          <span class="tw-count-badge">{{ content_group.count }} item{{ content_group.count|pluralize }}</span>
-                        </span>
-                      </summary>
-                      <div class="tw-result-list">
-                        {% for row in content_group.rows %}
-                          <article class="tw-result-card">
-                            <div class="tw-result-card-header">
-                              <div>
-                                <div class="tw-result-eyebrow">{{ row.group_label }} / {{ row.language_label }} ({{ row.language }})</div>
-                                <h4 class="tw-result-title">{{ row.field_label }}</h4>
-                                {% if row.context_label %}<div class="tw-muted">{{ row.context_label }}</div>{% endif %}
-                              </div>
-                              <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
-                            </div>
-                            <div class="tw-result-main{% if row.main_value_is_reason %} is-reason{% endif %}">
-                              <div class="tw-result-main-label">{{ row.main_value_label }}</div>
-                              <div class="tw-result-main-value">{{ row.main_value_display|default:"-" }}</div>
-                            </div>
-                            {% if row.result_reason_labels %}
-                              <div class="tw-result-reasons">
-                                {% for reason_label in row.result_reason_labels %}
-                                  <span class="tw-reason-chip">{{ reason_label }}</span>
-                                {% endfor %}
-                              </div>
-                            {% endif %}
-                            <details class="tw-result-details">
-                              <summary>Compare original/current translation</summary>
-                              <div class="tw-result-compare-grid">
-                                <div>
-                                  <div class="tw-result-detail-label">Original text</div>
-                                  <div class="tw-result-text">{{ row.source_value_display|default:"-" }}</div>
-                                </div>
-                                <div>
-                                  <div class="tw-result-detail-label">Existing translation</div>
-                                  <div class="tw-result-text">{{ row.existing_translation_display|default:"-" }}</div>
-                                </div>
-                              </div>
-                            </details>
-                            <details class="tw-result-details">
-                              <summary>Technical details</summary>
-                              <dl class="tw-technical-list">
-                                <dt>Field key</dt><dd>{{ row.key|default:"-" }}</dd>
-                                <dt>Resource ID</dt><dd>{{ row.resource_id|default:"-" }}</dd>
-                                <dt>Resource key</dt><dd>{{ row.resource_key|default:"-" }}</dd>
-                                <dt>Digest</dt><dd>{{ row.digest|default:"-" }}</dd>
-                                <dt>Status</dt><dd>{{ row.status|default:"-" }}</dd>
-                                <dt>Raw reasons</dt><dd>{{ row.raw_reason_text|default:"-" }}</dd>
-                                <dt>Write eligibility</dt><dd>{{ row.write_eligibility|default:"-" }}</dd>
-                              </dl>
-                            </details>
-                          </article>
-                        {% endfor %}
-                      </div>
-                    </details>
-                  {% endfor %}
-                </details>
-              {% endfor %}
-            </div>
-          {% endif %}
-          <details id="{{ translation_background_job.detail_anchor }}" class="tw-advanced-details">
+          </details>
+          <details id="{{ translation_background_job.detail_anchor }}" class="tw-advanced-details" data-workspace-section="technical">
             <summary>Report details</summary>
             <table>
               <tbody>
@@ -2265,7 +2505,9 @@
                 <tr><th>rollback_performed</th><td>{{ translation_background_job.rollback_performed }}</td></tr>
               </tbody>
             </table>
-            <h3>Apply readiness summary</h3>
+            <div class="module tw-update-prep" data-workspace-section="update" style="padding: 12px; margin-bottom: 16px;">
+            <h2>Shopify update preparation</h2>
+            <h3>Eligible fields</h3>
             <div class="tw-run-grid">
               <div class="tw-run-item">
                 <div class="tw-run-label">Eligible apply count</div>
@@ -2293,7 +2535,58 @@
                 <tr><th>translations_register_called</th><td>{{ translation_background_job.apply_readiness_summary.translations_register_called }}</td></tr>
               </tbody>
             </table>
-            <h3>Prepare selected translations for Shopify update</h3>
+            <h3>Selected entries</h3>
+            {% if translation_background_job.review_rows %}
+              <form method="post" action="{% url 'shopify_translation_console' %}">
+                {% csrf_token %}
+                <input type="hidden" name="ui_mode" value="editor">
+                <input type="hidden" name="product_search" value="{{ product_search_text }}">
+                <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+                <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+                <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+                <div class="tw-job-actions" style="margin-bottom: 10px;">
+                  <div>
+                    <label for="id_update_safe_write_readiness_locale">Language for Shopify update preparation</label><br>
+                    <select id="id_update_safe_write_readiness_locale" name="target_locale">
+                      {% if safe_write_readiness_state.locale_options %}
+                        {% for option in safe_write_readiness_state.locale_options %}
+                          <option value="{{ option.value }}"{% if option.value == safe_write_readiness_state.locale %} selected{% endif %}>{{ option.label }} ({{ option.value }})</option>
+                        {% endfor %}
+                      {% else %}
+                        <option value="{{ selected_locale }}">{{ selected_locale }}</option>
+                      {% endif %}
+                    </select>
+                  </div>
+                  <div>
+                    <label for="id_update_locked_execution_ack_preview">Optional ACK preview for locked preparation</label><br>
+                    <input id="id_update_locked_execution_ack_preview" type="text" name="locked_execution_ack_preview" value="" style="min-width: 320px;" placeholder="{{ locked_execution_ack_phrase }}">
+                    <div class="tw-muted">ACK entry is not effective in this step.</div>
+                  </div>
+                </div>
+                <div class="tw-update-entry-grid">
+                  {% for row in translation_background_job.review_rows %}
+                    {% if row.safe_write_selectable %}
+                      <label class="tw-update-entry">
+                        <input type="checkbox" name="safe_write_entry_ids" value="{{ row.safe_write_entry_id }}">
+                        <span>
+                          <span class="tw-update-entry-title">{{ row.language }} / {{ row.group_label }} / {{ row.key }}</span>
+                          <span class="tw-update-entry-value">{{ row.generated_draft_summary|default:row.generated_draft_display|default:"Translation result ready for package" }}</span>
+                        </span>
+                      </label>
+                    {% endif %}
+                  {% endfor %}
+                </div>
+                {% if safe_write_readiness_state.can_prepare %}
+                  <button type="submit" class="button" name="action" value="prepare_translation_safe_write_readiness_package">Prepare safe write package</button>
+                  <button type="submit" class="button" name="action" value="prepare_translation_locked_execution_shell">Prepare locked execution</button>
+                {% else %}
+                  <p class="tw-muted">No selectable entries are ready for package preparation yet.</p>
+                {% endif %}
+              </form>
+            {% else %}
+              <p>No row-level translation result data was recorded in the local report.</p>
+            {% endif %}
+            <h3>Prepare safe write package</h3>
             <p><strong>This package does not write Shopify.</strong> It only prepares a locked review for future ACK.</p>
             <table class="tw-results-table">
               <tbody>
@@ -2371,7 +2664,7 @@
                 </table>
               </div>
             {% endif %}
-            <details class="tw-real-write-panel"{% if workspace_real_write_display.execution_status %} open{% endif %}>
+            <details class="tw-real-write-panel">
               <summary>Real Shopify update</summary>
               <p class="tw-real-write-warning">This will update one Shopify translation.</p>
               <table class="tw-results-table">
@@ -2436,6 +2729,7 @@
                 </table>
               {% endif %}
             </details>
+            </div>
             <h3>Needs review and skipped reasons</h3>
             {% if translation_background_job.blocked_reason_summary %}
               <div class="tw-editor-table-wrap">
@@ -2678,7 +2972,7 @@
         {% endif %}
       </div>
     {% endif %}
-    <details class="tw-advanced-details">
+    <details class="tw-advanced-details" data-workspace-section="technical">
       <summary>Advanced technical details: legacy synchronous translation</summary>
       <p class="tw-muted">Legacy/debug only. Prefer Translate all in background for the normal workflow.</p>
       <form method="post" action="{% url 'shopify_translation_console' %}">
@@ -2712,6 +3006,7 @@
       <p class="tw-muted" style="margin-top: 10px;">Translation results can include product basics, SEO, options, variants, important metafields, and media alt text when Shopify returns customer-facing rows. Technical fields remain view-only.</p>
     </details>
 
+    <div data-workspace-section="technical">
     {% if translate_all_result %}
       <div class="tw-run-banner is-{{ translate_all_result.status_key }}" data-translate-all-result>
         <div class="tw-run-header">
@@ -2934,7 +3229,9 @@
         </table>
       </details>
     {% endif %}
+    </div>
 
+    <div data-workspace-section="technical">
     {% if multi_locale_draft_result %}
       <h3>Translation results</h3>
       <p>{{ multi_locale_draft_result.message }}</p>
@@ -3013,9 +3310,10 @@
         </table>
       </details>
     {% endif %}
+    </div>
   </div>
 
-  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+  <div class="module" data-workspace-section="technical" style="padding: 12px; margin-bottom: 16px;">
     <h2>Original vs translation</h2>
     <p class="tw-muted">Showing {{ editor_view.editor_locale_label }} ({{ selected_locale }}) for the selected product.</p>
     {% if editor_view.editor_empty_message %}
@@ -3147,7 +3445,7 @@
     {% endif %}
   </div>
 
-  <div class="module" style="padding: 12px; margin-bottom: 16px;">
+  <div class="module" data-workspace-section="technical" style="padding: 12px; margin-bottom: 16px;">
     <details class="tw-advanced-details">
       <summary>Advanced details for technical review</summary>
       <form method="post" class="tw-editor-actions" style="margin: 8px 0 12px;">
@@ -3204,7 +3502,7 @@
   </div>
   {% endif %}
 
-  <details style="margin-bottom: 16px;">
+  <details data-workspace-section="technical" style="margin-bottom: 16px;">
     <summary><strong>Advanced details for technical review</strong></summary>
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
@@ -4979,6 +5277,140 @@
   </details>
   <script>
     (function () {
+      var root = document.querySelector(".translation-workspace");
+      var shell = document.querySelector("[data-workspace-shell]");
+      if (!root || !shell) {
+        return;
+      }
+      root.classList.add("tw-js");
+      var panels = {};
+      Array.prototype.slice.call(shell.querySelectorAll("[data-workspace-panel]"))
+        .forEach(function (panel) {
+          panels[panel.getAttribute("data-workspace-panel")] = panel;
+        });
+
+      Array.prototype.slice.call(document.querySelectorAll("[data-workspace-section]"))
+        .forEach(function (section) {
+          var target = section.getAttribute("data-workspace-section");
+          if (panels[target] && !panels[target].contains(section)) {
+            panels[target].appendChild(section);
+          }
+        });
+
+      var tabButtons = Array.prototype.slice.call(shell.querySelectorAll("[data-workspace-tab]"));
+
+      function selectWorkspaceTab(name) {
+        tabButtons.forEach(function (button) {
+          var active = button.getAttribute("data-workspace-tab") === name;
+          button.classList.toggle("is-active", active);
+          button.setAttribute("aria-selected", active ? "true" : "false");
+        });
+        Object.keys(panels).forEach(function (key) {
+          panels[key].hidden = key !== name;
+        });
+      }
+
+      tabButtons.forEach(function (button) {
+        button.addEventListener("click", function () {
+          selectWorkspaceTab(button.getAttribute("data-workspace-tab"));
+        });
+      });
+
+      document.addEventListener("click", function (event) {
+        var link = event.target.closest ? event.target.closest("a") : null;
+        if (!link) {
+          return;
+        }
+        var href = link.getAttribute("href") || "";
+        if (href === "#translation-results") {
+          selectWorkspaceTab("results");
+        } else if (href.indexOf("#translation-background-job-details") === 0) {
+          selectWorkspaceTab("technical");
+        }
+      });
+
+      selectWorkspaceTab(shell.getAttribute("data-initial-tab") || "overview");
+    }());
+
+    (function () {
+      Array.prototype.slice.call(document.querySelectorAll("[data-language-switcher]"))
+        .forEach(function (container) {
+          var buttons = Array.prototype.slice.call(container.querySelectorAll("[data-language-tab]"));
+          var panels = Array.prototype.slice.call(container.querySelectorAll("[data-language-panel]"));
+          if (!buttons.length || !panels.length) {
+            return;
+          }
+
+          function selectLanguage(language) {
+            buttons.forEach(function (button) {
+              var active = button.getAttribute("data-language-tab") === language;
+              button.classList.toggle("is-active", active);
+              button.setAttribute("aria-selected", active ? "true" : "false");
+            });
+            panels.forEach(function (panel) {
+              panel.hidden = panel.getAttribute("data-language-panel") !== language;
+            });
+          }
+
+          buttons.forEach(function (button) {
+            button.addEventListener("click", function () {
+              selectLanguage(button.getAttribute("data-language-tab"));
+            });
+          });
+          var defaultButton = buttons.filter(function (button) {
+            return button.getAttribute("data-language-default") === "true" ||
+              button.classList.contains("is-active");
+          })[0] || buttons[0];
+          selectLanguage(defaultButton.getAttribute("data-language-tab"));
+        });
+    }());
+
+    (function () {
+      Array.prototype.slice.call(document.querySelectorAll("[data-group-switcher]"))
+        .forEach(function (switcher) {
+          var languagePanel = switcher.closest("[data-language-panel]");
+          if (!languagePanel) {
+            return;
+          }
+          var buttons = Array.prototype.slice.call(switcher.querySelectorAll("[data-group-tab]"));
+          var panels = Array.prototype.slice.call(languagePanel.querySelectorAll("[data-group-panel]"));
+          if (!buttons.length || !panels.length) {
+            return;
+          }
+
+          function activeKeys() {
+            var keys = buttons
+              .filter(function (button) { return button.classList.contains("is-active"); })
+              .map(function (button) { return button.getAttribute("data-group-tab"); });
+            if (keys.length) {
+              return keys;
+            }
+            return [buttons[0].getAttribute("data-group-tab")];
+          }
+
+          function applyGroupFilter() {
+            var keys = activeKeys();
+            panels.forEach(function (panel) {
+              panel.hidden = keys.indexOf(panel.getAttribute("data-group-panel")) === -1;
+            });
+          }
+
+          buttons.forEach(function (button) {
+            button.addEventListener("click", function () {
+              buttons.forEach(function (item) {
+                item.classList.remove("is-active");
+                item.setAttribute("aria-selected", "false");
+              });
+              button.classList.add("is-active");
+              button.setAttribute("aria-selected", "true");
+              applyGroupFilter();
+            });
+          });
+          applyGroupFilter();
+        });
+    }());
+
+    (function () {
       var panel = document.querySelector("[data-translation-job-panel]");
       if (!panel) {
         return;
@@ -5066,7 +5498,7 @@
       }
 
       function setJobField(name, value) {
-        Array.prototype.slice.call(panel.querySelectorAll('[data-job-field="' + name + '"]'))
+        Array.prototype.slice.call(document.querySelectorAll('[data-job-field="' + name + '"]'))
           .forEach(function (element) {
             element.textContent = value;
           });
@@ -5190,15 +5622,15 @@
         panel.setAttribute("data-job-initial-status", status);
         setClassWithStatus(panel, "tw-run-banner", statusKey);
         setText("[data-job-status-message]", data.status_message || "No background translation has been recorded for this product.");
-        var badge = panel.querySelector("[data-job-status-badge]");
-        if (badge) {
+        Array.prototype.slice.call(document.querySelectorAll("[data-job-status-badge]"))
+          .forEach(function (badge) {
           setClassWithStatus(badge, "tw-status-badge", statusKey);
           badge.textContent = statusLabel;
-        }
-        var progressBar = panel.querySelector("[data-job-progress-bar]");
-        if (progressBar) {
+          });
+        Array.prototype.slice.call(document.querySelectorAll("[data-job-progress-bar]"))
+          .forEach(function (progressBar) {
           progressBar.style.width = String(progress) + "%";
-        }
+          });
         setJobField("progress_percent", String(progress) + "%");
         setJobField("current_locale", textOrDash(data.current_locale));
         setJobField("current_group", textOrDash(data.current_group));
