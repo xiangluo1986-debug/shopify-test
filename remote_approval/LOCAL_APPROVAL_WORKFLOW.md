@@ -186,6 +186,30 @@ Reviews APIs, or creates tracking tokens. Even when exactly one candidate is
 gate-ready and the locked ACK is present, this phase only reports
 `ready_for_future_real_send_execute`; it does not send.
 
+## Review Request Trustpilot Real Send Final Preflight
+
+`shopify_review_request_trustpilot_real_send_final_preflight` is a Phase 5.13
+final preflight task. It reads the real production auto refresh, locked send
+readiness, locked Gmail send gate, and no-send executor shell reports by
+default, then decides whether a future separately approved real-send execute
+task could proceed.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_real_send_final_preflight.json
+logs/shopify_review_request_trustpilot_real_send_final_preflight.html
+```
+
+Simulator fixture reports are ignored unless
+`SHOPIFY_REVIEW_REQUEST_REAL_PREFLIGHT_USE_SIMULATOR=YES_I_UNDERSTAND_THIS_IS_FAKE_DATA`
+is present. The preflight never calls Gmail APIs, creates/updates/deletes
+drafts, sends email, calls Shopify APIs, writes Shopify tags, calls
+Trustpilot/Kudosi/Ali Reviews APIs, or creates tracking tokens. Current
+production state should remain `blocked_no_eligible_candidate` until a real
+eligible delivered order with canonical `1: review request` passes all duplicate
+and risk checks.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

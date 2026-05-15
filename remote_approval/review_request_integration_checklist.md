@@ -606,3 +606,33 @@ Future tracking design note:
   is explicitly set.
 - [x] The simulator is used only to test gate/executor branches before any
   future real-send implementation.
+
+## Phase 5.13 Trustpilot Real Send Final Preflight
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_real_send_final_preflight`.
+- [x] Generate local JSON/HTML final preflight reports only:
+  `logs/shopify_review_request_trustpilot_real_send_final_preflight.json` and
+  `logs/shopify_review_request_trustpilot_real_send_final_preflight.html`.
+- [x] Read production reports by default:
+  `shopify_review_request_trustpilot_auto_queue_refresh.json`,
+  `shopify_review_request_trustpilot_locked_send_readiness_package.json`,
+  `shopify_review_request_trustpilot_locked_gmail_send_gate.json`, and
+  `shopify_review_request_trustpilot_gmail_send_executor_shell.json`.
+- [x] Ignore simulator fixtures unless
+  `SHOPIFY_REVIEW_REQUEST_REAL_PREFLIGHT_USE_SIMULATOR=YES_I_UNDERSTAND_THIS_IS_FAKE_DATA`
+  is explicitly set.
+- [x] Current production state remains blocked because no eligible Trustpilot
+  candidate exists: `preflight_status=blocked_no_eligible_candidate`.
+- [x] `#22620` remains blocked because the same customer already received
+  Trustpilot via `#22621`.
+- [x] `#22582` remains blocked because it is not delivered, is missing
+  `1: review request`, and related order group `#22582/#22581` is not ready.
+- [x] No Gmail API is called.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No email is sent.
+- [x] No Shopify API is called.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] The next phase can add real-send execute only after final preflight
+  reports `ready_for_real_send_execute_next_phase`.

@@ -612,6 +612,78 @@
         </details>
     </div>
 
+    <div class="rrw-section">
+        <h2>Real Send Final Preflight</h2>
+        <p class="{% if dashboard.trustpilot_real_send_final_preflight.real_send_execute_allowed_next_phase %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_real_send_final_preflight.message }}
+        </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_real_send_final_preflight.safety_message }}</p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Preflight status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_final_preflight.preflight_status }}</div>
+                <div class="rrw-card-note">Final report-only check before any future execute task.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Production reports used</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_final_preflight.production_reports_used_label }}</div>
+                <div class="rrw-card-note">
+                    Simulator reports used:
+                    {{ dashboard.trustpilot_real_send_final_preflight.simulator_reports_used_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_final_preflight.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected candidate:
+                    {{ dashboard.trustpilot_real_send_final_preflight.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gate status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_final_preflight.gate_status }}</div>
+                <div class="rrw-card-note">
+                    Executor:
+                    {{ dashboard.trustpilot_real_send_final_preflight.executor_status }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">ACK present</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_final_preflight.ack_present_label }}</div>
+                <div class="rrw-card-note">Required only for a future separately approved execute phase.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Real send execute allowed next phase</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_final_preflight.real_send_execute_allowed_next_phase_label }}</div>
+                <div class="rrw-card-note">This dashboard still cannot send email.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">Final preflight review</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_real_send_final_preflight.next_admin_action }}</div>
+            </div>
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_real_send_final_preflight.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_real_send_final_preflight.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_real_send_final_preflight.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_real_send_final_preflight.html_relative_path }}
+            </p>
+            <p class="rrw-muted">
+                Auto refresh:
+                {{ dashboard.trustpilot_real_send_final_preflight.auto_refresh_status|default:"missing" }}
+                | Readiness:
+                {{ dashboard.trustpilot_real_send_final_preflight.readiness_status|default:"missing" }}
+            </p>
+        </details>
+    </div>
+
     <details class="rrw-advanced-section">
         <summary>Sandbox Testing</summary>
         <p class="rrw-warning">

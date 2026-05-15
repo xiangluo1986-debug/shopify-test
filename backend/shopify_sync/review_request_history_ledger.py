@@ -84,6 +84,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("executor_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_real_send_final_preflight",
+        "label": "Trustpilot real send final preflight",
+        "filename": "shopify_review_request_trustpilot_real_send_final_preflight.json",
+        "channel": "trustpilot",
+        "event_type": "final_preflight",
+        "status_keys": ("preflight_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -159,6 +167,7 @@ EVENT_TYPE_OPTIONS = (
     ("readiness_package", "Readiness package"),
     ("send_gate", "Send gate"),
     ("send_executor_shell", "Send executor shell"),
+    ("final_preflight", "Final preflight"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
     ("draft_created", "Draft created"),
@@ -352,7 +361,11 @@ def _events_from_report(report):
         events.extend(_readiness_package_events(report))
     elif key == "trustpilot_auto_queue_refresh":
         events.extend(_auto_refresh_events(report))
-    elif key in {"trustpilot_locked_gmail_send_gate", "trustpilot_gmail_send_executor_shell"}:
+    elif key in {
+        "trustpilot_locked_gmail_send_gate",
+        "trustpilot_gmail_send_executor_shell",
+        "trustpilot_real_send_final_preflight",
+    }:
         events.extend(_gate_executor_events(report))
 
     return [event for event in events if event]
