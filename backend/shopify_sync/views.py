@@ -775,16 +775,26 @@ def _user_has_shopify_sync_access(request):
     return bool(set(request.user.groups.values_list("name", flat=True)) & allowed_groups)
 
 
+def _user_has_review_request_admin_access(request):
+    if not request.user.is_authenticated:
+        return False
+    if request.user.is_superuser:
+        return True
+    if not request.user.is_staff:
+        return False
+    return request.user.groups.filter(name="Admin").exists()
+
+
 @staff_member_required
 def review_request_workbench(request):
-    if not _user_has_shopify_sync_access(request):
-        return HttpResponseForbidden("Only authorized Shopify sync staff can view this workbench.")
+    if not _user_has_review_request_admin_access(request):
+        return HttpResponseForbidden("Only admins can view Review Requests.")
     if request.method not in {"GET", "HEAD"}:
         return HttpResponseNotAllowed(["GET", "HEAD"])
 
     context = admin.site.each_context(request)
     context.update(build_review_request_workbench_context(request.GET))
-    context["title"] = "Review Request Workbench"
+    context["title"] = "Review Requests"
     return render(request, "admin/shopify_sync/review_request_workbench.html", context)
 
 

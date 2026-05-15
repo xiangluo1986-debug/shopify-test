@@ -29,8 +29,16 @@
   {{ block.super }}
   <nav class="internal-module-nav" aria-label="Internal modules">
     <a href="{% url 'admin:tickets_ticket_changelist' %}">Tickets</a>
-    <a href="{% url 'admin:shopify_sync_shopifyorder_changelist' %}">Shopify Orders</a>
-    <a href="{% url 'shopify_sync_dashboard' %}">Shopify Sync</a>
-    <a href="{% url 'shopify_review_request_workbench' %}">Review Requests</a>
+    <a href="{% url 'admin:shopify_sync_settlementbatch_changelist' %}">Settlement</a>
+    {% if request.user.is_superuser %}
+      <a href="{% url 'shopify_review_request_workbench' %}">Review Requests</a>
+    {% else %}
+      {% for group in request.user.groups.all %}
+        {% if group.name == "Admin" %}
+          <a href="{% url 'shopify_review_request_workbench' %}">Review Requests</a>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+    <a href="{% url 'shopify_sync_dashboard' %}">Shopify Sync / Translation</a>
   </nav>
 {% endblock %}

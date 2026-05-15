@@ -164,11 +164,18 @@
         <a href="{% url 'admin:shopify_sync_shopifyorder_changelist' %}">Back to Shopify orders</a>
     </div>
 
-    <h1>Review Request Workbench</h1>
+    <h1>Review Requests</h1>
     <p class="rrw-muted">
-        Read-only Phase 5.3 review-request module. It reads local synced orders and local review-request reports only.
+        Trustpilot / Ali Reviews automation history, eligibility, and debug ledger
+    </p>
+    <p class="rrw-muted">
+        First-class internal system module parallel to Tickets and Settlement. It reads local synced orders and local review-request reports only.
         It does not send email, create Gmail drafts, write Shopify tags, call external review APIs, generate tracking tokens, or enable tracking redirects.
     </p>
+    <div class="rrw-warning">
+        <strong>Admins only.</strong>
+        This page is read-only and does not send emails or write Shopify tags.
+    </div>
 
     <div class="rrw-section">
         <h2>Overview</h2>

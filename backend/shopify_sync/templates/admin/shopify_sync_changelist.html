@@ -9,9 +9,19 @@
         <li>
             <a href="{% url 'shopify_translation_console' %}" class="viewlink">Translation Console</a>
         </li>
+    {% endif %}
+    {% if request.user.is_superuser %}
         <li>
-            <a href="{% url 'shopify_review_request_workbench' %}" class="viewlink">Review Request Workbench</a>
+            <a href="{% url 'shopify_review_request_workbench' %}" class="viewlink">Review Requests</a>
         </li>
+    {% else %}
+        {% for group in request.user.groups.all %}
+            {% if group.name == "Admin" %}
+                <li>
+                    <a href="{% url 'shopify_review_request_workbench' %}" class="viewlink">Review Requests</a>
+                </li>
+            {% endif %}
+        {% endfor %}
     {% endif %}
 {% endblock %}
 

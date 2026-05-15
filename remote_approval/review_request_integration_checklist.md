@@ -382,3 +382,19 @@ Future tracking design note:
 - [x] Phase 4.8C does not create Gmail drafts, send Gmail, delete Gmail drafts,
   write Shopify tags, remove Shopify tags, call Trustpilot/Kudosi/Ali Reviews
   APIs, enable tracking redirects, or generate tracking tokens.
+
+## Phase 5.4 First-Class Review Requests Module
+
+- [x] Review Requests appears in the internal admin module navigation as a
+  first-class module alongside Tickets and Settlement.
+- [x] Existing URL remains:
+  `/admin/shopify_sync/review-request-workbench/`.
+- [x] Current access rule is admins only: Django superusers or staff users in
+  the `Admin` group. Finance and Shenzhen Warehouse users are not granted
+  Review Requests access in this phase.
+- [x] The workbench page displays an admins-only/read-only note.
+- [x] Review Requests remains read-only until future write/send phases are
+  explicitly run through locked tasks.
+- [x] Phase 5.4 does not create Gmail drafts, send Gmail, delete Gmail drafts,
+  write Shopify tags, remove Shopify tags, call Trustpilot/Kudosi/Ali Reviews
+  APIs, enable tracking redirects, or generate tracking tokens.
