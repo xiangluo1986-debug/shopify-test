@@ -41,6 +41,30 @@
         padding: 10px 12px;
         margin: 8px 0;
     }
+    .rrw-answer-banner {
+        border: 1px solid var(--border-color, #d6d6d6);
+        border-left: 5px solid #d97706;
+        border-radius: 6px;
+        padding: 14px 16px;
+        margin: 16px 0 20px;
+        background: #fff7ed;
+    }
+    .rrw-answer-ready {
+        border-left-color: #16a34a;
+        background: #f0fdf4;
+    }
+    .rrw-answer-question {
+        color: var(--body-quiet-color, #666);
+        font-size: 13px;
+        font-weight: 700;
+        margin: 0 0 6px;
+    }
+    .rrw-answer-value {
+        color: var(--body-fg, #222);
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1.35;
+    }
     .rrw-section {
         margin: 0 0 28px;
     }
@@ -154,6 +178,39 @@
     .rrw-actions-list {
         display: grid;
         gap: 10px;
+    }
+    .rrw-checklist {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+    }
+    .rrw-check-item {
+        border: 1px solid var(--border-color, #d6d6d6);
+        border-radius: 6px;
+        padding: 12px;
+        background: var(--body-bg, #fff);
+    }
+    .rrw-check-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
+    .rrw-check-label {
+        color: var(--body-fg, #222);
+        font-size: 15px;
+        font-weight: 700;
+    }
+    .rrw-check-item p {
+        margin: 6px 0 0;
+    }
+    .rrw-mini-guide {
+        margin: 10px 0 0 22px;
+        padding: 0;
+    }
+    .rrw-mini-guide li {
+        margin: 5px 0;
     }
     .rrw-action {
         border: 1px solid var(--border-color, #d6d6d6);
@@ -291,6 +348,40 @@
         This page does not send emails by itself. It only shows what is ready and what is blocked.
     </div>
 
+    <div class="rrw-answer-banner {{ dashboard.setup_checklist.current_answer_class }}">
+        <div class="rrw-answer-question">Can the system prepare a Trustpilot email now?</div>
+        <div class="rrw-answer-value">Current answer: {{ dashboard.setup_checklist.current_answer }}</div>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Setup checklist</h2>
+        <p class="rrw-muted">Complete these items before the system can prepare a Trustpilot Gmail draft.</p>
+        <p class="rrw-muted">Checklist areas: Gmail permission, Eligible order, Safety checks, Final approval.</p>
+        <div class="rrw-checklist">
+            {% for item in dashboard.setup_checklist.items %}
+                <article class="rrw-check-item">
+                    <div class="rrw-check-heading">
+                        <div class="rrw-check-label">{{ item.letter }}. {{ item.label }}</div>
+                        <span class="rrw-badge {{ item.status_class }}">{{ item.status }}</span>
+                    </div>
+                    <p>{{ item.text }}</p>
+                    <p class="rrw-card-note"><strong>Action:</strong> {{ item.action }}</p>
+                </article>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="rrw-section">
+        <h2>How to make an order eligible</h2>
+        <ol class="rrw-mini-guide">
+            <li>Confirm the order was delivered.</li>
+            <li>Add Shopify tag <code>{{ wb.canonical_review_request_tag }}</code>.</li>
+            <li>Make sure the customer has not already received a Trustpilot email.</li>
+            <li>Make sure there is no open complaint, refund, return, or related-order issue.</li>
+            <li>The system will refresh after Shopify sync and show it as ready if safe.</li>
+        </ol>
+    </div>
+
     <div class="rrw-section">
         <h2>Current Status</h2>
         <div class="rrw-status-grid">
@@ -308,7 +399,7 @@
         <h2>What should I do next?</h2>
         <div class="rrw-action">
             <h3>{{ dashboard.next_action_headline }}</h3>
-            <p>Before the system can send a Trustpilot email, we need:</p>
+            <p>Before the system can prepare a Trustpilot email draft, we need:</p>
             <ol>
                 {% for item in dashboard.send_requirements %}
                     <li>{{ item }}</li>
@@ -372,31 +463,23 @@
     </div>
 
     <div class="rrw-section">
-        <h2>Gmail draft path</h2>
-        <p class="{% if dashboard.gmail_draft_path.draft_create_allowed_next_phase %}rrw-note{% else %}rrw-warning{% endif %}">
-            {{ dashboard.gmail_draft_path.message }}
+        <h2>Draft preparation</h2>
+        <p class="{% if dashboard.setup_checklist.current_answer_class == 'rrw-answer-ready' %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.setup_checklist.current_answer }}
         </p>
         <table class="rrw-table">
             <tbody>
                 <tr>
-                    <th>Draft path status</th>
-                    <td>{{ dashboard.gmail_draft_path.draft_preflight_status }}</td>
-                </tr>
-                <tr>
-                    <th>Can create one draft next phase</th>
-                    <td>{{ dashboard.gmail_draft_path.draft_create_allowed_next_phase_label }}</td>
-                </tr>
-                <tr>
-                    <th>Candidate count</th>
-                    <td>{{ dashboard.gmail_draft_path.eligible_candidate_count }}</td>
+                    <th>Ready orders</th>
+                    <td>{{ dashboard.setup_checklist.eligible_candidate_count_label }}</td>
                 </tr>
                 <tr>
                     <th>Selected order</th>
-                    <td>{{ dashboard.gmail_draft_path.selected_candidate_label }}</td>
+                    <td>{{ dashboard.setup_checklist.selected_candidate_label }}</td>
                 </tr>
                 <tr>
                     <th>Next action</th>
-                    <td>{{ dashboard.gmail_draft_path.next_admin_action }}</td>
+                    <td>{{ dashboard.setup_checklist.next_plain_action }}</td>
                 </tr>
             </tbody>
         </table>

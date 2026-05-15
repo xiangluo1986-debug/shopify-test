@@ -92,12 +92,14 @@ BLOCKED_REASON_DEFINITIONS = (
     ),
 )
 ADMIN_STATUS_LABELS = {
+    "scope_missing": "Gmail permission missing",
+    "blocked_missing_requirements": "Setup not complete",
     "blocked_existing_trustpilot_invitation_tag": "Already sent to this order",
     "blocked_existing_trustpilot_invitation_customer_level": "Already sent to this customer",
     "blocked_missing_delivered_tag": "Not delivered yet",
     "blocked_missing_review_request_tag": "Missing review request tag",
     "blocked_merged_order_group_not_ready": "Related orders are not ready",
-    "blocked_no_eligible_candidate": "No order ready to send",
+    "blocked_no_eligible_candidate": "No order ready",
     "blocked_missing_gmail_oauth_config": "Gmail setup is missing",
     "blocked_missing_ack": "Waiting for final approval",
     "blocked_multiple_candidates_require_manual_selection": "More than one order needs review",
@@ -3825,10 +3827,19 @@ def _operating_dashboard(
         trustpilot_gmail_config_compatibility_audit,
         trustpilot_gmail_scope_compatibility_resolver,
     )
+    setup_checklist = _setup_checklist(
+        ready_count=ready_count,
+        trustpilot_send_readiness=trustpilot_send_readiness,
+        trustpilot_auto_refresh=trustpilot_auto_refresh,
+        trustpilot_gmail_scope_compatibility_resolver=trustpilot_gmail_scope_compatibility_resolver,
+        trustpilot_gmail_draft_only_preflight=trustpilot_gmail_draft_only_preflight,
+        trustpilot_gmail_one_draft_create_locked_runner=trustpilot_gmail_one_draft_create_locked_runner,
+    )
     return {
         "ready_to_send_count": ready_count,
         "blocked_count": blocked_count,
         "sent_trustpilot_count": sent_count,
+        "setup_checklist": setup_checklist,
         "current_state_label": (
             "Waiting for eligible orders" if ready_count == 0 else "Ready for final review"
         ),
@@ -4110,6 +4121,226 @@ def _gmail_scope_plain_message(status):
     if status in {"gmail_send_scope_available", "broad_mail_scope_available"}:
         return "Gmail send permission is available. Final approval is still required."
     return "Gmail permission is not configured yet."
+
+
+def _setup_checklist(
+    ready_count,
+    trustpilot_send_readiness,
+    trustpilot_auto_refresh,
+    trustpilot_gmail_scope_compatibility_resolver,
+    trustpilot_gmail_draft_only_preflight,
+    trustpilot_gmail_one_draft_create_locked_runner,
+):
+    scope_checked = any(
+        source.get("report_loaded") is True
+        for source in (
+            trustpilot_gmail_scope_compatibility_resolver,
+            trustpilot_gmail_draft_only_preflight,
+            trustpilot_gmail_one_draft_create_locked_runner,
+        )
+    )
+    candidate_checked = any(
+        source.get("report_loaded") is True
+        for source in (
+            trustpilot_send_readiness,
+            trustpilot_auto_refresh,
+            trustpilot_gmail_draft_only_preflight,
+            trustpilot_gmail_one_draft_create_locked_runner,
+        )
+    )
+    scope_status = _safe_text(
+        trustpilot_gmail_one_draft_create_locked_runner.get("scope_status")
+        or trustpilot_gmail_draft_only_preflight.get("scope_status")
+        or trustpilot_gmail_scope_compatibility_resolver.get("scope_resolver_status"),
+        max_length=120,
+    )
+    draft_scope_available = (
+        trustpilot_gmail_one_draft_create_locked_runner.get("draft_scope_available") is True
+        or trustpilot_gmail_draft_only_preflight.get("draft_scope_available") is True
+        or trustpilot_gmail_scope_compatibility_resolver.get("compose_scope_available") is True
+        or trustpilot_gmail_scope_compatibility_resolver.get("real_send_scope_available") is True
+    )
+    eligible_candidate_count = _setup_eligible_candidate_count(
+        ready_count,
+        trustpilot_send_readiness,
+        trustpilot_auto_refresh,
+        trustpilot_gmail_draft_only_preflight,
+        trustpilot_gmail_one_draft_create_locked_runner,
+    )
+    exactly_one_candidate = (
+        trustpilot_gmail_one_draft_create_locked_runner.get("exactly_one_candidate") is True
+        or trustpilot_gmail_draft_only_preflight.get("exactly_one_candidate") is True
+        or eligible_candidate_count == 1
+    )
+    selected_candidate_label = _safe_text(
+        trustpilot_gmail_one_draft_create_locked_runner.get("selected_candidate_label")
+        or trustpilot_gmail_draft_only_preflight.get("selected_candidate_label")
+        or trustpilot_auto_refresh.get("selected_candidate_order_name")
+        or trustpilot_send_readiness.get("selected_candidate_order_name")
+        or "None",
+        max_length=80,
+    )
+    gmail_status = _setup_gmail_status(scope_checked, draft_scope_available, scope_status)
+    eligible_status = _setup_eligible_status(candidate_checked, eligible_candidate_count)
+    safety_status = _setup_safety_status(candidate_checked, exactly_one_candidate, eligible_candidate_count)
+    final_approval_status = "Required"
+    current_answer = _setup_current_answer(
+        scope_checked=scope_checked,
+        candidate_checked=candidate_checked,
+        gmail_ready=gmail_status == "Ready",
+        eligible_candidate_count=eligible_candidate_count,
+        exactly_one_candidate=exactly_one_candidate,
+    )
+    return {
+        "current_answer": current_answer,
+        "current_answer_class": "rrw-answer-ready" if current_answer.startswith("Ready") else "rrw-answer-blocked",
+        "eligible_candidate_count": eligible_candidate_count,
+        "eligible_candidate_count_label": _simple_order_count_text(eligible_candidate_count),
+        "selected_candidate_label": selected_candidate_label,
+        "next_plain_action": _setup_next_plain_action(
+            gmail_status,
+            eligible_status,
+            safety_status,
+        ),
+        "items": [
+            {
+                "letter": "A",
+                "label": "Gmail permission",
+                "status": gmail_status,
+                "status_class": _checklist_status_class(gmail_status),
+                "text": (
+                    "Gmail permission is not configured yet."
+                    if gmail_status != "Not checked yet"
+                    else "Gmail permission has not been checked yet."
+                ),
+                "action": (
+                    "Add Gmail scope to the environment. Use `gmail.compose` for draft-only mode, "
+                    "or `gmail.send` for direct sending later."
+                ),
+            },
+            {
+                "letter": "B",
+                "label": "Eligible order",
+                "status": eligible_status,
+                "status_class": _checklist_status_class(eligible_status),
+                "text": _setup_eligible_text(eligible_status, eligible_candidate_count),
+                "action": f"Wait for an order to be delivered, then add Shopify tag `{CANONICAL_REVIEW_REQUEST_TAG}`.",
+            },
+            {
+                "letter": "C",
+                "label": "Safety checks",
+                "status": safety_status,
+                "status_class": _checklist_status_class(safety_status),
+                "text": "The system needs exactly one safe order.",
+                "action": (
+                    "Orders with refunds, tickets, return risk, duplicate customers, "
+                    "or related-order issues will stay blocked."
+                ),
+            },
+            {
+                "letter": "D",
+                "label": "Final approval",
+                "status": final_approval_status,
+                "status_class": _checklist_status_class(final_approval_status),
+                "text": "Draft creation will still need final approval.",
+                "action": "Future draft creation requires a locked approval flag before any Gmail draft is created.",
+            },
+        ],
+    }
+
+
+def _setup_eligible_candidate_count(
+    ready_count,
+    trustpilot_send_readiness,
+    trustpilot_auto_refresh,
+    trustpilot_gmail_draft_only_preflight,
+    trustpilot_gmail_one_draft_create_locked_runner,
+):
+    for source in (
+        trustpilot_gmail_one_draft_create_locked_runner,
+        trustpilot_gmail_draft_only_preflight,
+        trustpilot_auto_refresh,
+        trustpilot_send_readiness,
+    ):
+        if source.get("report_loaded") is True:
+            return _int_or_zero(source.get("eligible_candidate_count"))
+    return _int_or_zero(ready_count)
+
+
+def _setup_gmail_status(scope_checked, draft_scope_available, scope_status):
+    if not scope_checked:
+        return "Not checked yet"
+    if draft_scope_available:
+        return "Ready"
+    if scope_status in {"scope_missing", "missing"}:
+        return "Missing"
+    return "Missing"
+
+
+def _setup_eligible_status(candidate_checked, eligible_candidate_count):
+    if not candidate_checked:
+        return "Not checked yet"
+    if eligible_candidate_count == 0:
+        return "Missing"
+    if eligible_candidate_count == 1:
+        return "Ready"
+    return "Needs review"
+
+
+def _setup_safety_status(candidate_checked, exactly_one_candidate, eligible_candidate_count):
+    if not candidate_checked:
+        return "Not checked yet"
+    if exactly_one_candidate and eligible_candidate_count == 1:
+        return "Ready"
+    return "Waiting"
+
+
+def _setup_eligible_text(status, eligible_candidate_count):
+    if status == "Not checked yet":
+        return "Order readiness has not been checked yet."
+    if eligible_candidate_count == 0:
+        return "No order is ready for review request yet."
+    if eligible_candidate_count == 1:
+        return "One order is ready for review request."
+    return "More than one order needs review before a draft can be prepared."
+
+
+def _setup_current_answer(
+    scope_checked,
+    candidate_checked,
+    gmail_ready,
+    eligible_candidate_count,
+    exactly_one_candidate,
+):
+    if not scope_checked or not candidate_checked:
+        return "Not checked yet - refresh the setup checks before preparing a Trustpilot email."
+    if not gmail_ready and eligible_candidate_count == 0:
+        return "No — Gmail permission is missing and there is no eligible order."
+    if gmail_ready and eligible_candidate_count == 0:
+        return "No — no eligible order."
+    if not gmail_ready:
+        return "No — Gmail permission missing."
+    if not exactly_one_candidate or eligible_candidate_count != 1:
+        return "No — more than one order needs review."
+    return "Ready for final review before draft creation."
+
+
+def _setup_next_plain_action(gmail_status, eligible_status, safety_status):
+    if gmail_status in {"Missing", "Not checked yet"}:
+        return "Finish Gmail permission setup."
+    if eligible_status in {"Missing", "Not checked yet"}:
+        return "Wait for one delivered order with the review request tag."
+    if eligible_status == "Needs review" or safety_status != "Ready":
+        return "Choose exactly one safe order before draft preparation."
+    return "Complete final review before any draft is prepared."
+
+
+def _checklist_status_class(status):
+    if status == "Ready":
+        return "rrw-badge-ok"
+    if status in {"Missing", "Required", "Waiting", "Needs review"}:
+        return "rrw-badge-warn"
+    return "rrw-badge-muted"
 
 
 def _current_blockers(ready_count, gmail_ready):

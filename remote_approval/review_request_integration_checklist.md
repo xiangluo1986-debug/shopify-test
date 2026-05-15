@@ -828,3 +828,21 @@ Future tracking design note:
 - [x] Update the Review Requests dashboard with "Draft creation readiness" and
   plain-language missing requirements while keeping technical fields in
   Advanced details.
+
+## Phase 5.20 Review Requests Setup Checklist
+
+- [x] Add an admin setup checklist / blocker action panel to the Review
+  Requests console.
+- [x] Make the main page clearly answer whether a Trustpilot email can be
+  prepared now.
+- [x] Show Gmail permission, eligible order, safety checks, and final approval
+  as checklist items.
+- [x] Explain how to make an order eligible: delivered order, exact review
+  request tag, no prior Trustpilot email, no open complaint/refund/return risk,
+  and safe refresh after Shopify sync.
+- [x] Keep this phase UI/readability/reporting only with no behavior changes.
+- [x] Do not call Gmail network/API, create/update/delete drafts, or send
+  email.
+- [x] Do not call Shopify APIs, write Shopify tags, call
+  Trustpilot/Kudosi/Ali Reviews APIs, or call `translationsRegister`.
+- [x] Do not add Send/Create/Write controls.
