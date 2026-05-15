@@ -89,6 +89,14 @@ BLOCKED_REASON_DEFINITIONS = (
         ("risk", "ticket", "refund", "cancel", "cancelled", "dispute", "chargeback"),
     ),
 )
+ADMIN_STATUS_LABELS = {
+    "blocked_existing_trustpilot_invitation_customer_level": "Already sent to this customer",
+    "blocked_missing_delivered_tag": "Not delivered yet",
+    "blocked_missing_review_request_tag": "Missing review request tag",
+    "blocked_merged_order_group_not_ready": "Related orders not ready",
+    "blocked_missing_vendor_api_documentation": "Waiting for API docs",
+    "no_eligible_delivered_review_request_candidate": "No orders ready",
+}
 
 REPORT_DEFINITIONS = (
     (
@@ -336,9 +344,19 @@ def build_review_request_workbench_context(params=None):
         history_ledger["filters"],
     )
     ali_reviews_status = _ali_reviews_status(history_ledger["focus"])
+    operating_dashboard = _operating_dashboard(
+        latest_scan=latest_scan,
+        candidate_queue=candidate_queue,
+        invitation_history=invitation_history,
+        blocked_orders=blocked_orders,
+        history_ledger=history_ledger,
+        trustpilot_email_records=trustpilot_email_records,
+        ali_reviews_status=ali_reviews_status,
+    )
 
     return {
         "review_request_workbench": {
+            "operating_dashboard": operating_dashboard,
             "module_overview": module_overview,
             "summary": _summary(
                 latest_scan=latest_scan,
@@ -1433,6 +1451,389 @@ def _ali_reviews_status(history_focus):
             "If API support is unavailable, any manual fallback needs a later explicit approval."
         ),
     }
+
+
+def _operating_dashboard(
+    latest_scan,
+    candidate_queue,
+    invitation_history,
+    blocked_orders,
+    history_ledger,
+    trustpilot_email_records,
+    ali_reviews_status,
+):
+    focus = history_ledger.get("focus") or {}
+    summary = history_ledger.get("summary") or {}
+    events = history_ledger.get("all_events") or []
+    ready_count = _ready_to_send_count(latest_scan, candidate_queue)
+    blocked_count = _blocked_order_count(blocked_orders, summary, focus)
+    sent_count = _trustpilot_sent_count(events, invitation_history, focus)
+    return {
+        "ready_to_send_count": ready_count,
+        "blocked_count": blocked_count,
+        "sent_trustpilot_count": sent_count,
+        "current_state_label": (
+            "Waiting for eligible orders" if ready_count == 0 else "Eligible order needs admin review"
+        ),
+        "status_cards": [
+            {
+                "label": "Ready to Send",
+                "value": _order_count_text(ready_count, "ready"),
+                "message": (
+                    f"No eligible orders right now. Orders must be delivered and tagged "
+                    f"{CANONICAL_REVIEW_REQUEST_TAG}."
+                    if ready_count == 0
+                    else "Review the eligible order before any future draft or send step."
+                ),
+                "tone": "info",
+            },
+            {
+                "label": "Blocked",
+                "value": _order_count_text(blocked_count, "blocked"),
+                "message": (
+                    "Some orders are blocked because they are not delivered, missing the "
+                    "review-request tag, duplicate customer, or related order group not ready."
+                ),
+                "tone": "warn",
+            },
+            {
+                "label": "Sent Trustpilot Emails",
+                "value": f"{sent_count} sent",
+                "message": "Trustpilot emails already sent and recorded.",
+                "tone": "ok",
+            },
+            {
+                "label": "Ali Reviews API",
+                "value": "Waiting for API docs",
+                "message": (
+                    "Ali Reviews automation is paused until vendor confirms request API endpoints."
+                ),
+                "tone": "warn",
+            },
+        ],
+        "pipeline_steps": _pipeline_steps(ready_count),
+        "next_actions": _next_actions(focus, ready_count),
+        "recent_activity": _recent_activity(
+            focus=focus,
+            trustpilot_email_records=trustpilot_email_records,
+            blocked_orders=blocked_orders,
+            invitation_history=invitation_history,
+        ),
+        "ali_reviews_message": (
+            "Ali Reviews API is not connected yet. We are waiting for vendor API documentation "
+            "for sending requests and checking request status."
+        ),
+        "ali_reviews_status_label": _admin_status_label(ali_reviews_status.get("status")),
+    }
+
+
+def _ready_to_send_count(latest_scan, candidate_queue):
+    selected = _safe_text(latest_scan.get("selected_order_name"), max_length=80)
+    eligible_count = _int_or_zero(latest_scan.get("eligible_candidate_count"))
+    blocked_reason = _safe_text(latest_scan.get("next_candidate_blocked_reason"), max_length=120)
+    if eligible_count:
+        return eligible_count
+    if selected and not blocked_reason:
+        return 1
+    return len(candidate_queue)
+
+
+def _blocked_order_count(blocked_orders, history_summary, focus):
+    count = len(blocked_orders) or _history_event_count(
+        history_summary,
+        {"candidate_blocked", "duplicate_block"},
+    )
+    focus_count = 0
+    if (focus.get("order_22620") or {}).get("blocked_confirmed"):
+        focus_count += 1
+    order_22582_classification = _safe_text(
+        (focus.get("order_22582") or {}).get("blocked_classification"),
+        max_length=120,
+    )
+    if order_22582_classification and order_22582_classification != "unavailable":
+        focus_count += 1
+    return max(count, focus_count)
+
+
+def _trustpilot_sent_count(events, invitation_history, focus):
+    sent_orders = {
+        _safe_text(event.get("order_name"), max_length=80)
+        for event in events
+        if event.get("channel") == "trustpilot" and event.get("email_sent") is True
+    }
+    sent_orders.discard("")
+    prior_order = _safe_text(
+        (focus.get("order_22620") or {}).get("prior_trustpilot_order_name"),
+        max_length=80,
+    )
+    if prior_order and prior_order != "unavailable":
+        sent_orders.add(prior_order)
+    return max(len(sent_orders), len(invitation_history))
+
+
+def _order_count_text(count, suffix):
+    noun = "order" if count == 1 else "orders"
+    return f"{count} {noun} {suffix}"
+
+
+def _pipeline_steps(ready_count):
+    active_label = "Waiting for eligible orders" if ready_count == 0 else "Ready for admin review"
+    return [
+        {
+            "number": 1,
+            "label": "Order delivered",
+            "detail": f"Order has the {DELIVERED_TAG} tag.",
+            "state_label": "Required",
+            "state_class": "rrw-step-muted",
+        },
+        {
+            "number": 2,
+            "label": "Shopify tag added",
+            "detail": f"Order has the {CANONICAL_REVIEW_REQUEST_TAG} tag.",
+            "state_label": "Required",
+            "state_class": "rrw-step-muted",
+        },
+        {
+            "number": 3,
+            "label": "Eligibility check",
+            "detail": "Duplicate, related-order, ticket, refund, return, and shipping risk checks pass.",
+            "state_label": active_label,
+            "state_class": "rrw-step-active",
+        },
+        {
+            "number": 4,
+            "label": "Gmail draft created",
+            "detail": "Future locked phase only.",
+            "state_label": "Coming later",
+            "state_class": "rrw-step-muted",
+        },
+        {
+            "number": 5,
+            "label": "Admin reviews draft",
+            "detail": "Admin confirms the customer-facing message before send.",
+            "state_label": "Coming later",
+            "state_class": "rrw-step-muted",
+        },
+        {
+            "number": 6,
+            "label": "Email sent",
+            "detail": "Future approved Gmail send phase only.",
+            "state_label": "Coming later",
+            "state_class": "rrw-step-muted",
+        },
+        {
+            "number": 7,
+            "label": "Shopify tag written",
+            "detail": "Future approved Shopify tag phase only.",
+            "state_label": "Coming later",
+            "state_class": "rrw-step-muted",
+        },
+        {
+            "number": 8,
+            "label": "History recorded",
+            "detail": "Result is recorded for duplicate prevention.",
+            "state_label": "Coming later",
+            "state_class": "rrw-step-muted",
+        },
+    ]
+
+
+def _next_actions(focus, ready_count):
+    prior_order = _safe_text(
+        (focus.get("order_22620") or {}).get("prior_trustpilot_order_name"),
+        max_length=80,
+    )
+    if not prior_order or prior_order == "unavailable":
+        prior_order = "#22621"
+    actions = []
+    if ready_count == 0:
+        actions.append(
+            {
+                "title": "Nothing to send now",
+                "description": (
+                    f"Wait until an order is delivered and has the {CANONICAL_REVIEW_REQUEST_TAG} tag."
+                ),
+                "items": [],
+            }
+        )
+    else:
+        actions.append(
+            {
+                "title": "Review the eligible order",
+                "description": "Keep this page read-only. Draft and send actions are still locked.",
+                "items": [],
+            }
+        )
+    actions.extend(
+        [
+            {
+                "title": "#22582 is not ready",
+                "description": "Do not prepare a Trustpilot request for this order yet.",
+                "items": [
+                    "Not delivered",
+                    f"Missing {CANONICAL_REVIEW_REQUEST_TAG}",
+                    "Related order group #22582/#22581 not ready",
+                ],
+            },
+            {
+                "title": "#22620 should not be sent",
+                "description": (
+                    f"This customer already received Trustpilot via {prior_order}. "
+                    "The existing unsent Gmail draft should not be sent."
+                ),
+                "items": [],
+            },
+            {
+                "title": "Ali Reviews is still paused",
+                "description": "Wait for vendor API documentation before any Ali Reviews automation.",
+                "items": [],
+            },
+        ]
+    )
+    return actions
+
+
+def _recent_activity(focus, trustpilot_email_records, blocked_orders, invitation_history):
+    rows = []
+    order_22620 = focus.get("order_22620") or {}
+    order_22582 = focus.get("order_22582") or {}
+    prior_order = _safe_text(order_22620.get("prior_trustpilot_order_name"), max_length=80)
+    if not prior_order or prior_order == "unavailable":
+        prior_order = "#22621"
+
+    rows.append(
+        {
+            "order": prior_order,
+            "customer": _masked_customer_for_order(
+                prior_order,
+                trustpilot_email_records,
+                invitation_history,
+                blocked_orders,
+            ),
+            "status": "Sent Trustpilot",
+            "status_class": "rrw-badge-ok",
+            "reason": "Trustpilot email already sent and recorded.",
+            "last_evidence": _evidence_for_order(
+                prior_order,
+                trustpilot_email_records,
+                invitation_history,
+                order_22620,
+            ),
+        }
+    )
+    rows.append(
+        {
+            "order": "#22620",
+            "customer": _masked_customer_for_order(
+                "#22620",
+                trustpilot_email_records,
+                invitation_history,
+                blocked_orders,
+            ),
+            "status": "Already sent to this customer",
+            "status_class": "rrw-badge-bad",
+            "reason": (
+                f"Blocked duplicate customer. Trustpilot already went out via {prior_order}; "
+                "the unsent draft should not be sent."
+            ),
+            "last_evidence": _evidence_for_order(
+                "#22620",
+                trustpilot_email_records,
+                blocked_orders,
+                order_22620,
+            ),
+        }
+    )
+    rows.append(
+        {
+            "order": "#22582",
+            "customer": _masked_customer_for_order(
+                "#22582",
+                trustpilot_email_records,
+                invitation_history,
+                blocked_orders,
+            ),
+            "status": "Not ready",
+            "status_class": "rrw-badge-warn",
+            "reason": (
+                f"Not delivered, missing {CANONICAL_REVIEW_REQUEST_TAG}, and related order group "
+                "#22582/#22581 is not ready."
+            ),
+            "last_evidence": _evidence_for_order(
+                "#22582",
+                trustpilot_email_records,
+                blocked_orders,
+                order_22582,
+            ),
+        }
+    )
+
+    seen_orders = {row["order"] for row in rows}
+    for record in trustpilot_email_records:
+        order_name = _safe_text(record.get("order_name"), max_length=80)
+        if not order_name or order_name in seen_orders:
+            continue
+        status_text = _admin_status_label(
+            record.get("status") or record.get("classification") or record.get("event_type")
+        )
+        rows.append(
+            {
+                "order": order_name,
+                "customer": record.get("masked_email") or "Masked in reports",
+                "status": status_text,
+                "status_class": record.get("badge_class") or "rrw-badge-info",
+                "reason": _admin_status_label(
+                    record.get("blocker_reason") or record.get("classification") or record.get("status")
+                ),
+                "last_evidence": _record_evidence_label(record),
+            }
+        )
+        seen_orders.add(order_name)
+        if len(rows) >= 8:
+            break
+    return rows
+
+
+def _masked_customer_for_order(order_name, *row_groups):
+    for rows in row_groups:
+        if isinstance(rows, dict):
+            rows = [rows]
+        for row in rows or []:
+            if row.get("order_name") == order_name or row.get("order") == order_name:
+                masked = row.get("masked_email") or row.get("customer")
+                if masked:
+                    return _safe_text(masked, max_length=120)
+    return "Masked in reports"
+
+
+def _evidence_for_order(order_name, records, rows, focus_row):
+    for row_group in (records, rows):
+        for row in row_group or []:
+            if row.get("order_name") == order_name or row.get("order") == order_name:
+                return _record_evidence_label(row)
+    if (focus_row or {}).get("evidence_available"):
+        return "Local report evidence loaded"
+    return "Current operating rule"
+
+
+def _record_evidence_label(row):
+    label = _safe_text(row.get("source_report_label") or row.get("source") or "Local report")
+    event_time = _safe_text(row.get("event_time") or row.get("created_at"), max_length=80)
+    if event_time:
+        return f"{label} - {event_time}"
+    return label
+
+
+def _admin_status_label(value):
+    text = _safe_text(value)
+    if not text:
+        return "-"
+    lowered = text.lower()
+    for key, label in ADMIN_STATUS_LABELS.items():
+        if key in lowered:
+            return label
+    cleaned = text.replace("_", " ").strip()
+    return cleaned[:1].upper() + cleaned[1:] if cleaned else "-"
 
 
 def _current_next_candidate(latest_scan, candidate_queue, history_focus):

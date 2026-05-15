@@ -398,3 +398,26 @@ Future tracking design note:
 - [x] Phase 5.4 does not create Gmail drafts, send Gmail, delete Gmail drafts,
   write Shopify tags, remove Shopify tags, call Trustpilot/Kudosi/Ali Reviews
   APIs, enable tracking redirects, or generate tracking tokens.
+
+## Phase 5.5 Review Requests Usability Dashboard
+
+- [x] Simplify the Review Requests workbench into an operating dashboard for
+  normal admin users.
+- [x] Keep the existing URL:
+  `/admin/shopify_sync/review-request-workbench/`.
+- [x] Keep access admins-only: Django superusers or staff users in the `Admin`
+  group.
+- [x] Show plain-English status cards for ready orders, blocked orders, sent
+  Trustpilot emails, and Ali Reviews API readiness.
+- [x] Show a simple Trustpilot automation pipeline and highlight that the
+  current state is waiting for eligible orders.
+- [x] Show clear next actions for the current known cases:
+  `#22620` is blocked as a duplicate customer after Trustpilot was sent via
+  `#22621`, and `#22582` is not ready because delivery, canonical review tag,
+  and related-order readiness checks are not satisfied.
+- [x] Move report paths, technical flags, source report details, ledger rows,
+  and low-level queue tables into a collapsed advanced debug section.
+- [x] Keep the dashboard read-only. Phase 5.5 does not create Gmail drafts,
+  send Gmail, delete Gmail drafts, write Shopify tags, remove Shopify tags,
+  call Trustpilot/Kudosi/Ali Reviews APIs, enable tracking redirects, or
+  generate tracking tokens.
