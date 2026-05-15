@@ -105,8 +105,10 @@ SHOPIFY_SHOP_DOMAIN_RE = re.compile(
 TRANSLATION_CONSOLE_PRODUCT_SELECTOR_LIMIT = 50
 TRANSLATION_CONSOLE_PRODUCT_SELECTOR_SORT_FIELDS = [
     "shopify_published_at",
+    "shopify_created_at",
     "shopify_product_created_at",
-    "shopify_product_updated_at",
+    "created_at",
+    "updated_at",
     "id",
 ]
 TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
@@ -829,8 +831,10 @@ def translation_console(request):
     )
     request_params = request.POST if is_post_action else request.GET
     translation_console_warnings = []
-    product_search_text = request_params.get("product_search_q", "") if is_post_action else request_params.get("q", "")
-    product_search_text = product_search_text.strip()
+    product_search_text = _translation_console_request_product_search_text(
+        request_params,
+        is_post_action=is_post_action,
+    )
     raw_product_url_parameter = (
         request_params.get("product_gid", "") or request_params.get("product_id", "")
     )
@@ -1593,14 +1597,10 @@ def _build_translation_console_product_selector(
     requested_gid = normalize_product_gid((requested_product_gid or "").strip()) or ""
     queryset = ShopifyProduct.objects.all()
     supported_fields = _translation_console_supported_product_search_fields()
+    order_by_fields, supported_sort_fields = _translation_console_product_ordering()
     for term in [part for part in query.split() if part.strip()]:
         queryset = queryset.filter(_translation_console_product_search_q(term, supported_fields))
-    queryset = queryset.order_by(
-        F("shopify_published_at").desc(nulls_last=True),
-        F("shopify_product_created_at").desc(nulls_last=True),
-        F("shopify_product_updated_at").desc(nulls_last=True),
-        F("id").desc(),
-    )
+    queryset = queryset.order_by(*order_by_fields)
 
     product_options = []
     seen_product_ids = set()
@@ -1609,29 +1609,23 @@ def _build_translation_console_product_selector(
         if not product_id or product_id in seen_product_ids:
             continue
         seen_product_ids.add(product_id)
-        product_gid = f"gid://shopify/Product/{product_id}"
-        product_options.append(
-            {
-                "gid": product_gid,
-                "numeric_id": str(product_id),
-                "title": product.product_title or "(untitled product)",
-                "handle": product.handle or "",
-                "vendor": product.vendor or "",
-                "product_type": product.product_type or "",
-                "sku": product.sku or "",
-                "status": product.status or "",
-                "published_at": _format_optional_datetime(product.shopify_published_at),
-                "created_at": _format_optional_datetime(product.shopify_product_created_at),
-                "updated_at": _format_optional_datetime(product.shopify_product_updated_at),
-                "sort_timestamp": _format_optional_datetime(
-                    product.shopify_published_at
-                    or product.shopify_product_created_at
-                    or product.shopify_product_updated_at
-                ),
-            }
-        )
+        product_options.append(_translation_console_selector_option_from_product(product))
         if len(product_options) >= limit:
             break
+
+    if query:
+        product_options.sort(
+            key=lambda option: _translation_console_product_search_relevance(option, query),
+            reverse=True,
+        )
+
+    matching_result_count = len(product_options)
+    included_selected_product = False
+    if requested_gid and not _find_selector_option(product_options, requested_gid):
+        selected_option = _translation_console_selector_option_for_gid(requested_gid)
+        if selected_option:
+            product_options.insert(0, selected_option)
+            included_selected_product = True
 
     selected_gid = requested_gid
     if not selected_gid:
@@ -1643,13 +1637,117 @@ def _build_translation_console_product_selector(
         "selected_product": _find_selector_option(product_options, selected_gid),
         "product_search_text": query,
         "result_count": len(product_options),
+        "matching_result_count": matching_result_count,
         "limit": limit,
         "has_products": bool(product_options),
-        "no_matching_products": bool(query) and not product_options,
+        "included_selected_product": included_selected_product,
+        "no_matching_products": bool(query) and matching_result_count == 0,
         "no_products_available": not query and not product_options,
-        "sort_fields": TRANSLATION_CONSOLE_PRODUCT_SELECTOR_SORT_FIELDS,
+        "sort_fields": supported_sort_fields,
         "search_supported_fields": supported_fields,
     }
+
+
+def _translation_console_request_product_search_text(
+    request_params,
+    *,
+    is_post_action: bool,
+) -> str:
+    field_names = (
+        ("product_search", "product_search_q")
+        if is_post_action
+        else ("product_search", "product_search_q", "q")
+    )
+    for field_name in field_names:
+        if field_name in request_params:
+            return (request_params.get(field_name, "") or "").strip()
+    return ""
+
+
+def _translation_console_selector_option_from_product(product):
+    product_id = getattr(product, "shopify_product_id", None)
+    product_gid = f"gid://shopify/Product/{product_id}"
+    title = product.product_title or "(untitled product)"
+    variant_title = product.variant_title or ""
+    sku = product.sku or ""
+    handle = product.handle or ""
+    product_type = product.product_type or ""
+    vendor = product.vendor or ""
+    thumbnail_url = (getattr(product, "image_url", "") or "").strip()
+    created_at_value = (
+        getattr(product, "shopify_created_at", None)
+        or getattr(product, "shopify_product_created_at", None)
+        or getattr(product, "created_at", None)
+    )
+    updated_at_value = getattr(product, "updated_at", None)
+    sort_timestamp_value = (
+        getattr(product, "shopify_published_at", None)
+        or created_at_value
+        or updated_at_value
+    )
+    searchable_text = " ".join(
+        str(value)
+        for value in (
+            title,
+            variant_title,
+            sku,
+            handle,
+            product_type,
+            vendor,
+            product_id,
+            product_gid,
+        )
+        if value
+    )
+    return {
+        "gid": product_gid,
+        "numeric_id": str(product_id),
+        "title": title,
+        "handle": handle,
+        "vendor": vendor,
+        "product_type": product_type,
+        "variant_title": variant_title,
+        "sku": sku,
+        "thumbnail_url": thumbnail_url,
+        "has_thumbnail": bool(thumbnail_url),
+        "searchable_text": searchable_text,
+        "searchable_normalized": _translation_console_normalize_search_text(searchable_text),
+        "status": product.status or "",
+        "published_at": _format_optional_datetime(product.shopify_published_at),
+        "created_at": _format_optional_datetime(created_at_value),
+        "updated_at": _format_optional_datetime(updated_at_value),
+        "sort_timestamp": _format_optional_datetime(sort_timestamp_value),
+    }
+
+
+def _translation_console_selector_option_for_gid(product_gid: str):
+    product_id = _extract_shopify_numeric_id(product_gid)
+    if not product_id:
+        return {}
+    order_by_fields, _supported_sort_fields = _translation_console_product_ordering()
+    product = (
+        ShopifyProduct.objects.filter(shopify_product_id=product_id)
+        .order_by(*order_by_fields)
+        .first()
+    )
+    if not product:
+        return {}
+    return _translation_console_selector_option_from_product(product)
+
+
+def _translation_console_product_ordering():
+    supported_sort_fields = [
+        field_name
+        for field_name in TRANSLATION_CONSOLE_PRODUCT_SELECTOR_SORT_FIELDS
+        if _model_has_field(ShopifyProduct, field_name)
+    ]
+    if "id" not in supported_sort_fields:
+        supported_sort_fields.append("id")
+    order_by_fields = [
+        F(field_name).desc(nulls_last=True)
+        for field_name in supported_sort_fields
+    ]
+    return order_by_fields, supported_sort_fields
 
 
 def _translation_console_supported_product_search_fields():
@@ -1665,10 +1763,12 @@ def _translation_console_product_search_q(term: str, supported_fields: list[str]
     query = Q()
     if not value:
         return query
+    term_variants = _translation_console_product_search_variants(value)
     for field_name in supported_fields:
         if field_name in {"shopify_product_id", "shopify_variant_id"}:
             continue
-        query |= Q(**{f"{field_name}__icontains": value})
+        for term_variant in term_variants:
+            query |= Q(**{f"{field_name}__icontains": term_variant})
     numeric_id = _extract_shopify_numeric_id(value)
     if numeric_id:
         if "shopify_product_id" in supported_fields:
@@ -1676,6 +1776,81 @@ def _translation_console_product_search_q(term: str, supported_fields: list[str]
         if "shopify_variant_id" in supported_fields:
             query |= Q(shopify_variant_id=numeric_id)
     return query
+
+
+def _translation_console_product_search_variants(value: str):
+    raw_value = (value or "").strip()
+    compact_value = re.sub(r"[^0-9A-Za-z]+", "", raw_value)
+    variants = []
+
+    def add_variant(candidate):
+        candidate = (candidate or "").strip()
+        if candidate and candidate.lower() not in {item.lower() for item in variants}:
+            variants.append(candidate)
+
+    add_variant(raw_value)
+    add_variant(compact_value)
+
+    parts = re.findall(r"[A-Za-z]+|\d+", compact_value)
+    if len(parts) > 1:
+        for separator in ("-", " ", "_"):
+            add_variant(separator.join(parts))
+
+    model_match = re.match(r"^([A-Za-z]+)(\d+)([A-Za-z]+)?$", compact_value)
+    if model_match:
+        letters, digits, suffix = model_match.groups()
+        suffix = suffix or ""
+        for separator in ("-", " ", "_"):
+            add_variant(f"{letters}{separator}{digits}{suffix}")
+
+    return variants
+
+
+def _translation_console_normalize_search_text(value: str):
+    return re.sub(r"[\s_-]+", "", (value or "").lower())
+
+
+def _translation_console_product_search_relevance(option: dict, query: str) -> int:
+    normalized_query = _translation_console_normalize_search_text(query)
+    if not normalized_query:
+        return 0
+    searchable_normalized = (
+        option.get("searchable_normalized")
+        or _translation_console_normalize_search_text(option.get("searchable_text", ""))
+    )
+    title_normalized = _translation_console_normalize_search_text(option.get("title", ""))
+    sku_normalized = _translation_console_normalize_search_text(option.get("sku", ""))
+    variant_normalized = _translation_console_normalize_search_text(
+        option.get("variant_title", "")
+    )
+    handle_normalized = _translation_console_normalize_search_text(option.get("handle", ""))
+    tokens = [
+        token
+        for token in (
+            _translation_console_normalize_search_text(part)
+            for part in re.split(r"[\s_-]+", query)
+        )
+        if token
+    ]
+
+    score = 0
+    if title_normalized == normalized_query:
+        score += 120
+    if title_normalized.startswith(normalized_query):
+        score += 90
+    if normalized_query in title_normalized:
+        score += 70
+    if sku_normalized.startswith(normalized_query):
+        score += 65
+    if variant_normalized.startswith(normalized_query):
+        score += 60
+    if handle_normalized.startswith(normalized_query):
+        score += 45
+    if normalized_query in searchable_normalized:
+        score += 35
+    if tokens and all(token in searchable_normalized for token in tokens):
+        score += 20 + len(tokens)
+    return score
 
 
 def _extract_shopify_numeric_id(value: str):
@@ -2106,7 +2281,7 @@ def _translation_workspace_preview_url(
         "target_locale": locale,
     }
     if product_search_text:
-        params["q"] = product_search_text
+        params["product_search"] = product_search_text
     if editor_filter:
         params["editor_filter"] = editor_filter
     if editor_search_query:

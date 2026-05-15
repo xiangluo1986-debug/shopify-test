@@ -373,6 +373,120 @@
     border-radius: 8px;
     background: #fff;
   }
+  .tw-product-picker {
+    display: block;
+    padding: 12px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #ffffff;
+  }
+  .tw-picker-controls {
+    display: grid;
+    grid-template-columns: minmax(260px, 2fr) minmax(150px, 0.8fr) minmax(180px, 1fr) auto auto;
+    gap: 8px;
+    align-items: end;
+  }
+  .tw-picker-controls input[type="search"],
+  .tw-picker-controls input[type="text"],
+  .tw-picker-controls select {
+    width: 100%;
+  }
+  .tw-product-selected {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+    padding: 10px;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+  .tw-product-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .translation-workspace .tw-product-option {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 10px;
+    min-height: 84px;
+    justify-content: start;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #111827 !important;
+    cursor: pointer;
+    padding: 8px;
+    text-align: left;
+    width: 100%;
+  }
+  .translation-workspace .tw-product-option:hover,
+  .translation-workspace .tw-product-option:focus {
+    border-color: #2563eb;
+    background: #eff6ff;
+    color: #111827 !important;
+  }
+  .translation-workspace .tw-product-option.is-selected {
+    border-color: #1d4ed8;
+    background: #eaf2ff;
+  }
+  .tw-product-thumb,
+  .tw-product-thumb-placeholder {
+    width: 64px;
+    height: 64px;
+    border: 1px solid #dbe1e8;
+    border-radius: 6px;
+    background: #f3f6fa;
+    object-fit: cover;
+  }
+  .tw-product-thumb-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4b5563;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+  }
+  .tw-product-title {
+    color: #111827;
+    font-weight: 700;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .tw-product-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 6px;
+  }
+  .tw-product-meta span,
+  .tw-selected-badge {
+    display: inline-block;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    background: #f3f4f6;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.4;
+    padding: 2px 7px;
+  }
+  .tw-selected-badge {
+    border-color: #86efac;
+    background: #dcfce7;
+    color: #14532d;
+  }
+  @media (max-width: 900px) {
+    .tw-picker-controls {
+      grid-template-columns: 1fr;
+    }
+    .tw-product-results {
+      grid-template-columns: 1fr;
+    }
+  }
   .tw-draft-card {
     padding: 12px;
     margin-bottom: 16px;
@@ -943,8 +1057,8 @@
 
   <div class="tw-mode-bar">
     <div class="tw-tabs">
-      <a class="tw-tab{% if ui_mode == 'editor' %} is-active{% endif %}" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Simple editor</a>
-      <a class="tw-tab{% if ui_mode == 'workbench' %} is-active{% endif %}" href="?ui_mode=workbench&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Advanced workflow</a>
+      <a class="tw-tab{% if ui_mode == 'editor' %} is-active{% endif %}" href="?ui_mode=editor&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Simple editor</a>
+      <a class="tw-tab{% if ui_mode == 'workbench' %} is-active{% endif %}" href="?ui_mode=workbench&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Advanced workflow</a>
     </div>
     <span class="tw-muted">{% if ui_mode == "editor" %}Original vs translation review{% else %}Technical draft workflow{% endif %}</span>
   </div>
@@ -1035,9 +1149,10 @@
     <h2>Step 1: Select Product</h2>
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="workbench">
+      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
       <div>
-        <label for="id_workbench_product_search_q">Search products</label><br>
-        <input id="id_workbench_product_search_q" type="text" name="q" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="title, gid, product id, handle, vendor, product type, SKU">
+        <label for="id_workbench_product_search">Search product</label><br>
+        <input id="id_workbench_product_search" type="text" name="product_search" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="Search by title, model, SKU, or product ID">
       </div>
       <div>
         <label for="id_workbench_search_locale">Preview locale</label><br>
@@ -1048,17 +1163,25 @@
         </select>
       </div>
       <button type="submit" class="button">Search local products</button>
-      <a class="button" href="?ui_mode=workbench">Clear search</a>
+      <a class="button" href="?ui_mode=workbench&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Clear search</a>
     </form>
+    <p class="tw-muted">
+      {% if product_search_text %}Showing matching products: {{ product_selector.matching_result_count }}{% else %}Showing latest products: {{ product_selector.result_count }}{% endif %}.
+      {% if product_search_text %}Search results for: <strong>{{ product_search_text }}</strong>.{% endif %}
+      {% if product_selector.included_selected_product %}Current selected product is included even though it is outside the filtered results.{% endif %}
+    </p>
+    {% if product_selector.no_matching_products %}
+      <p class="tw-warning">No matching products in this list. Try another keyword.</p>
+    {% endif %}
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       <input type="hidden" name="ui_mode" value="workbench">
-      <input type="hidden" name="q" value="{{ product_search_text }}">
+      <input type="hidden" name="product_search" value="{{ product_search_text }}">
       <div>
         <label for="id_workbench_selected_product_gid">Select product</label><br>
         <select id="id_workbench_selected_product_gid" name="selected_product_gid" style="min-width: 620px;">
           {% if product_selector.product_options %}
             {% for product in product_selector.product_options %}
-              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }} | {{ product.sort_timestamp }}</option>
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} | {{ product.handle }}{% endif %}{% if product.sku %} | SKU {{ product.sku }}{% endif %}{% if product.numeric_id %} | ID {{ product.numeric_id }}{% endif %}{% if product.sort_timestamp %} | {{ product.sort_timestamp }}{% endif %}</option>
             {% endfor %}
           {% else %}
             <option value="">No products available</option>
@@ -1091,7 +1214,7 @@
       {% csrf_token %}
       <input type="hidden" name="ui_mode" value="workbench">
       <input type="hidden" name="action" value="generate_draft_dry_run">
-      <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+      <input type="hidden" name="product_search" value="{{ product_search_text }}">
       <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
       <input type="hidden" name="locale" value="{{ selected_locale }}">
       <button type="submit" class="button">Generate draft package dry-run</button>
@@ -1152,7 +1275,7 @@
       {% csrf_token %}
       <input type="hidden" name="ui_mode" value="workbench">
       <input type="hidden" name="action" value="generate_locked_package_dry_run_report">
-      <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+      <input type="hidden" name="product_search" value="{{ product_search_text }}">
       <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
       <input type="hidden" name="locale" value="{{ selected_locale }}">
       <button type="submit" class="button">Generate locked package dry-run report</button>
@@ -1224,39 +1347,126 @@
   {% elif ui_mode == "editor" %}
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Choose product and language</h2>
-    <form method="get" class="tw-toolbar tw-compact-form" style="margin-bottom: 12px;">
+    <form method="get" class="tw-product-picker" data-product-picker style="margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="editor">
-      <input type="hidden" name="q" value="{{ product_search_text }}">
-      <div class="tw-compact-field tw-product-field">
-        <label for="id_editor_selected_product_gid">Choose product</label><br>
-        <select id="id_editor_selected_product_gid" name="product_gid">
-          {% if product_selector.product_options %}
-            {% for product in product_selector.product_options %}
-              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.product_type %} - {{ product.product_type }}{% endif %}</option>
-            {% endfor %}
-          {% else %}
-            <option value="">No products available</option>
-          {% endif %}
-        </select>
-      </div>
-      <div class="tw-compact-field">
-        <label for="id_editor_locale">Choose language</label><br>
-        <select id="id_editor_locale" name="target_locale">
-          {% for locale_option in supported_locale_options %}
-            <option value="{{ locale_option.value }}"{% if locale_option.value == selected_locale %} selected{% endif %}>{{ locale_option.label }} ({{ locale_option.value }})</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="tw-compact-field">
-        <label for="id_editor_q">Search text</label><br>
-        <input id="id_editor_q" type="text" name="editor_search" value="{{ editor_search_query }}" placeholder="word, field, or status">
-      </div>
+      <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-      <button type="submit" class="button">Show translation</button>
+      <div class="tw-picker-controls">
+        <div class="tw-compact-field tw-product-field">
+          <label for="id_editor_product_search">Choose product</label><br>
+          <input id="id_editor_product_search" type="search" name="product_search" value="{{ product_search_text }}" placeholder="Search product title, model, SKU, or handle" autocomplete="off" data-product-filter-input>
+        </div>
+        <div class="tw-compact-field">
+          <label for="id_editor_locale">Choose language</label><br>
+          <select id="id_editor_locale" name="target_locale">
+            {% for locale_option in supported_locale_options %}
+              <option value="{{ locale_option.value }}"{% if locale_option.value == selected_locale %} selected{% endif %}>{{ locale_option.label }} ({{ locale_option.value }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="tw-compact-field">
+          <label for="id_editor_q">Search text</label><br>
+          <input id="id_editor_q" type="text" name="editor_search" value="{{ editor_search_query }}" placeholder="word, field, or status">
+        </div>
+        <button type="submit" class="button">Show translation</button>
+        <a class="button" href="?ui_mode=editor&product_gid={{ selected_product_gid|urlencode }}&target_locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Clear search</a>
+      </div>
+      <div class="tw-product-selected">
+        {% if product_selector.selected_product %}
+          {% if product_selector.selected_product.thumbnail_url %}
+            <img class="tw-product-thumb" src="{{ product_selector.selected_product.thumbnail_url }}" alt="" loading="lazy">
+          {% else %}
+            <div class="tw-product-thumb-placeholder">No image</div>
+          {% endif %}
+          <div>
+            <div class="tw-product-title">{{ product_selector.selected_product.title }}</div>
+            <div class="tw-product-meta">
+              <span class="tw-selected-badge">Selected</span>
+              {% if product_selector.selected_product.sku %}<span>SKU {{ product_selector.selected_product.sku }}</span>{% endif %}
+              {% if product_selector.selected_product.variant_title %}<span>Model {{ product_selector.selected_product.variant_title }}</span>{% endif %}
+              {% if product_selector.selected_product.handle %}<span>{{ product_selector.selected_product.handle }}</span>{% endif %}
+              {% if product_selector.selected_product.numeric_id %}<span>ID {{ product_selector.selected_product.numeric_id }}</span>{% endif %}
+            </div>
+          </div>
+        {% else %}
+          <div class="tw-product-thumb-placeholder">No image</div>
+          <div>
+            <div class="tw-product-title">No product selected</div>
+            <div class="tw-muted">Type to search products, then choose a product below.</div>
+          </div>
+        {% endif %}
+      </div>
+      <p class="tw-muted" style="margin: 12px 0 0;">
+        <span data-product-picker-summary>{% if product_search_text %}Showing matching products{% else %}Showing latest products{% endif %}</span>: <span data-product-picker-count>{% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}{{ product_selector.result_count }}{% endif %}</span>.
+        {% if product_search_text %}Search results for: <strong>{{ product_search_text }}</strong>.{% endif %}
+        {% if product_selector.included_selected_product %}Current selected product stays available even when it is outside the search results.{% endif %}
+      </p>
+      {% if product_selector.no_matching_products %}
+        <p class="tw-warning">No matching products in this list. Try another keyword.</p>
+      {% endif %}
+      {% if product_selector.product_options %}
+        <div class="tw-product-results" role="list">
+          {% for product in product_selector.product_options %}
+            <button type="submit" name="product_gid" value="{{ product.gid }}" class="tw-product-option{% if product.gid == selected_product_gid %} is-selected{% endif %}" data-product-option data-search="{{ product.searchable_text }}" data-search-normalized="{{ product.searchable_normalized }}" aria-pressed="{% if product.gid == selected_product_gid %}true{% else %}false{% endif %}">
+              {% if product.thumbnail_url %}
+                <img class="tw-product-thumb" src="{{ product.thumbnail_url }}" alt="" loading="lazy">
+              {% else %}
+                <span class="tw-product-thumb-placeholder">No image</span>
+              {% endif %}
+              <span>
+                <span class="tw-product-title">{{ product.title }}</span>
+                <span class="tw-product-meta">
+                  {% if product.gid == selected_product_gid %}<span class="tw-selected-badge">Selected</span>{% endif %}
+                  {% if product.sku %}<span>SKU {{ product.sku }}</span>{% endif %}
+                  {% if product.variant_title %}<span>Model {{ product.variant_title }}</span>{% endif %}
+                  {% if product.handle %}<span>{{ product.handle }}</span>{% endif %}
+                  {% if product.numeric_id %}<span>ID {{ product.numeric_id }}</span>{% endif %}
+                </span>
+              </span>
+            </button>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="tw-empty-state" style="margin-top: 10px;">No products available.</div>
+      {% endif %}
+      <div class="tw-empty-state" data-product-picker-empty hidden style="margin-top: 10px;">No matching products in this list. Try another keyword.</div>
     </form>
+    <details class="tw-advanced-details" style="margin-bottom: 12px;">
+      <summary>Fallback product dropdown</summary>
+      <form method="get" class="tw-toolbar tw-compact-form" style="margin-top: 8px;">
+        <input type="hidden" name="ui_mode" value="editor">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
+        <div class="tw-compact-field tw-product-field">
+          <label for="id_editor_selected_product_gid">Choose product</label><br>
+          <select id="id_editor_selected_product_gid" name="product_gid">
+            {% if product_selector.product_options %}
+              {% for product in product_selector.product_options %}
+                <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} - {{ product.handle }}{% endif %}{% if product.sku %} - SKU {{ product.sku }}{% endif %}{% if product.variant_title %} - Model {{ product.variant_title }}{% endif %}{% if product.numeric_id %} - ID {{ product.numeric_id }}{% endif %}</option>
+              {% endfor %}
+            {% else %}
+              <option value="">No products available</option>
+            {% endif %}
+          </select>
+        </div>
+        <div class="tw-compact-field">
+          <label for="id_editor_fallback_locale">Choose language</label><br>
+          <select id="id_editor_fallback_locale" name="target_locale">
+            {% for locale_option in supported_locale_options %}
+              <option value="{{ locale_option.value }}"{% if locale_option.value == selected_locale %} selected{% endif %}>{{ locale_option.label }} ({{ locale_option.value }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="tw-compact-field">
+          <label for="id_editor_fallback_q">Search text</label><br>
+          <input id="id_editor_fallback_q" type="text" name="editor_search" value="{{ editor_search_query }}" placeholder="word, field, or status">
+        </div>
+        <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+        <button type="submit" class="button">Show translation</button>
+      </form>
+    </details>
     <div class="tw-filter-tabs" style="margin-bottom: 12px;">
       {% for tab in editor_view.filter_tabs %}
-        <a class="tw-filter-tab{% if tab.active %} is-active{% endif %}" href="?ui_mode=editor&q={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&target_locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_search={{ editor_search_query|urlencode }}">{{ tab.label }} ({{ tab.count }})</a>
+        <a class="tw-filter-tab{% if tab.active %} is-active{% endif %}" href="?ui_mode=editor&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&target_locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_search={{ editor_search_query|urlencode }}">{{ tab.label }} ({{ tab.count }})</a>
       {% endfor %}
     </div>
     <div class="tw-metric-strip">
@@ -1299,7 +1509,7 @@
       {% csrf_token %}
       <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="action" value="generate_multi_locale_drafts">
-      <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+      <input type="hidden" name="product_search" value="{{ product_search_text }}">
       <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
       <input type="hidden" name="target_locale" value="{{ selected_locale }}">
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
@@ -1356,7 +1566,7 @@
                         {% csrf_token %}
                         <input type="hidden" name="ui_mode" value="editor">
                         <input type="hidden" name="action" value="generate_multi_locale_drafts">
-                        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+                        <input type="hidden" name="product_search" value="{{ product_search_text }}">
                         <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
                         <input type="hidden" name="target_locale" value="{{ row.locale }}">
                         <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
@@ -1529,7 +1739,7 @@
         {% csrf_token %}
         <input type="hidden" name="ui_mode" value="editor">
         <input type="hidden" name="action" value="generate_draft_dry_run">
-        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
         <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="target_locale" value="{{ selected_locale }}">
         <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
@@ -1614,8 +1824,8 @@
     <p>This selector uses local synced ShopifyProduct rows only. It does not call Shopify or OpenAI.</p>
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
       <div>
-        <label for="id_product_search_q">Search products</label><br>
-        <input id="id_product_search_q" type="text" name="q" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="title, gid, product id, handle, vendor, product type, SKU">
+        <label for="id_product_search">Search product</label><br>
+        <input id="id_product_search" type="text" name="product_search" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="Search by title, model, SKU, or product ID">
       </div>
       <div>
         <label for="id_product_search_locale">Preview locale</label><br>
@@ -1629,20 +1839,23 @@
       <a class="button" href="?">Clear search</a>
     </form>
     <p>Current search: {% if product_search_text %}<strong>{{ product_search_text }}</strong>{% else %}recent products{% endif %}. Results shown: {{ product_selector.result_count }} of max {{ product_selector.limit }}.</p>
+    {% if product_selector.included_selected_product %}
+      <p class="tw-muted">Current selected product is included even though it is outside the filtered results.</p>
+    {% endif %}
     <p>Sort order: {{ product_selector.sort_fields|join:", " }} descending, newest first. Search fields: {{ product_selector.search_supported_fields|join:", " }}.</p>
     {% if product_selector.no_products_available %}
       <p><strong>No products available.</strong> Sync Shopify products first, or use the manual product ID fallback below.</p>
     {% elif product_selector.no_matching_products %}
-      <p><strong>No matching products.</strong> Try another keyword or clear search.</p>
+      <p><strong>No matching products in this list.</strong> Try another keyword.</p>
     {% endif %}
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
-      <input type="hidden" name="q" value="{{ product_search_text }}">
+      <input type="hidden" name="product_search" value="{{ product_search_text }}">
       <div>
         <label for="id_selected_product_gid">Select product</label><br>
         <select id="id_selected_product_gid" name="selected_product_gid" style="min-width: 620px;">
           {% if product_selector.product_options %}
             {% for product in product_selector.product_options %}
-              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }} | {{ product.gid }} | {{ product.sort_timestamp }}</option>
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} | {{ product.handle }}{% endif %}{% if product.sku %} | SKU {{ product.sku }}{% endif %}{% if product.numeric_id %} | ID {{ product.numeric_id }}{% endif %}{% if product.sort_timestamp %} | {{ product.sort_timestamp }}{% endif %}</option>
             {% endfor %}
           {% else %}
             <option value="">No products available</option>
@@ -1662,7 +1875,7 @@
     <details style="margin-top: 12px;">
       <summary>Advanced manual product ID fallback</summary>
       <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 8px;">
-        <input type="hidden" name="q" value="{{ product_search_text }}">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
         <div>
           <label for="id_manual_product_gid">Product gid or numeric product id</label><br>
           <input id="id_manual_product_gid" type="text" name="manual_product_gid" value="{{ manual_product_gid }}" style="min-width: 420px;" placeholder="gid://shopify/Product/7655686799427">
@@ -1702,7 +1915,7 @@
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="refresh_status">
-        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
         <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Refresh workflow status</button>
@@ -1710,7 +1923,7 @@
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="generate_draft_dry_run">
-        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
         <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Generate draft package dry-run</button>
@@ -1718,7 +1931,7 @@
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="generate_locked_package_dry_run_preview">
-        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
         <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Generate locked package dry-run preview</button>
@@ -1726,7 +1939,7 @@
       <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="generate_locked_package_dry_run_report">
-        <input type="hidden" name="product_search_q" value="{{ product_search_text }}">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
         <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
         <button type="submit" class="button">Generate locked package dry-run report</button>
@@ -3323,5 +3536,78 @@
     </div>
   {% endif %}
   </details>
+  <script>
+    (function () {
+      var picker = document.querySelector("[data-product-picker]");
+      if (!picker) {
+        return;
+      }
+      var input = picker.querySelector("[data-product-filter-input]");
+      var items = Array.prototype.slice.call(picker.querySelectorAll("[data-product-option]"));
+      var summary = picker.querySelector("[data-product-picker-summary]");
+      var count = picker.querySelector("[data-product-picker-count]");
+      var empty = picker.querySelector("[data-product-picker-empty]");
+      if (!input || !items.length) {
+        return;
+      }
+
+      function normalize(value) {
+        return String(value || "").toLowerCase().replace(/[\s_-]+/g, "");
+      }
+
+      function queryTokens(value) {
+        return String(value || "")
+          .toLowerCase()
+          .split(/[\s_-]+/)
+          .map(function (token) { return normalize(token); })
+          .filter(Boolean);
+      }
+
+      function itemMatches(item, query) {
+        var normalizedQuery = normalize(query);
+        if (!normalizedQuery) {
+          return true;
+        }
+        var rawSearch = String(item.getAttribute("data-search") || "").toLowerCase();
+        var normalizedSearch = item.getAttribute("data-search-normalized") || normalize(rawSearch);
+        if (normalizedSearch.indexOf(normalizedQuery) !== -1) {
+          return true;
+        }
+        return queryTokens(query).every(function (token) {
+          return normalizedSearch.indexOf(token) !== -1 || rawSearch.indexOf(token) !== -1;
+        });
+      }
+
+      function applyProductFilter() {
+        var visibleCount = 0;
+        var matchingCount = 0;
+        var hasQuery = Boolean(normalize(input.value));
+        items.forEach(function (item) {
+          var selected = item.classList.contains("is-selected");
+          var matches = itemMatches(item, input.value);
+          var visible = selected || matches;
+          item.hidden = !visible;
+          if (matches) {
+            matchingCount += 1;
+          }
+          if (visible) {
+            visibleCount += 1;
+          }
+        });
+        if (summary) {
+          summary.textContent = hasQuery ? "Showing matching products" : "Showing latest products";
+        }
+        if (count) {
+          count.textContent = String(hasQuery ? matchingCount : visibleCount);
+        }
+        if (empty) {
+          empty.hidden = !hasQuery || matchingCount !== 0;
+        }
+      }
+
+      input.addEventListener("input", applyProductFilter);
+      applyProductFilter();
+    }());
+  </script>
 </div>
 {% endblock %}
