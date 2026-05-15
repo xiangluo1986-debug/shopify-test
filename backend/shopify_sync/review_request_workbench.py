@@ -1,5 +1,7 @@
 import json
 import re
+from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
 from django.conf import settings
@@ -293,6 +295,8 @@ CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 MAX_REPORT_BYTES = 4_000_000
 MAX_SOURCE_ROWS = 500
 MAX_TABLE_ROWS = DEFAULT_LIMIT
+TRUSTPILOT_AUTO_REFRESH_REPORT_FILENAME = "shopify_review_request_trustpilot_auto_queue_refresh.json"
+TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME = "shopify_review_request_trustpilot_auto_queue_refresh.html"
 
 
 def build_review_request_workbench_context(params=None):
@@ -537,6 +541,498 @@ def _load_json_report(key, label, filename, status_keys):
     if "success" in data:
         report["success"] = bool(data.get("success"))
     return report
+
+
+def run_trustpilot_auto_queue_refresh_after_shopify_order_sync():
+    return run_trustpilot_auto_queue_refresh_hook(trigger="shopify_order_sync")
+
+
+def run_trustpilot_auto_queue_refresh_hook(trigger="shopify_order_sync"):
+    try:
+        from remote_approval.tasks.shopify_review_request_trustpilot_auto_queue_refresh_task import (
+            run_shopify_review_request_trustpilot_auto_queue_refresh_hook,
+        )
+    except ImportError:
+        try:
+            return _write_auto_refresh_hook_fallback_report(trigger)
+        except Exception as exc:
+            return _safe_auto_refresh_hook_failure_result(trigger, exc)
+
+    try:
+        result = run_shopify_review_request_trustpilot_auto_queue_refresh_hook(trigger=trigger)
+    except Exception as exc:
+        try:
+            return _write_auto_refresh_hook_failure_report(trigger, exc)
+        except Exception as failure_exc:
+            return _safe_auto_refresh_hook_failure_result(trigger, failure_exc)
+
+    return {
+        "success": bool(result.get("success", True)),
+        "hook_mode": _safe_text(result.get("hook_mode") or "post_sync_best_effort", max_length=80),
+        "auto_hook_invoked": True,
+        "hook_safe_no_write": result.get("hook_safe_no_write") is not False,
+        "last_auto_refresh_trigger": _safe_text(
+            result.get("last_auto_refresh_trigger") or trigger,
+            max_length=80,
+        ),
+        "last_auto_refresh_status": _safe_text(result.get("last_auto_refresh_status"), max_length=120),
+        "last_auto_refresh_at": _safe_text(result.get("last_auto_refresh_at"), max_length=120),
+        "last_auto_refresh_error": _safe_text(result.get("last_auto_refresh_error"), max_length=300),
+        "json_review_path": _safe_text(result.get("json_review_path"), max_length=300),
+        "html_review_path": _safe_text(result.get("html_review_path"), max_length=300),
+    }
+
+
+def _safe_auto_refresh_hook_failure_result(trigger, exc):
+    return {
+        "success": False,
+        "hook_mode": "post_sync_best_effort",
+        "auto_hook_invoked": True,
+        "hook_safe_no_write": True,
+        "last_auto_refresh_trigger": _safe_text(trigger, max_length=80),
+        "last_auto_refresh_status": "auto_refresh_failed_non_blocking",
+        "last_auto_refresh_at": _utc_now_iso(),
+        "last_auto_refresh_error": _safe_text(f"{exc.__class__.__name__}: {exc}", max_length=300),
+    }
+
+
+def _write_auto_refresh_hook_fallback_report(trigger):
+    payload = _build_auto_refresh_hook_fallback_payload(trigger)
+    json_path, html_path = _write_auto_refresh_hook_reports(payload)
+    return {
+        "success": True,
+        "hook_mode": payload["hook_mode"],
+        "auto_hook_invoked": True,
+        "hook_safe_no_write": True,
+        "last_auto_refresh_trigger": payload["last_auto_refresh_trigger"],
+        "last_auto_refresh_status": payload["last_auto_refresh_status"],
+        "last_auto_refresh_at": payload["last_auto_refresh_at"],
+        "last_auto_refresh_error": "",
+        "json_review_path": str(json_path),
+        "html_review_path": str(html_path),
+    }
+
+
+def _build_auto_refresh_hook_fallback_payload(trigger):
+    refreshed_at = _utc_now_iso()
+    reports = _load_known_reports()
+    readiness_report = reports.get("trustpilot_locked_send_readiness_package", {})
+    readiness_data = readiness_report.get("data") if readiness_report.get("loaded") else {}
+    readiness_data = readiness_data if isinstance(readiness_data, dict) else {}
+    eligible_count = _int_or_zero(readiness_data.get("eligible_candidate_count"))
+    blocked_count = _int_or_zero(readiness_data.get("blocked_candidate_count"))
+    source_status = _safe_text(
+        readiness_data.get("package_status")
+        or readiness_data.get("automation_status")
+        or readiness_report.get("status")
+        or "missing",
+        max_length=120,
+    )
+    next_real_step = _auto_refresh_hook_next_real_step(eligible_count, source_status)
+    refresh_status = _auto_refresh_hook_status(next_real_step)
+    known_blockers = _auto_refresh_hook_known_blockers(readiness_data)
+    payload = {
+        "timestamp": refreshed_at,
+        "report_generated_at": refreshed_at,
+        "refreshed_at": refreshed_at,
+        "task": "shopify_review_request_trustpilot_auto_queue_refresh",
+        "task_name": "shopify_review_request_trustpilot_auto_queue_refresh",
+        "phase": "5.9",
+        "channel": "trustpilot",
+        "mode": "dry-run-auto-refresh",
+        "dry_run": True,
+        "success": True,
+        "auto_queue_refresh_only": True,
+        "trigger": _safe_text(trigger, max_length=80),
+        "auto_hook_invoked": True,
+        "hook_mode": "post_sync_best_effort",
+        "hook_safe_no_write": True,
+        "hook_wired_to_sync_completion": True,
+        "last_auto_refresh_trigger": _safe_text(trigger, max_length=80),
+        "last_auto_refresh_status": refresh_status,
+        "last_auto_refresh_at": refreshed_at,
+        "last_auto_refresh_error": "",
+        "refresh_status": refresh_status,
+        "source_readiness_package_status": source_status,
+        "computed_readiness_package_status": source_status,
+        "eligible_candidate_count": eligible_count,
+        "blocked_candidate_count": blocked_count,
+        "selected_candidate_order_name": _safe_text(
+            readiness_data.get("selected_candidate_order_name"),
+            max_length=80,
+        ),
+        "next_real_step": next_real_step,
+        "next_admin_action": _auto_refresh_hook_next_admin_action(next_real_step),
+        "auto_refresh_safe_for_scheduler": True,
+        "gmail_send_allowed_now": False,
+        "gmail_draft_create_allowed_now": False,
+        "shopify_tag_write_allowed_now": False,
+        "external_review_api_call_allowed_now": False,
+        "gmail_future_action_status": "no_gmail_action_until_eligible_candidate",
+        "shopify_tag_future_action_status": "no_shopify_tag_action_until_email_sent_and_verified",
+        "ali_reviews_status": "blocked_waiting_for_vendor_api_documentation",
+        "safety_flags": _auto_refresh_hook_safety_flags(),
+        "known_blockers_summary": known_blockers,
+        "dashboard_summary": _auto_refresh_hook_dashboard_summary(next_real_step, eligible_count),
+        "report_paths": {
+            "json": str(_log_dir() / TRUSTPILOT_AUTO_REFRESH_REPORT_FILENAME),
+            "html": str(_log_dir() / TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME),
+        },
+        "duration_seconds": 0,
+        "detected_issue_summary": _auto_refresh_hook_issue_summary(
+            next_real_step,
+            eligible_count,
+            blocked_count,
+            known_blockers,
+        ),
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "tagsAdd_performed": False,
+        "tagsRemove_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "ali_reviews_write_api_call_performed": False,
+        "tracking_redirect_enabled": False,
+        "tracking_token_generated": False,
+        "raw_customer_email_output": False,
+        "full_gmail_draft_or_message_id_output": False,
+        "all_new_actions_no_write_confirmed": True,
+    }
+    return _sanitize_auto_refresh_hook_payload(payload)
+
+
+def _write_auto_refresh_hook_failure_report(trigger, exc):
+    refreshed_at = _utc_now_iso()
+    sanitized_error = _safe_text(f"{exc.__class__.__name__}: {exc}", max_length=300)
+    payload = _sanitize_auto_refresh_hook_payload(
+        {
+            "timestamp": refreshed_at,
+            "report_generated_at": refreshed_at,
+            "refreshed_at": refreshed_at,
+            "task": "shopify_review_request_trustpilot_auto_queue_refresh",
+            "task_name": "shopify_review_request_trustpilot_auto_queue_refresh",
+            "phase": "5.9",
+            "channel": "trustpilot",
+            "mode": "dry-run-auto-refresh",
+            "dry_run": True,
+            "success": False,
+            "auto_queue_refresh_only": True,
+            "trigger": _safe_text(trigger, max_length=80),
+            "auto_hook_invoked": True,
+            "hook_mode": "post_sync_best_effort",
+            "hook_safe_no_write": True,
+            "hook_wired_to_sync_completion": True,
+            "last_auto_refresh_trigger": _safe_text(trigger, max_length=80),
+            "last_auto_refresh_status": "auto_refresh_failed_non_blocking",
+            "last_auto_refresh_at": refreshed_at,
+            "last_auto_refresh_error": sanitized_error,
+            "refresh_status": "auto_refresh_failed_non_blocking",
+            "source_readiness_package_status": "unknown_after_hook_failure",
+            "eligible_candidate_count": 0,
+            "blocked_candidate_count": 0,
+            "selected_candidate_order_name": "",
+            "next_real_step": "wait_no_candidate",
+            "next_admin_action": "Review the sanitized hook failure. Shopify order sync was not blocked.",
+            "auto_refresh_safe_for_scheduler": True,
+            "gmail_send_allowed_now": False,
+            "gmail_draft_create_allowed_now": False,
+            "shopify_tag_write_allowed_now": False,
+            "external_review_api_call_allowed_now": False,
+            "ali_reviews_status": "blocked_waiting_for_vendor_api_documentation",
+            "safety_flags": _auto_refresh_hook_safety_flags(),
+            "known_blockers_summary": _auto_refresh_hook_known_blockers({}),
+            "dashboard_summary": {
+                "message": "Automation refresh after Shopify sync failed without blocking order sync.",
+                "detail": "Review Advanced debug details. No email, draft, Shopify tag write, or external review API call was performed.",
+                "scheduler_safe_status": "scheduler_safe_dry_run_only",
+                "scheduler_note": "This hook is best-effort and keeps Shopify sync non-blocking.",
+            },
+            "report_paths": {
+                "json": str(_log_dir() / TRUSTPILOT_AUTO_REFRESH_REPORT_FILENAME),
+                "html": str(_log_dir() / TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME),
+            },
+            "duration_seconds": 0,
+            "detected_issue_summary": "Trustpilot auto queue refresh hook failed after Shopify order sync; sync was not blocked.",
+            "gmail_api_call_performed": False,
+            "gmail_draft_create_attempted": False,
+            "gmail_draft_created": False,
+            "gmail_drafts_send_called": False,
+            "gmail_messages_send_called": False,
+            "gmail_send_performed": False,
+            "email_sent": False,
+            "shopify_api_call_performed": False,
+            "shopify_write_performed": False,
+            "mutation_performed": False,
+            "tags_add_performed": False,
+            "tags_remove_performed": False,
+            "tagsAdd_performed": False,
+            "tagsRemove_performed": False,
+            "trustpilot_api_call_performed": False,
+            "kudosi_api_call_performed": False,
+            "ali_reviews_api_call_performed": False,
+            "ali_reviews_write_api_call_performed": False,
+            "tracking_redirect_enabled": False,
+            "tracking_token_generated": False,
+            "raw_customer_email_output": False,
+            "full_gmail_draft_or_message_id_output": False,
+            "all_new_actions_no_write_confirmed": True,
+        }
+    )
+    json_path, html_path = _write_auto_refresh_hook_reports(payload)
+    return {
+        "success": False,
+        "hook_mode": payload["hook_mode"],
+        "auto_hook_invoked": True,
+        "hook_safe_no_write": True,
+        "last_auto_refresh_trigger": payload["last_auto_refresh_trigger"],
+        "last_auto_refresh_status": payload["last_auto_refresh_status"],
+        "last_auto_refresh_at": payload["last_auto_refresh_at"],
+        "last_auto_refresh_error": payload["last_auto_refresh_error"],
+        "json_review_path": str(json_path),
+        "html_review_path": str(html_path),
+    }
+
+
+def _auto_refresh_hook_next_real_step(eligible_count, source_status):
+    if eligible_count == 0 or source_status == "blocked_no_eligible_candidate":
+        return "wait_no_candidate"
+    if eligible_count == 1 and source_status == "locked_send_ready_for_human_approval":
+        return "prepare_locked_send_package"
+    if eligible_count > 1 or source_status == "blocked_multiple_candidates_require_manual_selection":
+        return "manual_review_required_multiple_candidates"
+    return "blocked_safety_issue"
+
+
+def _auto_refresh_hook_status(next_real_step):
+    if next_real_step == "wait_no_candidate":
+        return "refreshed_no_eligible_candidate"
+    if next_real_step == "prepare_locked_send_package":
+        return "refreshed_locked_send_candidate_ready"
+    if next_real_step == "manual_review_required_multiple_candidates":
+        return "refreshed_multiple_candidates_manual_selection_required"
+    return "refreshed_blocked_safety_issue"
+
+
+def _auto_refresh_hook_next_admin_action(next_real_step):
+    if next_real_step == "prepare_locked_send_package":
+        return "Review the single eligible candidate and prepare a locked send package for human approval."
+    if next_real_step == "manual_review_required_multiple_candidates":
+        return "Multiple eligible candidates exist. Manually select exactly one candidate before any future send package."
+    if next_real_step == "blocked_safety_issue":
+        return "Stop automation and review safety flags before preparing any future locked send package."
+    return (
+        "Wait until an order is delivered, has canonical `1: review request`, and passes "
+        "duplicate/related-order/ticket/refund checks."
+    )
+
+
+def _auto_refresh_hook_dashboard_summary(next_real_step, eligible_count):
+    if next_real_step == "prepare_locked_send_package":
+        message = "1 candidate is ready for locked send review. No email has been sent."
+        detail = "Prepare a locked send package for human review only."
+    elif next_real_step == "manual_review_required_multiple_candidates":
+        message = f"{eligible_count} candidates are ready; manual selection is required."
+        detail = "Select exactly one candidate before any future locked send review."
+    elif next_real_step == "blocked_safety_issue":
+        message = "Automation refresh found a safety issue."
+        detail = "Review safety flags before any future locked send package."
+    else:
+        message = "Automation checked the queue. Nothing to send now."
+        detail = f"Waiting for a delivered order with `{CANONICAL_REVIEW_REQUEST_TAG}` that passes all safety checks."
+    return {
+        "message": message,
+        "detail": detail,
+        "scheduler_safe_status": "scheduler_safe_dry_run_only",
+        "scheduler_note": (
+            "This refresh is safe to run on a schedule because it does not send emails, "
+            "create Gmail drafts, or write Shopify tags."
+        ),
+    }
+
+
+def _auto_refresh_hook_known_blockers(readiness_data):
+    order_22620 = readiness_data.get("order_22620_blocker_status")
+    order_22620 = order_22620 if isinstance(order_22620, dict) else {}
+    order_22582 = readiness_data.get("order_22582_blocker_status")
+    order_22582 = order_22582 if isinstance(order_22582, dict) else {}
+    prior_order = _safe_text(order_22620.get("prior_trustpilot_order_name"), max_length=80) or "#22621"
+    return [
+        {
+            "order_name": "#22620",
+            "status": _safe_text(order_22620.get("status") or "blocked", max_length=80),
+            "summary": f"Already sent to this customer via {prior_order}",
+            "message": _safe_text(
+                order_22620.get("message") or f"Do not send. Already sent to this customer via {prior_order}.",
+                max_length=300,
+            ),
+            "blocking_reasons": [
+                _safe_text(value, max_length=120)
+                for value in (order_22620.get("blocking_reasons") or [])
+                if _safe_text(value, max_length=120)
+            ],
+            "selected_candidate_safe_to_prepare_send": False,
+        },
+        {
+            "order_name": "#22582",
+            "status": _safe_text(order_22582.get("status") or "blocked", max_length=80),
+            "summary": f"Not delivered, missing `{CANONICAL_REVIEW_REQUEST_TAG}`, related orders #22582/#22581 not ready",
+            "message": _safe_text(
+                order_22582.get("message")
+                or (
+                    f"Do not send yet. Not delivered, missing `{CANONICAL_REVIEW_REQUEST_TAG}`, "
+                    "related order group #22582/#22581 not ready."
+                ),
+                max_length=300,
+            ),
+            "blocking_reasons": [
+                _safe_text(value, max_length=120)
+                for value in (order_22582.get("blocking_reasons") or [])
+                if _safe_text(value, max_length=120)
+            ],
+            "selected_candidate_safe_to_prepare_send": False,
+        },
+    ]
+
+
+def _auto_refresh_hook_issue_summary(next_real_step, eligible_count, blocked_count, known_blockers):
+    if next_real_step == "prepare_locked_send_package":
+        return "One Trustpilot candidate is ready for locked send review. No email has been sent."
+    if next_real_step == "manual_review_required_multiple_candidates":
+        return f"{eligible_count} Trustpilot candidates are eligible; manual selection is required before any send package."
+    if next_real_step == "blocked_safety_issue":
+        return "Trustpilot auto queue refresh is blocked by a safety flag; no send or write action is allowed."
+    order_22620 = _safe_text((known_blockers[0] if known_blockers else {}).get("summary"), max_length=160)
+    order_22582 = _safe_text((known_blockers[1] if len(known_blockers) > 1 else {}).get("summary"), max_length=200)
+    return (
+        f"No eligible Trustpilot candidate; {blocked_count} blocked candidate summaries were prepared. "
+        f"#22620 remains blocked: {order_22620}. #22582 remains blocked: {order_22582}."
+    )
+
+
+def _auto_refresh_hook_safety_flags():
+    return {
+        "readiness_package_read_from_local_report_only": True,
+        "auto_refresh_safe_for_scheduler": True,
+        "hook_safe_no_write": True,
+        "gmail_send_allowed_now": False,
+        "gmail_draft_create_allowed_now": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_draft_deleted": False,
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "shopify_tag_write_allowed_now": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "tagsAdd_performed": False,
+        "tagsRemove_performed": False,
+        "external_review_api_call_allowed_now": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "ali_reviews_write_api_call_performed": False,
+        "tracking_redirect_enabled": False,
+        "tracking_token_generated": False,
+        "raw_customer_email_output": False,
+        "full_gmail_draft_or_message_id_output": False,
+        "all_new_actions_no_write_confirmed": True,
+    }
+
+
+def _write_auto_refresh_hook_reports(payload):
+    log_dir = _log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    json_path = log_dir / TRUSTPILOT_AUTO_REFRESH_REPORT_FILENAME
+    html_path = log_dir / TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    html_path.write_text(_render_auto_refresh_hook_html(payload), encoding="utf-8")
+    return json_path, html_path
+
+
+def _render_auto_refresh_hook_html(payload):
+    safety_rows = "\n".join(
+        f"<tr><td><code>{escape(str(key))}</code></td><td>{escape(str(value))}</td></tr>"
+        for key, value in (payload.get("safety_flags") or {}).items()
+    )
+    known_blockers = payload.get("known_blockers_summary") if isinstance(payload.get("known_blockers_summary"), list) else []
+    blocker_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(_safe_text(row.get('order_name'), max_length=80))}</td>"
+        f"<td><code>{escape(_safe_text(row.get('status'), max_length=80))}</code></td>"
+        f"<td>{escape(_safe_text(row.get('summary'), max_length=200))}</td>"
+        f"<td>{escape(_safe_text(row.get('message'), max_length=300))}</td>"
+        "</tr>"
+        for row in known_blockers
+        if isinstance(row, dict)
+    )
+    error_html = ""
+    if payload.get("last_auto_refresh_error"):
+        error_html = f"<p>Sanitized error: {escape(_safe_text(payload.get('last_auto_refresh_error'), max_length=300))}</p>"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Trustpilot Auto Queue Refresh</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; color: #1f2933; }}
+    code {{ background: #f5f7fa; padding: 1px 4px; }}
+    table {{ border-collapse: collapse; margin: 8px 0 24px; width: 100%; }}
+    th, td {{ border: 1px solid #d9e2ec; padding: 8px; text-align: left; vertical-align: top; }}
+    th {{ background: #f0f4f8; }}
+  </style>
+</head>
+<body>
+  <h1>Trustpilot Auto Queue Refresh</h1>
+  <p>Refresh status: <strong>{escape(_safe_text(payload.get("refresh_status"), max_length=120))}</strong></p>
+  <p>After Shopify order sync, this dashboard refreshes the Trustpilot review queue automatically. It does not send emails, create Gmail drafts, or write Shopify tags.</p>
+  {error_html}
+  <table>
+    <tbody>
+      <tr><th>Last trigger</th><td><code>{escape(_safe_text(payload.get("last_auto_refresh_trigger"), max_length=80))}</code></td></tr>
+      <tr><th>Last refresh time</th><td>{escape(_safe_text(payload.get("last_auto_refresh_at"), max_length=120))}</td></tr>
+      <tr><th>Source readiness package status</th><td><code>{escape(_safe_text(payload.get("source_readiness_package_status"), max_length=120))}</code></td></tr>
+      <tr><th>Eligible candidate count</th><td>{_int_or_zero(payload.get("eligible_candidate_count"))}</td></tr>
+      <tr><th>Blocked candidate count</th><td>{_int_or_zero(payload.get("blocked_candidate_count"))}</td></tr>
+      <tr><th>Next real step</th><td><code>{escape(_safe_text(payload.get("next_real_step"), max_length=120))}</code></td></tr>
+    </tbody>
+  </table>
+  <h2>Known Blockers</h2>
+  <table><thead><tr><th>Order</th><th>Status</th><th>Summary</th><th>Message</th></tr></thead><tbody>{blocker_rows}</tbody></table>
+  <h2>Safety Flags</h2>
+  <table><tbody>{safety_rows}</tbody></table>
+</body>
+</html>"""
+
+
+def _sanitize_auto_refresh_hook_payload(value):
+    if isinstance(value, dict):
+        return {_safe_text(key, max_length=120): _sanitize_auto_refresh_hook_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_auto_refresh_hook_payload(item) for item in value]
+    if isinstance(value, str):
+        return _safe_text(value, max_length=1000)
+    return value
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _format_file_time(timestamp):
@@ -1708,6 +2204,25 @@ def _trustpilot_auto_refresh_status(report, trustpilot_send_readiness):
         or "This refresh is safe to run on a schedule because it does not send emails, create Gmail drafts, or write Shopify tags.",
         max_length=300,
     )
+    last_trigger = _safe_text(
+        data.get("last_auto_refresh_trigger") or data.get("trigger") or "unknown",
+        max_length=80,
+    )
+    last_refresh_status = _safe_text(
+        data.get("last_auto_refresh_status") or refresh_status,
+        max_length=120,
+    )
+    last_refresh_at = _safe_text(
+        data.get("last_auto_refresh_at")
+        or data.get("refreshed_at")
+        or report.get("timestamp")
+        or report.get("modified_at"),
+        max_length=120,
+    )
+    last_refresh_error = _safe_text(
+        data.get("last_auto_refresh_error") or report.get("error", ""),
+        max_length=300,
+    )
     return {
         "report_present": bool(report.get("present")),
         "report_loaded": report_loaded,
@@ -1716,9 +2231,20 @@ def _trustpilot_auto_refresh_status(report, trustpilot_send_readiness):
             or "logs/shopify_review_request_trustpilot_auto_queue_refresh.json"
         ),
         "refresh_status": refresh_status,
-        "last_refresh_time": _safe_text(
-            data.get("refreshed_at") or report.get("timestamp") or report.get("modified_at"),
-            max_length=120,
+        "last_refresh_time": last_refresh_at,
+        "last_auto_refresh_trigger": last_trigger,
+        "last_auto_refresh_trigger_label": _auto_refresh_trigger_label(last_trigger),
+        "last_auto_refresh_status": last_refresh_status,
+        "last_auto_refresh_at": last_refresh_at,
+        "last_auto_refresh_error": last_refresh_error,
+        "auto_hook_invoked": data.get("auto_hook_invoked") is True,
+        "hook_mode": _safe_text(data.get("hook_mode") or "post_sync_best_effort", max_length=80),
+        "hook_safe_no_write": data.get("hook_safe_no_write") is not False,
+        "hook_status": "enabled",
+        "hook_status_message": "Auto refresh after Shopify sync is enabled",
+        "hook_explainer": (
+            "After Shopify order sync, this dashboard refreshes the Trustpilot review queue automatically. "
+            "It does not send emails, create Gmail drafts, or write Shopify tags."
         ),
         "source_readiness_package_status": _safe_text(
             data.get("source_readiness_package_status")
@@ -1775,6 +2301,14 @@ def _trustpilot_auto_refresh_status(report, trustpilot_send_readiness):
             "ali_reviews_api_call_performed": data.get("ali_reviews_api_call_performed") is True,
         },
     }
+
+
+def _auto_refresh_trigger_label(trigger):
+    if trigger == "shopify_order_sync":
+        return "Shopify order sync"
+    if trigger == "manual_runner":
+        return "Manual runner"
+    return "unknown"
 
 
 def _operating_dashboard(

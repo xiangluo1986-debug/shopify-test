@@ -54,6 +54,31 @@ SCHEDULER_SAFE_NOTE = (
 
 
 def run_shopify_review_request_trustpilot_auto_queue_refresh_task(mode: str) -> dict:
+    return _run_shopify_review_request_trustpilot_auto_queue_refresh(
+        mode=mode,
+        trigger="manual_runner",
+        auto_hook_invoked=False,
+        hook_mode="manual_runner",
+    )
+
+
+def run_shopify_review_request_trustpilot_auto_queue_refresh_hook(
+    trigger: str = "shopify_order_sync",
+) -> dict:
+    return _run_shopify_review_request_trustpilot_auto_queue_refresh(
+        mode="dry-run",
+        trigger=trigger,
+        auto_hook_invoked=True,
+        hook_mode="post_sync_best_effort",
+    )
+
+
+def _run_shopify_review_request_trustpilot_auto_queue_refresh(
+    mode: str,
+    trigger: str,
+    auto_hook_invoked: bool,
+    hook_mode: str,
+) -> dict:
     if mode != "dry-run":
         raise ValueError(f"{TASK_NAME} only supports dry-run mode.")
 
@@ -65,9 +90,38 @@ def run_shopify_review_request_trustpilot_auto_queue_refresh_task(mode: str) -> 
         source_readiness_package=source_readiness_package,
         duration_seconds=round(time.time() - started, 3),
     )
+    _attach_hook_metadata(
+        payload,
+        trigger=trigger,
+        auto_hook_invoked=auto_hook_invoked,
+        hook_mode=hook_mode,
+    )
     json_path = _write_json_report(payload)
     html_path = _write_html_report(payload)
     return _task_result(payload, json_path, html_path)
+
+
+def _attach_hook_metadata(
+    payload: dict,
+    trigger: str,
+    auto_hook_invoked: bool,
+    hook_mode: str,
+) -> None:
+    safe_trigger = _safe_text(trigger or "unknown", max_length=80)
+    safe_hook_mode = _safe_text(hook_mode or "unknown", max_length=80)
+    payload.update(
+        {
+            "trigger": safe_trigger,
+            "auto_hook_invoked": bool(auto_hook_invoked),
+            "hook_mode": safe_hook_mode,
+            "hook_safe_no_write": True,
+            "hook_wired_to_sync_completion": safe_trigger == "shopify_order_sync",
+            "last_auto_refresh_trigger": safe_trigger,
+            "last_auto_refresh_status": _safe_text(payload.get("refresh_status"), max_length=120),
+            "last_auto_refresh_at": _safe_text(payload.get("refreshed_at"), max_length=120),
+            "last_auto_refresh_error": "",
+        }
+    )
 
 
 def _compute_readiness_payload() -> dict:
@@ -466,6 +520,8 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>Next real step</th><td><code>{escape(payload["next_real_step"])}</code></td></tr>
       <tr><th>Next admin action</th><td>{escape(payload["next_admin_action"])}</td></tr>
       <tr><th>Scheduler safe</th><td>{escape(str(payload["auto_refresh_safe_for_scheduler"]))}</td></tr>
+      <tr><th>Last trigger</th><td><code>{escape(payload.get("last_auto_refresh_trigger", "unknown"))}</code></td></tr>
+      <tr><th>Hook mode</th><td><code>{escape(payload.get("hook_mode", "unknown"))}</code></td></tr>
     </tbody>
   </table>
   <h2>Known Blockers</h2>
@@ -506,6 +562,13 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "next_real_step": payload["next_real_step"],
         "next_admin_action": payload["next_admin_action"],
         "auto_refresh_safe_for_scheduler": payload["auto_refresh_safe_for_scheduler"],
+        "last_auto_refresh_trigger": payload.get("last_auto_refresh_trigger", "unknown"),
+        "last_auto_refresh_status": payload.get("last_auto_refresh_status", payload["refresh_status"]),
+        "last_auto_refresh_at": payload.get("last_auto_refresh_at", payload["refreshed_at"]),
+        "last_auto_refresh_error": payload.get("last_auto_refresh_error", ""),
+        "auto_hook_invoked": payload.get("auto_hook_invoked") is True,
+        "hook_mode": payload.get("hook_mode", ""),
+        "hook_safe_no_write": payload.get("hook_safe_no_write") is True,
         "gmail_send_allowed_now": False,
         "gmail_draft_create_allowed_now": False,
         "shopify_tag_write_allowed_now": False,
@@ -528,6 +591,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Blocked candidate count: {payload['blocked_candidate_count']}\n"
         f"Selected candidate: {payload['selected_candidate_order_name'] or 'None'}\n"
         f"Next real step: {payload['next_real_step']}\n"
+        f"Last trigger: {payload.get('last_auto_refresh_trigger', 'unknown')}\n"
         "Safety: no Gmail API, no draft creation/deletion, no email send, no Shopify API/write/tag mutation, no Trustpilot/Kudosi/Ali Reviews API, and no tracking token.\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"

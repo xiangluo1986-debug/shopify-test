@@ -30,7 +30,10 @@ from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
 from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem, ShopifySyncState
-from .review_request_workbench import build_review_request_workbench_context
+from .review_request_workbench import (
+    build_review_request_workbench_context,
+    run_trustpilot_auto_queue_refresh_after_shopify_order_sync,
+)
 from .sync_helpers import (
     ORDER_SYNC_TASK_NAMES,
     run_shopify_sync_task,
@@ -4883,7 +4886,18 @@ def sync_shenzhen_orders(request):
     )
     if task_result.get("skipped"):
         return JsonResponse(task_result, status=409)
-    return JsonResponse(task_result["result"])
+    result = dict(task_result["result"])
+    try:
+        result["trustpilot_queue_auto_refresh"] = (
+            run_trustpilot_auto_queue_refresh_after_shopify_order_sync()
+        )
+    except Exception as exc:
+        result["trustpilot_queue_auto_refresh"] = {
+            "success": False,
+            "last_auto_refresh_status": "auto_refresh_failed_non_blocking",
+            "last_auto_refresh_error": f"{exc.__class__.__name__}",
+        }
+    return JsonResponse(result)
 
 
 @login_required

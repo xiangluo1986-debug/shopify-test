@@ -342,12 +342,18 @@
         <p class="{% if dashboard.trustpilot_auto_refresh.eligible_candidate_count %}rrw-note{% else %}rrw-warning{% endif %}">
             {{ dashboard.trustpilot_auto_refresh.message }}
         </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_auto_refresh.hook_explainer }}</p>
         <p class="rrw-muted">{{ dashboard.trustpilot_auto_refresh.detail }}</p>
         <p class="rrw-muted">{{ dashboard.trustpilot_auto_refresh.scheduler_note }}</p>
         <div class="rrw-grid">
             <div class="rrw-card">
+                <div class="rrw-card-title">Last trigger</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.last_auto_refresh_trigger_label }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_auto_refresh.last_auto_refresh_trigger }}</div>
+            </div>
+            <div class="rrw-card">
                 <div class="rrw-card-title">Last refresh status</div>
-                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.refresh_status }}</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.last_auto_refresh_status }}</div>
                 <div class="rrw-card-note">{{ dashboard.trustpilot_auto_refresh.relative_path }}</div>
             </div>
             <div class="rrw-card">
@@ -378,6 +384,11 @@
                 <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.scheduler_safe_status }}</div>
                 <div class="rrw-card-note">Dry-run only. No Gmail draft/send, Shopify tag write, or external review API call.</div>
             </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Hook status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.hook_status_message }}</div>
+                <div class="rrw-card-note">Mode: {{ dashboard.trustpilot_auto_refresh.hook_mode }}</div>
+            </div>
         </div>
         <div class="rrw-note">
             {{ dashboard.trustpilot_auto_refresh.order_22620_message }}
@@ -385,6 +396,20 @@
         <div class="rrw-warning">
             {{ dashboard.trustpilot_auto_refresh.order_22582_message }}
         </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_auto_refresh.last_auto_refresh_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_auto_refresh.last_auto_refresh_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                Hook safe no-write:
+                {{ dashboard.trustpilot_auto_refresh.hook_safe_no_write }}
+                | Auto hook invoked:
+                {{ dashboard.trustpilot_auto_refresh.auto_hook_invoked }}
+                | Source error:
+                {{ dashboard.trustpilot_auto_refresh.source_error|default:"None" }}
+            </p>
+        </details>
     </div>
 
     <div class="rrw-section">

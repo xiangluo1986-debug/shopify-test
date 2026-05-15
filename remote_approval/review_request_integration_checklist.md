@@ -513,3 +513,25 @@ Future tracking design note:
 - [x] The next phase can add a scheduler hook or locked send execute only after
   an eligible candidate appears and a separate human approval confirms the exact
   action.
+
+## Phase 5.9 Shopify Order Sync Auto Refresh Hook
+
+- [x] Add the safe internal hook that refreshes the Trustpilot queue after
+  Shopify order sync completes.
+- [x] Keep the hook best-effort and non-blocking so Shopify order sync still
+  completes if the refresh fails.
+- [x] Keep the hook dry-run/read-only only.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] The existing auto queue refresh report records
+  `last_auto_refresh_trigger=shopify_order_sync`,
+  `last_auto_refresh_status`, `last_auto_refresh_at`, and sanitized
+  `last_auto_refresh_error` when needed.
+- [x] The Review Requests dashboard shows the latest hook/refresh status,
+  trigger, refresh time, queue counts, known blockers, and sanitized advanced
+  debug details.
+- [x] Add the fixed local approval audit task
+  `shopify_review_request_order_sync_auto_refresh_hook_audit`.
+- [x] The next phase can add locked send execute only when a true eligible
+  candidate exists and a separate human approval confirms the exact action.

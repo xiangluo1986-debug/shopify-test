@@ -117,6 +117,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_locked_send_readine
 from remote_approval.tasks.shopify_review_request_trustpilot_auto_queue_refresh_task import (
     run_shopify_review_request_trustpilot_auto_queue_refresh_task,
 )
+from remote_approval.tasks.shopify_review_request_order_sync_auto_refresh_hook_audit_task import (
+    run_shopify_review_request_order_sync_auto_refresh_hook_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_design_dry_run_task import (
     run_shopify_review_request_trustpilot_tag_write_design_dry_run_task,
 )
@@ -400,6 +403,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_auto_queue_refresh": (
         run_shopify_review_request_trustpilot_auto_queue_refresh_task
+    ),
+    "shopify_review_request_order_sync_auto_refresh_hook_audit": (
+        run_shopify_review_request_order_sync_auto_refresh_hook_audit_task
     ),
     "shopify_review_request_trustpilot_tag_write_design_dry_run": (
         run_shopify_review_request_trustpilot_tag_write_design_dry_run_task
@@ -803,6 +809,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local dashboard status refresh only",
         "review_file_path": "logs/shopify_review_request_trustpilot_auto_queue_refresh.json",
+    },
+    "shopify_review_request_order_sync_auto_refresh_hook_audit": {
+        "description": "Audit the dry-run Trustpilot queue auto-refresh hook after Shopify order sync completion.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local source/report audit only",
+        "review_file_path": "logs/shopify_review_request_order_sync_auto_refresh_hook_audit.json",
     },
     "shopify_review_request_trustpilot_tag_write_design_dry_run": {
         "description": "Generate a no-write Trustpilot Shopify tag-write design package after Gmail send audit.",

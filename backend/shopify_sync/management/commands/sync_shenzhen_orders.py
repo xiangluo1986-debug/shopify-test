@@ -1,6 +1,9 @@
 from django.core.management.base import BaseCommand, CommandError
 
 from shopify_sync.models import ShopifyInstallation
+from shopify_sync.review_request_workbench import (
+    run_trustpilot_auto_queue_refresh_after_shopify_order_sync,
+)
 from shopify_sync.sync_helpers import (
     ORDER_SYNC_TASK_NAMES,
     run_shopify_sync_task,
@@ -51,6 +54,13 @@ class Command(BaseCommand):
             self.stdout.write(task_result.get("reason", ""))
             return
         result = task_result["result"]
+        try:
+            refresh_result = run_trustpilot_auto_queue_refresh_after_shopify_order_sync()
+        except Exception as exc:
+            refresh_result = {
+                "last_auto_refresh_status": "auto_refresh_failed_non_blocking",
+                "last_auto_refresh_error": f"{exc.__class__.__name__}",
+            }
 
         self.stdout.write(self.style.SUCCESS("Shenzhen order sync completed."))
         self.stdout.write(f"Checked orders: {result['checked_orders']}")
@@ -63,6 +73,10 @@ class Command(BaseCommand):
         self.stdout.write(f"Updated tracking: {result['updated_tracking']}")
         self.stdout.write(f"Auto-marked warehouse fulfilled: {result['auto_marked_warehouse_fulfilled']}")
         self.stdout.write(f"Detected tracking count: {result['detected_tracking_count']}")
+        self.stdout.write(
+            "Trustpilot queue auto refresh: "
+            f"{refresh_result.get('last_auto_refresh_status') or 'unknown'}"
+        )
 
         if result["errors"]:
             self.stderr.write(self.style.WARNING("Errors encountered:"))
