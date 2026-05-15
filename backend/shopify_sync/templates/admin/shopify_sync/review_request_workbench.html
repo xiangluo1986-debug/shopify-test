@@ -684,6 +684,99 @@
         </details>
     </div>
 
+    <div class="rrw-section">
+        <h2>Real Send Execute</h2>
+        <p class="{% if dashboard.trustpilot_real_send_execute.real_send_execute_allowed_by_preflight %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_real_send_execute.message }}
+        </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_real_send_execute.future_send_message }}</p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Execution status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_execute.execution_status }}</div>
+                <div class="rrw-card-note">Locked skeleton only.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Preflight status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_execute.preflight_status }}</div>
+                <div class="rrw-card-note">
+                    Simulator used:
+                    {{ dashboard.trustpilot_real_send_execute.simulator_used_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_execute.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected candidate:
+                    {{ dashboard.trustpilot_real_send_execute.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Real send execute requested</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_execute.real_send_execute_requested_label }}</div>
+                <div class="rrw-card-note">
+                    Allowed by preflight:
+                    {{ dashboard.trustpilot_real_send_execute.real_send_execute_allowed_by_preflight_label }}
+                    | Allowed by env:
+                    {{ dashboard.trustpilot_real_send_execute.real_send_execute_allowed_by_env_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gmail send performed</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_execute.gmail_send_performed_label }}</div>
+                <div class="rrw-card-note">
+                    Gmail API:
+                    {{ dashboard.trustpilot_real_send_execute.gmail_api_call_performed_label }}
+                    | Draft create:
+                    {{ dashboard.trustpilot_real_send_execute.gmail_draft_create_performed_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Shopify tag write performed</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_real_send_execute.shopify_tag_write_performed_label }}</div>
+                <div class="rrw-card-note">
+                    External review API:
+                    {{ dashboard.trustpilot_real_send_execute.external_review_api_call_performed_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">Execute skeleton review</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_real_send_execute.next_admin_action }}</div>
+            </div>
+        </div>
+        <div class="rrw-warning">
+            Even when future conditions are ready, real sending requires an explicit execute flag and a separate implementation step.
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_real_send_execute.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_real_send_execute.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_real_send_execute.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_real_send_execute.html_relative_path }}
+            </p>
+            <p class="rrw-muted">
+                Required ACK:
+                <code>{{ dashboard.trustpilot_real_send_execute.required_ack }}</code>
+            </p>
+            <p class="rrw-muted">
+                Required execute flag:
+                <code>{{ dashboard.trustpilot_real_send_execute.required_execute_flag }}</code>
+            </p>
+            <p class="rrw-muted">
+                Source final preflight:
+                {{ dashboard.trustpilot_real_send_execute.source_preflight_report.relative_path|default:"logs/shopify_review_request_trustpilot_real_send_final_preflight.json" }}
+                |
+                {{ dashboard.trustpilot_real_send_execute.source_preflight_report.status|default:"missing" }}
+            </p>
+        </details>
+    </div>
+
     <details class="rrw-advanced-section">
         <summary>Sandbox Testing</summary>
         <p class="rrw-warning">

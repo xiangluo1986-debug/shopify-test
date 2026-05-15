@@ -210,6 +210,31 @@ production state should remain `blocked_no_eligible_candidate` until a real
 eligible delivered order with canonical `1: review request` passes all duplicate
 and risk checks.
 
+## Review Request Trustpilot Real Send Execute Skeleton
+
+`shopify_review_request_trustpilot_real_send_execute` is a Phase 5.14 locked
+executor entry point. It reads the final preflight report and decides whether a
+future real send would be allowed, but it does not contain an enabled Gmail send
+implementation.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_real_send_execute.json
+logs/shopify_review_request_trustpilot_real_send_execute.html
+```
+
+Production final preflight is used by default. Simulator readiness is ignored
+unless
+`SHOPIFY_REVIEW_REQUEST_REAL_SEND_EXECUTE_USE_SIMULATOR=YES_I_UNDERSTAND_THIS_IS_FAKE_DATA`
+is present. Even if final preflight is ready and
+`SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE=YES_I_APPROVE_REAL_TRUSTPILOT_GMAIL_SEND`
+is present, this phase reports
+`ready_but_real_send_implementation_not_enabled_in_this_phase` and still calls
+no Gmail API, creates/updates/deletes no drafts, sends no email, calls no
+Shopify API, writes no Shopify tag, calls no Trustpilot/Kudosi/Ali Reviews API,
+and creates no tracking token.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

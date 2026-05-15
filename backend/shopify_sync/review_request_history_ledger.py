@@ -92,6 +92,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("preflight_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_real_send_execute",
+        "label": "Trustpilot real send execute skeleton",
+        "filename": "shopify_review_request_trustpilot_real_send_execute.json",
+        "channel": "trustpilot",
+        "event_type": "real_send_execute",
+        "status_keys": ("execution_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -168,6 +176,7 @@ EVENT_TYPE_OPTIONS = (
     ("send_gate", "Send gate"),
     ("send_executor_shell", "Send executor shell"),
     ("final_preflight", "Final preflight"),
+    ("real_send_execute", "Real send execute"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
     ("draft_created", "Draft created"),
@@ -365,6 +374,7 @@ def _events_from_report(report):
         "trustpilot_locked_gmail_send_gate",
         "trustpilot_gmail_send_executor_shell",
         "trustpilot_real_send_final_preflight",
+        "trustpilot_real_send_execute",
     }:
         events.extend(_gate_executor_events(report))
 

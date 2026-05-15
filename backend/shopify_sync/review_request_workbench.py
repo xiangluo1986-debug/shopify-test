@@ -178,6 +178,12 @@ REPORT_DEFINITIONS = (
         ("preflight_status", "report_status", "status"),
     ),
     (
+        "trustpilot_real_send_execute",
+        "Trustpilot real send execute skeleton",
+        "shopify_review_request_trustpilot_real_send_execute.json",
+        ("execution_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -419,6 +425,10 @@ def build_review_request_workbench_context(params=None):
         reports.get("trustpilot_real_send_final_preflight", {}),
         trustpilot_gmail_send_executor_shell,
     )
+    trustpilot_real_send_execute = _trustpilot_real_send_execute_status(
+        reports.get("trustpilot_real_send_execute", {}),
+        trustpilot_real_send_final_preflight,
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -439,6 +449,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_gmail_send_gate=trustpilot_gmail_send_gate,
         trustpilot_gmail_send_executor_shell=trustpilot_gmail_send_executor_shell,
         trustpilot_real_send_final_preflight=trustpilot_real_send_final_preflight,
+        trustpilot_real_send_execute=trustpilot_real_send_execute,
     )
 
     return {
@@ -496,6 +507,7 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_gmail_send_gate": trustpilot_gmail_send_gate,
             "trustpilot_gmail_send_executor_shell": trustpilot_gmail_send_executor_shell,
             "trustpilot_real_send_final_preflight": trustpilot_real_send_final_preflight,
+            "trustpilot_real_send_execute": trustpilot_real_send_execute,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -1597,6 +1609,7 @@ def _report_readiness(reports):
         ("trustpilot_locked_gmail_send_gate", "Trustpilot locked Gmail send gate"),
         ("trustpilot_gmail_send_executor_shell", "Trustpilot Gmail send executor shell"),
         ("trustpilot_real_send_final_preflight", "Trustpilot real send final preflight"),
+        ("trustpilot_real_send_execute", "Trustpilot real send execute skeleton"),
         ("trustpilot_one_candidate_draft_package", "One-candidate Gmail draft package"),
         ("trustpilot_one_candidate_draft_create_execute", "One-candidate Gmail draft create execute"),
         ("trustpilot_one_candidate_draft_send_preflight", "One-candidate Gmail send preflight"),
@@ -2725,6 +2738,143 @@ def _trustpilot_real_send_final_preflight_status(report, trustpilot_gmail_send_e
     }
 
 
+def _trustpilot_real_send_execute_status(report, trustpilot_real_send_final_preflight):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    report_loaded = bool(report.get("loaded"))
+    eligible_count = _int_or_zero(
+        data.get("eligible_candidate_count")
+        if report_loaded
+        else trustpilot_real_send_final_preflight.get("eligible_candidate_count")
+    )
+    execution_status = _safe_text(
+        data.get("execution_status") or report.get("status") or "missing",
+        max_length=120,
+    )
+    preflight_status = _safe_text(
+        data.get("preflight_status")
+        or trustpilot_real_send_final_preflight.get("preflight_status")
+        or "missing",
+        max_length=120,
+    )
+    selected_order = _safe_text(
+        data.get("selected_candidate_order_name")
+        if report_loaded
+        else trustpilot_real_send_final_preflight.get("selected_candidate_order_name"),
+        max_length=80,
+    )
+    production_preflight_used = data.get("production_preflight_used") is True if report_loaded else True
+    simulator_used = data.get("simulator_used") is True
+    ack_present = (
+        data.get("ack_present") is True
+        if report_loaded
+        else trustpilot_real_send_final_preflight.get("ack_present") is True
+    )
+    real_send_execute_requested = data.get("real_send_execute_requested") is True
+    allowed_by_preflight = data.get("real_send_execute_allowed_by_preflight") is True
+    allowed_by_env = data.get("real_send_execute_allowed_by_env") is True
+    current_message = _safe_text(
+        data.get("current_state_message")
+        or (
+            "Real send execute is installed but locked. No email can be sent because final preflight is blocked."
+            if preflight_status != "ready_for_real_send_execute_next_phase"
+            else "Real send execute is installed but locked because the explicit execute flag is missing."
+        ),
+        max_length=300,
+    )
+    future_send_message = _safe_text(
+        data.get("future_send_message")
+        or (
+            "Even when future conditions are ready, real sending requires an explicit execute flag "
+            "and a separate implementation step."
+        ),
+        max_length=300,
+    )
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_real_send_execute.json",
+            max_length=160,
+        ),
+        "html_relative_path": "logs/shopify_review_request_trustpilot_real_send_execute.html",
+        "execution_status": execution_status,
+        "preflight_status": preflight_status,
+        "message": current_message,
+        "future_send_message": future_send_message,
+        "production_preflight_used": production_preflight_used,
+        "production_preflight_used_label": "Yes" if production_preflight_used else "No",
+        "simulator_used": simulator_used,
+        "simulator_used_label": "Yes" if simulator_used else "No",
+        "eligible_candidate_count": eligible_count,
+        "selected_candidate_order_name": selected_order,
+        "ack_present": ack_present,
+        "ack_present_label": "Yes" if ack_present else "No",
+        "real_send_execute_requested": real_send_execute_requested,
+        "real_send_execute_requested_label": "Yes" if real_send_execute_requested else "No",
+        "real_send_execute_allowed_by_preflight": allowed_by_preflight,
+        "real_send_execute_allowed_by_preflight_label": "Yes" if allowed_by_preflight else "No",
+        "real_send_execute_allowed_by_env": allowed_by_env,
+        "real_send_execute_allowed_by_env_label": "Yes" if allowed_by_env else "No",
+        "gmail_send_performed": data.get("gmail_send_performed") is True,
+        "gmail_send_performed_label": "Yes" if data.get("gmail_send_performed") is True else "No",
+        "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+        "gmail_api_call_performed_label": "Yes" if data.get("gmail_api_call_performed") is True else "No",
+        "gmail_draft_create_performed": data.get("gmail_draft_create_performed") is True,
+        "gmail_draft_create_performed_label": (
+            "Yes" if data.get("gmail_draft_create_performed") is True else "No"
+        ),
+        "shopify_tag_write_performed": data.get("shopify_tag_write_performed") is True,
+        "shopify_tag_write_performed_label": (
+            "Yes" if data.get("shopify_tag_write_performed") is True else "No"
+        ),
+        "external_review_api_call_performed": data.get("external_review_api_call_performed") is True,
+        "external_review_api_call_performed_label": (
+            "Yes" if data.get("external_review_api_call_performed") is True else "No"
+        ),
+        "next_admin_action": _safe_text(
+            data.get("next_admin_action")
+            or "Wait until final preflight reports exactly one real eligible candidate and `ready_for_real_send_execute_next_phase`.",
+            max_length=500,
+        ),
+        "required_ack": _safe_text(
+            data.get("required_ack")
+            or trustpilot_real_send_final_preflight.get("required_ack")
+            or "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_SEND",
+            max_length=180,
+        ),
+        "required_execute_flag": _safe_text(
+            data.get("required_execute_flag")
+            or "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE=YES_I_APPROVE_REAL_TRUSTPILOT_GMAIL_SEND",
+            max_length=180,
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "source_preflight_report": (
+            data.get("source_preflight_report")
+            if isinstance(data.get("source_preflight_report"), dict)
+            else {}
+        ),
+        "raw_flags": {
+            "production_preflight_used": production_preflight_used,
+            "simulator_used": simulator_used,
+            "real_send_execute_requested": real_send_execute_requested,
+            "real_send_execute_allowed_by_preflight": allowed_by_preflight,
+            "real_send_execute_allowed_by_env": allowed_by_env,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_send_performed": data.get("gmail_send_performed") is True,
+            "gmail_draft_create_performed": data.get("gmail_draft_create_performed") is True,
+            "gmail_draft_created": data.get("gmail_draft_created") is True,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "shopify_tag_write_performed": data.get("shopify_tag_write_performed") is True,
+            "external_review_api_call_performed": data.get("external_review_api_call_performed") is True,
+            "trustpilot_api_call_performed": data.get("trustpilot_api_call_performed") is True,
+            "kudosi_api_call_performed": data.get("kudosi_api_call_performed") is True,
+            "ali_reviews_api_call_performed": data.get("ali_reviews_api_call_performed") is True,
+        },
+    }
+
+
 def _auto_refresh_trigger_label(trigger):
     if trigger == "shopify_order_sync":
         return "Shopify order sync"
@@ -2748,6 +2898,7 @@ def _operating_dashboard(
     trustpilot_gmail_send_gate,
     trustpilot_gmail_send_executor_shell,
     trustpilot_real_send_final_preflight,
+    trustpilot_real_send_execute,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
@@ -2816,6 +2967,7 @@ def _operating_dashboard(
         "trustpilot_gmail_send_gate": trustpilot_gmail_send_gate,
         "trustpilot_gmail_send_executor_shell": trustpilot_gmail_send_executor_shell,
         "trustpilot_real_send_final_preflight": trustpilot_real_send_final_preflight,
+        "trustpilot_real_send_execute": trustpilot_real_send_execute,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,

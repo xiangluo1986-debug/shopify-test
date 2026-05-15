@@ -636,3 +636,28 @@ Future tracking design note:
 - [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
 - [x] The next phase can add real-send execute only after final preflight
   reports `ready_for_real_send_execute_next_phase`.
+
+## Phase 5.14 Trustpilot Real Send Execute Skeleton
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_real_send_execute`.
+- [x] Generate local JSON/HTML execute skeleton reports only:
+  `logs/shopify_review_request_trustpilot_real_send_execute.json` and
+  `logs/shopify_review_request_trustpilot_real_send_execute.html`.
+- [x] Read production final preflight by default:
+  `shopify_review_request_trustpilot_real_send_final_preflight.json`.
+- [x] Ignore simulator readiness unless
+  `SHOPIFY_REVIEW_REQUEST_REAL_SEND_EXECUTE_USE_SIMULATOR=YES_I_UNDERSTAND_THIS_IS_FAKE_DATA`
+  is explicitly set.
+- [x] Current production default remains blocked because no eligible Trustpilot
+  candidate exists: `execution_status=blocked_no_eligible_candidate`.
+- [x] No Gmail API is called.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No email is sent.
+- [x] No Shopify API is called.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] Future real send requires final preflight ready, exactly one real eligible
+  candidate, the explicit ACK, the explicit real-send execute flag
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE=YES_I_APPROVE_REAL_TRUSTPILOT_GMAIL_SEND`,
+  and a separate real-send implementation phase.

@@ -129,6 +129,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_send_executor
 from remote_approval.tasks.shopify_review_request_trustpilot_real_send_final_preflight_task import (
     run_shopify_review_request_trustpilot_real_send_final_preflight_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_real_send_execute_task import (
+    run_shopify_review_request_trustpilot_real_send_execute_task,
+)
 from remote_approval.tasks.shopify_review_request_order_sync_auto_refresh_hook_audit_task import (
     run_shopify_review_request_order_sync_auto_refresh_hook_audit_task,
 )
@@ -427,6 +430,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_real_send_final_preflight": (
         run_shopify_review_request_trustpilot_real_send_final_preflight_task
+    ),
+    "shopify_review_request_trustpilot_real_send_execute": (
+        run_shopify_review_request_trustpilot_real_send_execute_task
     ),
     "shopify_review_request_order_sync_auto_refresh_hook_audit": (
         run_shopify_review_request_order_sync_auto_refresh_hook_audit_task
@@ -857,6 +863,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; final preflight report only",
         "review_file_path": "logs/shopify_review_request_trustpilot_real_send_final_preflight.json",
+    },
+    "shopify_review_request_trustpilot_real_send_execute": {
+        "description": "Run the locked Trustpilot real-send execute skeleton from final preflight without calling Gmail, Shopify, or external review APIs.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; execute skeleton report only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_real_send_execute.json",
     },
     "shopify_review_request_order_sync_auto_refresh_hook_audit": {
         "description": "Audit the dry-run Trustpilot queue auto-refresh hook after Shopify order sync completion.",
