@@ -111,6 +111,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_suppress_ali_review
 from remote_approval.tasks.shopify_review_request_trustpilot_automation_dry_run_task import (
     run_shopify_review_request_trustpilot_automation_dry_run_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_locked_send_readiness_package_task import (
+    run_shopify_review_request_trustpilot_locked_send_readiness_package_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_design_dry_run_task import (
     run_shopify_review_request_trustpilot_tag_write_design_dry_run_task,
 )
@@ -388,6 +391,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_automation_dry_run": (
         run_shopify_review_request_trustpilot_automation_dry_run_task
+    ),
+    "shopify_review_request_trustpilot_locked_send_readiness_package": (
+        run_shopify_review_request_trustpilot_locked_send_readiness_package_task
     ),
     "shopify_review_request_trustpilot_tag_write_design_dry_run": (
         run_shopify_review_request_trustpilot_tag_write_design_dry_run_task
@@ -779,6 +785,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local report orchestration only",
         "review_file_path": "logs/shopify_review_request_trustpilot_automation_dry_run.json",
+    },
+    "shopify_review_request_trustpilot_locked_send_readiness_package": {
+        "description": "Build a dry-run Trustpilot queue and locked send readiness package from local reports without Gmail, Shopify, or external API calls.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local report readiness package only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_locked_send_readiness_package.json",
     },
     "shopify_review_request_trustpilot_tag_write_design_dry_run": {
         "description": "Generate a no-write Trustpilot Shopify tag-write design package after Gmail send audit.",

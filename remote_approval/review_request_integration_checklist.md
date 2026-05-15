@@ -446,3 +446,41 @@ Future tracking design note:
   collapsed Advanced debug details.
 - [x] The next phase should be a locked real-send package only after a truly
   eligible candidate exists and a separate approval confirms the exact action.
+
+## Phase 5.7 Trustpilot Locked Send Readiness Package
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_locked_send_readiness_package`.
+- [x] Build a dry-run Trustpilot automation queue from local reports/helpers:
+  eligible candidates, blocked candidates, duplicate blockers, delivered-tag
+  checks, canonical `1: review request` checks, related-order readiness checks,
+  and ticket/refund/risk blockers.
+- [x] Generate local JSON/HTML readiness reports only:
+  `logs/shopify_review_request_trustpilot_locked_send_readiness_package.json`
+  and
+  `logs/shopify_review_request_trustpilot_locked_send_readiness_package.html`.
+- [x] If no eligible candidate exists, report
+  `package_status=blocked_no_eligible_candidate`.
+- [x] If exactly one eligible candidate exists later, report
+  `package_status=locked_send_ready_for_human_approval` while keeping real
+  execution disabled.
+- [x] If more than one eligible candidate exists later, report
+  `package_status=blocked_multiple_candidates_require_manual_selection`.
+- [x] Show the future locked send command shape as a preview only; do not
+  execute it and do not create a real-send task in this phase.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] `#22620` remains blocked because the same customer already received
+  Trustpilot via `#22621`.
+- [x] `#22582` remains blocked because it is not delivered, is missing
+  `1: review request`, and related order group `#22582/#22581` is not ready.
+- [x] The Review Requests dashboard shows the Trustpilot Send Readiness status,
+  ready/blocked counts, selected candidate, next admin action, known blockers,
+  and collapsed future command preview.
+- [x] The history/debug ledger includes the locked send readiness package and
+  candidate blocker rows while keeping raw technical details in Advanced debug
+  details.
+- [x] The next phase can create a locked real-send execute task only after a
+  true eligible candidate exists and a separate human approval confirms the
+  exact action.

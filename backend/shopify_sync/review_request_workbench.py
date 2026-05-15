@@ -140,6 +140,12 @@ REPORT_DEFINITIONS = (
         ("automation_status", "report_status", "status"),
     ),
     (
+        "trustpilot_locked_send_readiness_package",
+        "Trustpilot locked send readiness package",
+        "shopify_review_request_trustpilot_locked_send_readiness_package.json",
+        ("package_status", "automation_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -254,6 +260,7 @@ TRUSTPILOT_EMAIL_EVENT_TYPES = {
     "candidate_selected",
     "candidate_blocked",
     "duplicate_block",
+    "readiness_package",
     "draft_package",
     "draft_create_preflight",
     "draft_created",
@@ -349,6 +356,10 @@ def build_review_request_workbench_context(params=None):
         reports.get("trustpilot_automation_dry_run", {}),
         candidate_queue_status,
     )
+    trustpilot_send_readiness = _trustpilot_send_readiness_status(
+        reports.get("trustpilot_locked_send_readiness_package", {}),
+        trustpilot_automation_status,
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -363,6 +374,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_email_records=trustpilot_email_records,
         ali_reviews_status=ali_reviews_status,
         trustpilot_automation_status=trustpilot_automation_status,
+        trustpilot_send_readiness=trustpilot_send_readiness,
     )
 
     return {
@@ -414,6 +426,7 @@ def build_review_request_workbench_context(params=None):
             "tracking_design": _tracking_design(),
             "candidate_queue_status": candidate_queue_status,
             "trustpilot_automation_status": trustpilot_automation_status,
+            "trustpilot_send_readiness": trustpilot_send_readiness,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -581,9 +594,11 @@ def _rows_from_report(data, source_label, source_path):
 
     for list_key, section in (
         ("ready_candidate_queue", "ready_candidate_queue"),
+        ("eligible_candidates_summary", "eligible_candidates_summary"),
         ("evaluated_orders", "evaluated_orders"),
         ("orders", "orders"),
         ("blocked_orders", "blocked_orders"),
+        ("blocked_candidates_summary", "blocked_candidates_summary"),
         ("repeat_customer_candidates", "repeat_customer_candidates"),
         ("needs_manual_review", "needs_manual_review"),
         ("decisions", "decisions"),
@@ -633,7 +648,7 @@ def _rows_from_report(data, source_label, source_path):
 
 
 def _row_from_top_level_report(data, source_label, source_path):
-    order_name = _first_text(data, ("selected_order_name", "next_candidate_order_name"))
+    order_name = _first_text(data, ("selected_candidate_order_name", "selected_order_name", "next_candidate_order_name"))
     masked_email = _first_text(data, ("selected_masked_email", "next_candidate_masked_email"))
     if not order_name and not masked_email:
         return None
@@ -646,6 +661,8 @@ def _row_from_top_level_report(data, source_label, source_path):
             data,
             (
                 "next_repeat_customer_candidate_scan_status",
+                "package_status",
+                "automation_status",
                 "report_status",
                 "status",
             ),
@@ -675,6 +692,7 @@ def _row_from_mapping(item, source_label, source_path, source_section):
         (
             "order_name",
             "name",
+            "selected_candidate_order_name",
             "selected_order_name",
             "next_candidate_order_name",
         ),
@@ -689,14 +707,18 @@ def _row_from_mapping(item, source_label, source_path, source_section):
     blocking_reasons = _collect_string_list(item, "blocking_reasons")
     if not blocking_reasons:
         blocking_reasons = _collect_string_list(item, "classification_reasons")
+    if not blocking_reasons:
+        blocking_reasons = _collect_string_list(item, "reasons")
     status = _first_text(
         item,
         (
+            "reason",
             "candidate_status",
             "classification",
             "decision",
             "source_decision",
             "suggested_next_manual_action",
+            "package_status",
             "status",
         ),
     )
@@ -720,11 +742,16 @@ def _row_from_mapping(item, source_label, source_path, source_section):
         "trustpilot_tags": trustpilot_tags,
         "trustpilot_invitation_present": bool(trustpilot_tags),
         "delivered_tag_present": item.get("delivered_tag_present") is True or DELIVERED_TAG in tags or "妥投" in tags,
-        "canonical_review_request_tag_present": CANONICAL_REVIEW_REQUEST_TAG in tags,
+        "canonical_review_request_tag_present": (
+            item.get("canonical_review_request_tag_present") is True or CANONICAL_REVIEW_REQUEST_TAG in tags
+        ),
         "typo_review_request_tag_present": TYPO_REVIEW_REQUEST_TAG in tags,
-        "review_request_tag_present": CANONICAL_REVIEW_REQUEST_TAG in tags,
+        "review_request_tag_present": item.get("canonical_review_request_tag_present") is True or CANONICAL_REVIEW_REQUEST_TAG in tags,
         "merged_or_related_order_guard_status": _safe_text(item.get("merged_or_related_order_guard_status")),
-        "eligible_for_trustpilot": item.get("eligible_for_trustpilot") is True,
+        "eligible_for_trustpilot": (
+            item.get("eligible_for_trustpilot") is True
+            or item.get("safe_to_prepare_send") is True
+        ),
         "blocking_reasons": blocking_reasons,
         "blocking_summary": ", ".join(blocking_reasons),
         "repeat_customer_detected": _safe_text(item.get("repeat_customer_detected")),
@@ -1491,8 +1518,16 @@ def _trustpilot_automation_status(report, candidate_queue_status):
             f"has {CANONICAL_REVIEW_REQUEST_TAG}, and has no duplicate/customer risk."
         )
         next_step = "Nothing to send now."
-    order_22620 = data.get("order_22620_blocker_status") if isinstance(data.get("order_22620_blocker_status"), dict) else {}
-    order_22582 = data.get("order_22582_blocker_status") if isinstance(data.get("order_22582_blocker_status"), dict) else {}
+    order_22620 = (
+        data.get("order_22620_blocker_status")
+        if isinstance(data.get("order_22620_blocker_status"), dict)
+        else {}
+    )
+    order_22582 = (
+        data.get("order_22582_blocker_status")
+        if isinstance(data.get("order_22582_blocker_status"), dict)
+        else {}
+    )
     return {
         "report_present": report_present,
         "report_loaded": report_loaded,
@@ -1542,6 +1577,82 @@ def _trustpilot_automation_status(report, candidate_queue_status):
     }
 
 
+def _trustpilot_send_readiness_status(report, trustpilot_automation_status):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    command_preview = data.get("future_locked_send_command_preview")
+    command_preview = command_preview if isinstance(command_preview, dict) else {}
+    order_22620 = data.get("order_22620_blocker_status") if isinstance(data.get("order_22620_blocker_status"), dict) else {}
+    order_22582 = data.get("order_22582_blocker_status") if isinstance(data.get("order_22582_blocker_status"), dict) else {}
+    report_loaded = bool(report.get("loaded"))
+    eligible_count = _int_or_zero(data.get("eligible_candidate_count"))
+    blocked_count = _int_or_zero(data.get("blocked_candidate_count"))
+    package_status = _safe_text(data.get("package_status") or report.get("status") or "missing")
+    if report_loaded:
+        message = _safe_text(
+            data.get("current_state_message")
+            or "Nothing to send now. The automation is watching for delivered orders with `1: review request`.",
+            max_length=300,
+        )
+    else:
+        message = "No locked send readiness package has been generated yet."
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_locked_send_readiness_package.json"
+        ),
+        "status": package_status,
+        "package_status": package_status,
+        "message": message,
+        "eligible_candidate_count": eligible_count,
+        "blocked_candidate_count": blocked_count,
+        "selected_candidate_order_name": _safe_text(
+            data.get("selected_candidate_order_name"),
+            max_length=80,
+        ),
+        "selected_candidate_safe_to_prepare_send": data.get("selected_candidate_safe_to_prepare_send") is True,
+        "next_admin_action": _safe_text(
+            data.get("next_admin_action")
+            or trustpilot_automation_status.get("next_step")
+            or "Nothing to send now.",
+            max_length=500,
+        ),
+        "future_locked_send_command": _safe_text(command_preview.get("command"), max_length=300),
+        "future_locked_send_command_warning": _safe_text(command_preview.get("warning"), max_length=300),
+        "order_22620_message": _safe_text(
+            order_22620.get("message")
+            or trustpilot_automation_status.get("order_22620_message")
+            or "Do not send. Already sent to this customer via #22621.",
+            max_length=300,
+        ),
+        "order_22582_message": _safe_text(
+            order_22582.get("message")
+            or trustpilot_automation_status.get("order_22582_message")
+            or (
+                "Do not send yet. Not delivered, missing `1: review request`, "
+                "related order group #22582/#22581 not ready."
+            ),
+            max_length=300,
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "raw_flags": {
+            "gmail_send_allowed_now": data.get("gmail_send_allowed_now") is True,
+            "gmail_draft_create_allowed_now": data.get("gmail_draft_create_allowed_now") is True,
+            "shopify_tag_write_allowed_now": data.get("shopify_tag_write_allowed_now") is True,
+            "external_review_api_call_allowed_now": data.get("external_review_api_call_allowed_now") is True,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_draft_created": data.get("gmail_draft_created") is True,
+            "email_sent": data.get("email_sent") is True,
+            "trustpilot_api_call_performed": data.get("trustpilot_api_call_performed") is True,
+            "kudosi_api_call_performed": data.get("kudosi_api_call_performed") is True,
+            "ali_reviews_api_call_performed": data.get("ali_reviews_api_call_performed") is True,
+        },
+    }
+
+
 def _operating_dashboard(
     latest_scan,
     candidate_queue,
@@ -1551,16 +1662,20 @@ def _operating_dashboard(
     trustpilot_email_records,
     ali_reviews_status,
     trustpilot_automation_status,
+    trustpilot_send_readiness,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
     events = history_ledger.get("all_events") or []
-    ready_count = (
-        _int_or_zero(trustpilot_automation_status.get("eligible_candidate_count"))
-        if trustpilot_automation_status.get("report_loaded")
-        else _ready_to_send_count(latest_scan, candidate_queue)
-    )
-    blocked_count = _blocked_order_count(blocked_orders, summary, focus)
+    if trustpilot_send_readiness.get("report_loaded"):
+        ready_count = _int_or_zero(trustpilot_send_readiness.get("eligible_candidate_count"))
+        blocked_count = _int_or_zero(trustpilot_send_readiness.get("blocked_candidate_count"))
+    elif trustpilot_automation_status.get("report_loaded"):
+        ready_count = _int_or_zero(trustpilot_automation_status.get("eligible_candidate_count"))
+        blocked_count = _blocked_order_count(blocked_orders, summary, focus)
+    else:
+        ready_count = _ready_to_send_count(latest_scan, candidate_queue)
+        blocked_count = _blocked_order_count(blocked_orders, summary, focus)
     sent_count = _trustpilot_sent_count(events, invitation_history, focus)
     return {
         "ready_to_send_count": ready_count,
@@ -1607,6 +1722,7 @@ def _operating_dashboard(
         ],
         "pipeline_steps": _pipeline_steps(ready_count),
         "trustpilot_automation": trustpilot_automation_status,
+        "trustpilot_send_readiness": trustpilot_send_readiness,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,

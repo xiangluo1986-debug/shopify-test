@@ -52,6 +52,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("automation_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_locked_send_readiness_package",
+        "label": "Trustpilot locked send readiness package",
+        "filename": "shopify_review_request_trustpilot_locked_send_readiness_package.json",
+        "channel": "trustpilot",
+        "event_type": "readiness_package",
+        "status_keys": ("package_status", "automation_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -123,6 +131,7 @@ EVENT_TYPE_OPTIONS = (
     ("candidate_blocked", "Candidate blocked"),
     ("duplicate_block", "Duplicate block"),
     ("automation_dry_run", "Automation dry-run"),
+    ("readiness_package", "Readiness package"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
     ("draft_created", "Draft created"),
@@ -309,6 +318,8 @@ def _events_from_report(report):
         events.extend(_candidate_scan_events(report))
     elif key == "customer_level_duplicate_audit":
         events.extend(_duplicate_audit_events(report))
+    elif key == "trustpilot_locked_send_readiness_package":
+        events.extend(_readiness_package_events(report))
 
     return [event for event in events if event]
 
@@ -379,6 +390,23 @@ def _duplicate_audit_events(report):
     return events
 
 
+def _readiness_package_events(report):
+    data = report["data"]
+    events = []
+    for item in data.get("blocked_candidates_summary") or []:
+        if isinstance(item, dict):
+            event = _event_from_mapping(report, item, "candidate_blocked", "blocked_candidates_summary")
+            if event:
+                events.append(event)
+    for item in data.get("eligible_candidates_summary") or []:
+        if isinstance(item, dict):
+            event = _event_from_mapping(report, item, "candidate_selected", "eligible_candidates_summary")
+            if event:
+                event["status"] = event["status"] or "eligible_for_locked_send_readiness"
+                events.append(event)
+    return events
+
+
 def _event_from_mapping(report, item, event_type, source_section):
     if not isinstance(item, dict):
         return None
@@ -388,6 +416,7 @@ def _event_from_mapping(report, item, event_type, source_section):
         (
             "order_name",
             "name",
+            "selected_candidate_order_name",
             "selected_order_name",
             "next_candidate_order_name",
             "audit_order_a",
@@ -412,6 +441,8 @@ def _event_from_mapping(report, item, event_type, source_section):
         item,
         (
             "candidate_status",
+            "package_status",
+            "reason",
             "classification",
             "decision",
             "source_decision",

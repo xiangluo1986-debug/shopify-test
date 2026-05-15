@@ -338,6 +338,49 @@
     </div>
 
     <div class="rrw-section">
+        <h2>Trustpilot Send Readiness</h2>
+        <p class="{% if dashboard.trustpilot_send_readiness.selected_candidate_safe_to_prepare_send %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_send_readiness.message }}
+        </p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Current readiness status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_send_readiness.package_status }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_send_readiness.relative_path }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Ready candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_send_readiness.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected candidate:
+                    {{ dashboard.trustpilot_send_readiness.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Blocked candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_send_readiness.blocked_candidate_count }}</div>
+                <div class="rrw-card-note">Blocked orders stay out of any future locked send phase.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">Read-only review</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_send_readiness.next_admin_action }}</div>
+            </div>
+        </div>
+        <div class="rrw-note">
+            {{ dashboard.trustpilot_send_readiness.order_22620_message }}
+        </div>
+        <div class="rrw-warning">
+            {{ dashboard.trustpilot_send_readiness.order_22582_message }}
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Future locked send command preview</summary>
+            <p class="rrw-muted">{{ dashboard.trustpilot_send_readiness.future_locked_send_command_warning }}</p>
+            <pre><code>{{ dashboard.trustpilot_send_readiness.future_locked_send_command|default:"No command preview available." }}</code></pre>
+        </details>
+    </div>
+
+    <div class="rrw-section">
         <h2>Automation Pipeline</h2>
         <p class="rrw-current-state">{{ dashboard.current_state_label }}</p>
         <ol class="rrw-pipeline">

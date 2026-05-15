@@ -67,6 +67,7 @@ python remote_approval_runner.py --task shopify_review_request_gmail_readiness_p
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_automation_dry_run --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_trustpilot_locked_send_readiness_package --mode dry-run --approval local
 ```
 
 Task discovery:
