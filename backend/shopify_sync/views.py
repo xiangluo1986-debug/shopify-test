@@ -46,6 +46,7 @@ from .translation_console import (
     ShopifyTranslationConsoleError,
     fetch_translation_console_data,
     normalize_product_gid,
+    safe_translation_console_error_message,
 )
 from .translation_apply_plan import (
     APPLY_PLAN_HTML_PATH,
@@ -53,8 +54,10 @@ from .translation_apply_plan import (
     build_selected_product_translation_apply_plan,
 )
 from .translation_drafts import (
+    ALL_ELIGIBLE_DRAFT_SCOPES,
     DEFAULT_FIELDS as TRANSLATION_DRAFT_FIELDS,
     DEFAULT_TARGET_LOCALES as TRANSLATION_DRAFT_TARGET_LOCALES,
+    TRANSLATE_ALL_ACTION_NAME,
     build_product_identity_context,
     generate_selected_product_missing_translation_draft_package,
     validate_product_identity_draft,
@@ -154,6 +157,7 @@ TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
     "status",
 ]
 TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS = 50
+TRANSLATION_CONSOLE_TRANSLATE_ALL_DETAIL_MAX_ROWS = 20
 TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS = 120
 TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS = 1200
 TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS = {
@@ -915,6 +919,7 @@ def translation_console(request):
     is_locked_package_report_post = post_action == "generate_locked_package_dry_run_report"
     is_status_only_safe_action_post = is_refresh_status_post
     is_multi_locale_draft_post = post_action == "generate_multi_locale_drafts"
+    is_translate_all_post = post_action == TRANSLATE_ALL_ACTION_NAME
     is_draft_post = post_action in {
         "generate_missing_translation_drafts",
         "generate_draft_dry_run",
@@ -934,6 +939,7 @@ def translation_console(request):
     is_post_action = (
         is_draft_post
         or is_multi_locale_draft_post
+        or is_translate_all_post
         or is_apply_plan_post
         or is_final_review_post
         or is_readiness_post
@@ -946,12 +952,15 @@ def translation_console(request):
     )
     request_params = request.POST if is_post_action else request.GET
     translation_console_warnings = []
+    translation_console_warnings.extend(
+        _translation_console_product_gid_conflict_warnings(request, is_post_action)
+    )
     product_search_text = _translation_console_request_product_search_text(
         request_params,
         is_post_action=is_post_action,
     )
-    raw_product_url_parameter = (
-        request_params.get("product_gid", "") or request_params.get("product_id", "")
+    raw_product_url_parameter = _translation_console_last_request_value(
+        request_params, ("product_gid", "product_id")
     )
     normalized_product_url_parameter = (
         normalize_product_gid(raw_product_url_parameter or "") or ""
@@ -964,10 +973,17 @@ def translation_console(request):
             "The product_gid/product_id URL parameter was not a valid Shopify product gid or numeric product id."
         )
     raw_selected_product_gid = (
-        request_params.get("selected_product_gid", "") or raw_product_url_parameter
+        _translation_console_last_request_value(request_params, ("selected_product_gid",))
+        or raw_product_url_parameter
     )
-    raw_manual_product_gid = request_params.get("manual_product_gid", "")
-    raw_post_product_query = request.POST.get("q", "") if is_post_action else ""
+    raw_manual_product_gid = _translation_console_last_request_value(
+        request_params, ("manual_product_gid",)
+    )
+    raw_post_product_query = (
+        _translation_console_last_request_value(request.POST, ("q",))
+        if is_post_action
+        else ""
+    )
     raw_locale = (
         request_params.get("target_locale", "") or request_params.get("locale", "ja")
     )
@@ -996,16 +1012,20 @@ def translation_console(request):
     requested_draft_locales, invalid_draft_locales = _translation_workspace_requested_draft_locales(
         request,
         is_multi_locale_draft_post=is_multi_locale_draft_post,
+        is_translate_all_post=is_translate_all_post,
     )
     draft_locale_options = _translation_workspace_draft_locale_options(
         selected_locale=locale,
         requested_locales=(
-            requested_draft_locales if is_multi_locale_draft_post else [locale]
+            requested_draft_locales
+            if (is_multi_locale_draft_post or is_translate_all_post)
+            else [locale]
         ),
     )
     requested_draft_groups, invalid_draft_groups = _translation_workspace_requested_draft_groups(
         request,
         is_multi_locale_draft_post=is_multi_locale_draft_post,
+        is_translate_all_post=is_translate_all_post,
     )
     draft_group_options = _translation_workspace_draft_group_options(
         requested_draft_groups
@@ -1069,6 +1089,7 @@ def translation_console(request):
     error_message = ""
     draft_result = None
     multi_locale_draft_result = None
+    translate_all_result = None
     draft_error_message = ""
     apply_plan_result = None
     apply_plan_error_message = ""
@@ -1104,6 +1125,52 @@ def translation_console(request):
             installation = ShopifyInstallation.objects.first()
             if installation is None:
                 error_message = f"Shopify installation not found for {shop_domain}."
+            elif is_translate_all_post:
+                selected_product_id = _resolve_translation_console_product_id(
+                    installation, action_product_query, locale
+                )
+                if selected_product_id:
+                    workflow_product_id = selected_product_id
+                    result.update(
+                        fetch_translation_console_data(
+                            installation, selected_product_id, locale
+                        )
+                    )
+                    translate_all_result = _generate_translation_workspace_translate_all_drafts(
+                        installation=installation,
+                        product_id=selected_product_id,
+                        selected_locale=locale,
+                        product_search_text=product_search_text,
+                        editor_filter=editor_filter,
+                        editor_search_query=editor_search_query,
+                    )
+                    draft_result = translate_all_result.get("draft_result")
+                    if translate_all_result.get("blocking_conditions"):
+                        draft_error_message = translate_all_result["message"]
+                    safe_action_result = _translation_console_safe_action_result(
+                        action=post_action,
+                        action_status=translate_all_result["action_status"],
+                        message=translate_all_result["message"],
+                        summary=_translation_workspace_translate_all_safe_summary(
+                            translate_all_result
+                        ),
+                    )
+                else:
+                    translate_all_result = _translation_workspace_empty_translate_all_result(
+                        product_id=action_product_query,
+                        selected_locale=locale,
+                        message="Select one product before translating all languages.",
+                        blocking_conditions=["missing_selected_product"],
+                    )
+                    draft_error_message = translate_all_result["message"]
+                    safe_action_result = _translation_console_safe_action_result(
+                        action=post_action,
+                        action_status=translate_all_result["action_status"],
+                        message=translate_all_result["message"],
+                        summary=_translation_workspace_translate_all_safe_summary(
+                            translate_all_result
+                        ),
+                    )
             elif is_multi_locale_draft_post:
                 if not requested_draft_locales or not requested_draft_groups:
                     multi_locale_draft_result = _translation_workspace_empty_multi_locale_result(
@@ -1511,7 +1578,7 @@ def translation_console(request):
         except ShopifyInstallation.DoesNotExist:
             error_message = f"Shopify installation not found for {shop_domain}."
         except (ShopifyTranslationConsoleError, requests.RequestException, ValueError) as exc:
-            error_message = f"Read-only Shopify query failed: {exc.__class__.__name__}"
+            error_message = safe_translation_console_error_message(exc)
 
     workflow_status = load_translation_workflow_status(workflow_product_id)
     if is_refresh_status_post:
@@ -1560,6 +1627,25 @@ def translation_console(request):
                 ),
                 "preview_only": True,
             },
+        )
+    elif post_action == TRANSLATE_ALL_ACTION_NAME and safe_action_result is None:
+        translate_all_result = _translation_workspace_empty_translate_all_result(
+            product_id=action_product_query,
+            selected_locale=locale,
+            message=(
+                draft_error_message
+                or error_message
+                or "Select one product before translating all languages."
+            ),
+            blocking_conditions=["missing_or_unavailable_selected_product"],
+        )
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status=translate_all_result["action_status"],
+            message=translate_all_result["message"],
+            summary=_translation_workspace_translate_all_safe_summary(
+                translate_all_result
+            ),
         )
     elif post_action == "generate_multi_locale_drafts" and safe_action_result is None:
         blocked_message = _translation_workspace_multi_locale_blocked_message(
@@ -1684,6 +1770,7 @@ def translation_console(request):
             "error_message": error_message,
             "draft_result": draft_result,
             "multi_locale_draft_result": multi_locale_draft_result,
+            "translate_all_result": translate_all_result,
             "draft_error_message": draft_error_message,
             "apply_plan_result": apply_plan_result,
             "apply_plan_error_message": apply_plan_error_message,
@@ -2351,6 +2438,65 @@ def _format_optional_datetime(value):
     return value.isoformat()
 
 
+def _translation_console_last_request_value(params, names):
+    for name in names:
+        values = [
+            str(value).strip()
+            for value in params.getlist(name)
+            if str(value or "").strip()
+        ]
+        if values:
+            return values[-1]
+    return ""
+
+
+def _translation_console_product_gid_conflict_warnings(request, is_post_action: bool):
+    warnings = []
+    query_product_values = _translation_console_normalized_product_values(
+        request.GET, ("product_gid", "product_id")
+    )
+    if len(set(query_product_values)) > 1:
+        warnings.append(
+            "Duplicate product_gid/product_id URL parameters were detected; the explicit selected product field is used for POST actions, otherwise the newest URL value is used."
+        )
+    if not is_post_action:
+        return warnings
+
+    form_product_values = _translation_console_normalized_product_values(
+        request.POST, ("product_gid", "product_id")
+    )
+    if len(set(form_product_values)) > 1:
+        warnings.append(
+            "Duplicate product_gid/product_id form values were detected; the newest form value is used unless selected_product_gid is present."
+        )
+    selected_product_gid = _translation_console_last_normalized_product_value(
+        request.POST, ("selected_product_gid",)
+    )
+    form_product_gid = _translation_console_last_normalized_product_value(
+        request.POST, ("product_gid", "product_id")
+    )
+    if selected_product_gid and form_product_gid and selected_product_gid != form_product_gid:
+        warnings.append(
+            "Conflicting selected_product_gid and product_gid were submitted; selected_product_gid was used."
+        )
+    return warnings
+
+
+def _translation_console_normalized_product_values(params, names):
+    values = []
+    for name in names:
+        for raw_value in params.getlist(name):
+            normalized = normalize_product_gid(str(raw_value or "").strip())
+            if normalized:
+                values.append(normalized)
+    return values
+
+
+def _translation_console_last_normalized_product_value(params, names):
+    values = _translation_console_normalized_product_values(params, names)
+    return values[-1] if values else ""
+
+
 def _model_has_field(model, field_name: str) -> bool:
     try:
         model._meta.get_field(field_name)
@@ -2396,7 +2542,10 @@ def _translation_console_safe_action_result(
 def _translation_workspace_requested_draft_locales(
     request,
     is_multi_locale_draft_post: bool,
+    is_translate_all_post: bool = False,
 ):
+    if is_translate_all_post:
+        return list(SUPPORTED_TRANSLATION_LOCALES), []
     if not is_multi_locale_draft_post:
         return [], []
 
@@ -2437,8 +2586,11 @@ def _translation_workspace_draft_locale_options(
 def _translation_workspace_requested_draft_groups(
     request,
     is_multi_locale_draft_post: bool,
+    is_translate_all_post: bool = False,
 ):
     allowed = {option["value"] for option in TRANSLATION_WORKSPACE_DRAFT_GROUPS}
+    if is_translate_all_post:
+        return list(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS), []
     if not is_multi_locale_draft_post:
         return list(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS), []
 
@@ -2563,6 +2715,331 @@ def _translation_workspace_empty_multi_locale_result(
         "apply_performed": False,
         "rollback_performed": False,
     }
+
+
+def _translation_workspace_empty_translate_all_result(
+    product_id: str,
+    selected_locale: str,
+    message: str = "",
+    blocking_conditions: list[str] | None = None,
+    product_title: str = "",
+    started_at: str = "",
+    finished_at: str = "",
+):
+    blocking_conditions = list(blocking_conditions or [])
+    if not blocking_conditions:
+        blocking_conditions.append("missing_selected_product")
+    finished_at = finished_at or _translation_workspace_now_iso()
+    started_at = started_at or finished_at
+    summary = {
+        "summary_status": "blocked",
+        "total_languages_checked": 0,
+        "total_source_rows_checked": 0,
+        "missing_drafts_generated": 0,
+        "outdated_update_drafts_generated": 0,
+        "already_translated_skipped": 0,
+        "not_eligible_skipped": 0,
+        "needs_review_blocked": 0,
+        "per_language_counts": [],
+        "per_section_counts": [],
+        "child_resource_discovery_errors": [],
+        "per_group_discovery_status": {},
+        "per_group_discovery_reasons": {},
+        "per_group_discovery_rows": [],
+        "blocking_conditions": blocking_conditions,
+        "shopify_read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+        "no_new_shopify_writes_performed": True,
+    }
+    error_count = _translation_workspace_translate_all_error_count(
+        summary, blocking_conditions
+    )
+    summary["errors_count"] = error_count
+    return {
+        "action_status": "translate_all_languages_all_content_blocked",
+        "action_name": TRANSLATE_ALL_ACTION_NAME,
+        "status_key": "failed",
+        "status_label": "Failed",
+        "message": message or "Select one product before translating all languages.",
+        "product_id": product_id,
+        "product_title": product_title,
+        "selected_locale": selected_locale,
+        "requested_locales": list(SUPPORTED_TRANSLATION_LOCALES),
+        "locales_requested_count": len(SUPPORTED_TRANSLATION_LOCALES),
+        "locales_processed_count": 0,
+        "locales_processed_label": f"0 / {len(SUPPORTED_TRANSLATION_LOCALES)}",
+        "generated_drafts_count": 0,
+        "errors_count": error_count,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "requested_groups": list(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS),
+        "draft_fields": list(ALL_ELIGIBLE_DRAFT_SCOPES),
+        "field_scope_labels": _translation_workspace_draft_field_labels(
+            list(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS)
+        ),
+        "locale_results": [],
+        "draft_result": None,
+        "summary": summary,
+        "blocking_conditions": blocking_conditions,
+        "read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+    }
+
+
+def _generate_translation_workspace_translate_all_drafts(
+    installation,
+    product_id: str,
+    selected_locale: str,
+    product_search_text: str = "",
+    editor_filter: str = "all",
+    editor_search_query: str = "",
+):
+    started_at = _translation_workspace_now_iso()
+    draft_groups = list(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS)
+    draft_scopes = _translation_workspace_draft_scopes(draft_groups)
+    try:
+        draft_result = generate_selected_product_missing_translation_draft_package(
+            product_id=product_id,
+            target_locales=list(SUPPORTED_TRANSLATION_LOCALES),
+            fields=draft_scopes,
+            installation=installation,
+            include_missing=True,
+            include_outdated=True,
+            include_all_eligible_groups=True,
+            action_name=TRANSLATE_ALL_ACTION_NAME,
+        )
+        _attach_translation_console_draft_detail(
+            draft_result,
+            max_rows=TRANSLATION_CONSOLE_TRANSLATE_ALL_DETAIL_MAX_ROWS,
+        )
+    except Exception as exc:
+        if isinstance(exc, (ShopifyTranslationConsoleError, requests.RequestException, ValueError)):
+            message = safe_translation_console_error_message(exc)
+        else:
+            message = "Translate all languages failed before drafts were completed."
+        return _translation_workspace_empty_translate_all_result(
+            product_id=product_id,
+            selected_locale=selected_locale,
+            message=message,
+            blocking_conditions=["translate_all_draft_generation_failed", type(exc).__name__],
+            started_at=started_at,
+            finished_at=_translation_workspace_now_iso(),
+        )
+
+    summary = dict(draft_result.get("translate_all_summary") or {})
+    summary["blocking_conditions"] = list(draft_result.get("blocking_conditions") or [])
+    summary["errors_count"] = _translation_workspace_translate_all_error_count(
+        summary, summary["blocking_conditions"]
+    )
+    locale_results = [
+        _translation_workspace_translate_all_locale_result(
+            locale=locale,
+            draft_result=draft_result,
+            product_id=product_id,
+            product_search_text=product_search_text,
+            editor_filter=editor_filter,
+            editor_search_query=editor_search_query,
+        )
+        for locale in SUPPORTED_TRANSLATION_LOCALES
+    ]
+    action_status, message = _translation_workspace_translate_all_status(draft_result, summary)
+    status_key, status_label = _translation_workspace_translate_all_display_status(
+        action_status, summary
+    )
+    locales_requested_count = len(SUPPORTED_TRANSLATION_LOCALES)
+    locales_processed_count = int(summary.get("total_languages_checked") or 0)
+    generated_drafts_count = int(summary.get("missing_drafts_generated") or 0) + int(
+        summary.get("outdated_update_drafts_generated") or 0
+    )
+    return {
+        "action_status": action_status,
+        "action_name": TRANSLATE_ALL_ACTION_NAME,
+        "status_key": status_key,
+        "status_label": status_label,
+        "message": message,
+        "product_id": product_id,
+        "product_title": draft_result.get("product_title", ""),
+        "selected_locale": selected_locale,
+        "requested_locales": list(SUPPORTED_TRANSLATION_LOCALES),
+        "locales_requested_count": locales_requested_count,
+        "locales_processed_count": locales_processed_count,
+        "locales_processed_label": (
+            f"{locales_processed_count} / {locales_requested_count}"
+        ),
+        "generated_drafts_count": generated_drafts_count,
+        "errors_count": summary["errors_count"],
+        "started_at": started_at,
+        "finished_at": _translation_workspace_now_iso(),
+        "requested_groups": draft_groups,
+        "draft_fields": list(draft_scopes),
+        "field_scope_labels": _translation_workspace_draft_field_labels(draft_groups),
+        "locale_results": locale_results,
+        "draft_result": draft_result,
+        "summary": summary,
+        "blocking_conditions": list(draft_result.get("blocking_conditions") or []),
+        "read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+    }
+
+
+def _translation_workspace_now_iso():
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def _translation_workspace_translate_all_error_count(
+    summary: dict, blocking_conditions: list[str]
+):
+    return len(blocking_conditions or []) + len(
+        (summary or {}).get("child_resource_discovery_errors") or []
+    )
+
+
+def _translation_workspace_translate_all_display_status(
+    action_status: str, summary: dict
+):
+    blocking_conditions = (summary or {}).get("blocking_conditions") or []
+    if (
+        blocking_conditions
+        or "blocked" in str(action_status or "")
+        or "needs_configuration" in str(action_status or "")
+    ):
+        return "failed", "Failed"
+    if (summary or {}).get("child_resource_discovery_errors") or int(
+        (summary or {}).get("needs_review_blocked") or 0
+    ):
+        return "partial", "Partial"
+    return "completed", "Completed"
+
+
+def _translation_workspace_translate_all_safe_summary(translate_all_result: dict | None):
+    result = translate_all_result or {}
+    summary = result.get("summary") or {}
+    return {
+        "status": result.get("status_label", ""),
+        "product_gid": result.get("product_id", ""),
+        "product_title": result.get("product_title", ""),
+        "locales_processed": result.get("locales_processed_label", ""),
+        "generated_drafts": result.get("generated_drafts_count", 0),
+        "skipped_existing_translations": summary.get("already_translated_skipped", 0),
+        "skipped_not_eligible": summary.get("not_eligible_skipped", 0),
+        "errors_count": result.get("errors_count", summary.get("errors_count", 0)),
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+    }
+
+
+def _translation_workspace_translate_all_locale_result(
+    locale: str,
+    draft_result: dict,
+    product_id: str,
+    product_search_text: str,
+    editor_filter: str,
+    editor_search_query: str,
+):
+    per_locale = (draft_result.get("per_locale_results") or {}).get(locale, {})
+    missing_count = int(per_locale.get("missing_translation_draft_generated_count") or 0)
+    outdated_count = int(
+        per_locale.get("outdated_translation_update_draft_generated_count") or 0
+    )
+    needs_review_count = int(per_locale.get("needs_review_or_blocked_count") or 0)
+    blocking_conditions = list(draft_result.get("blocking_conditions") or [])
+    if blocking_conditions:
+        status = "failed"
+        message = "Draft generation did not complete for this language."
+    elif needs_review_count:
+        status = "needs review"
+        message = "Drafts are ready, but some rows need review or remain blocked."
+    elif missing_count or outdated_count:
+        status = "generated"
+        message = "Missing and outdated drafts are ready for review."
+    else:
+        status = "skipped"
+        message = "No missing or outdated draft rows were found."
+    return {
+        "locale": locale,
+        "locale_label": _translation_editor_locale_label(locale),
+        "status": status,
+        "status_key": _translation_workspace_locale_status_key(status),
+        "status_label": status,
+        "missing_draft_count": missing_count,
+        "outdated_update_draft_count": outdated_count,
+        "already_translated_skipped": int(
+            per_locale.get("already_translated_skipped_count") or 0
+        ),
+        "not_eligible_skipped": int(per_locale.get("not_eligible_skipped_count") or 0),
+        "needs_review_blocked": needs_review_count,
+        "source_rows_checked": int(per_locale.get("source_row_count") or 0),
+        "message": message,
+        "blocking_conditions": blocking_conditions,
+        "product_id": product_id,
+        "product_search_text": product_search_text,
+        "editor_filter": editor_filter,
+        "editor_search_query": editor_search_query,
+        "preview_url": _translation_workspace_preview_url(
+            product_id=product_id,
+            locale=locale,
+            product_search_text=product_search_text,
+            editor_filter=editor_filter,
+            editor_search_query=editor_search_query,
+        ),
+    }
+
+
+def _translation_workspace_translate_all_status(draft_result: dict, summary: dict):
+    blocking_conditions = list((draft_result or {}).get("blocking_conditions") or [])
+    if blocking_conditions:
+        if (draft_result or {}).get("failure_type") == "missing_openai_api_key":
+            return (
+                "translate_all_languages_all_content_needs_configuration",
+                "Translate all could not run because OpenAI configuration is missing. Shopify was not updated.",
+            )
+        if (draft_result or {}).get("failure_type") == "shopify_read_query_failed":
+            return (
+                "translate_all_languages_all_content_blocked",
+                (draft_result or {}).get("error")
+                or "Translate all stayed no-write but the read-only Shopify query failed.",
+            )
+        return (
+            "translate_all_languages_all_content_blocked",
+            "Translate all stayed no-write but did not complete. Review the blocking conditions.",
+        )
+    generated = int(summary.get("missing_drafts_generated") or 0) + int(
+        summary.get("outdated_update_drafts_generated") or 0
+    )
+    needs_review = int(summary.get("needs_review_blocked") or 0)
+    if generated:
+        if needs_review:
+            return (
+                "translate_all_languages_all_content_completed_with_review",
+                "Translate all generated local drafts and some rows need review. Shopify was not updated.",
+            )
+        return (
+            "translate_all_languages_all_content_completed",
+            "Translate all generated local drafts for missing and outdated rows. Shopify was not updated.",
+        )
+    return (
+        "translate_all_languages_all_content_skipped",
+        "No missing or outdated draft rows were found. Shopify was not updated.",
+    )
 
 
 def _generate_translation_workspace_multi_locale_drafts(
@@ -4763,6 +5240,17 @@ def _translation_console_draft_summary(draft_result: dict):
         "draft_entry_count": detail.get(
             "draft_entry_count", draft_result.get("generated_draft_count", 0)
         ),
+        "missing_drafts_generated": draft_result.get(
+            "missing_translation_draft_generated_count", 0
+        ),
+        "outdated_update_drafts_generated": draft_result.get(
+            "outdated_translation_update_draft_generated_count", 0
+        ),
+        "already_translated_skipped": draft_result.get(
+            "already_translated_skipped_count", 0
+        ),
+        "not_eligible_skipped": draft_result.get("not_eligible_skipped_count", 0),
+        "needs_review_blocked": draft_result.get("needs_review_or_blocked_count", 0),
         "skipped_entry_count": detail.get("skipped_entry_count", skipped_count),
         "seo_warning_count": seo_warning_count,
         "ready_for_apply_plan_count": draft_result.get("eligible_apply_plan_count", 0),
@@ -4777,6 +5265,14 @@ def _translation_console_draft_summary(draft_result: dict):
             "skipped_existing_translation_count", 0
         ),
         "draft_coverage_summary": draft_result.get("draft_coverage_summary") or {},
+        "child_resource_discovery_errors": draft_result.get(
+            "child_resource_discovery_errors"
+        )
+        or [],
+        "per_group_discovery_status": draft_result.get("per_group_discovery_status")
+        or {},
+        "per_group_discovery_reasons": draft_result.get("per_group_discovery_reasons")
+        or {},
         "blocking_conditions": draft_result.get("blocking_conditions") or [],
         "shopify_write_performed": draft_result.get("shopify_write_performed", False),
         "mutation_performed": draft_result.get("mutation_performed", False),
@@ -4787,13 +5283,18 @@ def _translation_console_draft_summary(draft_result: dict):
     }
 
 
-def _attach_translation_console_draft_detail(draft_result: dict):
+def _attach_translation_console_draft_detail(
+    draft_result: dict,
+    max_rows: int = TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS,
+):
     if not isinstance(draft_result, dict):
         return
+    max_rows = int(max_rows or TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS)
     draft_entries = []
     skipped_entries = []
+    all_entries = []
     draft_entry_ids = {
-        (entry.get("locale"), entry.get("field"))
+        _translation_console_draft_entry_identity(entry)
         for entry in (draft_result.get("draft_entries") or [])
         if isinstance(entry, dict)
     }
@@ -4801,7 +5302,8 @@ def _attach_translation_console_draft_detail(draft_result: dict):
         if not isinstance(entry, dict):
             continue
         normalized = _normalize_translation_console_draft_entry(entry)
-        if (entry.get("locale"), entry.get("field")) in draft_entry_ids or entry.get(
+        all_entries.append(normalized)
+        if _translation_console_draft_entry_identity(entry) in draft_entry_ids or entry.get(
             "draft_value"
         ):
             draft_entries.append(normalized)
@@ -4812,18 +5314,29 @@ def _attach_translation_console_draft_detail(draft_result: dict):
         draft_result, draft_entries, skipped_entries
     )
     draft_result["translation_console_detail"] = {
-        "max_rows": TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS,
+        "max_rows": max_rows,
         "preview_chars": TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS,
-        "draft_entries": draft_entries[:TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS],
-        "skipped_entries": skipped_entries[:TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS],
+        "draft_entries": draft_entries[:max_rows],
+        "skipped_entries": skipped_entries[:max_rows],
+        "all_entries": all_entries[:max_rows],
         "draft_entry_count": len(draft_entries),
         "skipped_entry_count": len(skipped_entries),
-        "draft_entries_truncated": len(draft_entries)
-        > TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS,
-        "skipped_entries_truncated": len(skipped_entries)
-        > TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS,
+        "all_entry_count": len(all_entries),
+        "draft_entries_truncated": len(draft_entries) > max_rows,
+        "skipped_entries_truncated": len(skipped_entries) > max_rows,
+        "all_entries_truncated": len(all_entries) > max_rows,
         "summary_counts": summary,
     }
+
+
+def _translation_console_draft_entry_identity(entry: dict):
+    return (
+        entry.get("locale", ""),
+        entry.get("draft_key")
+        or entry.get("entry_key")
+        or entry.get("source_key")
+        or entry.get("field", ""),
+    )
 
 
 def _normalize_translation_console_draft_entry(entry: dict):
@@ -4832,11 +5345,17 @@ def _normalize_translation_console_draft_entry(entry: dict):
     blocking_reasons = _draft_entry_blocking_reasons(entry, seo_notes, quality_notes)
     return {
         "locale": entry.get("locale", ""),
+        "language": entry.get("locale", ""),
+        "section": entry.get("section_label") or entry.get("resource_group", ""),
+        "section_label": entry.get("section_label", ""),
         "field": entry.get("field", ""),
+        "key": entry.get("source_key") or entry.get("field", ""),
         "resource_key": entry.get("source_key") or entry.get("field", ""),
         "resource_id": entry.get("resource_id", ""),
         "resource_group": entry.get("resource_group", ""),
         "context_label": entry.get("context_label", ""),
+        "status": entry.get("row_status") or entry.get("status") or "",
+        "reason": entry.get("status_reason") or entry.get("skip_reason", ""),
         "source_value_preview": _preview_text(entry.get("source_value")),
         "proposed_translation_preview": _preview_text(entry.get("draft_value")),
         "proposed_chars": entry.get("draft_value_chars") or 0,
@@ -4879,6 +5398,20 @@ def _translation_console_draft_detail_counts(
     return {
         "draft_entry_count": len(draft_entries),
         "skipped_entry_count": skipped_count or len(skipped_entries),
+        "all_entry_count": len(draft_entries) + len(skipped_entries),
+        "missing_drafts_generated": int(
+            draft_result.get("missing_translation_draft_generated_count") or 0
+        ),
+        "outdated_update_drafts_generated": int(
+            draft_result.get("outdated_translation_update_draft_generated_count") or 0
+        ),
+        "already_translated_skipped": int(
+            draft_result.get("already_translated_skipped_count") or 0
+        ),
+        "not_eligible_skipped": int(draft_result.get("not_eligible_skipped_count") or 0),
+        "needs_review_blocked": int(
+            draft_result.get("needs_review_or_blocked_count") or 0
+        ),
         "seo_warning_count": int(draft_result.get("seo_needs_manual_review_count") or 0),
         "ready_for_apply_plan_count": int(
             draft_result.get("eligible_apply_plan_count") or 0

@@ -602,6 +602,62 @@
   .tw-results-table {
     margin-top: 12px;
   }
+  .tw-run-banner {
+    margin: 12px 0;
+    border: 1px solid #cfd8e3;
+    border-left-width: 4px;
+    border-radius: 8px;
+    background: #fbfdff;
+    padding: 12px;
+  }
+  .tw-run-banner.is-completed {
+    border-left-color: #16a34a;
+  }
+  .tw-run-banner.is-partial {
+    border-left-color: #ca8a04;
+  }
+  .tw-run-banner.is-failed {
+    border-left-color: #dc2626;
+  }
+  .tw-run-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .tw-run-header h3 {
+    margin-top: 0;
+  }
+  .tw-run-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .tw-run-item {
+    border: 1px solid #e1e7ef;
+    border-radius: 6px;
+    background: #ffffff;
+    padding: 8px 9px;
+  }
+  .tw-run-label {
+    color: #4b5563;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .tw-run-value {
+    margin-top: 3px;
+    color: #111827;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+  .tw-preview-cell {
+    max-width: 260px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
   .tw-compact-form {
     gap: 10px;
     align-items: flex-end;
@@ -683,6 +739,14 @@
   .tw-status-badge.is-generated {
     background: #e8f5e9;
     color: #185c25;
+  }
+  .tw-status-badge.is-completed {
+    background: #e8f5e9;
+    color: #185c25;
+  }
+  .tw-status-badge.is-partial {
+    background: #fff4e5;
+    color: #8a4b00;
   }
   .tw-status-badge.is-failed,
   .tw-status-badge.is-needs_configuration {
@@ -1062,6 +1126,7 @@
     font-weight: 700;
   }
   .translation-workspace .tw-status-badge.is-translated,
+  .translation-workspace .tw-status-badge.is-completed,
   .translation-workspace .tw-coverage-status.is-visible,
   .translation-workspace .tw-coverage-status.is-included {
     border-color: #86efac;
@@ -1078,6 +1143,7 @@
     color: #713f12;
   }
   .translation-workspace .tw-status-badge.is-outdated,
+  .translation-workspace .tw-status-badge.is-partial,
   .translation-workspace .tw-status-badge.is-needs_review {
     border-color: #facc15;
     background: #fef9c3;
@@ -1085,6 +1151,8 @@
   }
   .translation-workspace .tw-status-badge.is-blocked,
   .translation-workspace .tw-status-badge.is-blocked_draft,
+  .translation-workspace .tw-status-badge.is-failed,
+  .translation-workspace .tw-status-badge.is-needs_configuration,
   .translation-workspace .tw-status-badge.is-not_eligible {
     border-color: #fca5a5;
     background: #fee2e2;
@@ -1465,9 +1533,9 @@
   {% elif ui_mode == "editor" %}
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Choose product and language</h2>
-    <form method="get" class="tw-product-picker" data-product-picker data-product-search-url="{% url 'shopify_translation_console_product_search' %}" data-selected-product-gid="{{ selected_product_gid }}" style="margin-bottom: 12px;">
+    <form method="get" action="{% url 'shopify_translation_console' %}" class="tw-product-picker" data-product-picker data-product-search-url="{% url 'shopify_translation_console_product_search' %}" data-selected-product-gid="{{ selected_product_gid }}" style="margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="editor">
-      <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}" data-selected-product-input>
       <input type="hidden" name="locale" value="{{ selected_locale }}" data-product-locale-hidden>
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
       <div class="tw-picker-controls">
@@ -1481,7 +1549,7 @@
               </div>
               {% if product_selector.product_options %}
                 {% for product in product_selector.product_options %}
-                  <button type="submit" name="product_gid" value="{{ product.gid }}" class="tw-product-option{% if product.gid == selected_product_gid %} is-selected{% endif %}" data-product-option data-search="{{ product.searchable_text }}" data-search-normalized="{{ product.searchable_normalized }}" role="option" aria-selected="{% if product.gid == selected_product_gid %}true{% else %}false{% endif %}">
+                  <button type="button" value="{{ product.gid }}" class="tw-product-option{% if product.gid == selected_product_gid %} is-selected{% endif %}" data-product-option data-product-gid="{{ product.gid }}" data-search="{{ product.searchable_text }}" data-search-normalized="{{ product.searchable_normalized }}" role="option" aria-selected="{% if product.gid == selected_product_gid %}true{% else %}false{% endif %}">
                     {% if product.thumbnail_url %}
                       <img class="tw-product-thumb" src="{{ product.thumbnail_url }}" alt="" loading="lazy">
                     {% else %}
@@ -1645,12 +1713,26 @@
   <div class="module tw-draft-card">
     <h2>Generate translation drafts</h2>
     <p class="tw-draft-note">This only creates draft previews. It does not update Shopify.</p>
-    <form method="post">
+    {% if selected_product_gid %}
+      <form method="post" action="{% url 'shopify_translation_console' %}" style="margin-bottom: 14px;">
+        {% csrf_token %}
+        <input type="hidden" name="ui_mode" value="editor">
+        <input type="hidden" name="action" value="translate_all_languages_all_content">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
+        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+        <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+        <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+        <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+        <button type="submit" class="button">Translate all languages</button>
+        <div class="tw-muted" style="margin-top: 8px;">Generates local drafts for missing and outdated translations only. Does not write to Shopify.</div>
+      </form>
+    {% endif %}
+    <form method="post" action="{% url 'shopify_translation_console' %}">
       {% csrf_token %}
       <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="action" value="generate_multi_locale_drafts">
       <input type="hidden" name="product_search" value="{{ product_search_text }}">
-      <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
+      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
       <input type="hidden" name="target_locale" value="{{ selected_locale }}">
       <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
       <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
@@ -1674,6 +1756,229 @@
       <button type="submit" class="button">Generate drafts</button>
     </form>
     <p class="tw-muted" style="margin-top: 10px;">Drafts can include product basics, SEO, options, variants, important metafields, and media alt text when Shopify returns customer-facing rows. Technical fields remain view-only.</p>
+
+    {% if translate_all_result %}
+      <div class="tw-run-banner is-{{ translate_all_result.status_key }}" data-translate-all-result>
+        <div class="tw-run-header">
+          <div>
+            <h3>Last run result</h3>
+            <p><strong>{{ translate_all_result.action_name }}</strong> finished. {{ translate_all_result.message }}</p>
+          </div>
+          <span class="tw-status-badge is-{{ translate_all_result.status_key }}">{{ translate_all_result.status_label }}</span>
+        </div>
+        <div class="tw-run-grid">
+          <div class="tw-run-item">
+            <div class="tw-run-label">Product</div>
+            <div class="tw-run-value">{% if translate_all_result.product_title %}{{ translate_all_result.product_title }}{% else %}{{ product_selector.selected_product.title }}{% endif %}</div>
+            <div class="tw-muted">{{ translate_all_result.product_id }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Locales processed</div>
+            <div class="tw-run-value">{{ translate_all_result.locales_processed_label }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Generated drafts</div>
+            <div class="tw-run-value">{{ translate_all_result.generated_drafts_count }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Skipped existing</div>
+            <div class="tw-run-value">{{ translate_all_result.summary.already_translated_skipped }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Skipped not eligible</div>
+            <div class="tw-run-value">{{ translate_all_result.summary.not_eligible_skipped }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Errors</div>
+            <div class="tw-run-value">{{ translate_all_result.errors_count }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Started</div>
+            <div class="tw-run-value">{{ translate_all_result.started_at }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Finished</div>
+            <div class="tw-run-value">{{ translate_all_result.finished_at }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">No-write safety</div>
+            <div class="tw-run-value">Shopify write {{ translate_all_result.shopify_write_performed }} / translationsRegister {{ translate_all_result.translations_register_called }}</div>
+          </div>
+        </div>
+      </div>
+      {% if translate_all_result.summary.child_resource_discovery_errors %}
+        <details class="tw-advanced-details" style="margin: 10px 0;">
+          <summary>Read-only discovery warnings ({{ translate_all_result.summary.child_resource_discovery_errors|length }})</summary>
+          <p><strong>Some optional product areas could not be read.</strong> Product basics/SEO drafts may still be available.</p>
+          <ul>
+            {% for item in translate_all_result.summary.child_resource_discovery_errors %}
+              <li>
+                {{ item.skipped_group_labels|join:", " }}:
+                {{ item.reason }}
+                during {{ item.stage }}
+                {% if item.query_failure_type %}({{ item.query_failure_type }}){% endif %}
+                {% if item.message %}- {{ item.message }}{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+      <div class="tw-editor-table-wrap">
+        <table class="tw-results-table">
+          <tbody>
+            <tr><th>Total languages checked</th><td>{{ translate_all_result.summary.total_languages_checked }}</td></tr>
+            <tr><th>Total source rows checked</th><td>{{ translate_all_result.summary.total_source_rows_checked }}</td></tr>
+            <tr><th>Missing drafts generated</th><td>{{ translate_all_result.summary.missing_drafts_generated }}</td></tr>
+            <tr><th>Outdated update drafts generated</th><td>{{ translate_all_result.summary.outdated_update_drafts_generated }}</td></tr>
+            <tr><th>Already translated skipped</th><td>{{ translate_all_result.summary.already_translated_skipped }}</td></tr>
+            <tr><th>Not eligible skipped</th><td>{{ translate_all_result.summary.not_eligible_skipped }}</td></tr>
+            <tr><th>Needs review / blocked</th><td>{{ translate_all_result.summary.needs_review_blocked }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      {% if translate_all_result.summary.per_group_discovery_rows %}
+        <details class="tw-advanced-details">
+          <summary>Read-only discovery status</summary>
+          <div class="tw-editor-table-wrap">
+            <table class="tw-results-table">
+              <thead>
+                <tr>
+                  <th>Group</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in translate_all_result.summary.per_group_discovery_rows %}
+                  <tr>
+                    <td>{{ row.label }}</td>
+                    <td>{{ row.status }}</td>
+                    <td>{{ row.reason }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      {% endif %}
+      <h3>Per-language counts</h3>
+      <div class="tw-editor-table-wrap">
+        <table class="tw-results-table">
+          <thead>
+            <tr>
+              <th>Language</th>
+              <th>Status</th>
+              <th>Missing drafts</th>
+              <th>Outdated drafts</th>
+              <th>Already translated skipped</th>
+              <th>Not eligible skipped</th>
+              <th>Needs review / blocked</th>
+              <th>Preview</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in translate_all_result.locale_results %}
+              <tr>
+                <td><strong>{{ row.locale_label }}</strong> ({{ row.locale }})</td>
+                <td><span class="tw-status-badge is-{{ row.status_key }}">{{ row.status_label }}</span></td>
+                <td>{{ row.missing_draft_count }}</td>
+                <td>{{ row.outdated_update_draft_count }}</td>
+                <td>{{ row.already_translated_skipped }}</td>
+                <td>{{ row.not_eligible_skipped }}</td>
+                <td>{{ row.needs_review_blocked }}</td>
+                <td><a class="button" href="{{ row.preview_url }}">Open preview</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <h3>Per-section counts</h3>
+      <div class="tw-editor-table-wrap">
+        <table class="tw-results-table">
+          <thead>
+            <tr>
+              <th>Section</th>
+              <th>Source rows</th>
+              <th>Missing drafts</th>
+              <th>Outdated drafts</th>
+              <th>Already translated skipped</th>
+              <th>Not eligible skipped</th>
+              <th>Needs review / blocked</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in translate_all_result.summary.per_section_counts %}
+              <tr>
+                <td>{{ row.label }}</td>
+                <td>{{ row.source_rows_checked }}</td>
+                <td>{{ row.missing_drafts_generated }}</td>
+                <td>{{ row.outdated_update_drafts_generated }}</td>
+                <td>{{ row.already_translated_skipped }}</td>
+                <td>{{ row.not_eligible_skipped }}</td>
+                <td>{{ row.needs_review_blocked }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if draft_result.translation_console_detail.all_entries %}
+        <details class="tw-advanced-details">
+          <summary>Detailed draft row previews ({{ draft_result.translation_console_detail.all_entry_count }} rows; showing up to {{ draft_result.translation_console_detail.max_rows }})</summary>
+          <div class="tw-editor-table-wrap">
+            <table class="tw-results-table">
+              <thead>
+                <tr>
+                  <th>Language</th>
+                  <th>Section / group</th>
+                  <th>Context</th>
+                  <th>Key</th>
+                  <th>Original source preview</th>
+                  <th>Existing translation preview</th>
+                  <th>Outdated</th>
+                  <th>Generated draft preview</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for entry in draft_result.translation_console_detail.all_entries %}
+                  <tr>
+                    <td>{{ entry.locale }}</td>
+                    <td>{{ entry.section }}</td>
+                    <td>{{ entry.context_label }}</td>
+                    <td>{{ entry.key }}</td>
+                    <td class="tw-preview-cell">{{ entry.source_value_preview }}</td>
+                    <td class="tw-preview-cell">{{ entry.existing_translation_preview }}</td>
+                    <td>{{ entry.outdated }}</td>
+                    <td class="tw-preview-cell">{{ entry.proposed_translation_preview }}</td>
+                    <td>{{ entry.status }}</td>
+                    <td>{{ entry.reason }}{% if entry.blocking_reasons %}<br>{{ entry.blocking_reasons }}{% endif %}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if draft_result.translation_console_detail.all_entries_truncated %}
+            <p>Translate all rows truncated to the first {{ draft_result.translation_console_detail.max_rows }} rows.</p>
+          {% endif %}
+        </details>
+      {% endif %}
+      <details class="tw-advanced-details">
+        <summary>Translate all safety flags</summary>
+        <table>
+          <tbody>
+            <tr><th>shopify_read_only</th><td>{{ translate_all_result.summary.shopify_read_only }}</td></tr>
+            <tr><th>shopify_write_performed</th><td>{{ translate_all_result.shopify_write_performed }}</td></tr>
+            <tr><th>mutation_performed</th><td>{{ translate_all_result.mutation_performed }}</td></tr>
+            <tr><th>translations_register_called</th><td>{{ translate_all_result.translations_register_called }}</td></tr>
+            <tr><th>publish_performed</th><td>{{ translate_all_result.publish_performed }}</td></tr>
+            <tr><th>apply_performed</th><td>{{ translate_all_result.apply_performed }}</td></tr>
+            <tr><th>rollback_performed</th><td>{{ translate_all_result.rollback_performed }}</td></tr>
+            <tr><th>no_new_shopify_writes_performed</th><td>{{ translate_all_result.summary.no_new_shopify_writes_performed }}</td></tr>
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
 
     {% if multi_locale_draft_result %}
       <h3>Draft results</h3>
@@ -2501,7 +2806,7 @@
     <p>Fixed target locales: {{ draft_target_locales|join:", " }}. Fixed fields: {{ draft_fields|join:", " }}.</p>
   </div>
 
-  {% if draft_result %}
+  {% if draft_result and not translate_all_result %}
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
       <h2>Generate apply plan</h2>
       <p><strong>Apply plan only / No Shopify write.</strong> This action rebuilds the trusted backend draft package, includes only eligible entries, and writes a local apply plan report for manual review.</p>
@@ -2535,8 +2840,13 @@
           <tr><th>target_locales</th><td>{{ draft_result.target_locales|join:", " }}</td></tr>
           <tr><th>requested_fields</th><td>{{ draft_result.requested_fields|join:", " }}</td></tr>
           <tr><th>generated_draft_count</th><td>{{ draft_result.generated_draft_count }}</td></tr>
+          <tr><th>missing_translation_draft_generated_count</th><td>{{ draft_result.missing_translation_draft_generated_count }}</td></tr>
+          <tr><th>outdated_translation_update_draft_generated_count</th><td>{{ draft_result.outdated_translation_update_draft_generated_count }}</td></tr>
           <tr><th>draft_entry_count</th><td>{{ draft_result.translation_console_detail.summary_counts.draft_entry_count }}</td></tr>
           <tr><th>skipped_entry_count</th><td>{{ draft_result.translation_console_detail.summary_counts.skipped_entry_count }}</td></tr>
+          <tr><th>already_translated_skipped_count</th><td>{{ draft_result.already_translated_skipped_count }}</td></tr>
+          <tr><th>not_eligible_skipped_count</th><td>{{ draft_result.not_eligible_skipped_count }}</td></tr>
+          <tr><th>needs_review_or_blocked_count</th><td>{{ draft_result.needs_review_or_blocked_count }}</td></tr>
           <tr><th>seo_warning_count</th><td>{{ draft_result.translation_console_detail.summary_counts.seo_warning_count }}</td></tr>
           <tr><th>ready_for_apply_plan_count</th><td>{{ draft_result.translation_console_detail.summary_counts.ready_for_apply_plan_count }}</td></tr>
           <tr><th>needs_manual_review_count</th><td>{{ draft_result.translation_console_detail.summary_counts.needs_manual_review_count }}</td></tr>
@@ -3720,6 +4030,7 @@
       var empty = picker.querySelector("[data-product-picker-empty]");
       var localeSelect = picker.querySelector("[data-product-locale-select]");
       var localeHidden = picker.querySelector("[data-product-locale-hidden]");
+      var selectedProductInput = picker.querySelector("[data-selected-product-input]");
       var searchStatusText = picker.querySelector("[data-product-search-status-text]");
       var searchQueryLine = picker.querySelector("[data-product-search-query-line]");
       var currentQueryLabel = picker.querySelector("[data-product-current-query]");
@@ -3766,11 +4077,25 @@
       }
 
       function currentSelectedGid() {
-        var hiddenProductInput = picker.querySelector('input[name="product_gid"]');
-        if (hiddenProductInput && hiddenProductInput.value) {
-          return hiddenProductInput.value;
+        if (selectedProductInput && selectedProductInput.value) {
+          return selectedProductInput.value;
         }
         return picker.getAttribute("data-selected-product-gid") || "";
+      }
+
+      function selectProductOption(button) {
+        var gid = button.getAttribute("data-product-gid") || button.value || "";
+        if (gid && selectedProductInput) {
+          selectedProductInput.value = gid;
+          picker.setAttribute("data-selected-product-gid", gid);
+        }
+        syncLocaleParam();
+        closeDropdown();
+        if (picker.requestSubmit) {
+          picker.requestSubmit();
+        } else {
+          picker.submit();
+        }
       }
 
       function syncLocaleParam() {
@@ -3826,11 +4151,11 @@
       function createProductOption(product) {
         var selectedGid = currentSelectedGid();
         var button = document.createElement("button");
-        button.type = "submit";
-        button.name = "product_gid";
+        button.type = "button";
         button.value = product.gid || "";
         button.className = "tw-product-option";
         button.setAttribute("data-product-option", "");
+        button.setAttribute("data-product-gid", product.gid || "");
         button.setAttribute("data-search", product.searchable_text || "");
         button.setAttribute("data-search-normalized", product.searchable_normalized || "");
         button.setAttribute("role", "option");
@@ -3874,9 +4199,9 @@
         appendChip(meta, product.variant_numeric_id ? "Variant ID " + product.variant_numeric_id : "");
         body.appendChild(meta);
         button.appendChild(body);
-        button.addEventListener("click", function () {
-          syncLocaleParam();
-          closeDropdown();
+        button.addEventListener("click", function (event) {
+          event.preventDefault();
+          selectProductOption(button);
         });
         return button;
       }
@@ -3996,9 +4321,9 @@
       }
       Array.prototype.slice.call(dropdown.querySelectorAll("[data-product-option]"))
         .forEach(function (item) {
-          item.addEventListener("click", function () {
-            syncLocaleParam();
-            closeDropdown();
+          item.addEventListener("click", function (event) {
+            event.preventDefault();
+            selectProductOption(item);
           });
       });
       if (localeSelect) {
