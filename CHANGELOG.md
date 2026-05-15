@@ -1,5 +1,9 @@
 # 更新日志
 
+## 2026-05-15
+
+- Added merged Shenzhen settlement group cost confirmation and withdrawal actions so Shenzhen Warehouse, Admin, Finance, or superusers can move a complete group between `pending_warehouse` and `cost_confirmed` without changing member order statuses, member batches, Shopify sync, or payment exports.
+
 ## 2026-05-14
 
 - Added a Shopify Order detail review guard so active or unpaid merged Shenzhen settlement group member orders cannot enter the old single-order review statuses; users are directed to handle settlement in the merged group.

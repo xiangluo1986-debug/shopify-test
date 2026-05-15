@@ -50,7 +50,7 @@ MERGED_SETTLEMENT_BLOCKED_STATUSES = {
     "exception",
 }
 MERGED_GROUP_BATCH_ALLOWED_STATUSES = {"draft", "active"}
-MERGED_GROUP_BATCH_ALLOWED_SETTLEMENT_STATUSES = {"cost_confirmed", "pending_warehouse"}
+MERGED_GROUP_BATCH_ALLOWED_SETTLEMENT_STATUSES = {"cost_confirmed"}
 MERGED_GROUP_COST_LOCKED_SETTLEMENT_STATUSES = {"pending_payment", "payment_submitted", "paid"}
 MERGED_GROUP_BATCH_BLOCKED_ORDER_STATUSES = {
     "pending_payment",
@@ -2104,7 +2104,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
             return "-"
 
         request = getattr(self, "_current_request", None)
-        can_link = bool(request and (self.is_super_admin(request) or self.is_finance_user(request)))
+        can_link = bool(request and self.is_role_allowed(request))
         rows = []
         for group_link in group_links:
             group = group_link.group
@@ -3500,6 +3500,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         "group_orders__order__order_number",
     )
     readonly_fields = (
+        "merged_group_review_actions",
         "merged_group_cost_summary",
         "group_no",
         "status",
@@ -3526,6 +3527,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             "Merged settlement summary",
             {
                 "fields": (
+                    "merged_group_review_actions",
                     "merged_group_cost_summary",
                 )
             },
@@ -3571,12 +3573,19 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             },
         ),
     )
-    actions = ["add_merged_groups_to_settlement_batch"]
+    actions = [
+        "confirm_merged_group_costs",
+        "withdraw_merged_group_cost_confirmation",
+        "add_merged_groups_to_settlement_batch",
+    ]
 
     def _can_view_merged_groups(self, request):
-        return self.is_super_admin(request) or self.is_finance_user(request)
+        return self.is_super_admin(request) or self.is_finance_user(request) or self.is_shenzhen_user(request)
 
     def _can_edit_merged_group_costs(self, request):
+        return self._can_view_merged_groups(request)
+
+    def _can_confirm_merged_group_costs(self, request):
         return self._can_view_merged_groups(request)
 
     def has_module_permission(self, request):
@@ -3599,9 +3608,32 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
 
     def get_actions(self, request):
         actions = super().get_actions(request)
+        if not self._can_confirm_merged_group_costs(request):
+            actions.pop("confirm_merged_group_costs", None)
+            actions.pop("withdraw_merged_group_cost_confirmation", None)
         if not (self.is_super_admin(request) or self.is_finance_user(request)):
             actions.pop("add_merged_groups_to_settlement_batch", None)
         return actions
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<path:object_id>/confirm-costs/",
+                self.admin_site.admin_view(self.confirm_merged_group_costs_view),
+                name="shopify_sync_shenzhenmergedsettlementgroup_confirm_costs",
+            ),
+            path(
+                "<path:object_id>/withdraw-cost-confirmation/",
+                self.admin_site.admin_view(self.withdraw_merged_group_cost_confirmation_view),
+                name="shopify_sync_shenzhenmergedsettlementgroup_withdraw_cost_confirmation",
+            ),
+        ]
+        return custom_urls + urls
+
+    def get_fieldsets(self, request, obj=None):
+        self._current_request = request
+        return super().get_fieldsets(request, obj)
 
     def get_readonly_fields(self, request, obj=None):
         readonly = list(super().get_readonly_fields(request, obj))
@@ -3658,11 +3690,77 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             released_at__isnull=True,
         ).exists()
 
+    def _change_url(self, obj):
+        return reverse("admin:shopify_sync_shenzhenmergedsettlementgroup_change", args=[obj.pk])
+
+    def _redirect_to_change(self, obj):
+        return HttpResponseRedirect(self._change_url(obj))
+
+    def _merged_group_action_url(self, admin_url_name, obj):
+        return reverse(f"admin:{admin_url_name}", args=[obj.pk])
+
     def group_total_cost_snapshot(self, group):
         summary = group.group_cost_summary()
         if not summary["cost_completed"] or summary["group_total_cost_rmb"] is None:
             return None, summary
         return money(summary["group_total_cost_rmb"]), summary
+
+    def validate_group_ready_for_cost_confirmation(self, group):
+        errors = []
+        group_label = group.group_no or f"Group ID {group.pk}"
+        amount_rmb, summary = self.group_total_cost_snapshot(group)
+
+        if group.status not in MERGED_GROUP_BATCH_ALLOWED_STATUSES:
+            errors.append(f"{group_label}: group status 必须是 draft 或 active，当前为 {group.status}")
+
+        if group.settlement_status != "pending_warehouse":
+            errors.append(
+                f"{group_label}: settlement_status 必须是 pending_warehouse；"
+                f"当前为 {group.settlement_status}"
+            )
+
+        if group.settlement_status in MERGED_GROUP_COST_LOCKED_SETTLEMENT_STATUSES:
+            errors.append(f"{group_label}: 已进入待支付/已提交支付/已支付阶段，不能确认成本")
+
+        if self.group_has_active_batch_entry(group):
+            errors.append(f"{group_label}: 已存在未取消的 SettlementBatchEntry，不能确认成本")
+
+        if not summary["cost_completed"] or amount_rmb is None:
+            reasons = summary.get("incomplete_reasons") or [self._group_completion_text(summary)]
+            errors.append(f"{group_label}: 成本不完整（{'; '.join(reasons)}）")
+
+        return {
+            "group": group,
+            "group_label": group_label,
+            "amount_rmb": amount_rmb,
+            "summary": summary,
+            "errors": errors,
+        }
+
+    def validate_group_ready_for_cost_withdrawal(self, group):
+        errors = []
+        group_label = group.group_no or f"Group ID {group.pk}"
+
+        if group.status not in MERGED_GROUP_BATCH_ALLOWED_STATUSES:
+            errors.append(f"{group_label}: group status 必须是 draft 或 active，当前为 {group.status}")
+
+        if group.settlement_status != "cost_confirmed":
+            errors.append(
+                f"{group_label}: settlement_status 必须是 cost_confirmed；"
+                f"当前为 {group.settlement_status}"
+            )
+
+        if group.settlement_status in MERGED_GROUP_COST_LOCKED_SETTLEMENT_STATUSES:
+            errors.append(f"{group_label}: 已进入待支付/已提交支付/已支付阶段，不能撤回")
+
+        if self.group_has_active_batch_entry(group):
+            errors.append(f"{group_label}: 已加入结算批次，不能撤回")
+
+        return {
+            "group": group,
+            "group_label": group_label,
+            "errors": errors,
+        }
 
     def validate_group_ready_for_batch(self, group):
         errors = []
@@ -3678,10 +3776,6 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             errors.append(
                 f"{group_label}: settlement_status 必须是 cost_confirmed；"
                 f"当前为 {group.settlement_status}"
-            )
-        elif group.settlement_status == "pending_warehouse":
-            warnings.append(
-                f"{group_label}: 当前暂无合并组 cost_confirmed action，本次按成本完整性放行 pending_warehouse。"
             )
 
         if len(member_orders) < 2:
@@ -3900,6 +3994,77 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         )
     payment_lock_notice.short_description = "Payment lock"
 
+    def merged_group_review_actions(self, obj):
+        request = getattr(self, "_current_request", None)
+        if not obj or not obj.pk or request is None:
+            return "-"
+
+        status_label = settlement_status_admin_label(obj.settlement_status)
+        summary = self._group_cost_summary(obj)
+        cost_completed = summary["cost_completed"] and summary["group_total_cost_rmb"] is not None
+        active_batch_entry = self.group_has_active_batch_entry(obj)
+        locked = active_batch_entry or obj.settlement_status in MERGED_GROUP_COST_LOCKED_SETTLEMENT_STATUSES
+        button_style = (
+            "display:inline-block;margin:4px 8px 4px 0;padding:7px 12px;"
+            "border-radius:4px;background:#0c66e4;color:#fff;font-weight:600;"
+            "text-decoration:none;"
+        )
+        withdraw_button_style = button_style + "background:#667085;"
+        muted_style = "display:inline-block;margin-top:4px;color:#667085;"
+        warning_style = "display:inline-block;margin-top:4px;color:#b42318;font-weight:600;"
+
+        if not self._can_confirm_merged_group_costs(request):
+            return format_html('<span style="{}">当前账号不能操作合并组成本确认。</span>', warning_style)
+
+        if obj.status not in MERGED_GROUP_BATCH_ALLOWED_STATUSES:
+            return format_html(
+                '<span style="{}">合并组状态不是 draft/active，不能确认或撤回成本。当前状态：{}</span>',
+                warning_style,
+                obj.get_status_display(),
+            )
+
+        if locked:
+            return format_html(
+                '<span style="{}">合并组已进入结算批次或支付流程，不能确认或撤回成本。当前状态：{}</span>',
+                warning_style,
+                status_label,
+            )
+
+        if obj.settlement_status == "pending_warehouse":
+            if not cost_completed:
+                return format_html(
+                    '<span style="{}">成本未完整，暂不能提交 Admin 审核。{}</span>',
+                    warning_style,
+                    self._group_completion_text(summary),
+                )
+            return format_html(
+                '<a href="{}" style="{}" onclick="return confirm(\'确认合并组成本并提交给 Admin 审核？\');">'
+                '确认合并组成本 / 提交 Admin 审核</a>'
+                '<br><span style="{}">只更新合并组 settlement_status，不修改成员订单状态或批次。</span>',
+                self._merged_group_action_url(
+                    "shopify_sync_shenzhenmergedsettlementgroup_confirm_costs",
+                    obj,
+                ),
+                button_style,
+                muted_style,
+            )
+
+        if obj.settlement_status == "cost_confirmed":
+            return format_html(
+                '<span style="{}">合并组已提交 Admin 审核，等待 Admin/Finance 加入结算批次。</span><br>'
+                '<a href="{}" style="{}" onclick="return confirm(\'撤回后合并组会回到待深圳仓确认，确定继续？\');">'
+                '撤回确认 / 返回修改成本</a>',
+                muted_style,
+                self._merged_group_action_url(
+                    "shopify_sync_shenzhenmergedsettlementgroup_withdraw_cost_confirmation",
+                    obj,
+                ),
+                withdraw_button_style,
+            )
+
+        return format_html('<span style="{}">当前状态：{}</span>', muted_style, status_label)
+    merged_group_review_actions.short_description = "合并组审核操作"
+
     def merged_group_cost_summary(self, obj):
         if not obj or not obj.pk:
             return "-"
@@ -4034,10 +4199,121 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         if warnings:
             self.message_user(
                 request,
-                "；".join(warnings[:8]) + " 后续会补 group 审核流。",
+                "；".join(warnings[:8]),
                 level=messages.WARNING,
             )
     add_merged_groups_to_settlement_batch.short_description = "加入结算批次"
+
+    def confirm_merged_group_costs(self, request, queryset):
+        if not self._can_confirm_merged_group_costs(request):
+            self.message_user(request, "当前账号不能确认合并组成本。", level=messages.ERROR)
+            return
+
+        groups = list(queryset.order_by("pk"))
+        validations = [self.validate_group_ready_for_cost_confirmation(group) for group in groups]
+        errors = [
+            error
+            for validation in validations
+            for error in validation["errors"]
+        ]
+        valid_groups = [
+            validation["group"]
+            for validation in validations
+            if not validation["errors"]
+        ]
+
+        updated = 0
+        if valid_groups:
+            updated = ShenzhenMergedSettlementGroup.objects.filter(
+                pk__in=[group.pk for group in valid_groups],
+                settlement_status="pending_warehouse",
+            ).update(
+                settlement_status="cost_confirmed",
+                updated_at=timezone.now(),
+            )
+
+        if updated:
+            self.message_user(
+                request,
+                f"已确认 {updated} 个合并组成本，并提交 Admin/Finance 审核；成员订单状态和批次未修改。",
+                level=messages.SUCCESS,
+            )
+        if errors:
+            visible_errors = errors[:12]
+            suffix = ""
+            if len(errors) > len(visible_errors):
+                suffix = f"；另有 {len(errors) - len(visible_errors)} 条错误未显示"
+            self.message_user(
+                request,
+                "部分合并组未确认：" + "；".join(visible_errors) + suffix,
+                level=messages.WARNING if updated else messages.ERROR,
+            )
+    confirm_merged_group_costs.short_description = "确认合并组成本 / 提交 Admin 审核"
+
+    def withdraw_merged_group_cost_confirmation(self, request, queryset):
+        if not self._can_confirm_merged_group_costs(request):
+            self.message_user(request, "当前账号不能撤回合并组成本确认。", level=messages.ERROR)
+            return
+
+        groups = list(queryset.order_by("pk"))
+        validations = [self.validate_group_ready_for_cost_withdrawal(group) for group in groups]
+        errors = [
+            error
+            for validation in validations
+            for error in validation["errors"]
+        ]
+        valid_groups = [
+            validation["group"]
+            for validation in validations
+            if not validation["errors"]
+        ]
+
+        updated = 0
+        if valid_groups:
+            updated = ShenzhenMergedSettlementGroup.objects.filter(
+                pk__in=[group.pk for group in valid_groups],
+                settlement_status="cost_confirmed",
+            ).update(
+                settlement_status="pending_warehouse",
+                updated_at=timezone.now(),
+            )
+
+        if updated:
+            self.message_user(
+                request,
+                f"已撤回 {updated} 个合并组成本确认，状态已回到 pending_warehouse；成员订单状态和批次未修改。",
+                level=messages.SUCCESS,
+            )
+        if errors:
+            visible_errors = errors[:12]
+            suffix = ""
+            if len(errors) > len(visible_errors):
+                suffix = f"；另有 {len(errors) - len(visible_errors)} 条错误未显示"
+            self.message_user(
+                request,
+                "部分合并组未撤回：" + "；".join(visible_errors) + suffix,
+                level=messages.WARNING if updated else messages.ERROR,
+            )
+    withdraw_merged_group_cost_confirmation.short_description = "撤回合并组成本确认"
+
+    def confirm_merged_group_costs_view(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if not obj:
+            self.message_user(request, "合并结算组不存在。", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:shopify_sync_shenzhenmergedsettlementgroup_changelist"))
+        self.confirm_merged_group_costs(request, ShenzhenMergedSettlementGroup.objects.filter(pk=obj.pk))
+        return self._redirect_to_change(obj)
+
+    def withdraw_merged_group_cost_confirmation_view(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if not obj:
+            self.message_user(request, "合并结算组不存在。", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:shopify_sync_shenzhenmergedsettlementgroup_changelist"))
+        self.withdraw_merged_group_cost_confirmation(
+            request,
+            ShenzhenMergedSettlementGroup.objects.filter(pk=obj.pk),
+        )
+        return self._redirect_to_change(obj)
 
 
 class SettlementEntryAdminAccessMixin(ShopifyRoleAdminMixin):
