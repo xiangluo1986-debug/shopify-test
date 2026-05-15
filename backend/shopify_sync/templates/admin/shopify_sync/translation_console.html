@@ -3,6 +3,7 @@
 {% block content %}
 <style>
   .translation-workspace {
+    color-scheme: light;
     color: #111827;
     background: transparent;
     font-size: 14px;
@@ -753,6 +754,118 @@
     color: #374151;
     font-weight: 600;
   }
+  .tw-translation-results {
+    margin-top: 16px;
+  }
+  .tw-result-list {
+    display: grid;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .tw-result-card {
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #111827;
+    padding: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  }
+  .tw-result-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .tw-result-eyebrow,
+  .tw-result-main-label,
+  .tw-result-detail-label {
+    color: #4b5563;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .tw-result-title {
+    margin: 2px 0 0;
+    color: #111827;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+  .tw-result-main {
+    margin-top: 10px;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #111827;
+    padding: 10px;
+  }
+  .tw-result-main.is-reason {
+    border-color: #facc15;
+    background: #fffbeb;
+  }
+  .tw-result-main-value,
+  .tw-result-text {
+    margin-top: 5px;
+    color: #111827;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .tw-result-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .tw-reason-chip {
+    display: inline-block;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    background: #f3f4f6;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.5;
+    padding: 2px 8px;
+  }
+  .tw-result-details {
+    margin-top: 8px;
+    border-top: 1px solid #e5e7eb;
+    color: #111827;
+  }
+  .tw-result-details summary {
+    color: #1f2937;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  .tw-result-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .tw-result-text {
+    min-height: 42px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #ffffff;
+    padding: 8px;
+  }
+  .tw-technical-list {
+    display: grid;
+    grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
+    gap: 6px 10px;
+    margin: 6px 0 0;
+  }
+  .tw-technical-list dt {
+    color: #4b5563;
+    font-weight: 700;
+  }
+  .tw-technical-list dd {
+    margin: 0;
+    color: #111827;
+    overflow-wrap: anywhere;
+  }
   .tw-report-empty[hidden],
   .tw-report-row[hidden] {
     display: none !important;
@@ -838,6 +951,19 @@
   .tw-status-badge.is-generated {
     background: #e8f5e9;
     color: #185c25;
+  }
+  .tw-status-badge.is-ready,
+  .tw-status-badge.is-already_up_to_date {
+    background: #e8f5e9;
+    color: #185c25;
+  }
+  .tw-status-badge.is-needs_review {
+    background: #fff4e5;
+    color: #8a4b00;
+  }
+  .tw-status-badge.is-not_translated_automatically {
+    background: #f2f4f7;
+    color: #475467;
   }
   .tw-status-badge.is-completed {
     background: #e8f5e9;
@@ -1236,6 +1362,8 @@
   }
   .translation-workspace .tw-status-badge.is-translated,
   .translation-workspace .tw-status-badge.is-completed,
+  .translation-workspace .tw-status-badge.is-ready,
+  .translation-workspace .tw-status-badge.is-already_up_to_date,
   .translation-workspace .tw-coverage-status.is-visible,
   .translation-workspace .tw-coverage-status.is-included {
     border-color: #86efac;
@@ -1276,11 +1404,37 @@
   }
   .translation-workspace .tw-status-badge.is-untranslated,
   .translation-workspace .tw-status-badge.is-skipped,
+  .translation-workspace .tw-status-badge.is-not_translated_automatically,
   .translation-workspace .tw-coverage-status.is-missing,
   .translation-workspace .tw-coverage-status.is-not_detected {
     border-color: #d1d5db;
     background: #f3f4f6;
     color: #374151;
+  }
+  .translation-workspace .tw-result-card,
+  .translation-workspace .tw-result-main,
+  .translation-workspace .tw-result-text {
+    background: #ffffff;
+    color: #111827;
+  }
+  .translation-workspace .tw-result-main {
+    background: #f8fafc;
+  }
+  .translation-workspace .tw-result-main.is-reason {
+    background: #fffbeb;
+    color: #111827;
+  }
+  .translation-workspace .tw-result-eyebrow,
+  .translation-workspace .tw-result-main-label,
+  .translation-workspace .tw-result-detail-label,
+  .translation-workspace .tw-technical-list dt {
+    color: #4b5563;
+  }
+  .translation-workspace .tw-result-title,
+  .translation-workspace .tw-result-main-value,
+  .translation-workspace .tw-result-text,
+  .translation-workspace .tw-technical-list dd {
+    color: #111827;
   }
   .translation-workspace .tw-editor-table,
   .translation-workspace .tw-coverage-table {
@@ -1362,13 +1516,13 @@
         <div class="tw-summary-value">{{ single_product_mvp.supported_target_locales|join:", " }}</div>
       </div>
       <div class="tw-summary-card">
-        <div class="tw-summary-label">Current draft fields</div>
+        <div class="tw-summary-label">Current translation fields</div>
         <div class="tw-summary-value">{{ single_product_mvp.draft_fields|join:", " }}</div>
       </div>
     </div>
     <div class="tw-coverage-summary">
       <span class="tw-coverage-pill">Rows loaded: {{ single_product_mvp.editor_row_count }}</span>
-      <span class="tw-coverage-pill">Draft coverage: {{ single_product_mvp.draft_coverage_summary_status }}</span>
+      <span class="tw-coverage-pill">Translation coverage: {{ single_product_mvp.draft_coverage_summary_status }}</span>
       <span class="tw-coverage-pill">Read-only page: {{ single_product_mvp.read_only }}</span>
     </div>
     <div class="tw-editor-table-wrap">
@@ -1377,7 +1531,7 @@
           <tr>
             <th>Coverage group</th>
             <th>Status</th>
-            <th>Draft coverage</th>
+            <th>Translation coverage</th>
             <th>Source rows</th>
             <th>Notes</th>
           </tr>
@@ -1396,7 +1550,7 @@
               </td>
               <td>
                 {{ group.visible_row_count }} / {{ group.source_row_count }} visible
-                {% if group.draft_source_row_count %}<br>{{ group.draft_source_row_count }} rows classified in latest draft run{% endif %}
+                {% if group.draft_source_row_count %}<br>{{ group.draft_source_row_count }} rows classified in latest translation run{% endif %}
                 {% if group.missing_translation_count %}<br>{{ group.missing_translation_count }} missing target translations{% endif %}
               </td>
               <td>{{ group.notes }}</td>
@@ -1512,7 +1666,7 @@
       <input type="hidden" name="product_search" value="{{ product_search_text }}">
       <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
       <input type="hidden" name="locale" value="{{ selected_locale }}">
-      <button type="submit" class="button">Generate draft package dry-run</button>
+      <button type="submit" class="button">Run technical translation package dry-run</button>
     </form>
     <table>
       <tbody>
@@ -1532,7 +1686,7 @@
     <table>
       <tbody>
         <tr><th>Candidate count</th><td>{{ workbench_summary.apply_plan_candidate_count }}</td></tr>
-        <tr><th>Blocked / needs review count</th><td>{{ workbench_summary.blocked_or_needs_review_count }}</td></tr>
+        <tr><th>Needs review count</th><td>{{ workbench_summary.blocked_or_needs_review_count }}</td></tr>
         <tr><th>Next write count</th><td>{{ workbench_summary.next_write_count }}</td></tr>
       </tbody>
     </table>
@@ -1804,7 +1958,7 @@
         <div class="tw-metric-value">{{ editor_view.status_summary.needs_review }}</div>
       </div>
       <div class="tw-metric">
-        <div class="tw-metric-label">Draft only</div>
+        <div class="tw-metric-label">Preview only</div>
         <div class="tw-metric-value">{{ editor_view.status_summary.draft_only }}</div>
       </div>
     </div>
@@ -1812,16 +1966,16 @@
       <h3>What to do next</h3>
       <ol>
         <li>Choose product and language.</li>
-        <li>Generate drafts for the languages you need.</li>
-        <li>Open each language preview and review original vs translation.</li>
+        <li>Click Translate all in background.</li>
+        <li>Review original vs translation results on this page.</li>
         <li>Keep this page for review only. It cannot update Shopify.</li>
       </ol>
     </div>
   </div>
 
   <div class="module tw-draft-card">
-    <h2>Generate translation drafts</h2>
-    <p class="tw-draft-note">This only creates draft previews. It does not update Shopify.</p>
+    <h2>Translate product</h2>
+    <p class="tw-draft-note">Preview only - Shopify has not been updated yet. Nothing has been written to Shopify.</p>
     {% if selected_product_gid %}
       <form method="post" action="{% url 'shopify_translation_console' %}" style="margin-bottom: 14px;">
         {% csrf_token %}
@@ -1833,7 +1987,7 @@
         <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
         <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
         <button type="submit" class="button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Translate all in background</button>
-        <div class="tw-muted" style="margin-top: 8px;">Starts a local background draft job for missing and outdated translations. The request returns quickly and does not write to Shopify.</div>
+        <div class="tw-muted" style="margin-top: 8px;">Starts background translation for new and updated content. The request returns quickly and does not write to Shopify.</div>
       </form>
     {% endif %}
     {% if selected_product_gid %}
@@ -1844,7 +1998,7 @@
             {% if translation_background_job.exists %}
               <p data-job-status-message>{{ translation_background_job.status_message }}</p>
             {% else %}
-              <p data-job-status-message>No background draft job has been recorded for this product.</p>
+              <p data-job-status-message>No background translation has been recorded for this product.</p>
             {% endif %}
             <p class="tw-muted" data-job-polling-state>Updating automatically every few seconds. Refresh status remains available as a manual fallback.</p>
           </div>
@@ -1875,7 +2029,7 @@
             <div class="tw-run-value" data-job-field="failed_locales">{{ translation_background_job.counts.failed_locales|default:0 }}</div>
           </div>
           <div class="tw-run-item">
-            <div class="tw-run-label">Generated drafts</div>
+            <div class="tw-run-label">Translated items</div>
             <div class="tw-run-value" data-job-field="generated_draft_count">{{ translation_background_job.counts.generated_draft_count|default:0 }}</div>
           </div>
           <div class="tw-run-item">
@@ -1883,7 +2037,7 @@
             <div class="tw-run-value" data-job-field="skipped_count">{{ translation_background_job.counts.skipped_count|default:0 }}</div>
           </div>
           <div class="tw-run-item">
-            <div class="tw-run-label">Blocked</div>
+            <div class="tw-run-label">Needs review</div>
             <div class="tw-run-value" data-job-field="blocked_count">{{ translation_background_job.counts.blocked_count|default:0 }}</div>
           </div>
           <div class="tw-run-item">
@@ -1908,7 +2062,10 @@
             <button type="submit" class="button">Refresh status</button>
           </form>
           {% if translation_background_job.exists %}
-            <a class="button" href="#{{ translation_background_job.detail_anchor }}">Open last report details</a>
+            {% if translation_background_job.show_translation_results %}
+              <a class="button" href="#translation-results">View translation results</a>
+            {% endif %}
+            <a class="button" href="#{{ translation_background_job.detail_anchor }}">Report details</a>
           {% endif %}
         </div>
         {% if translation_background_job.exists %}
@@ -1920,10 +2077,10 @@
                   <th class="translation-job-progress-header translation-job-progress-cell">Language</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Status</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Rows checked</th>
-                  <th class="translation-job-progress-header translation-job-progress-cell">Missing drafts</th>
-                  <th class="translation-job-progress-header translation-job-progress-cell">Outdated drafts</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">New translations</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Updated translations</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Skipped</th>
-                  <th class="translation-job-progress-header translation-job-progress-cell">Blocked</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Needs review</th>
                 </tr>
               </thead>
               <tbody data-job-locale-body>
@@ -1949,10 +2106,10 @@
                   <th class="translation-job-progress-header translation-job-progress-cell">Group</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Status</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Rows checked</th>
-                  <th class="translation-job-progress-header translation-job-progress-cell">Generated drafts</th>
-                  <th class="translation-job-progress-header translation-job-progress-cell">Skipped existing</th>
-                  <th class="translation-job-progress-header translation-job-progress-cell">Skipped not eligible</th>
-                  <th class="translation-job-progress-header translation-job-progress-cell">Blocked</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Translated items</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Already up to date</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Not translated automatically</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Needs review</th>
                 </tr>
               </thead>
               <tbody data-job-group-body>
@@ -1970,8 +2127,96 @@
               </tbody>
             </table>
           </div>
+          {% if translation_background_job.show_translation_results %}
+            <div id="translation-results" class="tw-translation-results" data-translation-results-section>
+              <div class="tw-run-header">
+                <div>
+                  <h3>Translation results</h3>
+                  <p><strong>{{ translation_background_job.translation_result_status_label }}</strong></p>
+                  <p class="tw-draft-note">Preview only - Shopify has not been updated yet. Nothing has been written to Shopify.</p>
+                </div>
+                <span class="tw-count-badge">{{ translation_background_job.translation_result_count }} result item{{ translation_background_job.translation_result_count|pluralize }}</span>
+              </div>
+              {% for language_group in translation_background_job.translation_result_groups %}
+                <details class="tw-section-panel" open>
+                  <summary>
+                    <span class="tw-section-heading">
+                      <span class="tw-section-title">
+                        <strong>{{ language_group.language_label }}</strong>
+                        <span class="tw-section-hint">{{ language_group.language }}</span>
+                      </span>
+                      <span class="tw-count-badge">{{ language_group.count }} result item{{ language_group.count|pluralize }}</span>
+                    </span>
+                  </summary>
+                  {% for content_group in language_group.groups %}
+                    <details class="tw-section-panel"{% if content_group.is_primary %} open{% endif %}>
+                      <summary>
+                        <span class="tw-section-heading">
+                          <span class="tw-section-title">
+                            <strong>{{ content_group.group_label }}</strong>
+                            <span class="tw-section-hint">{{ content_group.group_key }}</span>
+                          </span>
+                          <span class="tw-count-badge">{{ content_group.count }} item{{ content_group.count|pluralize }}</span>
+                        </span>
+                      </summary>
+                      <div class="tw-result-list">
+                        {% for row in content_group.rows %}
+                          <article class="tw-result-card">
+                            <div class="tw-result-card-header">
+                              <div>
+                                <div class="tw-result-eyebrow">{{ row.group_label }} / {{ row.language_label }} ({{ row.language }})</div>
+                                <h4 class="tw-result-title">{{ row.field_label }}</h4>
+                                {% if row.context_label %}<div class="tw-muted">{{ row.context_label }}</div>{% endif %}
+                              </div>
+                              <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
+                            </div>
+                            <div class="tw-result-main{% if row.main_value_is_reason %} is-reason{% endif %}">
+                              <div class="tw-result-main-label">{{ row.main_value_label }}</div>
+                              <div class="tw-result-main-value">{{ row.main_value_display|default:"-" }}</div>
+                            </div>
+                            {% if row.result_reason_labels %}
+                              <div class="tw-result-reasons">
+                                {% for reason_label in row.result_reason_labels %}
+                                  <span class="tw-reason-chip">{{ reason_label }}</span>
+                                {% endfor %}
+                              </div>
+                            {% endif %}
+                            <details class="tw-result-details">
+                              <summary>Compare original/current translation</summary>
+                              <div class="tw-result-compare-grid">
+                                <div>
+                                  <div class="tw-result-detail-label">Original text</div>
+                                  <div class="tw-result-text">{{ row.source_value_display|default:"-" }}</div>
+                                </div>
+                                <div>
+                                  <div class="tw-result-detail-label">Existing translation</div>
+                                  <div class="tw-result-text">{{ row.existing_translation_display|default:"-" }}</div>
+                                </div>
+                              </div>
+                            </details>
+                            <details class="tw-result-details">
+                              <summary>Technical details</summary>
+                              <dl class="tw-technical-list">
+                                <dt>Field key</dt><dd>{{ row.key|default:"-" }}</dd>
+                                <dt>Resource ID</dt><dd>{{ row.resource_id|default:"-" }}</dd>
+                                <dt>Resource key</dt><dd>{{ row.resource_key|default:"-" }}</dd>
+                                <dt>Digest</dt><dd>{{ row.digest|default:"-" }}</dd>
+                                <dt>Status</dt><dd>{{ row.status|default:"-" }}</dd>
+                                <dt>Raw reasons</dt><dd>{{ row.raw_reason_text|default:"-" }}</dd>
+                                <dt>Write eligibility</dt><dd>{{ row.write_eligibility|default:"-" }}</dd>
+                              </dl>
+                            </details>
+                          </article>
+                        {% endfor %}
+                      </div>
+                    </details>
+                  {% endfor %}
+                </details>
+              {% endfor %}
+            </div>
+          {% endif %}
           <details id="{{ translation_background_job.detail_anchor }}" class="tw-advanced-details">
-            <summary>Last report details</summary>
+            <summary>Report details</summary>
             <table>
               <tbody>
                 <tr><th>job_id</th><td>{{ translation_background_job.job_id }}</td></tr>
@@ -1980,7 +2225,7 @@
                 <tr><th>job status</th><td>{{ translation_background_job.report_detail_summary.job_status }}</td></tr>
                 <tr><th>selected_locales</th><td>{{ translation_background_job.selected_locales|join:", " }}</td></tr>
                 <tr><th>selected_groups</th><td>{{ translation_background_job.selected_groups|join:", " }}</td></tr>
-                <tr><th>generated draft count</th><td>{{ translation_background_job.report_detail_summary.generated_draft_count }}</td></tr>
+                <tr><th>translated item count</th><td>{{ translation_background_job.report_detail_summary.generated_draft_count }}</td></tr>
                 <tr><th>skipped count</th><td>{{ translation_background_job.report_detail_summary.skipped_count }}</td></tr>
                 <tr><th>blocked count</th><td>{{ translation_background_job.report_detail_summary.blocked_count }}</td></tr>
                 <tr><th>no Shopify write performed</th><td>{{ translation_background_job.report_detail_summary.no_shopify_write_performed }}</td></tr>
@@ -2001,7 +2246,7 @@
                 <div class="tw-run-value">{{ translation_background_job.apply_readiness_summary.eligible_apply_count }}</div>
               </div>
               <div class="tw-run-item">
-                <div class="tw-run-label">Blocked apply count</div>
+                <div class="tw-run-label">Not ready to prepare</div>
                 <div class="tw-run-value">{{ translation_background_job.apply_readiness_summary.blocked_apply_count }}</div>
               </div>
               <div class="tw-run-item">
@@ -2016,13 +2261,13 @@
             <table class="tw-results-table">
               <tbody>
                 <tr><th>Eligible now fields</th><td>{{ translation_background_job.apply_readiness_summary.eligible_now_fields|join:", " }}</td></tr>
-                <tr><th>Blocked for future mapping</th><td>{{ translation_background_job.apply_readiness_summary.blocked_for_future_mapping_groups|join:", " }}</td></tr>
+                <tr><th>Needs mapping before update</th><td>{{ translation_background_job.apply_readiness_summary.blocked_for_future_mapping_groups|join:", " }}</td></tr>
                 <tr><th>shopify_write_performed</th><td>{{ translation_background_job.apply_readiness_summary.shopify_write_performed }}</td></tr>
                 <tr><th>mutation_performed</th><td>{{ translation_background_job.apply_readiness_summary.mutation_performed }}</td></tr>
                 <tr><th>translations_register_called</th><td>{{ translation_background_job.apply_readiness_summary.translations_register_called }}</td></tr>
               </tbody>
             </table>
-            <h3>Safe write readiness</h3>
+            <h3>Prepare selected translations for Shopify update</h3>
             <p><strong>This package does not write Shopify.</strong> It only prepares a locked review for future ACK.</p>
             <table class="tw-results-table">
               <tbody>
@@ -2030,7 +2275,7 @@
                 <tr><th>Selected product gid</th><td>{{ safe_write_readiness_display.product_gid }}</td></tr>
                 <tr><th>Selected locale</th><td>{{ safe_write_readiness_display.locale }}</td></tr>
                 <tr><th>Eligible entries count</th><td>{{ safe_write_readiness_display.eligible_entries_count }}</td></tr>
-                <tr><th>Blocked entries count</th><td>{{ safe_write_readiness_display.blocked_entries_count }}</td></tr>
+                <tr><th>Needs review entries count</th><td>{{ safe_write_readiness_display.blocked_entries_count }}</td></tr>
                 <tr><th>Selected entries count</th><td>{{ safe_write_readiness_display.selected_entry_count }}</td></tr>
                 <tr><th>Max entry count</th><td>{{ safe_write_readiness_display.max_entry_count }}</td></tr>
                 <tr><th>Package status</th><td>{{ safe_write_readiness_display.package_status }}</td></tr>
@@ -2044,7 +2289,7 @@
               </tbody>
             </table>
             {% if safe_write_readiness_display.blocked_entries_summary %}
-              <h4>Safe write blocked summary</h4>
+              <h4>Preparation blocked summary</h4>
               <table class="tw-results-table">
                 <thead>
                   <tr><th>Reason</th><th>Count</th></tr>
@@ -2056,7 +2301,7 @@
                 </tbody>
               </table>
             {% endif %}
-            <h3>Blocked and skipped reasons</h3>
+            <h3>Needs review and skipped reasons</h3>
             {% if translation_background_job.blocked_reason_summary %}
               <div class="tw-editor-table-wrap">
                 <table class="tw-results-table">
@@ -2077,7 +2322,7 @@
                 </table>
               </div>
             {% else %}
-              <p>No blocked or skipped reasons were recorded in the local report.</p>
+              <p>No needs-review or skipped reasons were recorded in the local report.</p>
             {% endif %}
             <h3>Options and variants diagnosis</h3>
             <div class="tw-editor-table-wrap">
@@ -2088,8 +2333,8 @@
                     <th>Discovery status</th>
                     <th>Resource count</th>
                     <th>Translatable rows</th>
-                    <th>Generated drafts</th>
-                    <th>Blocked apply</th>
+                    <th>Translated items</th>
+                    <th>Not ready to prepare</th>
                     <th>Needs mapping</th>
                     <th>Reason if zero rows</th>
                   </tr>
@@ -2119,8 +2364,9 @@
               </table>
             </div>
             {% if translation_background_job.review_rows %}
-              <h3>Draft review table</h3>
-              <form method="post" action="{% url 'shopify_translation_console' %}">
+              <details class="tw-advanced-details">
+                <summary>Advanced technical table</summary>
+                <form method="post" action="{% url 'shopify_translation_console' %}">
                 {% csrf_token %}
                 <input type="hidden" name="ui_mode" value="editor">
                 <input type="hidden" name="action" value="prepare_translation_safe_write_readiness_package">
@@ -2130,7 +2376,7 @@
                 <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
                 <div class="tw-job-actions" style="margin-bottom: 12px;">
                   <div>
-                    <label for="id_safe_write_readiness_locale">Safe package locale</label><br>
+                    <label for="id_safe_write_readiness_locale">Language for Shopify update preparation</label><br>
                     <select id="id_safe_write_readiness_locale" name="target_locale">
                       {% if safe_write_readiness_state.locale_options %}
                         {% for option in safe_write_readiness_state.locale_options %}
@@ -2142,9 +2388,9 @@
                     </select>
                   </div>
                   {% if safe_write_readiness_state.can_prepare %}
-                    <button type="submit" class="button">Prepare safe write package</button>
+                    <button type="submit" class="button">Prepare selected translations for Shopify update</button>
                   {% endif %}
-                  <span class="tw-muted">Select 1 to 3 enabled entries. Disabled rows stay visible with their block reason.</span>
+                  <span class="tw-muted">Select 1 to 3 enabled entries. Disabled rows stay visible with their review reason.</span>
                 </div>
               <div class="tw-report-filters" data-report-filters>
                 <div>
@@ -2165,9 +2411,9 @@
                     {% endfor %}
                   </select>
                 </div>
-                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-generated> Generated only</label>
-                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-blocked> Blocked only</label>
-                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-apply-eligible> Apply eligible only</label>
+                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-generated> Translation results only</label>
+                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-blocked> Needs review only</label>
+                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-apply-eligible> Ready to prepare only</label>
                 <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-needs-mapping> Needs mapping only</label>
               </div>
               <div class="tw-editor-table-wrap">
@@ -2183,7 +2429,7 @@
                       <th>Source value</th>
                       <th>Existing translation</th>
                       <th>Outdated</th>
-                      <th>Generated draft</th>
+                      <th>Translation result</th>
                       <th>Status</th>
                       <th>Write eligibility</th>
                       <th>Block reason</th>
@@ -2241,9 +2487,10 @@
               {% if translation_background_job.review_rows_truncated %}
                 <p>Review rows are capped at {{ translation_background_job.review_row_count }} rows in this page.</p>
               {% endif %}
-              </form>
+                </form>
+              </details>
             {% else %}
-              <p>No row-level draft review data was recorded in the local report.</p>
+              <p>No row-level translation result data was recorded in the local report.</p>
             {% endif %}
             {% if translation_background_job.errors %}
               <h3>Sanitized errors</h3>
@@ -2264,7 +2511,7 @@
                       <th>Key</th>
                       <th>Source preview</th>
                       <th>Existing preview</th>
-                      <th>Draft preview</th>
+                      <th>Translation preview</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -2291,35 +2538,39 @@
         {% endif %}
       </div>
     {% endif %}
-    <form method="post" action="{% url 'shopify_translation_console' %}">
-      {% csrf_token %}
-      <input type="hidden" name="ui_mode" value="editor">
-      <input type="hidden" name="action" value="generate_multi_locale_drafts">
-      <input type="hidden" name="product_search" value="{{ product_search_text }}">
-      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
-      <input type="hidden" name="target_locale" value="{{ selected_locale }}">
-      <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-      <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-      <div class="tw-checkbox-grid" aria-label="Target languages">
-        {% for locale_option in draft_locale_options %}
-          <label class="tw-checkbox-option">
-            <input type="checkbox" name="draft_target_locales" value="{{ locale_option.value }}"{% if locale_option.checked %} checked{% endif %}>
-            <span>{{ locale_option.label }} ({{ locale_option.value }})</span>
-          </label>
-        {% endfor %}
-      </div>
-      <h3>Include areas</h3>
-      <div class="tw-checkbox-grid" aria-label="Draft coverage areas">
-        {% for group_option in draft_group_options %}
-          <label class="tw-checkbox-option">
-            <input type="checkbox" name="draft_groups" value="{{ group_option.value }}"{% if group_option.checked %} checked{% endif %}>
-            <span>{{ group_option.label }}<br><span class="tw-muted">{{ group_option.description }}</span></span>
-          </label>
-        {% endfor %}
-      </div>
-      <button type="submit" class="button">Generate drafts</button>
-    </form>
-    <p class="tw-muted" style="margin-top: 10px;">Drafts can include product basics, SEO, options, variants, important metafields, and media alt text when Shopify returns customer-facing rows. Technical fields remain view-only.</p>
+    <details class="tw-advanced-details">
+      <summary>Advanced technical details: legacy synchronous translation</summary>
+      <p class="tw-muted">Legacy/debug only. Prefer Translate all in background for the normal workflow.</p>
+      <form method="post" action="{% url 'shopify_translation_console' %}">
+        {% csrf_token %}
+        <input type="hidden" name="ui_mode" value="editor">
+        <input type="hidden" name="action" value="generate_multi_locale_drafts">
+        <input type="hidden" name="product_search" value="{{ product_search_text }}">
+        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+        <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+        <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+        <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+        <div class="tw-checkbox-grid" aria-label="Target languages">
+          {% for locale_option in draft_locale_options %}
+            <label class="tw-checkbox-option">
+              <input type="checkbox" name="draft_target_locales" value="{{ locale_option.value }}"{% if locale_option.checked %} checked{% endif %}>
+              <span>{{ locale_option.label }} ({{ locale_option.value }})</span>
+            </label>
+          {% endfor %}
+        </div>
+        <h3>Include areas</h3>
+        <div class="tw-checkbox-grid" aria-label="Translation coverage areas">
+          {% for group_option in draft_group_options %}
+            <label class="tw-checkbox-option">
+              <input type="checkbox" name="draft_groups" value="{{ group_option.value }}"{% if group_option.checked %} checked{% endif %}>
+              <span>{{ group_option.label }}<br><span class="tw-muted">{{ group_option.description }}</span></span>
+            </label>
+          {% endfor %}
+        </div>
+        <button type="submit" class="button">Run legacy synchronous translation (debug only)</button>
+      </form>
+      <p class="tw-muted" style="margin-top: 10px;">Translation results can include product basics, SEO, options, variants, important metafields, and media alt text when Shopify returns customer-facing rows. Technical fields remain view-only.</p>
+    </details>
 
     {% if translate_all_result %}
       <div class="tw-run-banner is-{{ translate_all_result.status_key }}" data-translate-all-result>
@@ -2341,7 +2592,7 @@
             <div class="tw-run-value">{{ translate_all_result.locales_processed_label }}</div>
           </div>
           <div class="tw-run-item">
-            <div class="tw-run-label">Generated drafts</div>
+            <div class="tw-run-label">Translated items</div>
             <div class="tw-run-value">{{ translate_all_result.generated_drafts_count }}</div>
           </div>
           <div class="tw-run-item">
@@ -2373,7 +2624,7 @@
       {% if translate_all_result.summary.child_resource_discovery_errors %}
         <details class="tw-advanced-details" style="margin: 10px 0;">
           <summary>Read-only discovery warnings ({{ translate_all_result.summary.child_resource_discovery_errors|length }})</summary>
-          <p><strong>Some optional product areas could not be read.</strong> Product basics/SEO drafts may still be available.</p>
+          <p><strong>Some optional product areas could not be read.</strong> Product basics/SEO translation results may still be available.</p>
           <ul>
             {% for item in translate_all_result.summary.child_resource_discovery_errors %}
               <li>
@@ -2392,11 +2643,11 @@
           <tbody>
             <tr><th>Total languages checked</th><td>{{ translate_all_result.summary.total_languages_checked }}</td></tr>
             <tr><th>Total source rows checked</th><td>{{ translate_all_result.summary.total_source_rows_checked }}</td></tr>
-            <tr><th>Missing drafts generated</th><td>{{ translate_all_result.summary.missing_drafts_generated }}</td></tr>
-            <tr><th>Outdated update drafts generated</th><td>{{ translate_all_result.summary.outdated_update_drafts_generated }}</td></tr>
-            <tr><th>Already translated skipped</th><td>{{ translate_all_result.summary.already_translated_skipped }}</td></tr>
-            <tr><th>Not eligible skipped</th><td>{{ translate_all_result.summary.not_eligible_skipped }}</td></tr>
-            <tr><th>Needs review / blocked</th><td>{{ translate_all_result.summary.needs_review_blocked }}</td></tr>
+            <tr><th>New translations</th><td>{{ translate_all_result.summary.missing_drafts_generated }}</td></tr>
+            <tr><th>Updated translations</th><td>{{ translate_all_result.summary.outdated_update_drafts_generated }}</td></tr>
+            <tr><th>Already up to date</th><td>{{ translate_all_result.summary.already_translated_skipped }}</td></tr>
+            <tr><th>Not translated automatically</th><td>{{ translate_all_result.summary.not_eligible_skipped }}</td></tr>
+            <tr><th>Needs review</th><td>{{ translate_all_result.summary.needs_review_blocked }}</td></tr>
           </tbody>
         </table>
       </div>
@@ -2432,12 +2683,12 @@
             <tr>
               <th>Language</th>
               <th>Status</th>
-              <th>Missing drafts</th>
-              <th>Outdated drafts</th>
-              <th>Already translated skipped</th>
-              <th>Not eligible skipped</th>
-              <th>Needs review / blocked</th>
-              <th>Preview</th>
+              <th>New translations</th>
+              <th>Updated translations</th>
+              <th>Already up to date</th>
+              <th>Not translated automatically</th>
+              <th>Needs review</th>
+              <th>Results</th>
             </tr>
           </thead>
           <tbody>
@@ -2450,7 +2701,7 @@
                 <td>{{ row.already_translated_skipped }}</td>
                 <td>{{ row.not_eligible_skipped }}</td>
                 <td>{{ row.needs_review_blocked }}</td>
-                <td><a class="button" href="{{ row.preview_url }}">Open preview</a></td>
+                <td><a class="button" href="{{ row.preview_url }}">View results</a></td>
               </tr>
             {% endfor %}
           </tbody>
@@ -2463,11 +2714,11 @@
             <tr>
               <th>Section</th>
               <th>Source rows</th>
-              <th>Missing drafts</th>
-              <th>Outdated drafts</th>
-              <th>Already translated skipped</th>
-              <th>Not eligible skipped</th>
-              <th>Needs review / blocked</th>
+              <th>New translations</th>
+              <th>Updated translations</th>
+              <th>Already up to date</th>
+              <th>Not translated automatically</th>
+              <th>Needs review</th>
             </tr>
           </thead>
           <tbody>
@@ -2487,7 +2738,7 @@
       </div>
       {% if draft_result.translation_console_detail.all_entries %}
         <details class="tw-advanced-details">
-          <summary>Detailed draft row previews ({{ draft_result.translation_console_detail.all_entry_count }} rows; showing up to {{ draft_result.translation_console_detail.max_rows }})</summary>
+          <summary>Detailed translation row previews ({{ draft_result.translation_console_detail.all_entry_count }} rows; showing up to {{ draft_result.translation_console_detail.max_rows }})</summary>
           <div class="tw-editor-table-wrap">
             <table class="tw-results-table">
               <thead>
@@ -2499,7 +2750,7 @@
                   <th>Original source preview</th>
                   <th>Existing translation preview</th>
                   <th>Outdated</th>
-                  <th>Generated draft preview</th>
+                  <th>Translation result preview</th>
                   <th>Status</th>
                   <th>Reason</th>
                 </tr>
@@ -2545,7 +2796,7 @@
     {% endif %}
 
     {% if multi_locale_draft_result %}
-      <h3>Draft results</h3>
+      <h3>Translation results</h3>
       <p>{{ multi_locale_draft_result.message }}</p>
       {% if multi_locale_draft_result.locale_results %}
         <div class="tw-editor-table-wrap">
@@ -2554,8 +2805,8 @@
               <tr>
                 <th>Language</th>
                 <th>Status</th>
-                <th>Draft fields</th>
-                <th>Blocked drafts</th>
+                <th>Translated fields</th>
+                <th>Needs review</th>
                 <th>Existing fields skipped</th>
                 <th>Preview</th>
               </tr>
@@ -2594,7 +2845,7 @@
                         {% for selected_group_code in multi_locale_draft_result.requested_groups %}
                           <input type="hidden" name="draft_groups" value="{{ selected_group_code }}">
                         {% endfor %}
-                        <button type="submit" class="button">Open preview</button>
+                        <button type="submit" class="button">View results</button>
                       </form>
                     {% else %}
                       <span class="tw-muted">Unavailable</span>
@@ -2612,9 +2863,9 @@
           <tbody>
             <tr><th>Selected languages</th><td>{{ multi_locale_draft_result.requested_locales|join:", " }}</td></tr>
             <tr><th>Selected areas</th><td>{{ multi_locale_draft_result.requested_groups|join:", " }}</td></tr>
-            <tr><th>Draft fields</th><td>{{ multi_locale_draft_result.field_scope_labels|join:", " }}</td></tr>
-            <tr><th>Total draft fields</th><td>{{ multi_locale_draft_result.summary.draft_field_count }}</td></tr>
-            <tr><th>Blocked drafts</th><td>{{ multi_locale_draft_result.summary.blocked_draft_count }}</td></tr>
+            <tr><th>Translated fields</th><td>{{ multi_locale_draft_result.field_scope_labels|join:", " }}</td></tr>
+            <tr><th>Total translated fields</th><td>{{ multi_locale_draft_result.summary.draft_field_count }}</td></tr>
+            <tr><th>Needs review</th><td>{{ multi_locale_draft_result.summary.blocked_draft_count }}</td></tr>
             <tr><th>Product identity mismatches</th><td>{{ multi_locale_draft_result.summary.product_identity_mismatch_count }}</td></tr>
             <tr><th>Existing fields skipped</th><td>{{ multi_locale_draft_result.summary.skipped_existing_field_count }}</td></tr>
             <tr><th>Review notes</th><td>{{ multi_locale_draft_result.summary.blocking_conditions|join:", " }}</td></tr>
@@ -2717,7 +2968,7 @@
                         <span class="tw-status-badge">{{ row.target_value_source_label }}</span>
                       {% endif %}
                       {% for badge in row.status_badge_labels %}
-                        <span class="tw-status-badge{% if badge == 'Blocked draft' or badge == 'Possible wrong product' or badge == 'Future write blocked' or badge == 'Not eligible' %} is-blocked{% endif %}">{{ badge }}</span>
+                        <span class="tw-status-badge{% if badge == 'Needs review' or badge == 'Possible wrong product' or badge == 'Future write blocked' or badge == 'Not eligible' %} is-blocked{% endif %}">{{ badge }}</span>
                       {% endfor %}
                     </div>
                   {% endif %}
@@ -2737,7 +2988,7 @@
                       {% if row.char_limit %}<span>Recommended limit {{ row.char_limit }}</span>{% endif %}
                     </div>
                     {% if row.validation_status %}<div class="tw-resource-key">Validation: {{ row.validation_status }}</div>{% endif %}
-                    {% if row.draft_eligible == False %}<div class="tw-resource-key">Draft eligibility: {{ row.draft_ineligible_reason }}</div>{% endif %}
+                    {% if row.draft_eligible == False %}<div class="tw-resource-key">Translation eligibility: {{ row.draft_ineligible_reason }}</div>{% endif %}
                     {% if row.future_write_needs_mapping %}<div class="tw-resource-key">Future write: {{ row.apply_plan_blocked_reason }}</div>{% endif %}
                     {% if row.product_identity_validation_status %}<div class="tw-resource-key">Product identity: {{ row.product_identity_validation_status }}</div>{% endif %}
                     {% if row.validation_reasons %}<div class="tw-resource-key">Review reasons: {{ row.validation_reasons }}</div>{% endif %}
@@ -2768,12 +3019,12 @@
         <input type="hidden" name="target_locale" value="{{ selected_locale }}">
         <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
         <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-        <button type="submit" class="button">Generate draft package dry-run</button>
+        <button type="submit" class="button">Run technical translation package dry-run</button>
         <span class="tw-muted">Creates a dry-run package only; no Shopify write is available here.</span>
       </form>
       <div class="tw-coverage-summary">
         <span class="tw-coverage-pill">Core fields visible: {{ editor_view.field_coverage.core_visible_count }} / {{ editor_view.field_coverage.core_area_count }}</span>
-        <span class="tw-coverage-pill">Draft-supported visible: {{ editor_view.field_coverage.draft_supported_visible_count }} / {{ editor_view.field_coverage.draft_supported_area_count }}</span>
+        <span class="tw-coverage-pill">Translation-supported visible: {{ editor_view.field_coverage.draft_supported_visible_count }} / {{ editor_view.field_coverage.draft_supported_area_count }}</span>
         <span class="tw-coverage-pill">Rows after filter: {{ editor_view.field_coverage.visible_row_count }}</span>
         <span class="tw-coverage-pill">Review-only areas: {{ editor_view.field_coverage.review_only_or_unsupported_count }}</span>
       </div>
@@ -2787,7 +3038,7 @@
               <th>Area</th>
               <th>Coverage</th>
               <th>Current filter</th>
-              <th>Draft support</th>
+              <th>Translation support</th>
               <th>Source keys</th>
               <th>Notes</th>
             </tr>
@@ -2965,7 +3216,7 @@
         <input type="hidden" name="product_search" value="{{ product_search_text }}">
         <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
         <input type="hidden" name="locale" value="{{ selected_locale }}">
-        <button type="submit" class="button">Generate draft package dry-run</button>
+        <button type="submit" class="button">Run technical translation package dry-run</button>
       </form>
       <form method="post">
         {% csrf_token %}
@@ -3351,8 +3602,8 @@
   {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Generate missing translation drafts</h2>
-    <p><strong>Draft only / No Shopify write.</strong> This action checks existing translations, skips current translations, marks outdated translations for review, and generates local draft text only for missing entries.</p>
+    <h2>Create technical translation package</h2>
+    <p><strong>Preview only / No Shopify write.</strong> This action checks existing translations, skips current translations, marks outdated translations for review, and generates local translation text only for missing entries.</p>
     <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       {% csrf_token %}
       <input type="hidden" name="action" value="generate_missing_translation_drafts">
@@ -3368,7 +3619,7 @@
           {% endfor %}
         </select>
       </div>
-      <button type="submit" class="button">Generate draft package (Draft only / No Shopify write)</button>
+      <button type="submit" class="button">Create technical translation package (Preview only / No Shopify write)</button>
     </form>
     <p>Fixed target locales: {{ draft_target_locales|join:", " }}. Fixed fields: {{ draft_fields|join:", " }}.</p>
   </div>
@@ -3376,7 +3627,7 @@
   {% if draft_result and not translate_all_result %}
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
       <h2>Generate apply plan</h2>
-      <p><strong>Apply plan only / No Shopify write.</strong> This action rebuilds the trusted backend draft package, includes only eligible entries, and writes a local apply plan report for manual review.</p>
+      <p><strong>Apply plan only / No Shopify write.</strong> This action rebuilds the trusted backend translation package, includes only eligible entries, and writes a local apply plan report for manual review.</p>
       <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
         {% csrf_token %}
         <input type="hidden" name="action" value="generate_translation_apply_plan">
@@ -3492,7 +3743,7 @@
                 <td>{{ entry.validation_status }}</td>
                 <td>
                   {{ entry.product_identity_validation_status }}
-                  {% if entry.draft_blocked %}<br><span class="tw-status-badge is-blocked">Blocked draft</span>{% endif %}
+                  {% if entry.draft_blocked %}<br><span class="tw-status-badge is-blocked">Needs review</span>{% endif %}
                 </td>
                 <td>{{ entry.suspicious_terms }}</td>
                 <td>
@@ -3623,12 +3874,12 @@
           <p>Candidate entries truncated to the first {{ apply_plan_preview_result.max_rows }} rows.</p>
         {% endif %}
       {% else %}
-        <p>No candidate entries. Generate draft dry-run first, or review blocked entries below.</p>
+        <p>No candidate entries. Run the technical translation dry-run first, or review blocked entries below.</p>
       {% endif %}
     </div>
 
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
-      <h2>Blocked / needs review entries table</h2>
+      <h2>Needs review entries table</h2>
       <p><strong>Preview only / No Shopify write.</strong> These entries are excluded from the preview candidate set.</p>
       {% if apply_plan_preview_result.blocked_entries %}
         <table>
@@ -3664,7 +3915,7 @@
           </tbody>
         </table>
         {% if apply_plan_preview_result.blocked_entries_truncated %}
-          <p>Blocked entries truncated to the first {{ apply_plan_preview_result.max_rows }} rows.</p>
+          <p>Needs review entries truncated to the first {{ apply_plan_preview_result.max_rows }} rows.</p>
         {% endif %}
       {% else %}
         <p>No blocked or needs-review entries.</p>
@@ -3771,7 +4022,7 @@
   {% if final_review_result %}
     <div class="module" style="padding: 12px; margin-bottom: 16px;">
       <h2>Generate real write readiness package</h2>
-      <p><strong>Readiness package only / No Shopify write.</strong> This action rebuilds the trusted backend draft package, apply plan, and final review package, then checks whether the entries are ready for a future manually acknowledged write phase.</p>
+      <p><strong>Readiness package only / No Shopify write.</strong> This action rebuilds the trusted backend translation package, apply plan, and final review package, then checks whether the entries are ready for a future manually acknowledged write phase.</p>
       <p><strong>This is a no-write readiness package. Real Shopify writes remain disabled and require a separate future phase plus explicit manual ACK.</strong></p>
       <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
         {% csrf_token %}
@@ -3890,7 +4141,7 @@
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Generate locked real write execution plan</h2>
-    <p><strong>Locked execution plan only / No Shopify write.</strong> This action rebuilds the trusted backend draft package, apply plan, final review, and readiness package, then creates a locked plan for a future separate write phase.</p>
+    <p><strong>Locked execution plan only / No Shopify write.</strong> This action rebuilds the trusted backend translation package, apply plan, final review, and readiness package, then creates a locked plan for a future separate write phase.</p>
     <p><strong>This is a locked execution plan only. It does not write to Shopify. Real writes require a separate future phase and explicit manual ACK.</strong></p>
     <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       {% csrf_token %}
@@ -3913,7 +4164,7 @@
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Generate locked executor shell report</h2>
-    <p><strong>Locked executor shell only / No Shopify write.</strong> This action rebuilds the trusted backend draft package, apply plan, final review, readiness package, and locked execution plan, then creates a locked executor shell report.</p>
+    <p><strong>Locked executor shell only / No Shopify write.</strong> This action rebuilds the trusted backend translation package, apply plan, final review, readiness package, and locked execution plan, then creates a locked executor shell report.</p>
     <p><strong>This is a locked executor shell only. It cannot write to Shopify. Any ACK entered here is recorded only as a preview and is not effective in this phase.</strong></p>
     <form method="post" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       {% csrf_token %}
@@ -4630,6 +4881,34 @@
         return status === "pending" || status === "running";
       }
 
+      function shouldShowResults(status) {
+        return status === "completed" || status === "partial";
+      }
+
+      function refreshForResultsOnce(status, resultCount) {
+        if (!shouldShowResults(status) || numberOrZero(resultCount) <= 0) {
+          return;
+        }
+        if (document.querySelector("[data-translation-results-section]")) {
+          return;
+        }
+        if (!jobId || !window.sessionStorage) {
+          return;
+        }
+        var key = "translation-workspace-results-reloaded:" + jobId + ":" + status;
+        try {
+          if (window.sessionStorage.getItem(key)) {
+            return;
+          }
+          window.sessionStorage.setItem(key, "1");
+        } catch (error) {
+          return;
+        }
+        window.setTimeout(function () {
+          window.location.reload();
+        }, 500);
+      }
+
       function setClassWithStatus(element, baseClass, statusKey) {
         if (element) {
           element.className = baseClass + " is-" + safeStatusKey(statusKey);
@@ -4767,7 +5046,7 @@
         }
         panel.setAttribute("data-job-initial-status", status);
         setClassWithStatus(panel, "tw-run-banner", statusKey);
-        setText("[data-job-status-message]", data.status_message || "No background draft job has been recorded for this product.");
+        setText("[data-job-status-message]", data.status_message || "No background translation has been recorded for this product.");
         var badge = panel.querySelector("[data-job-status-badge]");
         if (badge) {
           setClassWithStatus(badge, "tw-status-badge", statusKey);
@@ -4798,6 +5077,7 @@
           schedulePoll();
         } else {
           stopPoll();
+          refreshForResultsOnce(status, data.translation_result_count);
         }
       }
 
