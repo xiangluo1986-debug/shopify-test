@@ -54,6 +54,9 @@ from .translation_console import (
 from .translation_apply_plan import (
     APPLY_PLAN_HTML_PATH,
     APPLY_PLAN_JSON_PATH,
+    SAFE_WRITE_READINESS_ACTION_NAME,
+    build_translation_workspace_safe_write_readiness_package,
+    build_translation_workspace_safe_write_readiness_state,
     build_selected_product_translation_apply_plan,
 )
 from .translation_drafts import (
@@ -947,6 +950,7 @@ def translation_console(request):
     post_action = (request.POST.get("action") or "").strip() if request.method == "POST" else ""
     is_refresh_status_post = post_action == "refresh_status"
     is_translation_job_refresh_post = post_action == "refresh_translation_job_status"
+    is_safe_write_readiness_package_post = post_action == SAFE_WRITE_READINESS_ACTION_NAME
     is_locked_package_preview_post = post_action in {
         "generate_locked_package_dry_run_placeholder",
         "generate_locked_package_dry_run_preview",
@@ -954,7 +958,9 @@ def translation_console(request):
     }
     is_locked_package_report_post = post_action == "generate_locked_package_dry_run_report"
     is_status_only_safe_action_post = (
-        is_refresh_status_post or is_translation_job_refresh_post
+        is_refresh_status_post
+        or is_translation_job_refresh_post
+        or is_safe_write_readiness_package_post
     )
     is_multi_locale_draft_post = post_action == "generate_multi_locale_drafts"
     is_translate_all_post = post_action == TRANSLATE_ALL_ACTION_NAME
@@ -985,6 +991,7 @@ def translation_console(request):
         or is_locked_executor_post
         or is_real_write_executor_post
         or is_real_write_manual_action_package_post
+        or is_safe_write_readiness_package_post
         or is_status_only_safe_action_post
         or is_locked_package_preview_post
     )
@@ -1147,6 +1154,9 @@ def translation_console(request):
     safe_action_result = None
     apply_plan_preview_result = None
     locked_package_report_result = None
+    safe_write_readiness_state = {}
+    safe_write_readiness_result = None
+    safe_write_readiness_error_message = ""
     workflow_product_id = (
         selected_product_gid
         if selected_product_gid.startswith("gid://shopify/Product/")
@@ -1630,6 +1640,15 @@ def translation_console(request):
     translation_background_job = load_translation_workspace_background_job_status(
         translation_job_product_id
     )
+    safe_write_readiness_state = build_translation_workspace_safe_write_readiness_state(
+        translation_background_job,
+        selected_product_gid=translation_job_product_id,
+        selected_locale=locale,
+    )
+    _attach_translation_workspace_safe_write_ui(
+        translation_background_job,
+        safe_write_readiness_state,
+    )
     if is_refresh_status_post:
         safe_action_result = _translation_console_safe_action_result(
             action=post_action,
@@ -1656,6 +1675,53 @@ def translation_console(request):
             summary=_translation_workspace_job_safe_summary(
                 translation_background_job
             ),
+        )
+    elif is_safe_write_readiness_package_post:
+        selected_entry_ids = request.POST.getlist("safe_write_entry_ids")
+        safe_write_readiness_result = (
+            build_translation_workspace_safe_write_readiness_package(
+                translation_background_job,
+                selected_product_gid=translation_job_product_id,
+                selected_locale=locale,
+                selected_entry_ids=selected_entry_ids,
+            )
+        )
+        if safe_write_readiness_result.get("blocking_conditions"):
+            safe_write_readiness_error_message = (
+                "Safe write readiness package blocked: "
+                + ", ".join(safe_write_readiness_result.get("blocking_conditions") or [])
+            )
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status=safe_write_readiness_result.get("package_status", ""),
+            message=(
+                "Safe write-readiness package generated locally. No Shopify write performed."
+                if safe_write_readiness_result.get("package_status")
+                == "write_readiness_ready"
+                else "Safe write-readiness package stayed no-write and is blocked for review."
+            ),
+            summary={
+                "product_gid": safe_write_readiness_result.get("product_gid", ""),
+                "locale": safe_write_readiness_result.get("locale", ""),
+                "selected_entry_count": safe_write_readiness_result.get(
+                    "selected_entry_count", 0
+                ),
+                "max_entry_count": safe_write_readiness_result.get(
+                    "max_entry_count", 3
+                ),
+                "json_report_path": safe_write_readiness_result.get(
+                    "json_report_path", ""
+                ),
+                "html_report_path": safe_write_readiness_result.get(
+                    "html_report_path", ""
+                ),
+                "blocking_conditions": safe_write_readiness_result.get(
+                    "blocking_conditions", []
+                ),
+                "shopify_write_performed": False,
+                "mutation_performed": False,
+                "translations_register_called": False,
+            },
         )
     elif is_locked_package_preview_post and safe_action_result is None:
         apply_plan_preview_result = _empty_apply_plan_preview_result(
@@ -1821,6 +1887,9 @@ def translation_console(request):
         locale=locale,
         supported_locales=SUPPORTED_TRANSLATION_LOCALES,
     )
+    safe_write_readiness_display = (
+        safe_write_readiness_result or safe_write_readiness_state
+    )
 
     return render(
         request,
@@ -1882,6 +1951,10 @@ def translation_console(request):
             "real_write_executor_error_message": real_write_executor_error_message,
             "manual_action_package_result": manual_action_package_result,
             "manual_action_package_error_message": manual_action_package_error_message,
+            "safe_write_readiness_state": safe_write_readiness_state,
+            "safe_write_readiness_result": safe_write_readiness_result,
+            "safe_write_readiness_display": safe_write_readiness_display,
+            "safe_write_readiness_error_message": safe_write_readiness_error_message,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
             "draft_fields": TRANSLATION_DRAFT_FIELDS,
             "draft_json_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
@@ -3757,6 +3830,35 @@ def _translation_workspace_attach_report_detail_view(view: dict):
     )
 
 
+def _attach_translation_workspace_safe_write_ui(
+    translation_background_job: dict,
+    safe_write_readiness_state: dict,
+):
+    if not isinstance(translation_background_job, dict):
+        return
+    entries_by_id = {
+        entry.get("entry_id"): entry
+        for entry in (
+            list((safe_write_readiness_state or {}).get("eligible_entries") or [])
+            + list((safe_write_readiness_state or {}).get("blocked_entries") or [])
+        )
+        if entry.get("entry_id")
+    }
+    for row in translation_background_job.get("review_rows") or []:
+        entry_id = row.get("safe_write_entry_id") or row.get("entry_id")
+        entry = entries_by_id.get(entry_id)
+        if not entry:
+            row["safe_write_entry_id"] = ""
+            row["safe_write_selectable"] = False
+            row["safe_write_eligibility_status"] = "not_in_selected_locale"
+            row["safe_write_block_reason"] = "not_in_selected_locale"
+            continue
+        row["safe_write_entry_id"] = entry.get("entry_id", "")
+        row["safe_write_selectable"] = bool(entry.get("selectable"))
+        row["safe_write_eligibility_status"] = entry.get("eligibility_status", "")
+        row["safe_write_block_reason"] = entry.get("blocked_reason", "")
+
+
 def _translation_workspace_report_detail_summary(status: dict):
     counts = status.get("counts") or {}
     return {
@@ -3806,10 +3908,21 @@ def _translation_workspace_job_review_rows(status: dict):
 def _translation_workspace_job_review_row(row: dict):
     group_key = _translation_workspace_review_group_key(row)
     field = str(row.get("field") or row.get("key") or "").strip()
+    resource_key = str(row.get("key") or row.get("resource_key") or field).strip()
+    locale = str(row.get("locale") or row.get("language") or "").strip()
+    resource_id = str(row.get("resource_id") or "").strip()
+    digest = str(row.get("source_digest") or row.get("digest") or "").strip()
+    safe_write_entry_id = _translation_workspace_safe_write_entry_id(
+        resource_id,
+        field,
+        locale,
+        digest,
+    )
     has_generated_draft = bool(
         row.get("has_generated_draft")
         or str(row.get("proposed_translation_display") or "").strip()
         or str(row.get("proposed_translation_preview") or "").strip()
+        or str(row.get("proposed_translation") or "").strip()
     )
     needs_mapping = bool(
         row.get("future_write_needs_mapping")
@@ -3863,26 +3976,60 @@ def _translation_workspace_job_review_row(row: dict):
     )
     return {
         "language": row.get("language") or row.get("locale", ""),
-        "locale": row.get("locale") or row.get("language", ""),
+        "locale": locale,
         "group_key": group_key,
+        "resource_group": row.get("resource_group") or group_key,
         "group_label": _translation_workspace_group_label(group_key),
-        "resource_id": row.get("resource_id", ""),
-        "key": row.get("key") or row.get("resource_key") or field,
+        "resource_id": resource_id,
+        "field": field,
+        "key": resource_key,
+        "source_key": row.get("source_key") or resource_key,
+        "resource_key": resource_key,
+        "digest": digest,
+        "source_digest": digest,
+        "entry_id": safe_write_entry_id,
+        "safe_write_entry_id": safe_write_entry_id,
         "context_label": row.get("context_label", ""),
+        "source_value": row.get("source_value") or row.get("source_value_display") or "",
         "source_value_summary": source_fields["summary"],
         "source_value_display": source_fields["display"],
         "source_value_is_long": source_fields["is_long"],
         "source_value_truncated": source_fields["truncated"],
+        "existing_translation_value": row.get("existing_translation_value")
+        or row.get("existing_translation")
+        or row.get("existing_translation_display")
+        or "",
+        "existing_translation_present": row.get(
+            "current_translation_present",
+            row.get("existing_translation_present"),
+        ),
+        "current_translation_present": row.get(
+            "current_translation_present",
+            row.get("existing_translation_present"),
+        ),
+        "existing_translation_outdated": row.get(
+            "existing_translation_outdated",
+            row.get("outdated"),
+        ),
         "existing_translation_summary": existing_fields["summary"],
         "existing_translation_display": existing_fields["display"],
         "existing_translation_is_long": existing_fields["is_long"],
         "existing_translation_truncated": existing_fields["truncated"],
         "outdated": row.get("outdated"),
+        "proposed_translation": row.get("proposed_translation")
+        or row.get("proposed_translation_display")
+        or "",
         "generated_draft_summary": draft_fields["summary"],
         "generated_draft_display": draft_fields["display"],
         "generated_draft_is_long": draft_fields["is_long"],
         "generated_draft_truncated": draft_fields["truncated"],
         "status": row.get("status", ""),
+        "validation_status": row.get("validation_status", ""),
+        "seo_validation_status": row.get("seo_validation_status")
+        or row.get("seo_status", ""),
+        "seo_warning": row.get("seo_warning", ""),
+        "draft_blocked": bool(row.get("draft_blocked")),
+        "product_identity_mismatch": bool(row.get("product_identity_mismatch")),
         "write_eligibility": write_eligibility,
         "block_reason": block_reason,
         "reason": row.get("reason", ""),
@@ -4137,6 +4284,23 @@ def _translation_workspace_group_status_row(status: dict, group_key: str):
 
 def _translation_workspace_bool_flag(value):
     return "1" if value else "0"
+
+
+def _translation_workspace_safe_write_entry_id(
+    resource_id: str,
+    field: str,
+    locale: str,
+    digest: str,
+):
+    raw = "|".join(
+        [
+            str(resource_id or ""),
+            str(field or ""),
+            str(locale or ""),
+            str(digest or ""),
+        ]
+    )
+    return "swr_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:18]
 
 
 def _translation_workspace_title_status(value):
@@ -6878,6 +7042,8 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "key": entry.get("source_key") or entry.get("field", ""),
         "resource_key": entry.get("source_key") or entry.get("field", ""),
         "resource_id": entry.get("resource_id", ""),
+        "source_digest": entry.get("source_digest", ""),
+        "digest": entry.get("source_digest", ""),
         "resource_group": entry.get("resource_group", ""),
         "context_label": entry.get("context_label", ""),
         "status": entry.get("row_status") or entry.get("status") or "",
@@ -6885,10 +7051,12 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "has_generated_draft": bool(str(entry.get("draft_value") or "").strip()),
         "write_eligibility": _translation_workspace_entry_write_eligibility(entry),
         "write_eligibility_key": _translation_workspace_entry_write_eligibility_key(entry),
+        "source_value": entry.get("source_value", ""),
         "source_value_preview": _preview_text(entry.get("source_value")),
         **_translation_workspace_review_text_fields(
             "source_value", entry.get("source_value"), entry.get("field", "")
         ),
+        "proposed_translation": entry.get("draft_value", ""),
         "proposed_translation_preview": _preview_text(entry.get("draft_value")),
         **_translation_workspace_review_text_fields(
             "proposed_translation", entry.get("draft_value"), entry.get("field", "")
@@ -6905,6 +7073,8 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "product_identity_mismatch": bool(entry.get("product_identity_mismatch")),
         "draft_blocked": bool(entry.get("draft_blocked")),
         "seo_validation_status": entry.get("seo_validation_status", ""),
+        "seo_notes": seo_notes,
+        "quality_notes": quality_notes,
         "seo_warning": ", ".join(seo_notes),
         "eligible_for_apply_plan": bool(entry.get("eligible_for_apply_plan")),
         "future_write_needs_mapping": bool(entry.get("future_write_needs_mapping")),
@@ -6915,6 +7085,10 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "skip_reason": entry.get("skip_reason", ""),
         "current_translation_present": bool(entry.get("existing_translation_present")),
         "outdated": entry.get("existing_translation_outdated"),
+        "existing_translation_outdated": entry.get("existing_translation_outdated"),
+        "existing_translation_value": entry.get("existing_translation_value")
+        or entry.get("translation_value")
+        or "",
         "existing_translation_preview": _preview_text(
             entry.get("existing_translation_value") or entry.get("translation_value")
         ),

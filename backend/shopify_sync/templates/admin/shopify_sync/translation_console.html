@@ -2017,6 +2017,40 @@
                 <tr><th>translations_register_called</th><td>{{ translation_background_job.apply_readiness_summary.translations_register_called }}</td></tr>
               </tbody>
             </table>
+            <h3>Safe write readiness</h3>
+            <p><strong>This package does not write Shopify.</strong> It only prepares a locked review for future ACK.</p>
+            <table class="tw-results-table">
+              <tbody>
+                <tr><th>Selected product</th><td>{{ safe_write_readiness_display.product_title }}</td></tr>
+                <tr><th>Selected product gid</th><td>{{ safe_write_readiness_display.product_gid }}</td></tr>
+                <tr><th>Selected locale</th><td>{{ safe_write_readiness_display.locale }}</td></tr>
+                <tr><th>Eligible entries count</th><td>{{ safe_write_readiness_display.eligible_entries_count }}</td></tr>
+                <tr><th>Blocked entries count</th><td>{{ safe_write_readiness_display.blocked_entries_count }}</td></tr>
+                <tr><th>Selected entries count</th><td>{{ safe_write_readiness_display.selected_entry_count }}</td></tr>
+                <tr><th>Max entry count</th><td>{{ safe_write_readiness_display.max_entry_count }}</td></tr>
+                <tr><th>Package status</th><td>{{ safe_write_readiness_display.package_status }}</td></tr>
+                <tr><th>JSON report path</th><td>{{ safe_write_readiness_display.json_report_path }}</td></tr>
+                <tr><th>HTML report path</th><td>{{ safe_write_readiness_display.html_report_path }}</td></tr>
+                <tr><th>blocking_conditions</th><td>{{ safe_write_readiness_display.blocking_conditions|join:", " }}</td></tr>
+                <tr><th>shopify_read_only</th><td>{{ safe_write_readiness_display.shopify_read_only }}</td></tr>
+                <tr><th>shopify_write_performed</th><td>{{ safe_write_readiness_display.shopify_write_performed }}</td></tr>
+                <tr><th>mutation_performed</th><td>{{ safe_write_readiness_display.mutation_performed }}</td></tr>
+                <tr><th>translations_register_called</th><td>{{ safe_write_readiness_display.translations_register_called }}</td></tr>
+              </tbody>
+            </table>
+            {% if safe_write_readiness_display.blocked_entries_summary %}
+              <h4>Safe write blocked summary</h4>
+              <table class="tw-results-table">
+                <thead>
+                  <tr><th>Reason</th><th>Count</th></tr>
+                </thead>
+                <tbody>
+                  {% for item in safe_write_readiness_display.blocked_entries_summary %}
+                    <tr><td>{{ item.reason }}</td><td>{{ item.count }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
             <h3>Blocked and skipped reasons</h3>
             {% if translation_background_job.blocked_reason_summary %}
               <div class="tw-editor-table-wrap">
@@ -2081,6 +2115,32 @@
             </div>
             {% if translation_background_job.review_rows %}
               <h3>Draft review table</h3>
+              <form method="post" action="{% url 'shopify_translation_console' %}">
+                {% csrf_token %}
+                <input type="hidden" name="ui_mode" value="editor">
+                <input type="hidden" name="action" value="prepare_translation_safe_write_readiness_package">
+                <input type="hidden" name="product_search" value="{{ product_search_text }}">
+                <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+                <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+                <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+                <div class="tw-job-actions" style="margin-bottom: 12px;">
+                  <div>
+                    <label for="id_safe_write_readiness_locale">Safe package locale</label><br>
+                    <select id="id_safe_write_readiness_locale" name="target_locale">
+                      {% if safe_write_readiness_state.locale_options %}
+                        {% for option in safe_write_readiness_state.locale_options %}
+                          <option value="{{ option.value }}"{% if option.value == safe_write_readiness_state.locale %} selected{% endif %}>{{ option.label }} ({{ option.value }})</option>
+                        {% endfor %}
+                      {% else %}
+                        <option value="{{ selected_locale }}">{{ selected_locale }}</option>
+                      {% endif %}
+                    </select>
+                  </div>
+                  {% if safe_write_readiness_state.can_prepare %}
+                    <button type="submit" class="button">Prepare safe write package</button>
+                  {% endif %}
+                  <span class="tw-muted">Select 1 to 3 enabled entries. Disabled rows stay visible with their block reason.</span>
+                </div>
               <div class="tw-report-filters" data-report-filters>
                 <div>
                   <label for="tw-report-language-filter">Language</label>
@@ -2109,6 +2169,7 @@
                 <table class="tw-results-table" data-report-review-table>
                   <thead>
                     <tr>
+                      <th>Safe package</th>
                       <th>Language</th>
                       <th>Group</th>
                       <th>Resource ID</th>
@@ -2126,6 +2187,14 @@
                   <tbody>
                     {% for row in translation_background_job.review_rows %}
                       <tr class="tw-report-row" data-report-review-row data-language="{{ row.language }}" data-group="{{ row.group_key }}" data-generated="{{ row.has_generated_draft_flag }}" data-blocked="{{ row.is_blocked_flag }}" data-apply-eligible="{{ row.apply_eligible_flag }}" data-needs-mapping="{{ row.needs_mapping_flag }}">
+                        <td>
+                          {% if row.safe_write_selectable %}
+                            <input type="checkbox" name="safe_write_entry_ids" value="{{ row.safe_write_entry_id }}">
+                          {% else %}
+                            <input type="checkbox" disabled>
+                            <div class="tw-muted">{{ row.safe_write_block_reason }}</div>
+                          {% endif %}
+                        </td>
                         <td>{{ row.language }}</td>
                         <td>{{ row.group_label }}</td>
                         <td style="word-break: break-all;">{{ row.resource_id }}</td>
@@ -2159,7 +2228,7 @@
                       </tr>
                     {% endfor %}
                     <tr class="tw-report-empty" data-report-filter-empty hidden>
-                      <td colspan="12">No rows match the selected filters.</td>
+                      <td colspan="13">No rows match the selected filters.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -2167,6 +2236,7 @@
               {% if translation_background_job.review_rows_truncated %}
                 <p>Review rows are capped at {{ translation_background_job.review_row_count }} rows in this page.</p>
               {% endif %}
+              </form>
             {% else %}
               <p>No row-level draft review data was recorded in the local report.</p>
             {% endif %}
@@ -3203,6 +3273,9 @@
   {% endif %}
   {% if manual_action_package_error_message %}
     <p class="errornote">{{ manual_action_package_error_message }}</p>
+  {% endif %}
+  {% if safe_write_readiness_error_message %}
+    <p class="errornote">{{ safe_write_readiness_error_message }}</p>
   {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
