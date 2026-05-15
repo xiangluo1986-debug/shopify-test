@@ -69,6 +69,7 @@ python remote_approval_runner.py --task shopify_review_request_tag_discovery --m
 python remote_approval_runner.py --task shopify_review_request_trustpilot_automation_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_locked_send_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_auto_queue_refresh --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_trustpilot_locked_gmail_send_gate --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -113,6 +114,26 @@ Trustpilot/Kudosi/Ali Reviews APIs, create tracking redirects, or generate
 tracking tokens. Its next-step output is limited to `wait_no_candidate`,
 `prepare_locked_send_package`, `manual_review_required_multiple_candidates`, or
 `blocked_safety_issue`.
+
+## Review Request Trustpilot Locked Gmail Send Gate
+
+`shopify_review_request_trustpilot_locked_gmail_send_gate` is a Phase 5.10
+dry-run gate report. It reads the latest Trustpilot auto queue refresh, locked
+send readiness package, automation dry-run, and optional history ledger audit
+reports, then decides whether a future Gmail send could be considered after a
+separate locked ACK.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_locked_gmail_send_gate.json
+logs/shopify_review_request_trustpilot_locked_gmail_send_gate.html
+```
+
+The gate never calls Gmail APIs, creates or updates drafts, sends email, writes
+Shopify tags, calls Shopify mutations, calls Trustpilot/Kudosi/Ali Reviews APIs,
+or creates tracking tokens. Current send permission remains false even when the
+gate is ready for a future ACK.
 
 ## Interrupt Flag
 

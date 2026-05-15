@@ -154,6 +154,12 @@ REPORT_DEFINITIONS = (
         ("refresh_status", "report_status", "status"),
     ),
     (
+        "trustpilot_locked_gmail_send_gate",
+        "Trustpilot locked Gmail send gate",
+        "shopify_review_request_trustpilot_locked_gmail_send_gate.json",
+        ("gate_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -374,6 +380,10 @@ def build_review_request_workbench_context(params=None):
         reports.get("trustpilot_auto_queue_refresh", {}),
         trustpilot_send_readiness,
     )
+    trustpilot_gmail_send_gate = _trustpilot_gmail_send_gate_status(
+        reports.get("trustpilot_locked_gmail_send_gate", {}),
+        trustpilot_auto_refresh,
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -390,6 +400,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_automation_status=trustpilot_automation_status,
         trustpilot_send_readiness=trustpilot_send_readiness,
         trustpilot_auto_refresh=trustpilot_auto_refresh,
+        trustpilot_gmail_send_gate=trustpilot_gmail_send_gate,
     )
 
     return {
@@ -443,6 +454,7 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_automation_status": trustpilot_automation_status,
             "trustpilot_send_readiness": trustpilot_send_readiness,
             "trustpilot_auto_refresh": trustpilot_auto_refresh,
+            "trustpilot_gmail_send_gate": trustpilot_gmail_send_gate,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -2303,6 +2315,112 @@ def _trustpilot_auto_refresh_status(report, trustpilot_send_readiness):
     }
 
 
+def _trustpilot_gmail_send_gate_status(report, trustpilot_auto_refresh):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    known_blockers = data.get("known_blockers_summary") if isinstance(data.get("known_blockers_summary"), list) else []
+    blocker_by_order = {
+        _safe_text(item.get("order_name"), max_length=80): item
+        for item in known_blockers
+        if isinstance(item, dict)
+    }
+    order_22620 = blocker_by_order.get("#22620") or {}
+    order_22582 = blocker_by_order.get("#22582") or {}
+    report_loaded = bool(report.get("loaded"))
+    eligible_count = _int_or_zero(
+        data.get("eligible_candidate_count")
+        if report_loaded
+        else trustpilot_auto_refresh.get("eligible_candidate_count")
+    )
+    gate_status = _safe_text(data.get("gate_status") or report.get("status") or "missing", max_length=120)
+    selected_order = _safe_text(data.get("selected_candidate_order_name"), max_length=80)
+    send_allowed_now = data.get("send_allowed_now") is True
+    draft_create_allowed_now = data.get("draft_create_allowed_now") is True
+    gmail_api_allowed_now = data.get("gmail_api_allowed_now") is True
+    current_message = _safe_text(
+        data.get("current_state_message")
+        or (
+            "No email can be sent now. There is no eligible Trustpilot candidate."
+            if eligible_count == 0
+            else "No email can be sent now. Review the locked Gmail send gate."
+        ),
+        max_length=300,
+    )
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_locked_gmail_send_gate.json",
+            max_length=160,
+        ),
+        "html_relative_path": "logs/shopify_review_request_trustpilot_locked_gmail_send_gate.html",
+        "gate_status": gate_status,
+        "message": current_message,
+        "future_ack_message": _safe_text(
+            data.get("future_ack_message")
+            or "Future sending will require a locked ACK and exactly one safe candidate.",
+            max_length=300,
+        ),
+        "send_allowed_now": send_allowed_now,
+        "draft_create_allowed_now": draft_create_allowed_now,
+        "gmail_api_allowed_now": gmail_api_allowed_now,
+        "send_allowed_now_label": "Yes" if send_allowed_now else "No",
+        "draft_create_allowed_now_label": "Yes" if draft_create_allowed_now else "No",
+        "gmail_api_allowed_now_label": "Yes" if gmail_api_allowed_now else "No",
+        "eligible_candidate_count": eligible_count,
+        "selected_candidate_order_name": selected_order,
+        "next_admin_action": _safe_text(
+            data.get("next_admin_action")
+            or trustpilot_auto_refresh.get("next_admin_action")
+            or "Wait until an eligible delivered order with canonical `1: review request` appears and passes all duplicate/risk checks.",
+            max_length=500,
+        ),
+        "required_ack_for_future_real_send": _safe_text(
+            data.get("required_ack_for_future_real_send")
+            or "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_SEND",
+            max_length=180,
+        ),
+        "order_22620_message": _safe_text(
+            order_22620.get("message")
+            or trustpilot_auto_refresh.get("order_22620_message")
+            or "Do not send. Already sent to this customer via #22621.",
+            max_length=300,
+        ),
+        "order_22620_status": _safe_text(
+            order_22620.get("status") or "blocked_existing_trustpilot_invitation_customer_level",
+            max_length=120,
+        ),
+        "order_22582_message": _safe_text(
+            order_22582.get("message")
+            or trustpilot_auto_refresh.get("order_22582_message")
+            or (
+                "Do not send yet. Not delivered, missing `1: review request`, "
+                "related order group #22582/#22581 not ready."
+            ),
+            max_length=300,
+        ),
+        "order_22582_status": _safe_text(
+            order_22582.get("status") or "blocked_candidate_safety_check_failed",
+            max_length=120,
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "source_gate_basis": data.get("source_gate_basis") if isinstance(data.get("source_gate_basis"), dict) else {},
+        "raw_flags": {
+            "send_allowed_now": send_allowed_now,
+            "draft_create_allowed_now": draft_create_allowed_now,
+            "gmail_api_allowed_now": gmail_api_allowed_now,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_draft_created": data.get("gmail_draft_created") is True,
+            "email_sent": data.get("email_sent") is True,
+            "trustpilot_api_call_performed": data.get("trustpilot_api_call_performed") is True,
+            "kudosi_api_call_performed": data.get("kudosi_api_call_performed") is True,
+            "ali_reviews_api_call_performed": data.get("ali_reviews_api_call_performed") is True,
+        },
+    }
+
+
 def _auto_refresh_trigger_label(trigger):
     if trigger == "shopify_order_sync":
         return "Shopify order sync"
@@ -2322,6 +2440,7 @@ def _operating_dashboard(
     trustpilot_automation_status,
     trustpilot_send_readiness,
     trustpilot_auto_refresh,
+    trustpilot_gmail_send_gate,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
@@ -2386,6 +2505,7 @@ def _operating_dashboard(
         "trustpilot_automation": trustpilot_automation_status,
         "trustpilot_send_readiness": trustpilot_send_readiness,
         "trustpilot_auto_refresh": trustpilot_auto_refresh,
+        "trustpilot_gmail_send_gate": trustpilot_gmail_send_gate,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,

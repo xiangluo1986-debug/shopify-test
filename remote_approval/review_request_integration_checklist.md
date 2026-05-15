@@ -535,3 +535,27 @@ Future tracking design note:
   `shopify_review_request_order_sync_auto_refresh_hook_audit`.
 - [x] The next phase can add locked send execute only when a true eligible
   candidate exists and a separate human approval confirms the exact action.
+
+## Phase 5.10 Trustpilot Locked Gmail Send Gate
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_locked_gmail_send_gate`.
+- [x] Generate local JSON/HTML gate reports only:
+  `logs/shopify_review_request_trustpilot_locked_gmail_send_gate.json` and
+  `logs/shopify_review_request_trustpilot_locked_gmail_send_gate.html`.
+- [x] Read the latest Trustpilot auto queue refresh, locked send readiness
+  package, automation dry-run, and optional history ledger audit reports.
+- [x] Current gate blocks because no eligible Trustpilot candidate exists:
+  `gate_status=blocked_no_eligible_candidate`.
+- [x] No Gmail API is called.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No email is sent.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] `#22620` remains blocked because the same customer already received
+  Trustpilot via `#22621`.
+- [x] `#22582` remains blocked because it is not delivered, is missing
+  `1: review request`, and related order group `#22582/#22581` is not ready.
+- [x] Future real Trustpilot Gmail send requires exactly one safe eligible
+  candidate and explicit ACK
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_SEND`.

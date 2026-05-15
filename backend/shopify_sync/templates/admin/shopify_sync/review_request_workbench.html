@@ -456,6 +456,79 @@
     </div>
 
     <div class="rrw-section">
+        <h2>Trustpilot Gmail Send Gate</h2>
+        <p class="{% if dashboard.trustpilot_gmail_send_gate.eligible_candidate_count %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_gmail_send_gate.message }}
+        </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_gmail_send_gate.future_ack_message }}</p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gate status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_gate.gate_status }}</div>
+                <div class="rrw-card-note">Locked local report only.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Send allowed now</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_gate.send_allowed_now_label }}</div>
+                <div class="rrw-card-note">This phase never sends email.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gmail API allowed now</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_gate.gmail_api_allowed_now_label }}</div>
+                <div class="rrw-card-note">
+                    Draft create:
+                    {{ dashboard.trustpilot_gmail_send_gate.draft_create_allowed_now_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_send_gate.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected candidate:
+                    {{ dashboard.trustpilot_gmail_send_gate.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">Locked gate review</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_send_gate.next_admin_action }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Required future ACK</div>
+                <div class="rrw-card-value">Required</div>
+                <div class="rrw-card-note"><code>{{ dashboard.trustpilot_gmail_send_gate.required_ack_for_future_real_send }}</code></div>
+            </div>
+        </div>
+        <div class="rrw-note">
+            #22620:
+            {{ dashboard.trustpilot_gmail_send_gate.order_22620_status }}.
+            {{ dashboard.trustpilot_gmail_send_gate.order_22620_message }}
+        </div>
+        <div class="rrw-warning">
+            #22582:
+            {{ dashboard.trustpilot_gmail_send_gate.order_22582_status }}.
+            {{ dashboard.trustpilot_gmail_send_gate.order_22582_message }}
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_gmail_send_gate.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_gmail_send_gate.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_gmail_send_gate.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_gmail_send_gate.html_relative_path }}
+            </p>
+            <p class="rrw-muted">
+                Source basis:
+                {{ dashboard.trustpilot_gmail_send_gate.source_gate_basis.source_key|default:"None" }}
+                {{ dashboard.trustpilot_gmail_send_gate.source_gate_basis.source_status|default:"" }}
+            </p>
+        </details>
+    </div>
+
+    <div class="rrw-section">
         <h2>Automation Pipeline</h2>
         <p class="rrw-current-state">{{ dashboard.current_state_label }}</p>
         <ol class="rrw-pipeline">
