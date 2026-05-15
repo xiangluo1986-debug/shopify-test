@@ -166,9 +166,34 @@
 
     <h1>Review Request Workbench</h1>
     <p class="rrw-muted">
-        Read-only Phase 4.3 daily review view. It reads local synced orders and local review-request reports only.
+        Read-only Phase 5.3 review-request module. It reads local synced orders and local review-request reports only.
         It does not send email, create Gmail drafts, write Shopify tags, call external review APIs, generate tracking tokens, or enable tracking redirects.
     </p>
+
+    <div class="rrw-section">
+        <h2>Overview</h2>
+        <div class="rrw-grid">
+            {% for card in wb.module_overview %}
+                <div class="rrw-card">
+                    <div class="rrw-card-title">{{ card.label }}</div>
+                    <div class="rrw-card-value">{{ card.value }}</div>
+                    <div class="rrw-card-note">{{ card.note }}</div>
+                </div>
+            {% endfor %}
+        </div>
+        <div class="rrw-warning">
+            <strong>Read-only policy:</strong>
+            this module exposes filters, links, and local report evidence only. There are no send, create, delete,
+            Shopify tag-write, API-call, redirect, or tracking-token controls in this phase.
+        </div>
+        {% if wb.history_focus.order_22620.existing_unsent_gmail_draft_should_not_be_sent %}
+            <div class="rrw-warning">
+                <strong>#22620 unsafe draft warning:</strong>
+                the existing unsent Gmail draft must not be sent. #22620 is blocked because the same customer/email
+                already received Trustpilot via {{ wb.history_focus.order_22620.prior_trustpilot_order_name|default:"#22621" }}.
+            </div>
+        {% endif %}
+    </div>
 
     <form class="rrw-filterbar" method="get">
         <div class="rrw-field">
@@ -216,15 +241,15 @@
             </select>
         </div>
         <div class="rrw-field">
-            <label for="rrw-ledger-status">Ledger status</label>
+            <label for="rrw-ledger-status">Status</label>
             <input id="rrw-ledger-status" type="search" name="ledger_status" value="{{ wb.history_filters.ledger_status }}" placeholder="blocked or sent">
         </div>
         <div class="rrw-field">
-            <label for="rrw-order">Ledger order</label>
+            <label for="rrw-order">Order</label>
             <input id="rrw-order" type="search" name="order" value="{{ wb.history_filters.order }}" placeholder="#22620">
         </div>
         <div class="rrw-field">
-            <label for="rrw-ledger-limit">Ledger limit</label>
+            <label for="rrw-ledger-limit">Record limit</label>
             <select id="rrw-ledger-limit" name="ledger_limit">
                 {% for option in wb.history_limit_filter_options %}
                     <option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>
@@ -237,6 +262,7 @@
 
     <p class="rrw-muted">
         Filtered view: queue rows {{ wb.filter_summary.visible_queue_rows }},
+        Trustpilot email records {{ wb.trustpilot_email_records|length }},
         Trustpilot history rows {{ wb.filter_summary.visible_trustpilot_history_rows }},
         blocked rows {{ wb.filter_summary.visible_blocked_rows }},
         report rows {{ wb.filter_summary.visible_report_rows }},
@@ -244,6 +270,7 @@
         row limit {{ wb.filter_summary.limit }}.
     </p>
 
+    <h2>Eligibility Counts</h2>
     <div class="rrw-grid">
         {% for card in wb.summary %}
             <div class="rrw-card">
@@ -285,6 +312,71 @@
                         <br><code>{{ wb.latest_scan.candidate_22582_audit.classification|default:"-" }}</code>
                     </td>
                 </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Trustpilot Email Records</h2>
+        <p class="rrw-muted">
+            One row per relevant Trustpilot/Gmail draft or send-history event reconstructed from local reports.
+            Draft and message identifiers are partial only when evidence is available.
+        </p>
+        <table class="rrw-table">
+            <thead>
+                <tr>
+                    <th>Created / loaded</th>
+                    <th>Order</th>
+                    <th>Masked email</th>
+                    <th>Event</th>
+                    <th>Status</th>
+                    <th>Outcomes</th>
+                    <th>Evidence IDs</th>
+                    <th>Source report</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in wb.trustpilot_email_records %}
+                    <tr>
+                        <td>{{ row.event_time|default:"-" }}</td>
+                        <td>
+                            {{ row.order_name|default:"-" }}
+                            {% if row.prior_trustpilot_order_name %}
+                                <br><span class="rrw-muted">Prior Trustpilot: {{ row.prior_trustpilot_order_name }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.masked_email|default:"-" }}</td>
+                        <td>
+                            <span class="rrw-badge {{ row.badge_class }}">{{ row.event_type }}</span>
+                        </td>
+                        <td>
+                            <code>{{ row.status|default:"-" }}</code>
+                            {% if row.classification %}<br><span class="rrw-muted">{{ row.classification }}</span>{% endif %}
+                            {% if row.blocker_reason %}<br><span class="rrw-muted">{{ row.blocker_reason }}</span>{% endif %}
+                            {% if row.draft_should_not_be_sent %}
+                                <br><span class="rrw-badge rrw-badge-bad">Existing draft should not be sent</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="rrw-pill">draft_created={{ row.gmail_draft_created|yesno:"true,false,unknown" }}</span>
+                            <span class="rrw-pill">email_sent={{ row.email_sent|yesno:"true,false,unknown" }}</span>
+                        </td>
+                        <td>
+                            {% if row.partial_draft_id %}<div>Draft: <code>{{ row.partial_draft_id }}</code></div>{% endif %}
+                            {% if row.partial_message_id %}<div>Message: <code>{{ row.partial_message_id }}</code></div>{% endif %}
+                            {% if not row.partial_draft_id and not row.partial_message_id %}
+                                <span class="rrw-muted">No ID evidence</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ row.source_report_label }}
+                            <br><span class="rrw-muted">{{ row.source_report_path }}</span>
+                            <br><span class="rrw-muted">{{ row.source_section }}</span>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="8" class="rrw-muted">No Trustpilot email records match the current filters.</td></tr>
+                {% endfor %}
             </tbody>
         </table>
     </div>
@@ -479,10 +571,24 @@
     </div>
 
     <div class="rrw-section">
-        <h2>Candidate Scan Queue</h2>
+        <h2>Candidate Queue</h2>
         <p class="rrw-muted">
-            Ready repeat-customer candidates from local scan reports. Delivered / 妥投, exact canonical review-request tag,
+            Ready repeat-customer candidates from local scan reports. Delivered, exact canonical review-request tag,
             merged/related order readiness, duplicate, return, and risk gates must all pass. No send or tag-write actions are available.
+        </p>
+        <p>
+            <span class="rrw-pill">status={{ wb.candidate_queue_status.status }}</span>
+            <span class="rrw-pill">eligible_count={{ wb.candidate_queue_status.eligible_candidate_count }}</span>
+            <span class="rrw-pill">next={{ wb.candidate_queue_status.order_name }}</span>
+            {% if wb.candidate_queue_status.reason %}
+                <span class="rrw-pill">reason={{ wb.candidate_queue_status.reason }}</span>
+            {% endif %}
+        </p>
+        <p class="rrw-muted">
+            Requirements:
+            {% for requirement in wb.candidate_queue_status.requirements %}
+                <span class="rrw-pill">{{ requirement }}</span>
+            {% endfor %}
         </p>
         <table class="rrw-table">
             <thead>
@@ -666,7 +772,28 @@
     </div>
 
     <div class="rrw-section">
-        <h2>Blocked Reasons</h2>
+        <h2>Blocked / Not Eligible Orders</h2>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">#22620 customer-level duplicate</div>
+                <div class="rrw-card-value">{{ wb.history_focus.order_22620.blocked_classification }}</div>
+                <div class="rrw-card-note">
+                    Blocked because the same customer/email already received Trustpilot via
+                    {{ wb.history_focus.order_22620.prior_trustpilot_order_name|default:"#22621" }}.
+                    Existing unsent Gmail draft should not be sent:
+                    {{ wb.history_focus.order_22620.existing_unsent_gmail_draft_should_not_be_sent|yesno:"true,false" }}.
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">#22582 eligibility block</div>
+                <div class="rrw-card-value">{{ wb.history_focus.order_22582.blocked_classification }}</div>
+                <div class="rrw-card-note">
+                    Delivered {{ wb.history_focus.order_22582.delivered_tag_present|yesno:"true,false" }};
+                    canonical review {{ wb.history_focus.order_22582.canonical_review_request_tag_present|yesno:"true,false" }};
+                    related order group #22582/#22581 {{ wb.history_focus.order_22582.merged_or_related_order_guard_status }}.
+                </div>
+            </div>
+        </div>
         <div class="rrw-grid">
             {% for item in wb.blocked_reason_counts %}
                 <div class="rrw-card">
@@ -787,6 +914,18 @@
                 {% empty %}
                     <tr><td colspan="4" class="rrw-muted">No loaded local reports with safety metadata.</td></tr>
                 {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Ali Reviews API Status</h2>
+        <table class="rrw-table">
+            <tbody>
+                <tr><th>Status</th><td><code>{{ wb.ali_reviews_status.status }}</code></td></tr>
+                <tr><th>Vendor API docs needed</th><td>{{ wb.ali_reviews_status.vendor_docs_needed|yesno:"true,false" }}</td></tr>
+                <tr><th>Evidence path</th><td><code>{{ wb.ali_reviews_status.evidence_report_path|default:"-" }}</code></td></tr>
+                <tr><th>Manual fallback policy</th><td>{{ wb.ali_reviews_status.manual_policy }}</td></tr>
             </tbody>
         </table>
     </div>

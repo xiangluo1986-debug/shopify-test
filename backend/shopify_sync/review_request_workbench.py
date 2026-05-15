@@ -236,6 +236,16 @@ SAFETY_FLAGS = (
     "tracking_redirect_enabled",
     "tracking_token_generated",
 )
+TRUSTPILOT_EMAIL_EVENT_TYPES = {
+    "candidate_selected",
+    "candidate_blocked",
+    "duplicate_block",
+    "draft_package",
+    "draft_create_preflight",
+    "draft_created",
+    "send_preflight",
+    "send_execute",
+}
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SECRET_VALUE_RE = re.compile(
@@ -310,9 +320,26 @@ def build_review_request_workbench_context(params=None):
     safety_history = _safety_history(reports)
     local_stats = _local_order_stats()
     blocked_reason_counts = _blocked_reason_counts(blocked_orders)
+    module_overview = _module_overview(
+        latest_scan=latest_scan,
+        candidate_queue=candidate_queue,
+        blocked_orders=blocked_orders,
+        history_ledger=history_ledger,
+    )
+    candidate_queue_status = _candidate_queue_status(
+        latest_scan=latest_scan,
+        candidate_queue=candidate_queue,
+        history_focus=history_ledger["focus"],
+    )
+    trustpilot_email_records = _trustpilot_email_records(
+        history_ledger["all_events"],
+        history_ledger["filters"],
+    )
+    ali_reviews_status = _ali_reviews_status(history_ledger["focus"])
 
     return {
         "review_request_workbench": {
+            "module_overview": module_overview,
             "summary": _summary(
                 latest_scan=latest_scan,
                 candidate_queue=candidate_queue,
@@ -356,6 +383,9 @@ def build_review_request_workbench_context(params=None):
             "safety_history": safety_history,
             "local_stats": local_stats,
             "tracking_design": _tracking_design(),
+            "candidate_queue_status": candidate_queue_status,
+            "trustpilot_email_records": trustpilot_email_records,
+            "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
             "canonical_review_request_tag": CANONICAL_REVIEW_REQUEST_TAG,
             "typo_review_request_tag": TYPO_REVIEW_REQUEST_TAG,
@@ -1285,6 +1315,210 @@ def _safety_history(reports):
     return rows
 
 
+def _module_overview(latest_scan, candidate_queue, blocked_orders, history_ledger):
+    history_summary = history_ledger.get("summary") or {}
+    history_focus = history_ledger.get("focus") or {}
+    source_reports = history_ledger.get("source_reports") or []
+    eligible_count = _int_or_zero(latest_scan.get("eligible_candidate_count")) or len(candidate_queue)
+    next_candidate = _current_next_candidate(latest_scan, candidate_queue, history_focus)
+    blocked_count = len(blocked_orders) or _history_event_count(
+        history_summary,
+        {"candidate_blocked", "duplicate_block"},
+    )
+    ali_status = ((history_focus.get("ali_reviews_api") or {}).get("status")) or "unavailable"
+    last_update = _latest_source_update_time(source_reports) or latest_scan.get("generated_time") or "-"
+    return [
+        {
+            "label": "Total Ledger Events",
+            "value": history_summary.get("total_event_count", 0),
+            "note": "Normalized from local review-request reports.",
+        },
+        {
+            "label": "Eligible Candidates",
+            "value": eligible_count,
+            "note": "Current scan count after delivered, tag, duplicate, and risk gates.",
+        },
+        {
+            "label": "Next Candidate",
+            "value": next_candidate or "None",
+            "note": "No action is available from this read-only workbench.",
+        },
+        {
+            "label": "Blocked / Not Eligible",
+            "value": blocked_count,
+            "note": "Current local report rows or reconstructed blocked ledger events.",
+        },
+        {
+            "label": "Ali Reviews API",
+            "value": ali_status,
+            "note": "Vendor API documentation is required before any API automation.",
+        },
+        {
+            "label": "Last Audit / Update",
+            "value": last_update,
+            "note": "Latest modified local source report loaded by the ledger.",
+        },
+    ]
+
+
+def _candidate_queue_status(latest_scan, candidate_queue, history_focus):
+    next_candidate = _current_next_candidate(latest_scan, candidate_queue, history_focus)
+    eligible_count = _int_or_zero(latest_scan.get("eligible_candidate_count")) or len(candidate_queue)
+    blocked_reason = latest_scan.get("next_candidate_blocked_reason") or ""
+    if not next_candidate and eligible_count == 0:
+        blocked_reason = blocked_reason or "no_eligible_delivered_review_request_candidate"
+    return {
+        "status": "eligible_candidate_available" if next_candidate else "no_eligible_candidate",
+        "order_name": next_candidate or "None",
+        "eligible_candidate_count": eligible_count,
+        "reason": blocked_reason,
+        "requirements": [
+            f"Delivered tag present ({DELIVERED_TAG})",
+            f"Exact canonical review-request tag present ({CANONICAL_REVIEW_REQUEST_TAG})",
+            "Merged or related order group ready",
+            "No duplicate Trustpilot invitation at order or customer level",
+            "No unresolved ticket, refund, return, shipping, dispute, or chargeback risk",
+        ],
+    }
+
+
+def _trustpilot_email_records(events, filters):
+    records = []
+    if filters.get("channel") not in {"all", "trustpilot"}:
+        return records
+    for event in events:
+        if event.get("channel") != "trustpilot":
+            continue
+        if not _is_trustpilot_email_record(event):
+            continue
+        if not _event_matches_trustpilot_record_filters(event, filters):
+            continue
+        records.append(
+            {
+                "event_time": _safe_text(event.get("event_time")) or _safe_text(event.get("loaded_at")),
+                "order_name": _safe_text(event.get("order_name"), max_length=80),
+                "masked_email": mask_email(event.get("masked_email")),
+                "event_type": _safe_text(event.get("event_type")),
+                "status": _safe_text(event.get("status")),
+                "classification": _safe_text(event.get("classification")),
+                "blocker_reason": _safe_text(event.get("blocker_reason")),
+                "gmail_draft_created": event.get("gmail_draft_created"),
+                "email_sent": event.get("email_sent"),
+                "partial_draft_id": _safe_text(event.get("partial_draft_id"), max_length=80),
+                "partial_message_id": _safe_text(event.get("partial_message_id"), max_length=80),
+                "source_report_path": _safe_text(event.get("source_report_path")),
+                "source_report_label": _safe_text(event.get("source_report_label")),
+                "source_section": _safe_text(event.get("source_section")),
+                "draft_should_not_be_sent": bool(event.get("draft_should_not_be_sent")),
+                "prior_trustpilot_order_name": _safe_text(
+                    event.get("prior_trustpilot_order_name"),
+                    max_length=80,
+                ),
+                "badge_class": event.get("badge_class") or "rrw-badge-info",
+            }
+        )
+    return records[: filters.get("ledger_limit", DEFAULT_LIMIT)]
+
+
+def _ali_reviews_status(history_focus):
+    status = (history_focus.get("ali_reviews_api") or {}) if isinstance(history_focus, dict) else {}
+    api_status = status.get("status") or "unavailable"
+    return {
+        "status": api_status,
+        "vendor_docs_needed": api_status == "blocked_missing_vendor_api_documentation",
+        "evidence_report_path": status.get("evidence_report_path") or "",
+        "loaded": bool(status.get("loaded")),
+        "manual_policy": (
+            "Do not manually manage Ali Reviews blocklists or dashboard suppression from this module. "
+            "If API support is unavailable, any manual fallback needs a later explicit approval."
+        ),
+    }
+
+
+def _current_next_candidate(latest_scan, candidate_queue, history_focus):
+    next_candidate = latest_scan.get("selected_order_name") or (
+        candidate_queue[0].get("order_name") if candidate_queue else ""
+    )
+    if next_candidate:
+        return next_candidate
+    focus_candidate = ((history_focus or {}).get("next_candidate") or {}).get("order_name", "")
+    if focus_candidate and focus_candidate != "unavailable":
+        return focus_candidate
+    return ""
+
+
+def _history_event_count(history_summary, event_types):
+    count = 0
+    for row in history_summary.get("by_event_type", []) or []:
+        if row.get("key") in event_types:
+            count += _int_or_zero(row.get("count"))
+    return count
+
+
+def _latest_source_update_time(source_reports):
+    values = [
+        _safe_text(report.get("modified_at") or report.get("timestamp"))
+        for report in source_reports
+        if report.get("modified_at") or report.get("timestamp")
+    ]
+    return max(values) if values else ""
+
+
+def _is_trustpilot_email_record(event):
+    return (
+        event.get("event_type") in TRUSTPILOT_EMAIL_EVENT_TYPES
+        or event.get("email_sent") is not None
+        or event.get("gmail_draft_created") is not None
+        or bool(event.get("partial_draft_id"))
+        or bool(event.get("partial_message_id"))
+        or bool(event.get("draft_should_not_be_sent"))
+        or bool(event.get("prior_trustpilot_order_name"))
+    )
+
+
+def _event_matches_trustpilot_record_filters(event, filters):
+    event_type = filters.get("event_type") or "all"
+    if event_type != "all" and event.get("event_type") != event_type:
+        return False
+    query = (filters.get("q") or "").lower()
+    if query and query not in _trustpilot_record_search_text(event):
+        return False
+    order_query = (filters.get("order") or "").lower()
+    if order_query and order_query not in _safe_text(event.get("order_name")).lower():
+        return False
+    status_query = (filters.get("ledger_status") or "").lower()
+    if status_query and status_query not in " ".join(
+        (
+            _safe_text(event.get("status")).lower(),
+            _safe_text(event.get("classification")).lower(),
+            _safe_text(event.get("blocker_reason")).lower(),
+        )
+    ):
+        return False
+    return True
+
+
+def _trustpilot_record_search_text(event):
+    return " ".join(
+        _safe_text(event.get(key, "")).lower()
+        for key in (
+            "event_time",
+            "source_report_path",
+            "source_report_label",
+            "source_section",
+            "event_type",
+            "order_name",
+            "masked_email",
+            "status",
+            "classification",
+            "blocker_reason",
+            "partial_draft_id",
+            "partial_message_id",
+            "prior_trustpilot_order_name",
+        )
+    )
+
+
 def _summary(
     latest_scan,
     candidate_queue,
@@ -1406,7 +1640,7 @@ def _tracking_design():
         "future_click_tracking": (
             "A future write phase could create a local invitation record and a "
             "unique redirect token per invitation. That redirect route is not "
-            "enabled in Phase 4.3."
+            "enabled in Phase 5.3."
         ),
         "future_review_detection": (
             "A future phase would need Trustpilot Business/API/export support "

@@ -1,6 +1,36 @@
 {% extends "admin/base_site.html" %}
+{% load static %}
 
 {% block extrastyle %}
   {{ block.super }}
   <link rel="stylesheet" href="{% static 'admin/css/mobile-overrides.css' %}">
+  <style>
+    .internal-module-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 0;
+    }
+    .internal-module-nav a {
+      border: 1px solid var(--hairline-color, #e5e7eb);
+      border-radius: 4px;
+      color: var(--header-link-color, #fff);
+      padding: 4px 8px;
+      text-decoration: none;
+    }
+    .internal-module-nav a:hover,
+    .internal-module-nav a:focus {
+      background: rgba(255, 255, 255, 0.12);
+    }
+  </style>
+{% endblock %}
+
+{% block nav-global %}
+  {{ block.super }}
+  <nav class="internal-module-nav" aria-label="Internal modules">
+    <a href="{% url 'admin:tickets_ticket_changelist' %}">Tickets</a>
+    <a href="{% url 'admin:shopify_sync_shopifyorder_changelist' %}">Shopify Orders</a>
+    <a href="{% url 'shopify_sync_dashboard' %}">Shopify Sync</a>
+    <a href="{% url 'shopify_review_request_workbench' %}">Review Requests</a>
+  </nav>
 {% endblock %}
