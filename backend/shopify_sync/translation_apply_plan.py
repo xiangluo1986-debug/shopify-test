@@ -8,13 +8,46 @@ from pathlib import Path
 APPLY_PLAN_JSON_PATH = Path("logs/shopify_translation_selected_product_apply_plan_package.json")
 APPLY_PLAN_HTML_PATH = Path("logs/shopify_translation_selected_product_apply_plan_package.html")
 SAFE_WRITE_READINESS_REPORT_DIR = Path("logs/shopify_translation_write_readiness")
+LOCKED_EXECUTION_REPORT_DIR = Path("logs/shopify_translation_locked_execution")
 READY_DRAFT_STATUS = "selected_product_missing_translation_draft_ready_for_manual_review"
 TRANSLATE_ALL_READY_DRAFT_STATUS = "selected_product_all_content_translation_draft_ready_for_manual_review"
 READY_DRAFT_STATUSES = {READY_DRAFT_STATUS, TRANSLATE_ALL_READY_DRAFT_STATUS}
 SAFE_WRITE_READINESS_ACTION_NAME = "prepare_translation_safe_write_readiness_package"
+LOCKED_EXECUTION_ACTION_NAME = "prepare_translation_locked_execution_shell"
+LOCKED_EXECUTION_ACK_PHRASE = "I UNDERSTAND THIS WILL WRITE ONE SHOPIFY TRANSLATION"
+LOCKED_EXECUTION_READY_STATUS = "locked_execution_ready_for_manual_ack"
+LOCKED_EXECUTION_BLOCKED_STATUS = "locked_execution_blocked"
 SAFE_WRITE_READINESS_MAX_ENTRY_COUNT = 3
 SAFE_WRITE_READINESS_FIELDS = ("title", "meta_title", "meta_description")
 SAFE_WRITE_READINESS_FIELD_SET = set(SAFE_WRITE_READINESS_FIELDS)
+LOCKED_EXECUTION_ALLOWED_FIELDS = SAFE_WRITE_READINESS_FIELDS
+LOCKED_EXECUTION_ALLOWED_FIELD_SET = set(LOCKED_EXECUTION_ALLOWED_FIELDS)
+LOCKED_EXECUTION_SUPPORTED_LOCALES = {"de", "es", "fr", "it", "ja"}
+LOCKED_EXECUTION_EXCLUDED_SCOPE_GROUPS = (
+    "body_html",
+    "options",
+    "variants",
+    "metafields",
+    "important_metafields",
+    "media",
+    "media_alt_text",
+    "technical_fields",
+    "technical_metafields",
+)
+LOCKED_EXECUTION_FORBIDDEN_PHRASES = (
+    "buy now",
+    "order now",
+    "shop now",
+    "worldwide shipping",
+    "ships worldwide",
+    "free shipping",
+    "made in china",
+    "china origin",
+    "mainland china",
+    "shipped from china",
+    "ships from china",
+    "factory direct",
+)
 SAFE_WRITE_READINESS_GROUPS = ("product_basics", "seo")
 SAFE_WRITE_READINESS_GROUP_SET = set(SAFE_WRITE_READINESS_GROUPS)
 SAFE_WRITE_READINESS_READY_JOB_STATUSES = {"completed", "partial"}
@@ -178,6 +211,153 @@ def build_translation_workspace_safe_write_readiness_package(
     }
     if write_reports:
         _write_safe_write_readiness_reports(payload, json_path, html_path)
+    return payload
+
+
+def build_translation_workspace_locked_execution_package(
+    safe_write_readiness_package: dict | None,
+    *,
+    latest_background_report: dict | None = None,
+    selected_product_gid: str = "",
+    selected_locale: str = "",
+    selected_entry_ids=None,
+    ack_preview_text: str = "",
+    write_reports: bool = True,
+):
+    readiness_package = dict(safe_write_readiness_package or {})
+    selected_entry_ids = [
+        str(entry_id or "").strip()
+        for entry_id in (selected_entry_ids or [])
+        if str(entry_id or "").strip()
+    ]
+    selected_entries = [
+        dict(entry)
+        for entry in (readiness_package.get("selected_entries") or [])
+        if isinstance(entry, dict)
+    ]
+    product_gid = str(
+        selected_product_gid or readiness_package.get("product_gid") or ""
+    ).strip()
+    locale = str(selected_locale or readiness_package.get("locale") or "").strip()
+    generated_at = _utc_now()
+    json_path, html_path = _locked_execution_report_paths(
+        product_gid,
+        locale,
+        generated_at,
+    )
+
+    selected_entry = selected_entries[0] if len(selected_entries) == 1 else {}
+    risk_checks, blocking_conditions = _locked_execution_risk_checks(
+        readiness_package=readiness_package,
+        latest_background_report=latest_background_report or {},
+        product_gid=product_gid,
+        locale=locale,
+        selected_entry_ids=selected_entry_ids,
+        selected_entries=selected_entries,
+        selected_entry=selected_entry,
+    )
+    locked_entry = (
+        _locked_execution_entry_snapshot(selected_entry, product_gid=product_gid, locale=locale)
+        if selected_entry
+        else {}
+    )
+    package_status = (
+        LOCKED_EXECUTION_READY_STATUS
+        if locked_entry and not blocking_conditions
+        else LOCKED_EXECUTION_BLOCKED_STATUS
+    )
+    dangerous_ack_present = bool(str(ack_preview_text or "").strip())
+    payload = {
+        "package_status": package_status,
+        "generated_at": generated_at,
+        "locked_execution_package_only": True,
+        "locked_preparation_only": True,
+        "locked_execution_locked": True,
+        "product_gid": product_gid,
+        "product_title": readiness_package.get("product_title", ""),
+        "locale": locale,
+        "selected_entry_count": len(selected_entries),
+        "requested_selected_entry_count": len(selected_entry_ids),
+        "selected_entry": locked_entry,
+        "selected_entries": [locked_entry] if locked_entry else [],
+        "resource_id": locked_entry.get("resource_id", ""),
+        "key": locked_entry.get("key", ""),
+        "digest": locked_entry.get("digest", ""),
+        "source_value": locked_entry.get("source_value", ""),
+        "existing_translation_value": locked_entry.get(
+            "existing_translation_value", ""
+        ),
+        "existing_translation_outdated": locked_entry.get(
+            "existing_translation_outdated"
+        ),
+        "proposed_translation_value": locked_entry.get(
+            "proposed_translation_value", ""
+        ),
+        "locked_entry_hash": locked_entry.get("locked_entry_hash", ""),
+        "locked_entry_checksum": locked_entry.get("locked_entry_checksum", ""),
+        "risk_checks": risk_checks,
+        "blocking_conditions": _unique_strings(blocking_conditions),
+        "allowed_fields": list(LOCKED_EXECUTION_ALLOWED_FIELDS),
+        "blocked_fields": [
+            "body_html",
+            "options",
+            "variants",
+            "metafields",
+            "media_alt_text",
+            "technical_fields",
+        ],
+        "blocked_scope_groups": list(LOCKED_EXECUTION_EXCLUDED_SCOPE_GROUPS),
+        "manual_ack_phrase_required": LOCKED_EXECUTION_ACK_PHRASE,
+        "manual_ack_phrase_shown": True,
+        "manual_ack_can_be_copied": True,
+        "manual_ack_preview_entered": dangerous_ack_present,
+        "manual_ack_preview_value_recorded": False,
+        "manual_ack_effective": False,
+        "manual_ack_required_for_future_write": True,
+        "future_write_requires_separate_phase": True,
+        "real_write_allowed": False,
+        "future_write_allowed": False,
+        "source_safe_write_readiness_status": readiness_package.get(
+            "package_status", ""
+        ),
+        "source_safe_write_readiness_json_report_path": readiness_package.get(
+            "json_report_path", ""
+        ),
+        "source_safe_write_readiness_html_report_path": readiness_package.get(
+            "html_report_path", ""
+        ),
+        "source_background_report_path": readiness_package.get(
+            "source_background_report_path", ""
+        ),
+        "latest_background_report_path": str(
+            (latest_background_report or {}).get("report_path") or ""
+        ),
+        "json_report_path": json_path.as_posix(),
+        "html_report_path": html_path.as_posix(),
+        "shopify_api_call_performed": False,
+        "all_new_actions_no_write_confirmed": True,
+        **SAFE_WRITE_SAFETY_FLAGS,
+    }
+    payload["safety_summary"] = {
+        "locked_execution_package_only": True,
+        "locked_preparation_only": True,
+        "locked_execution_locked": True,
+        "real_write_allowed": False,
+        "future_write_allowed": False,
+        "manual_ack_effective": False,
+        "manual_ack_required_for_future_write": True,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+        "no_new_shopify_writes_performed": True,
+        "all_new_actions_no_write_confirmed": True,
+    }
+    if write_reports:
+        _write_locked_execution_reports(payload, json_path, html_path)
     return payload
 
 
@@ -684,14 +864,23 @@ def _safe_write_blocked_entries_summary(blocked_entries: list[dict]):
 
 def _safe_write_package_entry(entry: dict):
     return {
+        "entry_id": entry.get("entry_id", ""),
+        "locale": entry.get("locale", ""),
         "resource_id": entry.get("resource_id", ""),
         "key": entry.get("key", ""),
         "digest": entry.get("digest", ""),
         "source_value": entry.get("source_value", ""),
+        "existing_translation_present": entry.get("existing_translation_present"),
         "existing_translation_value": entry.get("existing_translation_value", ""),
         "existing_translation_outdated": entry.get("existing_translation_outdated"),
         "proposed_translation_value": entry.get("proposed_translation_value", ""),
         "field_group": entry.get("field_group", ""),
+        "context_label": entry.get("context_label", ""),
+        "validation_status": entry.get("validation_status", ""),
+        "seo_validation_status": entry.get("seo_validation_status", ""),
+        "seo_warning": entry.get("seo_warning", ""),
+        "blocking_reasons": entry.get("blocking_reasons", ""),
+        "product_identity_mismatch": entry.get("product_identity_mismatch", False),
         "eligibility_status": entry.get("eligibility_status", ""),
     }
 
@@ -820,6 +1009,310 @@ def _safe_write_blocked_summary_row(item):
         "<tr>"
         f"<td>{escape(str(item.get('reason', '')))}</td>"
         f"<td>{escape(str(item.get('count', '')))}</td>"
+        "</tr>"
+    )
+
+
+def _locked_execution_risk_checks(
+    *,
+    readiness_package: dict,
+    latest_background_report: dict,
+    product_gid: str,
+    locale: str,
+    selected_entry_ids: list[str],
+    selected_entries: list[dict],
+    selected_entry: dict,
+):
+    checks = []
+    blocking_conditions = []
+
+    def add_check(name, passed, blocked_reason, detail=""):
+        status = "passed" if passed else "blocked"
+        checks.append(
+            {
+                "name": name,
+                "status": status,
+                "blocking_condition": "" if passed else blocked_reason,
+                "detail": detail,
+            }
+        )
+        if not passed:
+            blocking_conditions.append(blocked_reason)
+
+    add_check(
+        "safe_write_readiness_package_ready",
+        bool(readiness_package)
+        and readiness_package.get("package_status") == "write_readiness_ready",
+        "blocked_safe_write_readiness_package_not_ready",
+        readiness_package.get("package_status", ""),
+    )
+    add_check(
+        "selected_entry_count_exactly_one",
+        len(selected_entries) == 1
+        and (not selected_entry_ids or len(selected_entry_ids) == 1),
+        "blocked_selected_entry_count_not_exactly_1",
+        f"selected_entries={len(selected_entries)} requested={len(selected_entry_ids)}",
+    )
+
+    field_key = str(selected_entry.get("key") or "").strip()
+    field_group = str(selected_entry.get("field_group") or "").strip()
+    resource_id = str(selected_entry.get("resource_id") or "").strip()
+    digest = str(selected_entry.get("digest") or "").strip()
+    source_value = str(selected_entry.get("source_value") or "")
+    proposed_value = str(selected_entry.get("proposed_translation_value") or "")
+    existing_value = str(selected_entry.get("existing_translation_value") or "")
+    existing_present = _safe_write_bool(
+        selected_entry.get("existing_translation_present")
+    ) or bool(existing_value.strip())
+    existing_outdated = _safe_write_bool(
+        selected_entry.get("existing_translation_outdated")
+    )
+    forbidden_phrases = _locked_execution_forbidden_phrase_matches(proposed_value)
+    latest_report_path = str(latest_background_report.get("report_path") or "").strip()
+    source_report_path = str(
+        readiness_package.get("source_background_report_path") or ""
+    ).strip()
+    latest_report_product_gid = str(
+        latest_background_report.get("product_gid") or ""
+    ).strip()
+
+    add_check(
+        "field_allowed",
+        field_key in LOCKED_EXECUTION_ALLOWED_FIELD_SET,
+        "blocked_field_not_allowed_for_locked_execution",
+        field_key,
+    )
+    add_check(
+        "field_group_allowed",
+        field_group in SAFE_WRITE_READINESS_GROUP_SET,
+        "blocked_field_group_not_locked_execution_scope",
+        field_group,
+    )
+    add_check(
+        "resource_key_digest_present",
+        bool(resource_id and field_key and digest),
+        "blocked_missing_resource_id_key_or_digest",
+        f"resource_id={bool(resource_id)} key={bool(field_key)} digest={bool(digest)}",
+    )
+    add_check(
+        "proposed_translation_present",
+        bool(proposed_value.strip()),
+        "blocked_proposed_translation_empty",
+        "",
+    )
+    add_check(
+        "proposed_translation_differs_from_source",
+        bool(proposed_value.strip())
+        and proposed_value.strip() != source_value.strip(),
+        "blocked_proposed_translation_equals_source_value",
+        "",
+    )
+    add_check(
+        "forbidden_phrase_absent",
+        not forbidden_phrases,
+        "blocked_forbidden_cta_shipping_origin_phrase",
+        ", ".join(forbidden_phrases),
+    )
+    add_check(
+        "seo_title_length",
+        field_key != "meta_title" or len(proposed_value) <= 60,
+        "blocked_seo_title_over_60_chars",
+        str(len(proposed_value)) if field_key == "meta_title" else "",
+    )
+    add_check(
+        "seo_description_length",
+        field_key != "meta_description" or len(proposed_value) <= 160,
+        "blocked_seo_description_over_160_chars",
+        str(len(proposed_value)) if field_key == "meta_description" else "",
+    )
+    add_check(
+        "product_identity_matches",
+        bool(product_gid)
+        and bool(resource_id)
+        and product_gid == resource_id
+        and not _safe_write_bool(selected_entry.get("product_identity_mismatch")),
+        "blocked_product_identity_mismatch",
+        f"product_gid={product_gid} resource_id={resource_id}",
+    )
+    add_check(
+        "entry_from_latest_selected_product_report",
+        bool(latest_report_path)
+        and bool(source_report_path)
+        and latest_report_path == source_report_path
+        and (
+            not latest_report_product_gid
+            or not product_gid
+            or latest_report_product_gid == product_gid
+        ),
+        "blocked_entry_not_from_latest_selected_product_report",
+        f"source={source_report_path} latest={latest_report_path}",
+    )
+    add_check(
+        "readiness_package_safety_flags_safe",
+        not _locked_execution_safety_flag_blocking_conditions(readiness_package),
+        "blocked_readiness_package_safety_flags_not_safe",
+        ", ".join(_locked_execution_safety_flag_blocking_conditions(readiness_package)),
+    )
+    add_check(
+        "target_locale_supported",
+        locale in LOCKED_EXECUTION_SUPPORTED_LOCALES,
+        "blocked_target_locale_unsupported",
+        locale,
+    )
+    add_check(
+        "existing_translation_not_current",
+        not existing_present or existing_outdated is True,
+        "blocked_existing_translation_current_not_outdated",
+        f"existing_present={existing_present} existing_outdated={existing_outdated}",
+    )
+
+    return checks, _unique_strings(blocking_conditions)
+
+
+def _locked_execution_safety_flag_blocking_conditions(readiness_package: dict):
+    conditions = []
+    for key, expected in SAFE_WRITE_SAFETY_FLAGS.items():
+        if readiness_package.get(key) is not expected:
+            conditions.append(f"readiness_safety_{key}_not_confirmed")
+    if readiness_package.get("shopify_api_call_performed") is True:
+        conditions.append("readiness_safety_shopify_api_call_performed_not_false")
+    return conditions
+
+
+def _locked_execution_forbidden_phrase_matches(value: str):
+    normalized = str(value or "").lower()
+    return [
+        phrase
+        for phrase in LOCKED_EXECUTION_FORBIDDEN_PHRASES
+        if phrase in normalized
+    ]
+
+
+def _locked_execution_entry_snapshot(entry: dict, *, product_gid: str, locale: str):
+    snapshot = {
+        "entry_id": entry.get("entry_id", ""),
+        "product_gid": product_gid,
+        "locale": locale,
+        "resource_id": entry.get("resource_id", ""),
+        "key": entry.get("key", ""),
+        "digest": entry.get("digest", ""),
+        "source_value": entry.get("source_value", ""),
+        "existing_translation_value": entry.get("existing_translation_value", ""),
+        "existing_translation_outdated": entry.get("existing_translation_outdated"),
+        "proposed_translation_value": entry.get("proposed_translation_value", ""),
+        "field_group": entry.get("field_group", ""),
+        "context_label": entry.get("context_label", ""),
+    }
+    checksum = _locked_execution_entry_checksum(snapshot)
+    snapshot["locked_entry_hash"] = checksum
+    snapshot["locked_entry_checksum"] = checksum
+    return snapshot
+
+
+def _locked_execution_entry_checksum(snapshot: dict):
+    locked_fields = {
+        key: snapshot.get(key)
+        for key in (
+            "product_gid",
+            "locale",
+            "resource_id",
+            "key",
+            "digest",
+            "source_value",
+            "existing_translation_value",
+            "existing_translation_outdated",
+            "proposed_translation_value",
+        )
+    }
+    text = json.dumps(locked_fields, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _locked_execution_report_paths(product_gid: str, locale: str, generated_at: str):
+    product_token = _safe_write_product_token(product_gid)
+    locale_token = _safe_write_filename_token(locale or "locale")
+    stamp = _safe_write_timestamp_token(generated_at)
+    base = f"translation_locked_execution_{product_token}_{locale_token}_{stamp}"
+    return (
+        LOCKED_EXECUTION_REPORT_DIR / f"{base}.json",
+        LOCKED_EXECUTION_REPORT_DIR / f"{base}.html",
+    )
+
+
+def _write_locked_execution_reports(payload: dict, json_path: Path, html_path: Path):
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
+    json.loads(text)
+    json_path.write_text(text, encoding="utf-8")
+    html_path.write_text(_render_locked_execution_html(payload), encoding="utf-8")
+
+
+def _render_locked_execution_html(payload: dict):
+    summary_rows = "\n".join(
+        _row(label, payload.get(key))
+        for label, key in [
+            ("Package Status", "package_status"),
+            ("Product GID", "product_gid"),
+            ("Product Title", "product_title"),
+            ("Locale", "locale"),
+            ("Selected Entry Count", "selected_entry_count"),
+            ("Resource ID", "resource_id"),
+            ("Key", "key"),
+            ("Digest", "digest"),
+            ("Locked Entry Checksum", "locked_entry_checksum"),
+            ("ACK Phrase", "manual_ack_phrase_required"),
+            ("ACK Effective", "manual_ack_effective"),
+            ("Real Write Allowed", "real_write_allowed"),
+            ("Future Write Allowed", "future_write_allowed"),
+            ("JSON Report Path", "json_report_path"),
+            ("HTML Report Path", "html_report_path"),
+            ("Blocking Conditions", "blocking_conditions"),
+            ("shopify_write_performed", "shopify_write_performed"),
+            ("mutation_performed", "mutation_performed"),
+            ("translations_register_called", "translations_register_called"),
+        ]
+    )
+    entry = payload.get("selected_entry") or {}
+    entry_rows = "\n".join(
+        _row(label, entry.get(key))
+        for label, key in [
+            ("Source Value", "source_value"),
+            ("Existing Translation", "existing_translation_value"),
+            ("Existing Translation Outdated", "existing_translation_outdated"),
+            ("Proposed Translation", "proposed_translation_value"),
+        ]
+    )
+    risk_rows = "\n".join(
+        _locked_execution_risk_check_row(item)
+        for item in payload.get("risk_checks", [])
+    ) or "<tr><td colspan='4'>No risk checks recorded</td></tr>"
+    return f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Translation Locked Execution Package</title></head>
+<body>
+  <h1>Final Shopify Update Preparation</h1>
+  <p><strong>Locked preparation only &mdash; Shopify will not be updated in this step.</strong></p>
+  <h2>Summary</h2>
+  <table border="1" cellspacing="0" cellpadding="6"><tbody>{summary_rows}</tbody></table>
+  <h2>Selected Entry</h2>
+  <table border="1" cellspacing="0" cellpadding="6"><tbody>{entry_rows}</tbody></table>
+  <h2>Risk Checks</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Check</th><th>Status</th><th>Blocking condition</th><th>Detail</th></tr></thead>
+    <tbody>{risk_rows}</tbody>
+  </table>
+</body>
+</html>
+"""
+
+
+def _locked_execution_risk_check_row(item):
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get('name', '')))}</td>"
+        f"<td>{escape(str(item.get('status', '')))}</td>"
+        f"<td>{escape(str(item.get('blocking_condition', '')))}</td>"
+        f"<td>{escape(str(item.get('detail', '')))}</td>"
         "</tr>"
     )
 

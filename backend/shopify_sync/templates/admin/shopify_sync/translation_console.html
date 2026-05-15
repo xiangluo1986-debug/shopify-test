@@ -2301,6 +2301,50 @@
                 </tbody>
               </table>
             {% endif %}
+            <h3>Final Shopify update preparation</h3>
+            <p><strong>Locked preparation only &mdash; Shopify will not be updated in this step.</strong></p>
+            <table class="tw-results-table">
+              <tbody>
+                <tr><th>Selected product</th><td>{{ workspace_locked_execution_display.product_title|default:safe_write_readiness_display.product_title }}</td></tr>
+                <tr><th>Selected product gid</th><td>{{ workspace_locked_execution_display.product_gid|default:safe_write_readiness_display.product_gid }}</td></tr>
+                <tr><th>Selected locale</th><td>{{ workspace_locked_execution_display.locale|default:safe_write_readiness_display.locale }}</td></tr>
+                <tr><th>Selected field</th><td>{{ workspace_locked_execution_display.key|default:"Select exactly one eligible title/meta_title/meta_description row, then prepare the locked update." }}</td></tr>
+                <tr><th>Current/source text</th><td style="white-space: pre-wrap;">{{ workspace_locked_execution_display.source_value }}</td></tr>
+                <tr><th>Existing translation</th><td style="white-space: pre-wrap;">{{ workspace_locked_execution_display.existing_translation_value }}</td></tr>
+                <tr><th>Proposed translation</th><td style="white-space: pre-wrap;">{{ workspace_locked_execution_display.proposed_translation_value }}</td></tr>
+                <tr><th>Digest</th><td style="word-break: break-all;">{{ workspace_locked_execution_display.digest }}</td></tr>
+                <tr><th>Locked checksum</th><td style="word-break: break-all;">{{ workspace_locked_execution_display.locked_entry_checksum }}</td></tr>
+                <tr><th>ACK phrase</th><td><input type="text" readonly value="{{ locked_execution_ack_phrase }}" style="min-width: 420px;"></td></tr>
+                <tr><th>Status</th><td>{{ workspace_locked_execution_display.package_status|default:"locked_execution_not_prepared" }}</td></tr>
+                <tr><th>JSON report path</th><td>{{ workspace_locked_execution_display.json_report_path }}</td></tr>
+                <tr><th>HTML report path</th><td>{{ workspace_locked_execution_display.html_report_path }}</td></tr>
+                <tr><th>blocking_conditions</th><td>{{ workspace_locked_execution_display.blocking_conditions|join:", " }}</td></tr>
+                <tr><th>manual_ack_effective</th><td>{{ workspace_locked_execution_display.manual_ack_effective|default:"False" }}</td></tr>
+                <tr><th>shopify_write_performed</th><td>{{ workspace_locked_execution_display.shopify_write_performed|default:"False" }}</td></tr>
+                <tr><th>mutation_performed</th><td>{{ workspace_locked_execution_display.mutation_performed|default:"False" }}</td></tr>
+                <tr><th>translations_register_called</th><td>{{ workspace_locked_execution_display.translations_register_called|default:"False" }}</td></tr>
+              </tbody>
+            </table>
+            {% if workspace_locked_execution_display.risk_checks %}
+              <h4>Locked preparation risk checks</h4>
+              <div class="tw-editor-table-wrap">
+                <table class="tw-results-table">
+                  <thead>
+                    <tr><th>Check</th><th>Status</th><th>Blocking condition</th><th>Detail</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for check in workspace_locked_execution_display.risk_checks %}
+                      <tr>
+                        <td>{{ check.name }}</td>
+                        <td>{{ check.status }}</td>
+                        <td>{{ check.blocking_condition }}</td>
+                        <td>{{ check.detail }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
             <h3>Needs review and skipped reasons</h3>
             {% if translation_background_job.blocked_reason_summary %}
               <div class="tw-editor-table-wrap">
@@ -2369,7 +2413,6 @@
                 <form method="post" action="{% url 'shopify_translation_console' %}">
                 {% csrf_token %}
                 <input type="hidden" name="ui_mode" value="editor">
-                <input type="hidden" name="action" value="prepare_translation_safe_write_readiness_package">
                 <input type="hidden" name="product_search" value="{{ product_search_text }}">
                 <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
                 <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
@@ -2387,10 +2430,16 @@
                       {% endif %}
                     </select>
                   </div>
+                  <div>
+                    <label for="id_locked_execution_ack_preview">Optional ACK preview for locked preparation</label><br>
+                    <input id="id_locked_execution_ack_preview" type="text" name="locked_execution_ack_preview" value="" style="min-width: 420px;" placeholder="{{ locked_execution_ack_phrase }}">
+                    <div class="tw-muted">ACK entry is not effective in this step.</div>
+                  </div>
                   {% if safe_write_readiness_state.can_prepare %}
-                    <button type="submit" class="button">Prepare selected translations for Shopify update</button>
+                    <button type="submit" class="button" name="action" value="prepare_translation_safe_write_readiness_package">Prepare selected translations for Shopify update</button>
+                    <button type="submit" class="button" name="action" value="prepare_translation_locked_execution_shell">Prepare locked Shopify update</button>
                   {% endif %}
-                  <span class="tw-muted">Select 1 to 3 enabled entries. Disabled rows stay visible with their review reason.</span>
+                  <span class="tw-muted">Readiness accepts 1 to 3 enabled entries. Locked update preparation requires exactly 1 enabled title/meta_title/meta_description entry.</span>
                 </div>
               <div class="tw-report-filters" data-report-filters>
                 <div>
@@ -3532,6 +3581,9 @@
   {% endif %}
   {% if safe_write_readiness_error_message %}
     <p class="errornote">{{ safe_write_readiness_error_message }}</p>
+  {% endif %}
+  {% if workspace_locked_execution_error_message %}
+    <p class="errornote">{{ workspace_locked_execution_error_message }}</p>
   {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">

@@ -54,7 +54,10 @@ from .translation_console import (
 from .translation_apply_plan import (
     APPLY_PLAN_HTML_PATH,
     APPLY_PLAN_JSON_PATH,
+    LOCKED_EXECUTION_ACK_PHRASE,
+    LOCKED_EXECUTION_ACTION_NAME,
     SAFE_WRITE_READINESS_ACTION_NAME,
+    build_translation_workspace_locked_execution_package,
     build_translation_workspace_safe_write_readiness_package,
     build_translation_workspace_safe_write_readiness_state,
     build_selected_product_translation_apply_plan,
@@ -993,6 +996,7 @@ def translation_console(request):
     is_refresh_status_post = post_action == "refresh_status"
     is_translation_job_refresh_post = post_action == "refresh_translation_job_status"
     is_safe_write_readiness_package_post = post_action == SAFE_WRITE_READINESS_ACTION_NAME
+    is_workspace_locked_execution_post = post_action == LOCKED_EXECUTION_ACTION_NAME
     is_locked_package_preview_post = post_action in {
         "generate_locked_package_dry_run_placeholder",
         "generate_locked_package_dry_run_preview",
@@ -1003,6 +1007,7 @@ def translation_console(request):
         is_refresh_status_post
         or is_translation_job_refresh_post
         or is_safe_write_readiness_package_post
+        or is_workspace_locked_execution_post
     )
     is_multi_locale_draft_post = post_action == "generate_multi_locale_drafts"
     is_translate_all_post = post_action == TRANSLATE_ALL_ACTION_NAME
@@ -1034,6 +1039,7 @@ def translation_console(request):
         or is_real_write_executor_post
         or is_real_write_manual_action_package_post
         or is_safe_write_readiness_package_post
+        or is_workspace_locked_execution_post
         or is_status_only_safe_action_post
         or is_locked_package_preview_post
     )
@@ -1199,6 +1205,8 @@ def translation_console(request):
     safe_write_readiness_state = {}
     safe_write_readiness_result = None
     safe_write_readiness_error_message = ""
+    workspace_locked_execution_result = None
+    workspace_locked_execution_error_message = ""
     workflow_product_id = (
         selected_product_gid
         if selected_product_gid.startswith("gid://shopify/Product/")
@@ -1765,6 +1773,75 @@ def translation_console(request):
                 "translations_register_called": False,
             },
         )
+    elif is_workspace_locked_execution_post:
+        selected_entry_ids = request.POST.getlist("safe_write_entry_ids")
+        safe_write_readiness_result = (
+            build_translation_workspace_safe_write_readiness_package(
+                translation_background_job,
+                selected_product_gid=translation_job_product_id,
+                selected_locale=locale,
+                selected_entry_ids=selected_entry_ids,
+            )
+        )
+        if safe_write_readiness_result.get("blocking_conditions"):
+            safe_write_readiness_error_message = (
+                "Safe write readiness package blocked before locked preparation: "
+                + ", ".join(safe_write_readiness_result.get("blocking_conditions") or [])
+            )
+        workspace_locked_execution_result = (
+            build_translation_workspace_locked_execution_package(
+                safe_write_readiness_result,
+                latest_background_report=translation_background_job,
+                selected_product_gid=translation_job_product_id,
+                selected_locale=locale,
+                selected_entry_ids=selected_entry_ids,
+                ack_preview_text=request.POST.get("locked_execution_ack_preview", ""),
+            )
+        )
+        if workspace_locked_execution_result.get("blocking_conditions"):
+            workspace_locked_execution_error_message = (
+                "Locked Shopify update preparation blocked: "
+                + ", ".join(
+                    workspace_locked_execution_result.get("blocking_conditions") or []
+                )
+            )
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status=workspace_locked_execution_result.get("package_status", ""),
+            message=(
+                "Locked Shopify update preparation generated locally. Shopify was not updated."
+                if workspace_locked_execution_result.get("package_status")
+                == "locked_execution_ready_for_manual_ack"
+                else "Locked Shopify update preparation stayed no-write and is blocked for review."
+            ),
+            summary={
+                "product_gid": workspace_locked_execution_result.get("product_gid", ""),
+                "locale": workspace_locked_execution_result.get("locale", ""),
+                "key": workspace_locked_execution_result.get("key", ""),
+                "selected_entry_count": workspace_locked_execution_result.get(
+                    "selected_entry_count", 0
+                ),
+                "package_status": workspace_locked_execution_result.get(
+                    "package_status", ""
+                ),
+                "json_report_path": workspace_locked_execution_result.get(
+                    "json_report_path", ""
+                ),
+                "html_report_path": workspace_locked_execution_result.get(
+                    "html_report_path", ""
+                ),
+                "blocking_conditions": workspace_locked_execution_result.get(
+                    "blocking_conditions", []
+                ),
+                "manual_ack_phrase_required": workspace_locked_execution_result.get(
+                    "manual_ack_phrase_required", ""
+                ),
+                "manual_ack_effective": False,
+                "shopify_write_performed": False,
+                "mutation_performed": False,
+                "translations_register_called": False,
+            },
+        )
     elif is_locked_package_preview_post and safe_action_result is None:
         apply_plan_preview_result = _empty_apply_plan_preview_result(
             "generate_draft_dry_run_first"
@@ -1932,6 +2009,7 @@ def translation_console(request):
     safe_write_readiness_display = (
         safe_write_readiness_result or safe_write_readiness_state
     )
+    workspace_locked_execution_display = workspace_locked_execution_result or {}
 
     return render(
         request,
@@ -1997,6 +2075,10 @@ def translation_console(request):
             "safe_write_readiness_result": safe_write_readiness_result,
             "safe_write_readiness_display": safe_write_readiness_display,
             "safe_write_readiness_error_message": safe_write_readiness_error_message,
+            "workspace_locked_execution_result": workspace_locked_execution_result,
+            "workspace_locked_execution_display": workspace_locked_execution_display,
+            "workspace_locked_execution_error_message": workspace_locked_execution_error_message,
+            "locked_execution_ack_phrase": LOCKED_EXECUTION_ACK_PHRASE,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
             "draft_fields": TRANSLATION_DRAFT_FIELDS,
             "draft_json_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
