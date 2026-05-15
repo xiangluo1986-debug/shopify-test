@@ -285,11 +285,10 @@
     </div>
 
     <h1>Review Requests</h1>
-    <p class="rrw-subtitle">Automatic Trustpilot review request workflow</p>
-    <p class="rrw-muted">Admins only | Read-only dashboard | No emails are sent from this page</p>
+    <p class="rrw-subtitle">Automatically checks which orders are ready for Trustpilot review emails.</p>
+    <p class="rrw-muted">Admins only | Read-only dashboard</p>
     <div class="rrw-note">
-        This page explains the current review-request queue. It cannot create Gmail drafts, send emails,
-        delete drafts, write Shopify tags, call Trustpilot/Kudosi/Ali Reviews APIs, or create tracking links.
+        This page does not send emails by itself. It only shows what is ready and what is blocked.
     </div>
 
     <div class="rrw-section">
@@ -304,6 +303,119 @@
             {% endfor %}
         </div>
     </div>
+
+    <div class="rrw-section">
+        <h2>What should I do next?</h2>
+        <div class="rrw-action">
+            <h3>{{ dashboard.next_action_headline }}</h3>
+            <p>Before the system can send a Trustpilot email, we need:</p>
+            <ol>
+                {% for item in dashboard.send_requirements %}
+                    <li>{{ item }}</li>
+                {% endfor %}
+            </ol>
+            {% if dashboard.current_blockers %}
+                <p><strong>Current blockers:</strong></p>
+                <ul>
+                    {% for blocker in dashboard.current_blockers %}
+                        <li>{{ blocker }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Blocked orders</h2>
+        <table class="rrw-table">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                    <th>Evidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in dashboard.blocked_order_rows %}
+                    <tr>
+                        <td>{{ row.order }}</td>
+                        <td><span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span></td>
+                        <td>{{ row.reason }}</td>
+                        <td>{{ row.evidence }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" class="rrw-muted">No blocked orders are listed right now.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Gmail setup</h2>
+        <p class="{% if dashboard.gmail_setup_ready %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.gmail_setup_message }}
+            {% if not dashboard.gmail_setup_ready %}
+                No email can be sent until setup is complete.
+            {% endif %}
+        </p>
+        <table class="rrw-table">
+            <tbody>
+                {% for row in dashboard.gmail_setup_rows %}
+                    <tr>
+                        <th>{{ row.label }}</th>
+                        <td>{{ row.value }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="rrw-section">
+        <h2>How it works</h2>
+        <ol class="rrw-pipeline">
+            {% for step in dashboard.pipeline_steps %}
+                <li class="{{ step.state_class }}">
+                    <div class="rrw-step-number">{{ step.number }}</div>
+                    <div class="rrw-step-label">{{ step.label }}</div>
+                    <div class="rrw-step-detail">{{ step.detail }}</div>
+                    <div class="rrw-step-state">{{ step.state_label }}</div>
+                </li>
+            {% endfor %}
+        </ol>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Recent activity</h2>
+        <table class="rrw-table">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                    <th>Evidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in dashboard.recent_activity %}
+                    <tr>
+                        <td>{{ row.order }}</td>
+                        <td><span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span></td>
+                        <td>{{ row.reason }}</td>
+                        <td>{{ row.last_evidence }}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="4" class="rrw-muted">No local Trustpilot activity is available.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <details class="rrw-advanced">
+        <summary>Advanced technical details</summary>
+        <p class="rrw-muted">
+            Internal task names, report paths, safety flags, simulator data, and local debug tables are kept here.
+        </p>
 
     <div class="rrw-section">
         <h2>Trustpilot Automation</h2>
@@ -952,7 +1064,7 @@
     <details class="rrw-advanced-section">
         <summary>Sandbox Testing</summary>
         <p class="rrw-warning">
-            Sandbox simulator is for testing only. It never uses real customer data and never sends emails.
+            Sandbox testing uses fake data only and is hidden from the live send queue.
         </p>
         {% if dashboard.trustpilot_candidate_simulator.source_error %}
             <p class="rrw-warning">{{ dashboard.trustpilot_candidate_simulator.source_error }}</p>
@@ -1767,6 +1879,7 @@
                 Local orders with email: {{ wb.local_stats.orders_with_email }}.
             </p>
         </div>
+    </details>
     </details>
 </div>
 {% endwith %}

@@ -716,3 +716,16 @@ Future tracking design note:
 - [x] Next phase can add local OAuth setup verification only after config paths
   are provided, still without enabling real send until final preflight and
   readiness audit pass.
+
+## Phase 5.17 Review Requests Admin Usability
+
+- [x] Simplify the Review Requests dashboard for non-technical admins.
+- [x] Make the main page focus on ready orders, blocked orders, Gmail setup,
+  sent Trustpilot emails, and the next action.
+- [x] Move technical task names, report paths, simulator details, safety flags,
+  and internal statuses into collapsed Advanced technical details.
+- [x] Keep the change UI/readability only with no behavior changes.
+- [x] No Gmail API call, Gmail draft create/update/delete, or email send is
+  added.
+- [x] No Shopify API call, Shopify tag write, Shopify mutation, Trustpilot API
+  call, Kudosi API call, or Ali Reviews API call is added.

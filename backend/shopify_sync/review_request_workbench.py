@@ -92,10 +92,16 @@ BLOCKED_REASON_DEFINITIONS = (
     ),
 )
 ADMIN_STATUS_LABELS = {
+    "blocked_existing_trustpilot_invitation_tag": "Already sent to this order",
     "blocked_existing_trustpilot_invitation_customer_level": "Already sent to this customer",
     "blocked_missing_delivered_tag": "Not delivered yet",
     "blocked_missing_review_request_tag": "Missing review request tag",
-    "blocked_merged_order_group_not_ready": "Related orders not ready",
+    "blocked_merged_order_group_not_ready": "Related orders are not ready",
+    "blocked_no_eligible_candidate": "No order ready to send",
+    "blocked_missing_gmail_oauth_config": "Gmail setup is missing",
+    "blocked_missing_ack": "Waiting for final approval",
+    "blocked_multiple_candidates_require_manual_selection": "More than one order needs review",
+    "blocked_candidate_safety_check_failed": "Safety check failed",
     "blocked_missing_vendor_api_documentation": "Waiting for API docs",
     "no_eligible_delivered_review_request_candidate": "No orders ready",
 }
@@ -3224,49 +3230,62 @@ def _operating_dashboard(
         ready_count = _ready_to_send_count(latest_scan, candidate_queue)
         blocked_count = _blocked_order_count(blocked_orders, summary, focus)
     sent_count = _trustpilot_sent_count(events, invitation_history, focus)
+    gmail_setup = _gmail_setup_summary(trustpilot_gmail_oauth_config_helper)
     return {
         "ready_to_send_count": ready_count,
         "blocked_count": blocked_count,
         "sent_trustpilot_count": sent_count,
         "current_state_label": (
-            "Waiting for eligible orders" if ready_count == 0 else "Eligible order needs admin review"
+            "Waiting for eligible orders" if ready_count == 0 else "Ready for final review"
         ),
         "status_cards": [
             {
-                "label": "Ready to Send",
-                "value": _order_count_text(ready_count, "ready"),
-                "message": (
-                    f"No eligible orders right now. Orders must be delivered and tagged "
-                    f"{CANONICAL_REVIEW_REQUEST_TAG}."
-                    if ready_count == 0
-                    else "Review the eligible order before any future draft or send step."
-                ),
+                "label": "Ready to send",
+                "value": _ready_to_send_value(ready_count),
+                "message": _ready_to_send_message(ready_count),
                 "tone": "info",
             },
             {
-                "label": "Blocked",
-                "value": _order_count_text(blocked_count, "blocked"),
-                "message": (
-                    "Some orders are blocked because they are not delivered, missing the "
-                    "review-request tag, duplicate customer, or related order group not ready."
-                ),
+                "label": "Blocked orders",
+                "value": _simple_order_count_text(blocked_count),
+                "message": "These orders are not safe to send yet.",
                 "tone": "warn",
             },
             {
-                "label": "Sent Trustpilot Emails",
-                "value": f"{sent_count} sent",
-                "message": "Trustpilot emails already sent and recorded.",
+                "label": "Gmail setup",
+                "value": gmail_setup["status_value"],
+                "message": gmail_setup["status_message"],
+                "tone": "ok" if gmail_setup["ready"] else "warn",
+            },
+            {
+                "label": "Sent Trustpilot emails",
+                "value": str(sent_count),
+                "message": "Already sent",
                 "tone": "ok",
             },
-            {
-                "label": "Ali Reviews API",
-                "value": "Waiting for API docs",
-                "message": (
-                    "Ali Reviews automation is paused until vendor confirms request API endpoints."
-                ),
-                "tone": "warn",
-            },
         ],
+        "next_action_headline": (
+            "Nothing to send right now."
+            if ready_count == 0
+            else "Review the ready order before sending."
+        ),
+        "send_requirements": [
+            "An order marked as delivered",
+            f"The Shopify tag `{CANONICAL_REVIEW_REQUEST_TAG}`",
+            "No previous Trustpilot email sent to the same customer",
+            "Gmail setup completed",
+        ],
+        "current_blockers": _current_blockers(ready_count, gmail_setup["ready"]),
+        "blocked_order_rows": _blocked_order_rows(
+            focus=focus,
+            blocked_orders=blocked_orders,
+            trustpilot_email_records=trustpilot_email_records,
+            invitation_history=invitation_history,
+        ),
+        "gmail_setup_ready": gmail_setup["ready"],
+        "gmail_setup_status_value": gmail_setup["status_value"],
+        "gmail_setup_message": gmail_setup["status_message"],
+        "gmail_setup_rows": gmail_setup["rows"],
         "pipeline_steps": _pipeline_steps(ready_count),
         "trustpilot_automation": trustpilot_automation_status,
         "trustpilot_send_readiness": trustpilot_send_readiness,
@@ -3291,6 +3310,27 @@ def _operating_dashboard(
         ),
         "ali_reviews_status_label": _admin_status_label(ali_reviews_status.get("status")),
     }
+
+
+def _ready_to_send_value(count):
+    if count == 0:
+        return "0 orders"
+    if count == 1:
+        return "1 order"
+    return "Multiple orders"
+
+
+def _ready_to_send_message(count):
+    if count == 0:
+        return "Nothing to send now."
+    if count == 1:
+        return "Ready for final review before sending."
+    return "Manual review needed."
+
+
+def _simple_order_count_text(count):
+    noun = "order" if count == 1 else "orders"
+    return f"{count} {noun}"
 
 
 def _ready_to_send_count(latest_scan, candidate_queue):
@@ -3342,63 +3382,167 @@ def _order_count_text(count, suffix):
     return f"{count} {noun} {suffix}"
 
 
+def _gmail_setup_summary(gmail_helper):
+    ready = (
+        gmail_helper.get("gmail_dependencies_importable") is True
+        and gmail_helper.get("gmail_send_from_email_configured") is True
+        and gmail_helper.get("gmail_oauth_client_secret_path_exists") is True
+        and gmail_helper.get("gmail_oauth_token_path_exists") is True
+        and gmail_helper.get("gmail_required_scope_matches_expected") is True
+    )
+    required_scope = _safe_text(
+        gmail_helper.get("required_scope_expected") or "https://www.googleapis.com/auth/gmail.send",
+        max_length=120,
+    )
+    return {
+        "ready": ready,
+        "status_value": "Ready" if ready else "Setup needed",
+        "status_message": (
+            "Gmail setup looks complete."
+            if ready
+            else "Gmail is not fully connected yet."
+        ),
+        "rows": [
+            {
+                "label": "Gmail tools installed",
+                "value": _plain_yes_no(gmail_helper.get("gmail_dependencies_importable") is True),
+            },
+            {
+                "label": "From email added",
+                "value": _plain_yes_no(gmail_helper.get("gmail_send_from_email_configured") is True),
+            },
+            {
+                "label": "Gmail login file added",
+                "value": _plain_yes_no(gmail_helper.get("gmail_oauth_client_secret_path_exists") is True),
+            },
+            {
+                "label": "Gmail token file added",
+                "value": _plain_yes_no(gmail_helper.get("gmail_oauth_token_path_exists") is True),
+            },
+            {
+                "label": "Required permission",
+                "value": "gmail.send" if required_scope.endswith("/gmail.send") else required_scope,
+            },
+        ],
+    }
+
+
+def _plain_yes_no(value):
+    return "Yes" if value else "No"
+
+
+def _current_blockers(ready_count, gmail_ready):
+    blockers = []
+    if ready_count == 0:
+        blockers.append("No eligible order is available.")
+    if not gmail_ready:
+        blockers.append("Gmail setup is not complete.")
+    return blockers
+
+
+def _blocked_order_rows(focus, blocked_orders, trustpilot_email_records, invitation_history):
+    order_22620 = (focus.get("order_22620") or {}) if isinstance(focus, dict) else {}
+    prior_order = _safe_text(order_22620.get("prior_trustpilot_order_name"), max_length=80)
+    if not prior_order or prior_order == "unavailable":
+        prior_order = "#22621"
+
+    rows = [
+        {
+            "order": "#22620",
+            "status": "Already sent to this customer",
+            "status_class": "rrw-badge-bad",
+            "reason": f"Do not send. This customer already received a Trustpilot email via {prior_order}.",
+            "evidence": "Duplicate customer check",
+        },
+        {
+            "order": "#22582",
+            "status": "Related orders are not ready",
+            "status_class": "rrw-badge-warn",
+            "reason": (
+                f"Do not send yet. This order is not delivered, missing `{CANONICAL_REVIEW_REQUEST_TAG}`, "
+                "and related orders #22582/#22581 are not ready."
+            ),
+            "evidence": "Delivery, tag, and related-order check",
+        },
+    ]
+
+    seen_orders = {row["order"] for row in rows}
+    for row in blocked_orders or []:
+        order_name = _safe_text(row.get("order_name"), max_length=80)
+        if not order_name or order_name in seen_orders:
+            continue
+        rows.append(
+            {
+                "order": order_name,
+                "status": _plain_blocked_status(row),
+                "status_class": "rrw-badge-warn",
+                "reason": _plain_blocked_reason(row),
+                "evidence": "Local safety check",
+            }
+        )
+        seen_orders.add(order_name)
+        if len(rows) >= 8:
+            break
+
+    return rows
+
+
+def _plain_blocked_status(row):
+    return _admin_status_label(
+        row.get("status")
+        or row.get("blocking_summary")
+        or "blocked_candidate_safety_check_failed"
+    )
+
+
+def _plain_blocked_reason(row):
+    text = " ".join(
+        (
+            _safe_text(row.get("status")),
+            _safe_text(row.get("blocking_summary")),
+        )
+    )
+    label = _admin_status_label(text)
+    if label and label != "-":
+        return label
+    return "Do not send yet. This order needs manual review."
+
+
 def _pipeline_steps(ready_count):
-    active_label = "Waiting for eligible orders" if ready_count == 0 else "Ready for admin review"
     return [
         {
             "number": 1,
-            "label": "Delivered order detected",
-            "detail": f"Order has the {DELIVERED_TAG} tag.",
-            "state_label": "Required",
+            "label": "Order is delivered",
+            "detail": "The order has reached the customer.",
+            "state_label": "Needed",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 2,
-            "label": f"Required Shopify tag present: {CANONICAL_REVIEW_REQUEST_TAG}",
-            "detail": f"Order has the {CANONICAL_REVIEW_REQUEST_TAG} tag.",
-            "state_label": "Required",
+            "label": f"Staff adds `{CANONICAL_REVIEW_REQUEST_TAG}`",
+            "detail": "Staff marks the order for a Trustpilot request.",
+            "state_label": "Needed",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 3,
-            "label": "Duplicate/customer-level blocker check",
-            "detail": "Duplicate, related-order, ticket, refund, return, and shipping risk checks pass.",
-            "state_label": active_label,
+            "label": "System checks for duplicates and risks",
+            "detail": "Customers who already received an email stay blocked.",
+            "state_label": "Checking",
             "state_class": "rrw-step-active",
         },
         {
             "number": 4,
-            "label": "Gmail draft/send readiness",
-            "detail": "Dry-run preparation only. No Gmail draft, delete, or send is active here.",
-            "state_label": "Dry-run only",
+            "label": "Gmail setup is checked",
+            "detail": "The sender account must be connected first.",
+            "state_label": "Setup needed",
             "state_class": "rrw-step-muted",
         },
         {
             "number": 5,
-            "label": "Locked admin approval",
-            "detail": "Separate locked approval is required before any real email.",
-            "state_label": "Preparation only",
-            "state_class": "rrw-step-muted",
-        },
-        {
-            "number": 6,
-            "label": "Email sent",
-            "detail": "Future approved Gmail phase only. This workbench cannot send.",
-            "state_label": "Not active",
-            "state_class": "rrw-step-muted",
-        },
-        {
-            "number": 7,
-            "label": "Shopify tag write: 1: trustpilot",
-            "detail": "Future approved Shopify tag phase only after send is verified.",
-            "state_label": "Not active",
-            "state_class": "rrw-step-muted",
-        },
-        {
-            "number": 8,
-            "label": "History/debug recorded",
-            "detail": "Result is recorded for duplicate prevention.",
-            "state_label": "Local reports",
+            "label": "Email can be reviewed before sending",
+            "detail": "A staff member reviews the final email first.",
+            "state_label": "Not ready" if ready_count == 0 else "Ready for review",
             "state_class": "rrw-step-muted",
         },
     ]
@@ -3415,10 +3559,8 @@ def _next_actions(focus, ready_count):
     if ready_count == 0:
         actions.append(
             {
-                "title": "Nothing to send now",
-                "description": (
-                    "Nothing to send now."
-                ),
+                "title": "Nothing to send right now",
+                "description": "Wait for a delivered order with the review request tag and complete Gmail setup.",
                 "items": [],
             }
         )
@@ -3435,19 +3577,19 @@ def _next_actions(focus, ready_count):
             {
                 "title": "#22582 is not ready",
                 "description": (
-                    f"Do not send yet. Order is not delivered, missing {CANONICAL_REVIEW_REQUEST_TAG}, "
-                    "and related order group #22582/#22581 is not ready."
+                    f"Do not send yet. This order is not delivered, missing `{CANONICAL_REVIEW_REQUEST_TAG}`, "
+                    "and related orders #22582/#22581 are not ready."
                 ),
                 "items": [
                     "Not delivered",
-                    f"Missing {CANONICAL_REVIEW_REQUEST_TAG}",
-                    "Related order group #22582/#22581 not ready",
+                    f"Missing `{CANONICAL_REVIEW_REQUEST_TAG}`",
+                    "Related orders #22582/#22581 are not ready",
                 ],
             },
             {
                 "title": "#22620 should not be sent",
                 "description": (
-                    f"Do not send. This customer already received a Trustpilot invitation via {prior_order}."
+                    f"Do not send. This customer already received a Trustpilot email via {prior_order}."
                 ),
                 "items": [],
             },
@@ -3481,12 +3623,7 @@ def _recent_activity(focus, trustpilot_email_records, blocked_orders, invitation
             "status": "Sent Trustpilot",
             "status_class": "rrw-badge-ok",
             "reason": "Trustpilot email already sent and recorded.",
-            "last_evidence": _evidence_for_order(
-                prior_order,
-                trustpilot_email_records,
-                invitation_history,
-                order_22620,
-            ),
+            "last_evidence": "Send record found",
         }
     )
     rows.append(
@@ -3501,15 +3638,9 @@ def _recent_activity(focus, trustpilot_email_records, blocked_orders, invitation
             "status": "Already sent to this customer",
             "status_class": "rrw-badge-bad",
             "reason": (
-                f"Blocked duplicate customer. Trustpilot already went out via {prior_order}; "
-                "the unsent draft should not be sent."
+                f"Do not send. This customer already received a Trustpilot email via {prior_order}."
             ),
-            "last_evidence": _evidence_for_order(
-                "#22620",
-                trustpilot_email_records,
-                blocked_orders,
-                order_22620,
-            ),
+            "last_evidence": "Duplicate customer check",
         }
     )
     rows.append(
@@ -3524,15 +3655,10 @@ def _recent_activity(focus, trustpilot_email_records, blocked_orders, invitation
             "status": "Not ready",
             "status_class": "rrw-badge-warn",
             "reason": (
-                f"Not delivered, missing {CANONICAL_REVIEW_REQUEST_TAG}, and related order group "
-                "#22582/#22581 is not ready."
+                f"Do not send yet. This order is not delivered, missing `{CANONICAL_REVIEW_REQUEST_TAG}`, "
+                "and related orders #22582/#22581 are not ready."
             ),
-            "last_evidence": _evidence_for_order(
-                "#22582",
-                trustpilot_email_records,
-                blocked_orders,
-                order_22582,
-            ),
+            "last_evidence": "Delivery, tag, and related-order check",
         }
     )
 
@@ -3553,7 +3679,7 @@ def _recent_activity(focus, trustpilot_email_records, blocked_orders, invitation
                 "reason": _admin_status_label(
                     record.get("blocker_reason") or record.get("classification") or record.get("status")
                 ),
-                "last_evidence": _record_evidence_label(record),
+                "last_evidence": "Local history record",
             }
         )
         seen_orders.add(order_name)
