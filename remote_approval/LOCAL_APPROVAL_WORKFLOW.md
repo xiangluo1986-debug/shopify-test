@@ -69,6 +69,7 @@ python remote_approval_runner.py --task shopify_review_request_tag_discovery --m
 python remote_approval_runner.py --task shopify_review_request_trustpilot_automation_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_locked_send_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_auto_queue_refresh --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_trustpilot_candidate_simulator --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_locked_gmail_send_gate --mode dry-run --approval local
 ```
 
@@ -115,13 +116,42 @@ tracking tokens. Its next-step output is limited to `wait_no_candidate`,
 `prepare_locked_send_package`, `manual_review_required_multiple_candidates`, or
 `blocked_safety_issue`.
 
+## Review Request Trustpilot Candidate Simulator
+
+`shopify_review_request_trustpilot_candidate_simulator` is a Phase 5.12
+local-only sandbox task. It writes fake candidate fixtures that can test the
+locked Gmail send gate and executor shell branches without touching real
+customers or external services.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_candidate_simulator.json
+logs/shopify_review_request_trustpilot_candidate_simulator.html
+logs/shopify_review_request_trustpilot_locked_gmail_send_gate_simulator_fixture.json
+logs/shopify_review_request_trustpilot_gmail_send_executor_shell_simulator_fixture.json
+```
+
+Supported simulator modes are configured with
+`SHOPIFY_REVIEW_REQUEST_SIMULATOR_MODE`: `no_candidate`,
+`one_eligible_candidate`, `multiple_eligible_candidates`, or
+`unsafe_candidate`. The default is `no_candidate`.
+
+The locked gate and executor shell ignore simulator fixture reports unless
+`SHOPIFY_REVIEW_REQUEST_USE_SIMULATOR_FIXTURE=YES_I_UNDERSTAND_THIS_IS_FAKE_DATA`
+is present. The simulator never calls Gmail APIs, creates/updates/deletes
+drafts, sends email, calls Shopify APIs, writes Shopify tags, calls
+Trustpilot/Kudosi/Ali Reviews APIs, creates tracking redirects, or uses raw
+customer emails.
+
 ## Review Request Trustpilot Locked Gmail Send Gate
 
 `shopify_review_request_trustpilot_locked_gmail_send_gate` is a Phase 5.10
 dry-run gate report. It reads the latest Trustpilot auto queue refresh, locked
 send readiness package, automation dry-run, and optional history ledger audit
 reports, then decides whether a future Gmail send could be considered after a
-separate locked ACK.
+separate locked ACK. For sandbox branch testing only, it can read the Phase 5.12
+simulator fixture when the explicit fake-data environment variable is set.
 
 It writes local review files only:
 
@@ -139,7 +169,9 @@ gate is ready for a future ACK.
 
 `shopify_review_request_trustpilot_gmail_send_executor_shell` is a Phase 5.11
 no-send executor shell. It reads the latest locked Gmail send gate report and
-decides whether a future real Gmail send implementation could proceed.
+decides whether a future real Gmail send implementation could proceed. For
+sandbox branch testing only, it can read the Phase 5.12 simulator fixture when
+the explicit fake-data environment variable is set.
 
 It writes local review files only:
 

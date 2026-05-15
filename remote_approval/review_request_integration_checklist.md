@@ -580,3 +580,29 @@ Future tracking design note:
   candidate, and explicit ACK
   `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK=YES_I_APPROVE_ONE_TRUSTPILOT_GMAIL_SEND`.
 - [x] Current status remains blocked because no eligible candidate exists.
+
+## Phase 5.12 Trustpilot Candidate Simulator
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_candidate_simulator`.
+- [x] Generate local JSON/HTML simulator reports only:
+  `logs/shopify_review_request_trustpilot_candidate_simulator.json` and
+  `logs/shopify_review_request_trustpilot_candidate_simulator.html`.
+- [x] Generate simulator-only downstream fixtures for the locked Gmail send
+  gate and executor shell.
+- [x] Use fake candidate data only, including sandbox order
+  `#SIM-TRUSTPILOT-001` and masked email `s***@example.invalid`.
+- [x] Default simulator mode is `no_candidate`; supported modes are
+  `one_eligible_candidate`, `multiple_eligible_candidates`, and
+  `unsafe_candidate`.
+- [x] No Shopify API is called.
+- [x] No Gmail API is called.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No email is sent.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] Simulator fixtures are ignored unless
+  `SHOPIFY_REVIEW_REQUEST_USE_SIMULATOR_FIXTURE=YES_I_UNDERSTAND_THIS_IS_FAKE_DATA`
+  is explicitly set.
+- [x] The simulator is used only to test gate/executor branches before any
+  future real-send implementation.

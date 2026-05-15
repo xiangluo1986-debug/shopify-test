@@ -154,6 +154,12 @@ REPORT_DEFINITIONS = (
         ("refresh_status", "report_status", "status"),
     ),
     (
+        "trustpilot_candidate_simulator",
+        "Trustpilot candidate simulator",
+        "shopify_review_request_trustpilot_candidate_simulator.json",
+        ("simulator_status", "report_status", "status"),
+    ),
+    (
         "trustpilot_locked_gmail_send_gate",
         "Trustpilot locked Gmail send gate",
         "shopify_review_request_trustpilot_locked_gmail_send_gate.json",
@@ -391,6 +397,9 @@ def build_review_request_workbench_context(params=None):
         reports.get("trustpilot_auto_queue_refresh", {}),
         trustpilot_send_readiness,
     )
+    trustpilot_candidate_simulator = _trustpilot_candidate_simulator_status(
+        reports.get("trustpilot_candidate_simulator", {}),
+    )
     trustpilot_gmail_send_gate = _trustpilot_gmail_send_gate_status(
         reports.get("trustpilot_locked_gmail_send_gate", {}),
         trustpilot_auto_refresh,
@@ -415,6 +424,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_automation_status=trustpilot_automation_status,
         trustpilot_send_readiness=trustpilot_send_readiness,
         trustpilot_auto_refresh=trustpilot_auto_refresh,
+        trustpilot_candidate_simulator=trustpilot_candidate_simulator,
         trustpilot_gmail_send_gate=trustpilot_gmail_send_gate,
         trustpilot_gmail_send_executor_shell=trustpilot_gmail_send_executor_shell,
     )
@@ -470,6 +480,7 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_automation_status": trustpilot_automation_status,
             "trustpilot_send_readiness": trustpilot_send_readiness,
             "trustpilot_auto_refresh": trustpilot_auto_refresh,
+            "trustpilot_candidate_simulator": trustpilot_candidate_simulator,
             "trustpilot_gmail_send_gate": trustpilot_gmail_send_gate,
             "trustpilot_gmail_send_executor_shell": trustpilot_gmail_send_executor_shell,
             "trustpilot_email_records": trustpilot_email_records,
@@ -1569,6 +1580,7 @@ def _report_readiness(reports):
         ("trustpilot_automation_dry_run", "Trustpilot automation dry-run"),
         ("trustpilot_locked_send_readiness_package", "Trustpilot locked send readiness package"),
         ("trustpilot_auto_queue_refresh", "Trustpilot auto queue refresh"),
+        ("trustpilot_candidate_simulator", "Trustpilot candidate simulator (sandbox)"),
         ("trustpilot_locked_gmail_send_gate", "Trustpilot locked Gmail send gate"),
         ("trustpilot_gmail_send_executor_shell", "Trustpilot Gmail send executor shell"),
         ("trustpilot_one_candidate_draft_package", "One-candidate Gmail draft package"),
@@ -2336,6 +2348,62 @@ def _trustpilot_auto_refresh_status(report, trustpilot_send_readiness):
     }
 
 
+def _trustpilot_candidate_simulator_status(report):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    report_loaded = bool(report.get("loaded"))
+    generated_fixture_reports = (
+        data.get("generated_downstream_fixture_reports")
+        if isinstance(data.get("generated_downstream_fixture_reports"), list)
+        else []
+    )
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_candidate_simulator.json",
+            max_length=160,
+        ),
+        "html_relative_path": "logs/shopify_review_request_trustpilot_candidate_simulator.html",
+        "simulator_status": _safe_text(
+            data.get("simulator_status") or report.get("status") or "missing",
+            max_length=120,
+        ),
+        "simulator_mode": _safe_text(data.get("simulator_mode") or "no_candidate", max_length=80),
+        "simulator_only": data.get("simulator_only") is True,
+        "simulator_only_label": "Yes" if data.get("simulator_only") is True else "No",
+        "real_customer_data_used": data.get("real_customer_data_used") is True,
+        "real_customer_data_used_label": "Yes" if data.get("real_customer_data_used") is True else "No",
+        "eligible_candidate_count": _int_or_zero(data.get("eligible_candidate_count")),
+        "selected_candidate_order_name": _safe_text(data.get("selected_candidate_order_name"), max_length=80),
+        "message": _safe_text(
+            data.get("simulator_warning")
+            or "Sandbox simulator is for testing only. It never uses real customer data and never sends emails.",
+            max_length=300,
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "generated_downstream_fixture_reports": [
+            {
+                "key": _safe_text(item.get("key"), max_length=80),
+                "relative_path": _safe_text(item.get("relative_path"), max_length=160),
+                "present": item.get("present") is True,
+            }
+            for item in generated_fixture_reports
+            if isinstance(item, dict)
+        ],
+        "raw_flags": {
+            "simulator_only": data.get("simulator_only") is True,
+            "real_customer_data_used": data.get("real_customer_data_used") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "email_sent": data.get("email_sent") is True,
+            "shopify_api_call_performed": data.get("shopify_api_call_performed") is True,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "external_review_api_call_performed": data.get("external_review_api_call_performed") is True,
+        },
+    }
+
+
 def _trustpilot_gmail_send_gate_status(report, trustpilot_auto_refresh):
     data = report.get("data") if report.get("loaded") else {}
     data = data if isinstance(data, dict) else {}
@@ -2557,6 +2625,7 @@ def _operating_dashboard(
     trustpilot_automation_status,
     trustpilot_send_readiness,
     trustpilot_auto_refresh,
+    trustpilot_candidate_simulator,
     trustpilot_gmail_send_gate,
     trustpilot_gmail_send_executor_shell,
 ):
@@ -2623,6 +2692,7 @@ def _operating_dashboard(
         "trustpilot_automation": trustpilot_automation_status,
         "trustpilot_send_readiness": trustpilot_send_readiness,
         "trustpilot_auto_refresh": trustpilot_auto_refresh,
+        "trustpilot_candidate_simulator": trustpilot_candidate_simulator,
         "trustpilot_gmail_send_gate": trustpilot_gmail_send_gate,
         "trustpilot_gmail_send_executor_shell": trustpilot_gmail_send_executor_shell,
         "next_actions": _next_actions(focus, ready_count),

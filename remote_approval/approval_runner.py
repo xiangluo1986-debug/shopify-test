@@ -262,6 +262,7 @@ def _execute_selected_action(
         "shopify_review_request_trustpilot_automation_dry_run",
         "shopify_review_request_trustpilot_locked_send_readiness_package",
         "shopify_review_request_trustpilot_auto_queue_refresh",
+        "shopify_review_request_trustpilot_candidate_simulator",
         "shopify_review_request_trustpilot_locked_gmail_send_gate",
         "shopify_review_request_trustpilot_gmail_send_executor_shell",
         "shopify_review_request_order_sync_auto_refresh_hook_audit",

@@ -612,6 +612,66 @@
         </details>
     </div>
 
+    <details class="rrw-advanced-section">
+        <summary>Sandbox Testing</summary>
+        <p class="rrw-warning">
+            Sandbox simulator is for testing only. It never uses real customer data and never sends emails.
+        </p>
+        {% if dashboard.trustpilot_candidate_simulator.source_error %}
+            <p class="rrw-warning">{{ dashboard.trustpilot_candidate_simulator.source_error }}</p>
+        {% endif %}
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Simulator status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_candidate_simulator.simulator_status }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_candidate_simulator.relative_path }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Simulator mode</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_candidate_simulator.simulator_mode }}</div>
+                <div class="rrw-card-note">
+                    Simulator only:
+                    {{ dashboard.trustpilot_candidate_simulator.simulator_only_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Synthetic candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_candidate_simulator.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected sandbox candidate:
+                    {{ dashboard.trustpilot_candidate_simulator.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Real customer data used</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_candidate_simulator.real_customer_data_used_label }}</div>
+                <div class="rrw-card-note">Gate/executor ignore fixtures unless the explicit simulator env var is set.</div>
+            </div>
+        </div>
+        <p class="rrw-muted">
+            JSON report:
+            {{ dashboard.trustpilot_candidate_simulator.relative_path }}
+            | HTML report:
+            {{ dashboard.trustpilot_candidate_simulator.html_relative_path }}
+        </p>
+        {% if dashboard.trustpilot_candidate_simulator.generated_downstream_fixture_reports %}
+            <table class="rrw-table">
+                <thead>
+                    <tr><th>Fixture</th><th>Path</th><th>Present</th></tr>
+                </thead>
+                <tbody>
+                    {% for fixture in dashboard.trustpilot_candidate_simulator.generated_downstream_fixture_reports %}
+                        <tr>
+                            <td>{{ fixture.key }}</td>
+                            <td><code>{{ fixture.relative_path }}</code></td>
+                            <td>{{ fixture.present|yesno:"true,false" }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </details>
+
     <div class="rrw-section">
         <h2>Automation Pipeline</h2>
         <p class="rrw-current-state">{{ dashboard.current_state_label }}</p>

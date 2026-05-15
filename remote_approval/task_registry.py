@@ -117,6 +117,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_locked_send_readine
 from remote_approval.tasks.shopify_review_request_trustpilot_auto_queue_refresh_task import (
     run_shopify_review_request_trustpilot_auto_queue_refresh_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_candidate_simulator_task import (
+    run_shopify_review_request_trustpilot_candidate_simulator_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_locked_gmail_send_gate_task import (
     run_shopify_review_request_trustpilot_locked_gmail_send_gate_task,
 )
@@ -409,6 +412,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_auto_queue_refresh": (
         run_shopify_review_request_trustpilot_auto_queue_refresh_task
+    ),
+    "shopify_review_request_trustpilot_candidate_simulator": (
+        run_shopify_review_request_trustpilot_candidate_simulator_task
     ),
     "shopify_review_request_trustpilot_locked_gmail_send_gate": (
         run_shopify_review_request_trustpilot_locked_gmail_send_gate_task
@@ -821,6 +827,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local dashboard status refresh only",
         "review_file_path": "logs/shopify_review_request_trustpilot_auto_queue_refresh.json",
+    },
+    "shopify_review_request_trustpilot_candidate_simulator": {
+        "description": "Generate fake local-only Trustpilot candidate fixtures for testing the locked Gmail send gate and executor shell.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; synthetic simulator fixture only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_candidate_simulator.json",
     },
     "shopify_review_request_trustpilot_locked_gmail_send_gate": {
         "description": "Validate the locked Trustpilot Gmail send gate from local reports without calling Gmail, Shopify, or external review APIs.",

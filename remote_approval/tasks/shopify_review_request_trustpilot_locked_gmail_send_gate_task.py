@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from html import escape
 from pathlib import Path
@@ -21,6 +22,11 @@ PHASE = "5.10"
 
 REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_locked_gmail_send_gate.json"
 REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_locked_gmail_send_gate.html"
+SIMULATOR_FIXTURE_JSON_PATH = (
+    LOG_DIR / "shopify_review_request_trustpilot_locked_gmail_send_gate_simulator_fixture.json"
+)
+SIMULATOR_FIXTURE_ENV_VAR = "SHOPIFY_REVIEW_REQUEST_USE_SIMULATOR_FIXTURE"
+SIMULATOR_FIXTURE_ACK = "YES_I_UNDERSTAND_THIS_IS_FAKE_DATA"
 
 SOURCE_REPORTS = {
     "auto_queue_refresh": LOG_DIR / "shopify_review_request_trustpilot_auto_queue_refresh.json",
@@ -101,7 +107,16 @@ def run_shopify_review_request_trustpilot_locked_gmail_send_gate_task(mode: str)
 
 
 def _load_sources() -> dict:
-    return {key: _load_json_report(key, path) for key, path in SOURCE_REPORTS.items()}
+    sources = {key: _load_json_report(key, path) for key, path in SOURCE_REPORTS.items()}
+    if _simulator_fixture_enabled():
+        return {
+            "simulator_fixture": _load_json_report(
+                "simulator_fixture",
+                SIMULATOR_FIXTURE_JSON_PATH,
+            ),
+            **sources,
+        }
+    return sources
 
 
 def _load_json_report(key: str, path: Path) -> dict:
@@ -138,7 +153,12 @@ def _load_json_report(key: str, path: Path) -> dict:
 
 
 def _primary_source(sources: dict) -> dict:
-    for key in ("auto_queue_refresh", "locked_send_readiness_package", "automation_dry_run"):
+    for key in (
+        "simulator_fixture",
+        "auto_queue_refresh",
+        "locked_send_readiness_package",
+        "automation_dry_run",
+    ):
         report = sources.get(key) or {}
         if report.get("loaded"):
             return {
@@ -152,6 +172,7 @@ def _primary_source(sources: dict) -> dict:
 
 def _build_payload(sources: dict, primary_source: dict, duration_seconds: float) -> dict:
     data = primary_source.get("data") if isinstance(primary_source.get("data"), dict) else {}
+    simulator_only = _simulator_source_active(primary_source)
     eligible_count = _int_or_zero(data.get("eligible_candidate_count"))
     blocked_count = _int_or_zero(data.get("blocked_candidate_count"))
     selected_order = _selected_candidate_order_name(data, eligible_count)
@@ -184,6 +205,11 @@ def _build_payload(sources: dict, primary_source: dict, duration_seconds: float)
         "command_label": COMMAND_LABEL,
         "success": True,
         "gate_status": gate_status,
+        "simulator_fixture_enabled": _simulator_fixture_enabled(),
+        "simulator_only": simulator_only,
+        "simulator_mode": _safe_text(data.get("simulator_mode"), max_length=80) if simulator_only else "",
+        "real_customer_data_used": False if simulator_only else data.get("real_customer_data_used") is True,
+        "fake_candidate_summary": data.get("fake_candidate_summary") if simulator_only else {},
         "send_allowed_now": False,
         "draft_create_allowed_now": False,
         "gmail_api_allowed_now": False,
@@ -305,6 +331,20 @@ def _source_safety_findings(data: dict) -> list[str]:
             if no_write_flags.get(key) is True:
                 findings.append(f"source_no_write_flag_true:{key}")
     return _dedupe_text(findings)
+
+
+def _simulator_fixture_enabled() -> bool:
+    return os.environ.get(SIMULATOR_FIXTURE_ENV_VAR) == SIMULATOR_FIXTURE_ACK
+
+
+def _simulator_source_active(primary_source: dict) -> bool:
+    data = primary_source.get("data") if isinstance(primary_source.get("data"), dict) else {}
+    return (
+        _simulator_fixture_enabled()
+        and primary_source.get("key") == "simulator_fixture"
+        and data.get("simulator_only") is True
+        and data.get("source") == "trustpilot_candidate_simulator"
+    )
 
 
 def _block_reasons(
@@ -490,6 +530,12 @@ def _render_html_report(payload: dict) -> str:
     status_class = "ok" if payload["gate_status"] == GATE_STATUS_READY_FOR_ACK else "warn"
     selected_candidate = payload.get("selected_candidate_order_name") or "-"
     block_reasons = ", ".join(payload.get("block_reasons") or []) or "-"
+    simulator_notice = ""
+    if payload.get("simulator_only"):
+        simulator_notice = (
+            '<p class="status">Sandbox simulator fixture is active. This report uses fake data only '
+            "and still cannot send email or call external APIs.</p>"
+        )
     blocker_rows = "\n".join(_render_blocker_row(row) for row in payload["known_blockers_summary"])
     safety_rows = "\n".join(
         f"<tr><td><code>{escape(key)}</code></td><td>{escape(str(value))}</td></tr>"
@@ -519,6 +565,7 @@ def _render_html_report(payload: dict) -> str:
 </head>
 <body>
   <h1>Trustpilot Locked Gmail Send Gate</h1>
+  {simulator_notice}
   <p class="status {status_class}">Gate status: <strong>{escape(payload["gate_status"])}</strong></p>
   <p>{escape(payload["current_state_message"])}</p>
   <p>{escape(payload["future_ack_message"])}</p>
@@ -531,6 +578,8 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>Eligible candidate count</th><td>{payload["eligible_candidate_count"]}</td></tr>
       <tr><th>Blocked candidate count</th><td>{payload["blocked_candidate_count"]}</td></tr>
       <tr><th>Selected candidate</th><td>{escape(selected_candidate)}</td></tr>
+      <tr><th>Simulator only</th><td>{escape(str(payload.get("simulator_only") is True))}</td></tr>
+      <tr><th>Simulator mode</th><td><code>{escape(payload.get("simulator_mode") or "-")}</code></td></tr>
       <tr><th>Block reasons</th><td>{escape(block_reasons)}</td></tr>
       <tr><th>Required future ACK</th><td><code>{escape(payload["required_ack_for_future_real_send"])}</code></td></tr>
       <tr><th>Next admin action</th><td>{escape(payload["next_admin_action"])}</td></tr>
@@ -574,6 +623,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "json_trustpilot_locked_gmail_send_gate_path": str(json_path),
         "html_trustpilot_locked_gmail_send_gate_path": str(html_path),
         "gate_status": payload["gate_status"],
+        "simulator_fixture_enabled": payload["simulator_fixture_enabled"],
+        "simulator_only": payload["simulator_only"],
+        "simulator_mode": payload["simulator_mode"],
+        "real_customer_data_used": payload["real_customer_data_used"],
         "send_allowed_now": False,
         "draft_create_allowed_now": False,
         "gmail_api_allowed_now": False,
@@ -598,9 +651,15 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     selected = payload["selected_candidate_order_name"] or "None"
+    simulator_line = (
+        f"Simulator fixture active: True ({payload['simulator_mode']})\n"
+        if payload.get("simulator_only")
+        else "Simulator fixture active: False\n"
+    )
     return (
         "Shopify review request Phase 5.10 Trustpilot locked Gmail send gate finished.\n"
         f"Gate status: {payload['gate_status']}\n"
+        f"{simulator_line}"
         f"Send allowed now: {payload['send_allowed_now']}\n"
         f"Draft create allowed now: {payload['draft_create_allowed_now']}\n"
         f"Gmail API allowed now: {payload['gmail_api_allowed_now']}\n"
