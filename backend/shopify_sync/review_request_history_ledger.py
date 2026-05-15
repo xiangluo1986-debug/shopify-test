@@ -132,6 +132,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("scope_resolver_status", "scope_compatibility_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_gmail_draft_only_preflight",
+        "label": "Trustpilot Gmail draft-only preflight",
+        "filename": "shopify_review_request_trustpilot_gmail_draft_only_preflight.json",
+        "channel": "trustpilot",
+        "event_type": "draft_only_preflight",
+        "status_keys": ("draft_preflight_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -213,6 +221,7 @@ EVENT_TYPE_OPTIONS = (
     ("gmail_oauth_config_helper", "Gmail OAuth/config helper"),
     ("gmail_config_compatibility_audit", "Gmail config compatibility audit"),
     ("gmail_scope_compatibility_resolver", "Gmail scope compatibility resolver"),
+    ("draft_only_preflight", "Draft-only preflight"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
     ("draft_created", "Draft created"),
@@ -413,6 +422,7 @@ def _events_from_report(report):
         "trustpilot_real_send_execute",
         "trustpilot_gmail_real_send_readiness_audit",
         "trustpilot_gmail_scope_compatibility_resolver",
+        "trustpilot_gmail_draft_only_preflight",
     }:
         events.extend(_gate_executor_events(report))
 

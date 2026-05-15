@@ -778,3 +778,29 @@ Future tracking design note:
 - [x] Update the helper/readiness/dashboard wording so admins can see whether
   Gmail permission is missing, draft-only, or real-send capable without showing
   secret values.
+
+## Phase 5.19A Trustpilot Gmail Draft-Only Preflight
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_draft_only_preflight`.
+- [x] Generate local JSON/HTML draft-only preflight reports only:
+  `logs/shopify_review_request_trustpilot_gmail_draft_only_preflight.json`
+  and
+  `logs/shopify_review_request_trustpilot_gmail_draft_only_preflight.html`.
+- [x] Prepare the fastest safe route: if only `gmail.compose` is available,
+  a later locked phase can create one Gmail draft for staff review and manual
+  sending.
+- [x] Do not call Gmail network/API in this phase.
+- [x] Do not create, update, delete, or send a Gmail draft in this phase.
+- [x] Do not send email.
+- [x] Do not call Shopify APIs, write Shopify tags, or mutate Shopify data.
+- [x] Do not call Trustpilot, Kudosi, or Ali Reviews APIs.
+- [x] Keep the current default blocked until Gmail permission is configured and
+  exactly one eligible Trustpilot candidate exists.
+- [x] Preserve current known blockers:
+  `#22620` already received Trustpilot via `#22621`, and `#22582` is not
+  delivered, is missing `1: review request`, and related `#22582/#22581` is
+  not ready.
+- [x] The next phase can add a one-draft create locked runner only if scope and
+  candidate preflight are ready, and that future phase still needs separate
+  human approval.

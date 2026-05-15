@@ -337,6 +337,27 @@ the broad mail scope), or missing/unknown. It must not call Gmail, create or
 send drafts, read token/credential files, print secret values, call Shopify,
 write tags, call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
 
+## Review Request Trustpilot Gmail Draft-Only Preflight
+
+`shopify_review_request_trustpilot_gmail_draft_only_preflight` is a Phase
+5.19A local preflight for the fastest safe Trustpilot rollout path: one future
+Gmail draft for admin review and manual send when Gmail compose permission is
+available.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_draft_only_preflight.json
+logs/shopify_review_request_trustpilot_gmail_draft_only_preflight.html
+```
+
+The task reads only local safe reports from the Gmail scope resolver, real-send
+final preflight/execute skeleton, auto queue refresh, locked send readiness
+package, and locked Gmail send gate. It decides whether a later locked phase
+could create exactly one Gmail draft. This phase must not call Gmail, create or
+update a draft, send email, call Shopify, write tags, call Trustpilot/Kudosi/Ali
+Reviews, or call `translationsRegister`.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

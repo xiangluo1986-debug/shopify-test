@@ -372,6 +372,37 @@
     </div>
 
     <div class="rrw-section">
+        <h2>Gmail draft path</h2>
+        <p class="{% if dashboard.gmail_draft_path.draft_create_allowed_next_phase %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.gmail_draft_path.message }}
+        </p>
+        <table class="rrw-table">
+            <tbody>
+                <tr>
+                    <th>Draft path status</th>
+                    <td>{{ dashboard.gmail_draft_path.draft_preflight_status }}</td>
+                </tr>
+                <tr>
+                    <th>Can create one draft next phase</th>
+                    <td>{{ dashboard.gmail_draft_path.draft_create_allowed_next_phase_label }}</td>
+                </tr>
+                <tr>
+                    <th>Candidate count</th>
+                    <td>{{ dashboard.gmail_draft_path.eligible_candidate_count }}</td>
+                </tr>
+                <tr>
+                    <th>Selected order</th>
+                    <td>{{ dashboard.gmail_draft_path.selected_candidate_label }}</td>
+                </tr>
+                <tr>
+                    <th>Next action</th>
+                    <td>{{ dashboard.gmail_draft_path.next_admin_action }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="rrw-section">
         <h2>How it works</h2>
         <ol class="rrw-pipeline">
             {% for step in dashboard.pipeline_steps %}
@@ -1108,6 +1139,64 @@
                     <tr><th>Send scope available</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.send_scope_available|yesno:"Yes,No" }}</td></tr>
                     <tr><th>Broad mail scope available</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.broad_mail_scope_available|yesno:"Yes,No" }}</td></tr>
                     <tr><th>Recommendation</th><td>{{ dashboard.trustpilot_gmail_scope_compatibility_resolver.compatibility_recommendation }}</td></tr>
+                </tbody>
+            </table>
+        </details>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Gmail Draft-Only Preflight</h2>
+        <p class="{% if dashboard.trustpilot_gmail_draft_only_preflight.draft_create_allowed_next_phase %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_gmail_draft_only_preflight.message }}
+        </p>
+        <p class="rrw-muted">
+            No Gmail network call was made, no draft was created, no email was sent, and no Shopify tag was written.
+        </p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Draft preflight status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_draft_only_preflight.draft_preflight_status }}</div>
+                <div class="rrw-card-note">Local report only.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Can create one draft next phase</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_draft_only_preflight.draft_create_allowed_next_phase_label }}</div>
+                <div class="rrw-card-note">This phase creates no draft.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_draft_only_preflight.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected order:
+                    {{ dashboard.trustpilot_gmail_draft_only_preflight.selected_candidate_label }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_draft_only_preflight.draft_scope_available_label }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_draft_only_preflight.next_admin_action }}</div>
+            </div>
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_gmail_draft_only_preflight.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_gmail_draft_only_preflight.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_gmail_draft_only_preflight.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_gmail_draft_only_preflight.html_relative_path }}
+            </p>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>Scope status</th><td><code>{{ dashboard.trustpilot_gmail_draft_only_preflight.scope_status }}</code></td></tr>
+                    <tr><th>Draft scope available</th><td>{{ dashboard.trustpilot_gmail_draft_only_preflight.draft_scope_available_label }}</td></tr>
+                    <tr><th>Real-send scope available</th><td>{{ dashboard.trustpilot_gmail_draft_only_preflight.real_send_scope_available_label }}</td></tr>
+                    <tr><th>Exactly one candidate</th><td>{{ dashboard.trustpilot_gmail_draft_only_preflight.exactly_one_candidate|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Duplicate suppression passed</th><td>{{ dashboard.trustpilot_gmail_draft_only_preflight.duplicate_suppression_passed|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Related order guard passed</th><td>{{ dashboard.trustpilot_gmail_draft_only_preflight.related_order_guard_passed|yesno:"Yes,No" }}</td></tr>
+                    <tr><th>Risk checks passed</th><td>{{ dashboard.trustpilot_gmail_draft_only_preflight.risk_checks_passed|yesno:"Yes,No" }}</td></tr>
                 </tbody>
             </table>
         </details>

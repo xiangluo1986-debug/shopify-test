@@ -144,6 +144,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_gmail_config_compat
 from remote_approval.tasks.shopify_review_request_trustpilot_gmail_scope_compatibility_resolver_task import (
     run_shopify_review_request_trustpilot_gmail_scope_compatibility_resolver_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_gmail_draft_only_preflight_task import (
+    run_shopify_review_request_trustpilot_gmail_draft_only_preflight_task,
+)
 from remote_approval.tasks.shopify_review_request_order_sync_auto_refresh_hook_audit_task import (
     run_shopify_review_request_order_sync_auto_refresh_hook_audit_task,
 )
@@ -457,6 +460,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_gmail_scope_compatibility_resolver": (
         run_shopify_review_request_trustpilot_gmail_scope_compatibility_resolver_task
+    ),
+    "shopify_review_request_trustpilot_gmail_draft_only_preflight": (
+        run_shopify_review_request_trustpilot_gmail_draft_only_preflight_task
     ),
     "shopify_review_request_order_sync_auto_refresh_hook_audit": (
         run_shopify_review_request_order_sync_auto_refresh_hook_audit_task
@@ -917,6 +923,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local scope compatibility report only",
         "review_file_path": "logs/shopify_review_request_trustpilot_gmail_scope_compatibility_resolver.json",
+    },
+    "shopify_review_request_trustpilot_gmail_draft_only_preflight": {
+        "description": "Prepare the Trustpilot Gmail draft-only route for one future draft without calling Gmail, creating drafts, sending email, or writing Shopify.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local draft-only preflight report only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_gmail_draft_only_preflight.json",
     },
     "shopify_review_request_order_sync_auto_refresh_hook_audit": {
         "description": "Audit the dry-run Trustpilot queue auto-refresh hook after Shopify order sync completion.",

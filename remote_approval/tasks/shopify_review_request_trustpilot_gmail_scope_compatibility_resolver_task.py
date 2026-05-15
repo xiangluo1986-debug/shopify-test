@@ -200,7 +200,7 @@ def _scope_decision(legacy_summary: dict, new_summary: dict) -> dict:
             "future_real_send_scope_blocker": False,
             "warnings": _broad_scope_warning(broad_present),
             "dashboard_message": (
-                "Gmail send permission is available. Final approval is still required before sending."
+                "Gmail send permission is available. Final approval is still required."
             ),
             "compatibility_recommendation": (
                 "Configured Gmail scope includes gmail.send. Keep the future real-send path locked "
@@ -224,7 +224,7 @@ def _scope_decision(legacy_summary: dict, new_summary: dict) -> dict:
             "future_real_send_scope_blocker": False,
             "warnings": _broad_scope_warning(True),
             "dashboard_message": (
-                "Gmail send permission is available through a broad mail scope. Final approval is still required before sending."
+                "Gmail send permission is available. Final approval is still required."
             ),
             "compatibility_recommendation": (
                 "Broad mail scope can support real sending, but prefer least-privilege gmail.send if possible."
@@ -247,7 +247,7 @@ def _scope_decision(legacy_summary: dict, new_summary: dict) -> dict:
             "future_real_send_scope_blocker": True,
             "warnings": [],
             "dashboard_message": (
-                "Gmail can prepare drafts, but direct sending needs extra permission."
+                "Gmail can prepare drafts. Staff will review and send manually."
             ),
             "compatibility_recommendation": (
                 "Existing config can support draft creation, but direct automatic sending requires gmail.send scope."
@@ -268,8 +268,8 @@ def _scope_decision(legacy_summary: dict, new_summary: dict) -> dict:
         "draft_only_mode": False,
         "real_send_scope_available": False,
         "future_real_send_scope_blocker": True,
-        "warnings": [],
-        "dashboard_message": "Gmail permission is not configured yet.",
+            "warnings": [],
+            "dashboard_message": "Gmail permission is not configured yet.",
         "compatibility_recommendation": (
             "Configure Gmail scope explicitly. Use gmail.compose for draft-only workflows or gmail.send "
             "for a future direct-send workflow after approval."
