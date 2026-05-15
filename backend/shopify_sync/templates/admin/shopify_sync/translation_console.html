@@ -375,6 +375,7 @@
   }
   .tw-product-picker {
     display: block;
+    position: relative;
     padding: 12px;
     border: 1px solid #dbe1e8;
     border-radius: 8px;
@@ -400,27 +401,67 @@
     border: 1px solid #cfd8e3;
     border-radius: 8px;
     background: #f8fafc;
+    cursor: pointer;
+  }
+  .tw-product-selected:focus {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+  .tw-selected-label {
+    color: #475467;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+  }
+  .tw-product-combobox {
+    position: relative;
   }
   .tw-product-results {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 8px;
-    margin-top: 10px;
-  }
-  .translation-workspace .tw-product-option {
-    display: grid;
-    grid-template-columns: 64px minmax(0, 1fr);
-    gap: 10px;
-    min-height: 84px;
-    justify-content: start;
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    display: block;
+    width: min(640px, calc(100vw - 48px));
+    max-height: 460px;
+    overflow-y: auto;
+    padding: 6px;
     border: 1px solid #cfd8e3;
     border-radius: 8px;
     background: #ffffff;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+  }
+  .tw-product-results[hidden] {
+    display: none !important;
+  }
+  .tw-product-dropdown-status {
+    padding: 6px 8px 8px;
+    color: #475467;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .tw-product-dropdown-empty {
+    margin: 4px;
+  }
+  .translation-workspace .tw-product-option {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 9px;
+    min-height: 56px;
+    justify-content: start;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: #ffffff;
     color: #111827 !important;
     cursor: pointer;
-    padding: 8px;
+    padding: 7px;
     text-align: left;
     width: 100%;
+  }
+  .translation-workspace .tw-product-option + .tw-product-option {
+    margin-top: 2px;
   }
   .translation-workspace .tw-product-option:hover,
   .translation-workspace .tw-product-option:focus {
@@ -434,12 +475,17 @@
   }
   .tw-product-thumb,
   .tw-product-thumb-placeholder {
-    width: 64px;
-    height: 64px;
+    width: 52px;
+    height: 52px;
     border: 1px solid #dbe1e8;
     border-radius: 6px;
     background: #f3f6fa;
     object-fit: cover;
+  }
+  .tw-product-option .tw-product-thumb,
+  .tw-product-option .tw-product-thumb-placeholder {
+    width: 44px;
+    height: 44px;
   }
   .tw-product-thumb-placeholder {
     display: flex;
@@ -484,7 +530,8 @@
       grid-template-columns: 1fr;
     }
     .tw-product-results {
-      grid-template-columns: 1fr;
+      width: 100%;
+      max-height: 390px;
     }
   }
   .tw-draft-card {
@@ -1354,7 +1401,38 @@
       <div class="tw-picker-controls">
         <div class="tw-compact-field tw-product-field">
           <label for="id_editor_product_search">Choose product</label><br>
-          <input id="id_editor_product_search" type="search" name="product_search" value="{{ product_search_text }}" placeholder="Search product title, model, SKU, or handle" autocomplete="off" data-product-filter-input>
+          <div class="tw-product-combobox">
+            <input id="id_editor_product_search" type="search" name="product_search" value="{{ product_search_text }}" placeholder="Search product title, model, SKU, or handle" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tw-product-picker-dropdown" data-product-filter-input>
+            <div id="tw-product-picker-dropdown" class="tw-product-results" role="listbox" data-product-dropdown hidden>
+              <div class="tw-product-dropdown-status">
+                <span data-product-picker-summary>{% if product_search_text %}Showing matching products{% else %}Showing latest products{% endif %}</span>: <span data-product-picker-count>{% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}{{ product_selector.result_count }}{% endif %}</span>
+              </div>
+              {% if product_selector.product_options %}
+                {% for product in product_selector.product_options %}
+                  <button type="submit" name="product_gid" value="{{ product.gid }}" class="tw-product-option{% if product.gid == selected_product_gid %} is-selected{% endif %}" data-product-option data-search="{{ product.searchable_text }}" data-search-normalized="{{ product.searchable_normalized }}" role="option" aria-selected="{% if product.gid == selected_product_gid %}true{% else %}false{% endif %}">
+                    {% if product.thumbnail_url %}
+                      <img class="tw-product-thumb" src="{{ product.thumbnail_url }}" alt="" loading="lazy">
+                    {% else %}
+                      <span class="tw-product-thumb-placeholder">No image</span>
+                    {% endif %}
+                    <span>
+                      <span class="tw-product-title">{{ product.title }}</span>
+                      <span class="tw-product-meta">
+                        {% if product.gid == selected_product_gid %}<span class="tw-selected-badge">Selected</span>{% endif %}
+                        {% if product.sku %}<span>SKU {{ product.sku }}</span>{% endif %}
+                        {% if product.variant_title %}<span>Model {{ product.variant_title }}</span>{% endif %}
+                        {% if product.handle %}<span>{{ product.handle }}</span>{% endif %}
+                        {% if product.numeric_id %}<span>ID {{ product.numeric_id }}</span>{% endif %}
+                      </span>
+                    </span>
+                  </button>
+                {% endfor %}
+              {% endif %}
+              <div class="tw-empty-state tw-product-dropdown-empty" data-product-picker-empty{% if product_selector.product_options and not product_selector.no_matching_products %} hidden{% endif %}>
+                {% if product_selector.no_products_available %}No products available.{% else %}No matching products in this list. Try another keyword.{% endif %}
+              </div>
+            </div>
+          </div>
         </div>
         <div class="tw-compact-field">
           <label for="id_editor_locale">Choose language</label><br>
@@ -1371,7 +1449,7 @@
         <button type="submit" class="button">Show translation</button>
         <a class="button" href="?ui_mode=editor&product_gid={{ selected_product_gid|urlencode }}&target_locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Clear search</a>
       </div>
-      <div class="tw-product-selected">
+      <div class="tw-product-selected" data-product-selected-toggle role="button" tabindex="0" aria-controls="tw-product-picker-dropdown">
         {% if product_selector.selected_product %}
           {% if product_selector.selected_product.thumbnail_url %}
             <img class="tw-product-thumb" src="{{ product_selector.selected_product.thumbnail_url }}" alt="" loading="lazy">
@@ -1379,6 +1457,7 @@
             <div class="tw-product-thumb-placeholder">No image</div>
           {% endif %}
           <div>
+            <div class="tw-selected-label">Selected product</div>
             <div class="tw-product-title">{{ product_selector.selected_product.title }}</div>
             <div class="tw-product-meta">
               <span class="tw-selected-badge">Selected</span>
@@ -1391,45 +1470,17 @@
         {% else %}
           <div class="tw-product-thumb-placeholder">No image</div>
           <div>
+            <div class="tw-selected-label">Selected product</div>
             <div class="tw-product-title">No product selected</div>
-            <div class="tw-muted">Type to search products, then choose a product below.</div>
+            <div class="tw-muted">Search products, then choose one.</div>
           </div>
         {% endif %}
       </div>
       <p class="tw-muted" style="margin: 12px 0 0;">
-        <span data-product-picker-summary>{% if product_search_text %}Showing matching products{% else %}Showing latest products{% endif %}</span>: <span data-product-picker-count>{% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}{{ product_selector.result_count }}{% endif %}</span>.
+        {% if product_search_text %}Matching products{% else %}Latest products{% endif %}: {% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}{{ product_selector.result_count }}{% endif %}.
         {% if product_search_text %}Search results for: <strong>{{ product_search_text }}</strong>.{% endif %}
         {% if product_selector.included_selected_product %}Current selected product stays available even when it is outside the search results.{% endif %}
       </p>
-      {% if product_selector.no_matching_products %}
-        <p class="tw-warning">No matching products in this list. Try another keyword.</p>
-      {% endif %}
-      {% if product_selector.product_options %}
-        <div class="tw-product-results" role="list">
-          {% for product in product_selector.product_options %}
-            <button type="submit" name="product_gid" value="{{ product.gid }}" class="tw-product-option{% if product.gid == selected_product_gid %} is-selected{% endif %}" data-product-option data-search="{{ product.searchable_text }}" data-search-normalized="{{ product.searchable_normalized }}" aria-pressed="{% if product.gid == selected_product_gid %}true{% else %}false{% endif %}">
-              {% if product.thumbnail_url %}
-                <img class="tw-product-thumb" src="{{ product.thumbnail_url }}" alt="" loading="lazy">
-              {% else %}
-                <span class="tw-product-thumb-placeholder">No image</span>
-              {% endif %}
-              <span>
-                <span class="tw-product-title">{{ product.title }}</span>
-                <span class="tw-product-meta">
-                  {% if product.gid == selected_product_gid %}<span class="tw-selected-badge">Selected</span>{% endif %}
-                  {% if product.sku %}<span>SKU {{ product.sku }}</span>{% endif %}
-                  {% if product.variant_title %}<span>Model {{ product.variant_title }}</span>{% endif %}
-                  {% if product.handle %}<span>{{ product.handle }}</span>{% endif %}
-                  {% if product.numeric_id %}<span>ID {{ product.numeric_id }}</span>{% endif %}
-                </span>
-              </span>
-            </button>
-          {% endfor %}
-        </div>
-      {% else %}
-        <div class="tw-empty-state" style="margin-top: 10px;">No products available.</div>
-      {% endif %}
-      <div class="tw-empty-state" data-product-picker-empty hidden style="margin-top: 10px;">No matching products in this list. Try another keyword.</div>
     </form>
     <details class="tw-advanced-details" style="margin-bottom: 12px;">
       <summary>Fallback product dropdown</summary>
@@ -3544,10 +3595,12 @@
       }
       var input = picker.querySelector("[data-product-filter-input]");
       var items = Array.prototype.slice.call(picker.querySelectorAll("[data-product-option]"));
+      var dropdown = picker.querySelector("[data-product-dropdown]");
+      var selectedToggle = picker.querySelector("[data-product-selected-toggle]");
       var summary = picker.querySelector("[data-product-picker-summary]");
       var count = picker.querySelector("[data-product-picker-count]");
       var empty = picker.querySelector("[data-product-picker-empty]");
-      if (!input || !items.length) {
+      if (!input || !dropdown) {
         return;
       }
 
@@ -3578,6 +3631,11 @@
         });
       }
 
+      function setDropdownOpen(isOpen) {
+        dropdown.hidden = !isOpen;
+        input.setAttribute("aria-expanded", isOpen ? "true" : "false");
+      }
+
       function applyProductFilter() {
         var visibleCount = 0;
         var matchingCount = 0;
@@ -3601,12 +3659,53 @@
           count.textContent = String(hasQuery ? matchingCount : visibleCount);
         }
         if (empty) {
-          empty.hidden = !hasQuery || matchingCount !== 0;
+          empty.hidden = !(items.length === 0 || (hasQuery && matchingCount === 0));
         }
       }
 
-      input.addEventListener("input", applyProductFilter);
+      function openDropdown() {
+        applyProductFilter();
+        setDropdownOpen(true);
+      }
+
+      function closeDropdown() {
+        setDropdownOpen(false);
+      }
+
+      input.addEventListener("focus", openDropdown);
+      input.addEventListener("input", function () {
+        applyProductFilter();
+        setDropdownOpen(true);
+      });
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          closeDropdown();
+          input.blur();
+        }
+      });
+      if (selectedToggle) {
+        selectedToggle.addEventListener("click", function () {
+          input.focus();
+          openDropdown();
+        });
+        selectedToggle.addEventListener("keydown", function (event) {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            input.focus();
+            openDropdown();
+          }
+        });
+      }
+      items.forEach(function (item) {
+        item.addEventListener("click", closeDropdown);
+      });
+      document.addEventListener("click", function (event) {
+        if (!picker.contains(event.target)) {
+          closeDropdown();
+        }
+      });
       applyProductFilter();
+      closeDropdown();
     }());
   </script>
 </div>
