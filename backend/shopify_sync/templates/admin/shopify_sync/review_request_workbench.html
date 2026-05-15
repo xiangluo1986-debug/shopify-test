@@ -338,6 +338,56 @@
     </div>
 
     <div class="rrw-section">
+        <h2>Automation Refresh</h2>
+        <p class="{% if dashboard.trustpilot_auto_refresh.eligible_candidate_count %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_auto_refresh.message }}
+        </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_auto_refresh.detail }}</p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_auto_refresh.scheduler_note }}</p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Last refresh status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.refresh_status }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_auto_refresh.relative_path }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Last refresh time</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.last_refresh_time|default:"Not refreshed yet" }}</div>
+                <div class="rrw-card-note">
+                    Source readiness: {{ dashboard.trustpilot_auto_refresh.source_readiness_package_status }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Queue counts</div>
+                <div class="rrw-card-value">
+                    {{ dashboard.trustpilot_auto_refresh.eligible_candidate_count }} ready /
+                    {{ dashboard.trustpilot_auto_refresh.blocked_candidate_count }} blocked
+                </div>
+                <div class="rrw-card-note">
+                    Selected candidate:
+                    {{ dashboard.trustpilot_auto_refresh.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next real step</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.next_real_step }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_auto_refresh.next_admin_action }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Scheduler-safe status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_auto_refresh.scheduler_safe_status }}</div>
+                <div class="rrw-card-note">Dry-run only. No Gmail draft/send, Shopify tag write, or external review API call.</div>
+            </div>
+        </div>
+        <div class="rrw-note">
+            {{ dashboard.trustpilot_auto_refresh.order_22620_message }}
+        </div>
+        <div class="rrw-warning">
+            {{ dashboard.trustpilot_auto_refresh.order_22582_message }}
+        </div>
+    </div>
+
+    <div class="rrw-section">
         <h2>Trustpilot Send Readiness</h2>
         <p class="{% if dashboard.trustpilot_send_readiness.selected_candidate_safe_to_prepare_send %}rrw-note{% else %}rrw-warning{% endif %}">
             {{ dashboard.trustpilot_send_readiness.message }}

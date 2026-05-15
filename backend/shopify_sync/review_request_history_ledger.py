@@ -60,6 +60,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("package_status", "automation_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_auto_queue_refresh",
+        "label": "Trustpilot auto queue refresh",
+        "filename": "shopify_review_request_trustpilot_auto_queue_refresh.json",
+        "channel": "trustpilot",
+        "event_type": "automation_refresh",
+        "status_keys": ("refresh_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -131,6 +139,7 @@ EVENT_TYPE_OPTIONS = (
     ("candidate_blocked", "Candidate blocked"),
     ("duplicate_block", "Duplicate block"),
     ("automation_dry_run", "Automation dry-run"),
+    ("automation_refresh", "Automation refresh"),
     ("readiness_package", "Readiness package"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
@@ -320,6 +329,8 @@ def _events_from_report(report):
         events.extend(_duplicate_audit_events(report))
     elif key == "trustpilot_locked_send_readiness_package":
         events.extend(_readiness_package_events(report))
+    elif key == "trustpilot_auto_queue_refresh":
+        events.extend(_auto_refresh_events(report))
 
     return [event for event in events if event]
 
@@ -403,6 +414,17 @@ def _readiness_package_events(report):
             event = _event_from_mapping(report, item, "candidate_selected", "eligible_candidates_summary")
             if event:
                 event["status"] = event["status"] or "eligible_for_locked_send_readiness"
+                events.append(event)
+    return events
+
+
+def _auto_refresh_events(report):
+    data = report["data"]
+    events = []
+    for item in data.get("known_blockers_summary") or []:
+        if isinstance(item, dict):
+            event = _event_from_mapping(report, item, "candidate_blocked", "known_blockers_summary")
+            if event:
                 events.append(event)
     return events
 

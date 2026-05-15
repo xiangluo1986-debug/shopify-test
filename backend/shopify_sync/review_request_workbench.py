@@ -146,6 +146,12 @@ REPORT_DEFINITIONS = (
         ("package_status", "automation_status", "report_status", "status"),
     ),
     (
+        "trustpilot_auto_queue_refresh",
+        "Trustpilot auto queue refresh",
+        "shopify_review_request_trustpilot_auto_queue_refresh.json",
+        ("refresh_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -360,6 +366,10 @@ def build_review_request_workbench_context(params=None):
         reports.get("trustpilot_locked_send_readiness_package", {}),
         trustpilot_automation_status,
     )
+    trustpilot_auto_refresh = _trustpilot_auto_refresh_status(
+        reports.get("trustpilot_auto_queue_refresh", {}),
+        trustpilot_send_readiness,
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -375,6 +385,7 @@ def build_review_request_workbench_context(params=None):
         ali_reviews_status=ali_reviews_status,
         trustpilot_automation_status=trustpilot_automation_status,
         trustpilot_send_readiness=trustpilot_send_readiness,
+        trustpilot_auto_refresh=trustpilot_auto_refresh,
     )
 
     return {
@@ -427,6 +438,7 @@ def build_review_request_workbench_context(params=None):
             "candidate_queue_status": candidate_queue_status,
             "trustpilot_automation_status": trustpilot_automation_status,
             "trustpilot_send_readiness": trustpilot_send_readiness,
+            "trustpilot_auto_refresh": trustpilot_auto_refresh,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -1653,6 +1665,118 @@ def _trustpilot_send_readiness_status(report, trustpilot_automation_status):
     }
 
 
+def _trustpilot_auto_refresh_status(report, trustpilot_send_readiness):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    dashboard_summary = data.get("dashboard_summary") if isinstance(data.get("dashboard_summary"), dict) else {}
+    known_blockers = data.get("known_blockers_summary") if isinstance(data.get("known_blockers_summary"), list) else []
+    blocker_by_order = {
+        _safe_text(item.get("order_name"), max_length=80): item
+        for item in known_blockers
+        if isinstance(item, dict)
+    }
+    order_22620 = blocker_by_order.get("#22620") or {}
+    order_22582 = blocker_by_order.get("#22582") or {}
+    report_loaded = bool(report.get("loaded"))
+    eligible_count = _int_or_zero(
+        data.get("eligible_candidate_count")
+        if report_loaded
+        else trustpilot_send_readiness.get("eligible_candidate_count")
+    )
+    blocked_count = _int_or_zero(
+        data.get("blocked_candidate_count")
+        if report_loaded
+        else trustpilot_send_readiness.get("blocked_candidate_count")
+    )
+    refresh_status = _safe_text(data.get("refresh_status") or report.get("status") or "missing")
+    message = _safe_text(
+        dashboard_summary.get("message")
+        or (
+            "Automation checked the queue. Nothing to send now."
+            if report_loaded and eligible_count == 0
+            else "No automation refresh report has been generated yet."
+        ),
+        max_length=300,
+    )
+    detail = _safe_text(
+        dashboard_summary.get("detail")
+        or f"Waiting for a delivered order with `{CANONICAL_REVIEW_REQUEST_TAG}` that passes all safety checks.",
+        max_length=300,
+    )
+    scheduler_note = _safe_text(
+        dashboard_summary.get("scheduler_note")
+        or "This refresh is safe to run on a schedule because it does not send emails, create Gmail drafts, or write Shopify tags.",
+        max_length=300,
+    )
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_auto_queue_refresh.json"
+        ),
+        "refresh_status": refresh_status,
+        "last_refresh_time": _safe_text(
+            data.get("refreshed_at") or report.get("timestamp") or report.get("modified_at"),
+            max_length=120,
+        ),
+        "source_readiness_package_status": _safe_text(
+            data.get("source_readiness_package_status")
+            or trustpilot_send_readiness.get("package_status")
+            or "missing",
+            max_length=120,
+        ),
+        "eligible_candidate_count": eligible_count,
+        "blocked_candidate_count": blocked_count,
+        "selected_candidate_order_name": _safe_text(data.get("selected_candidate_order_name"), max_length=80),
+        "next_real_step": _safe_text(data.get("next_real_step") or "wait_no_candidate", max_length=120),
+        "next_admin_action": _safe_text(
+            data.get("next_admin_action")
+            or trustpilot_send_readiness.get("next_admin_action")
+            or "Nothing to send now.",
+            max_length=500,
+        ),
+        "message": message,
+        "detail": detail,
+        "scheduler_note": scheduler_note,
+        "auto_refresh_safe_for_scheduler": data.get("auto_refresh_safe_for_scheduler") is True,
+        "scheduler_safe_status": (
+            "Scheduler-safe dry run"
+            if data.get("auto_refresh_safe_for_scheduler") is True
+            else "No scheduler-safe refresh loaded"
+        ),
+        "order_22620_message": _safe_text(
+            order_22620.get("message")
+            or trustpilot_send_readiness.get("order_22620_message")
+            or "Do not send. Already sent to this customer via #22621.",
+            max_length=300,
+        ),
+        "order_22582_message": _safe_text(
+            order_22582.get("message")
+            or trustpilot_send_readiness.get("order_22582_message")
+            or (
+                "Do not send yet. Not delivered, missing `1: review request`, "
+                "related order group #22582/#22581 not ready."
+            ),
+            max_length=300,
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "raw_flags": {
+            "gmail_send_allowed_now": data.get("gmail_send_allowed_now") is True,
+            "gmail_draft_create_allowed_now": data.get("gmail_draft_create_allowed_now") is True,
+            "shopify_tag_write_allowed_now": data.get("shopify_tag_write_allowed_now") is True,
+            "external_review_api_call_allowed_now": data.get("external_review_api_call_allowed_now") is True,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_draft_created": data.get("gmail_draft_created") is True,
+            "email_sent": data.get("email_sent") is True,
+            "trustpilot_api_call_performed": data.get("trustpilot_api_call_performed") is True,
+            "kudosi_api_call_performed": data.get("kudosi_api_call_performed") is True,
+            "ali_reviews_api_call_performed": data.get("ali_reviews_api_call_performed") is True,
+        },
+    }
+
+
 def _operating_dashboard(
     latest_scan,
     candidate_queue,
@@ -1663,11 +1787,15 @@ def _operating_dashboard(
     ali_reviews_status,
     trustpilot_automation_status,
     trustpilot_send_readiness,
+    trustpilot_auto_refresh,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
     events = history_ledger.get("all_events") or []
-    if trustpilot_send_readiness.get("report_loaded"):
+    if trustpilot_auto_refresh.get("report_loaded"):
+        ready_count = _int_or_zero(trustpilot_auto_refresh.get("eligible_candidate_count"))
+        blocked_count = _int_or_zero(trustpilot_auto_refresh.get("blocked_candidate_count"))
+    elif trustpilot_send_readiness.get("report_loaded"):
         ready_count = _int_or_zero(trustpilot_send_readiness.get("eligible_candidate_count"))
         blocked_count = _int_or_zero(trustpilot_send_readiness.get("blocked_candidate_count"))
     elif trustpilot_automation_status.get("report_loaded"):
@@ -1723,6 +1851,7 @@ def _operating_dashboard(
         "pipeline_steps": _pipeline_steps(ready_count),
         "trustpilot_automation": trustpilot_automation_status,
         "trustpilot_send_readiness": trustpilot_send_readiness,
+        "trustpilot_auto_refresh": trustpilot_auto_refresh,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,

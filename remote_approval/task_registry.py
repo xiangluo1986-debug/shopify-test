@@ -114,6 +114,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_automation_dry_run_
 from remote_approval.tasks.shopify_review_request_trustpilot_locked_send_readiness_package_task import (
     run_shopify_review_request_trustpilot_locked_send_readiness_package_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_auto_queue_refresh_task import (
+    run_shopify_review_request_trustpilot_auto_queue_refresh_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_design_dry_run_task import (
     run_shopify_review_request_trustpilot_tag_write_design_dry_run_task,
 )
@@ -394,6 +397,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_locked_send_readiness_package": (
         run_shopify_review_request_trustpilot_locked_send_readiness_package_task
+    ),
+    "shopify_review_request_trustpilot_auto_queue_refresh": (
+        run_shopify_review_request_trustpilot_auto_queue_refresh_task
     ),
     "shopify_review_request_trustpilot_tag_write_design_dry_run": (
         run_shopify_review_request_trustpilot_tag_write_design_dry_run_task
@@ -791,6 +797,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local report readiness package only",
         "review_file_path": "logs/shopify_review_request_trustpilot_locked_send_readiness_package.json",
+    },
+    "shopify_review_request_trustpilot_auto_queue_refresh": {
+        "description": "Refresh the Trustpilot queue status for the dashboard from local reports without Gmail, Shopify, or external API calls.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local dashboard status refresh only",
+        "review_file_path": "logs/shopify_review_request_trustpilot_auto_queue_refresh.json",
     },
     "shopify_review_request_trustpilot_tag_write_design_dry_run": {
         "description": "Generate a no-write Trustpilot Shopify tag-write design package after Gmail send audit.",

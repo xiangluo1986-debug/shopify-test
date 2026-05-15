@@ -484,3 +484,32 @@ Future tracking design note:
 - [x] The next phase can create a locked real-send execute task only after a
   true eligible candidate exists and a separate human approval confirms the
   exact action.
+
+## Phase 5.8 Trustpilot Auto Queue Refresh
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_auto_queue_refresh`.
+- [x] Refresh the Trustpilot queue/readiness status for the dashboard from local
+  reports without sending, drafting, writing tags, or calling external review
+  APIs.
+- [x] Generate local JSON/HTML refresh reports only:
+  `logs/shopify_review_request_trustpilot_auto_queue_refresh.json` and
+  `logs/shopify_review_request_trustpilot_auto_queue_refresh.html`.
+- [x] Safe for a future scheduler because it is dry-run only.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] Current result remains no eligible candidate:
+  `refresh_status=refreshed_no_eligible_candidate`,
+  `next_real_step=wait_no_candidate`, and source readiness remains
+  `blocked_no_eligible_candidate`.
+- [x] `#22620` remains blocked because the same customer already received
+  Trustpilot via `#22621`.
+- [x] `#22582` remains blocked because it is not delivered, is missing
+  `1: review request`, and related order group `#22582/#22581` is not ready.
+- [x] The Review Requests dashboard shows Automation Refresh status, last
+  refresh time, ready/blocked counts, next real step, next admin action, and the
+  scheduler-safe note.
+- [x] The next phase can add a scheduler hook or locked send execute only after
+  an eligible candidate appears and a separate human approval confirms the exact
+  action.

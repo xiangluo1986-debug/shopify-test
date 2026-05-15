@@ -68,6 +68,7 @@ python remote_approval_runner.py --task shopify_review_request_shopify_tag_permi
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_automation_dry_run --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_locked_send_readiness_package --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_trustpilot_auto_queue_refresh --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -93,6 +94,25 @@ python remote_approval_runner.py --task demo --mode dry-run --summary-only
 - `SUMMARY` = show current task summary
 
 Console replies are fixed options only. They are never treated as PowerShell commands.
+
+## Review Request Trustpilot Auto Queue Refresh
+
+`shopify_review_request_trustpilot_auto_queue_refresh` is a Phase 5.8 dry-run
+dashboard refresh task. It recomputes the Trustpilot readiness queue from local
+reports, reads the existing locked send readiness package status for source
+context, and writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_auto_queue_refresh.json
+logs/shopify_review_request_trustpilot_auto_queue_refresh.html
+```
+
+The task is safe for a future scheduler because it does not call Gmail APIs,
+create Gmail drafts, send emails, call Shopify APIs, write Shopify tags, call
+Trustpilot/Kudosi/Ali Reviews APIs, create tracking redirects, or generate
+tracking tokens. Its next-step output is limited to `wait_no_candidate`,
+`prepare_locked_send_package`, `manual_review_required_multiple_candidates`, or
+`blocked_safety_issue`.
 
 ## Interrupt Flag
 
