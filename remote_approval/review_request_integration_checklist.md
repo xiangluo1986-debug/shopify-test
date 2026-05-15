@@ -661,3 +661,30 @@ Future tracking design note:
   candidate, the explicit ACK, the explicit real-send execute flag
   `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE=YES_I_APPROVE_REAL_TRUSTPILOT_GMAIL_SEND`,
   and a separate real-send implementation phase.
+
+## Phase 5.15 Trustpilot Gmail Real-Send Readiness Audit
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_real_send_readiness_audit`.
+- [x] Generate local JSON/HTML readiness audit reports only:
+  `logs/shopify_review_request_trustpilot_gmail_real_send_readiness_audit.json`
+  and
+  `logs/shopify_review_request_trustpilot_gmail_real_send_readiness_audit.html`.
+- [x] Read the latest local production reports where available:
+  auto queue refresh, locked send readiness package, locked Gmail send gate,
+  Gmail send executor shell, real send final preflight, and real send execute.
+- [x] Audit Gmail dependency availability and local config name presence only.
+  Do not print secret values, token contents, credential contents, or private
+  environment values.
+- [x] No Gmail network call is made.
+- [x] No Gmail draft is created, updated, deleted, or sent.
+- [x] No email is sent.
+- [x] No Shopify API is called.
+- [x] No Shopify tag is written, removed, overwritten, or mutated.
+- [x] No Trustpilot, Kudosi, or Ali Reviews API is called.
+- [x] Current production state remains blocked because no eligible Trustpilot
+  candidate exists: `readiness_audit_status=blocked_no_eligible_candidate`.
+- [x] Future real send implementation must enforce exactly one candidate, final
+  preflight ready, explicit ACK, explicit real-send execute flag, single-send
+  limit, duplicate suppression, privacy masking, and post-send audit before any
+  Shopify tag write.

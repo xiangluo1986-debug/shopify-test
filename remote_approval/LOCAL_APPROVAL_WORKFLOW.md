@@ -71,6 +71,7 @@ python remote_approval_runner.py --task shopify_review_request_trustpilot_locked
 python remote_approval_runner.py --task shopify_review_request_trustpilot_auto_queue_refresh --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_candidate_simulator --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_locked_gmail_send_gate --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_trustpilot_gmail_real_send_readiness_audit --mode dry-run --approval local
 ```
 
 Task discovery:
@@ -234,6 +235,36 @@ is present, this phase reports
 no Gmail API, creates/updates/deletes no drafts, sends no email, calls no
 Shopify API, writes no Shopify tag, calls no Trustpilot/Kudosi/Ali Reviews API,
 and creates no tracking token.
+
+## Review Request Trustpilot Gmail Real-Send Readiness Audit
+
+`shopify_review_request_trustpilot_gmail_real_send_readiness_audit` is a Phase
+5.15 local readiness audit for a future Trustpilot Gmail real-send
+implementation. It reads only local reports from the auto refresh, locked send
+readiness, locked Gmail send gate, no-send executor shell, final preflight, and
+execute skeleton phases.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_real_send_readiness_audit.json
+logs/shopify_review_request_trustpilot_gmail_real_send_readiness_audit.html
+```
+
+The audit may check whether Gmail dependency modules are importable and whether
+expected local config names are present in the process environment, but it must
+not print secret values, read credential contents, exchange OAuth tokens, or
+contact Gmail. It must not create/update/delete drafts, send email, call
+Shopify APIs, write Shopify tags, call Trustpilot/Kudosi/Ali Reviews APIs, or
+create tracking redirects/tokens.
+
+Current production state remains `blocked_no_eligible_candidate`. A future real
+send implementation must still require exactly one candidate, final preflight
+ready, explicit ACK name
+`SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK`, explicit execute flag name
+`SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE`, single-send limiting,
+duplicate suppression, privacy masking, and a post-send audit before any
+Shopify tag-write phase.
 
 ## Interrupt Flag
 

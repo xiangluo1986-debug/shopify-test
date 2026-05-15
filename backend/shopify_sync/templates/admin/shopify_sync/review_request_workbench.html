@@ -777,6 +777,97 @@
         </details>
     </div>
 
+    <div class="rrw-section">
+        <h2>Gmail Real-Send Readiness</h2>
+        <p class="{% if dashboard.trustpilot_gmail_real_send_readiness_audit.eligible_candidate_count %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_gmail_real_send_readiness_audit.message }}
+        </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.safety_message }}</p>
+        {% if dashboard.trustpilot_gmail_real_send_readiness_audit.eligible_candidate_count == 0 %}
+            <p class="rrw-muted">
+                Gmail real-send implementation is not enabled yet. Current blocker: no eligible Trustpilot candidate.
+            </p>
+        {% endif %}
+        <p class="rrw-muted">
+            No Gmail network call was made. No email was sent. No Shopify tag was written.
+        </p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Readiness audit status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.readiness_audit_status }}</div>
+                <div class="rrw-card-note">Audit-only local report.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gmail dependencies</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.gmail_dependencies_status }}</div>
+                <div class="rrw-card-note">Local import availability only; no Gmail contact.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gmail OAuth config</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.gmail_oauth_config_status }}</div>
+                <div class="rrw-card-note">Presence-only config audit; no secret values shown.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible candidate count</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">
+                    Selected candidate:
+                    {{ dashboard.trustpilot_gmail_real_send_readiness_audit.selected_candidate_order_name|default:"None" }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Latest preflight status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.latest_preflight_status }}</div>
+                <div class="rrw-card-note">
+                    Execute:
+                    {{ dashboard.trustpilot_gmail_real_send_readiness_audit.latest_execute_status }}
+                </div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Single-send limit</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.single_send_limit_label }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.single_send_limit_status }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Duplicate suppression</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.duplicate_suppression_label }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.duplicate_suppression_status }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Privacy checks</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.privacy_checks_label }}</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.privacy_masking_status }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">Wait</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.next_admin_action }}</div>
+            </div>
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_gmail_real_send_readiness_audit.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_gmail_real_send_readiness_audit.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_gmail_real_send_readiness_audit.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_gmail_real_send_readiness_audit.html_relative_path }}
+            </p>
+            <p class="rrw-muted">
+                Required ACK name:
+                <code>{{ dashboard.trustpilot_gmail_real_send_readiness_audit.required_ack_name }}</code>
+                | Required execute flag name:
+                <code>{{ dashboard.trustpilot_gmail_real_send_readiness_audit.required_real_send_execute_flag_name }}</code>
+            </p>
+            <p class="rrw-muted">
+                Latest auto refresh:
+                <code>{{ dashboard.trustpilot_gmail_real_send_readiness_audit.latest_auto_refresh_status }}</code>
+            </p>
+        </details>
+    </div>
+
     <details class="rrw-advanced-section">
         <summary>Sandbox Testing</summary>
         <p class="rrw-warning">
