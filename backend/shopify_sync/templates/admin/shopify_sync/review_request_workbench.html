@@ -868,6 +868,87 @@
         </details>
     </div>
 
+    <div class="rrw-section">
+        <h2>Gmail OAuth / Config</h2>
+        <p class="{% if dashboard.trustpilot_gmail_oauth_config_helper.config_helper_status == 'gmail_oauth_config_ready_for_preflight' %}rrw-note{% else %}rrw-warning{% endif %}">
+            {{ dashboard.trustpilot_gmail_oauth_config_helper.message }}
+        </p>
+        <p class="rrw-muted">{{ dashboard.trustpilot_gmail_oauth_config_helper.safety_message }}</p>
+        <p class="rrw-muted">Gmail OAuth is not fully configured yet. No Gmail network call was made.</p>
+        <p class="rrw-muted">Do not enable real sending until OAuth config, final preflight, and readiness audit all pass.</p>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Config helper status</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.config_helper_status }}</div>
+                <div class="rrw-card-note">Local helper report only.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Gmail dependencies</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.gmail_dependencies_status }}</div>
+                <div class="rrw-card-note">Import check only; no Gmail contact.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">From email configured</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.gmail_send_from_email_configured_label }}</div>
+                <div class="rrw-card-note">No sender value is shown.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">OAuth client secret path configured</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.gmail_oauth_client_secret_file_configured_label }}</div>
+                <div class="rrw-card-note">Path value is not shown.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">OAuth token path configured</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.gmail_oauth_token_file_configured_label }}</div>
+                <div class="rrw-card-note">Token file contents are never read.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Required scope</div>
+                <div class="rrw-card-value">{{ dashboard.trustpilot_gmail_oauth_config_helper.required_scope_status }}</div>
+                <div class="rrw-card-note"><code>{{ dashboard.trustpilot_gmail_oauth_config_helper.required_scope_expected }}</code></div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Next admin action</div>
+                <div class="rrw-card-value">Configure OAuth paths</div>
+                <div class="rrw-card-note">{{ dashboard.trustpilot_gmail_oauth_config_helper.next_admin_action }}</div>
+            </div>
+        </div>
+        <details class="rrw-advanced-section">
+            <summary>Advanced debug details</summary>
+            {% if dashboard.trustpilot_gmail_oauth_config_helper.source_error %}
+                <p class="rrw-warning">{{ dashboard.trustpilot_gmail_oauth_config_helper.source_error }}</p>
+            {% endif %}
+            <p class="rrw-muted">
+                JSON report:
+                {{ dashboard.trustpilot_gmail_oauth_config_helper.relative_path }}
+                | HTML report:
+                {{ dashboard.trustpilot_gmail_oauth_config_helper.html_relative_path }}
+            </p>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>OAuth client secret path exists</th><td>{{ dashboard.trustpilot_gmail_oauth_config_helper.gmail_oauth_client_secret_path_exists_label }}</td></tr>
+                    <tr><th>OAuth token path exists</th><td>{{ dashboard.trustpilot_gmail_oauth_config_helper.gmail_oauth_token_path_exists_label }}</td></tr>
+                    <tr><th>Required ACK name documented</th><td>{{ dashboard.trustpilot_gmail_oauth_config_helper.required_ack_name_documented_label }}</td></tr>
+                    <tr><th>Required execute flag name documented</th><td>{{ dashboard.trustpilot_gmail_oauth_config_helper.required_execute_flag_name_documented_label }}</td></tr>
+                    <tr><th>Readiness audit status</th><td><code>{{ dashboard.trustpilot_gmail_oauth_config_helper.readiness_audit_status|default:"missing" }}</code></td></tr>
+                </tbody>
+            </table>
+            {% if dashboard.trustpilot_gmail_oauth_config_helper.blocking_conditions %}
+                <table class="rrw-table">
+                    <thead><tr><th>Blocking condition</th><th>Detail</th></tr></thead>
+                    <tbody>
+                        {% for condition in dashboard.trustpilot_gmail_oauth_config_helper.blocking_conditions %}
+                            <tr>
+                                <td><code>{{ condition.status }}</code></td>
+                                <td>{{ condition.detail }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+        </details>
+    </div>
+
     <details class="rrw-advanced-section">
         <summary>Sandbox Testing</summary>
         <p class="rrw-warning">

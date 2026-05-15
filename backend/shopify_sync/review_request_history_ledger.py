@@ -108,6 +108,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("readiness_audit_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_gmail_oauth_config_helper",
+        "label": "Trustpilot Gmail OAuth/config helper",
+        "filename": "shopify_review_request_trustpilot_gmail_oauth_config_helper.json",
+        "channel": "trustpilot",
+        "event_type": "gmail_oauth_config_helper",
+        "status_keys": ("config_helper_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_create_locked_runner",
         "label": "Trustpilot one-candidate Gmail draft create locked runner",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_create_locked_runner.json",
@@ -186,6 +194,7 @@ EVENT_TYPE_OPTIONS = (
     ("final_preflight", "Final preflight"),
     ("real_send_execute", "Real send execute"),
     ("real_send_readiness_audit", "Real send readiness audit"),
+    ("gmail_oauth_config_helper", "Gmail OAuth/config helper"),
     ("draft_package", "Draft package"),
     ("draft_create_preflight", "Draft create preflight"),
     ("draft_created", "Draft created"),

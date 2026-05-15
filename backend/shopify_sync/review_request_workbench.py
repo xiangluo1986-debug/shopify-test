@@ -190,6 +190,12 @@ REPORT_DEFINITIONS = (
         ("readiness_audit_status", "report_status", "status"),
     ),
     (
+        "trustpilot_gmail_oauth_config_helper",
+        "Trustpilot Gmail OAuth/config helper",
+        "shopify_review_request_trustpilot_gmail_oauth_config_helper.json",
+        ("config_helper_status", "report_status", "status"),
+    ),
+    (
         "returned_package_guard",
         "Returned package guard",
         "shopify_review_request_returned_package_guard.json",
@@ -441,6 +447,10 @@ def build_review_request_workbench_context(params=None):
         trustpilot_real_send_final_preflight,
         trustpilot_real_send_execute,
     )
+    trustpilot_gmail_oauth_config_helper = _trustpilot_gmail_oauth_config_helper_status(
+        reports.get("trustpilot_gmail_oauth_config_helper", {}),
+        trustpilot_gmail_real_send_readiness_audit,
+    )
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -463,6 +473,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_real_send_final_preflight=trustpilot_real_send_final_preflight,
         trustpilot_real_send_execute=trustpilot_real_send_execute,
         trustpilot_gmail_real_send_readiness_audit=trustpilot_gmail_real_send_readiness_audit,
+        trustpilot_gmail_oauth_config_helper=trustpilot_gmail_oauth_config_helper,
     )
 
     return {
@@ -522,6 +533,7 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_real_send_final_preflight": trustpilot_real_send_final_preflight,
             "trustpilot_real_send_execute": trustpilot_real_send_execute,
             "trustpilot_gmail_real_send_readiness_audit": trustpilot_gmail_real_send_readiness_audit,
+            "trustpilot_gmail_oauth_config_helper": trustpilot_gmail_oauth_config_helper,
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
@@ -1625,6 +1637,7 @@ def _report_readiness(reports):
         ("trustpilot_real_send_final_preflight", "Trustpilot real send final preflight"),
         ("trustpilot_real_send_execute", "Trustpilot real send execute skeleton"),
         ("trustpilot_gmail_real_send_readiness_audit", "Trustpilot Gmail real-send readiness audit"),
+        ("trustpilot_gmail_oauth_config_helper", "Trustpilot Gmail OAuth/config helper"),
         ("trustpilot_one_candidate_draft_package", "One-candidate Gmail draft package"),
         ("trustpilot_one_candidate_draft_create_execute", "One-candidate Gmail draft create execute"),
         ("trustpilot_one_candidate_draft_send_preflight", "One-candidate Gmail send preflight"),
@@ -3042,10 +3055,130 @@ def _trustpilot_gmail_real_send_readiness_audit_status(
     }
 
 
+def _trustpilot_gmail_oauth_config_helper_status(report, trustpilot_gmail_real_send_readiness_audit):
+    data = report.get("data") if report.get("loaded") else {}
+    data = data if isinstance(data, dict) else {}
+    report_loaded = bool(report.get("loaded"))
+    config_status = _safe_text(
+        data.get("config_helper_status") or report.get("status") or "missing",
+        max_length=120,
+    )
+    dependencies_importable = data.get("gmail_dependencies_importable") is True
+    from_configured = data.get("gmail_send_from_email_configured") is True
+    client_secret_configured = data.get("gmail_oauth_client_secret_file_configured") is True
+    client_secret_exists = data.get("gmail_oauth_client_secret_path_exists") is True
+    token_configured = data.get("gmail_oauth_token_file_configured") is True
+    token_exists = data.get("gmail_oauth_token_path_exists") is True
+    scope_configured = data.get("gmail_required_scope_configured") is True
+    scope_matches = data.get("gmail_required_scope_matches_expected") is True
+    required_scope = _safe_text(
+        data.get("required_scope_expected") or "https://www.googleapis.com/auth/gmail.send",
+        max_length=120,
+    )
+    required_ack_documented = data.get("required_ack_name_documented") is True
+    required_execute_documented = data.get("required_execute_flag_name_documented") is True
+    dashboard_message = _safe_text(
+        data.get("dashboard_message")
+        or "Gmail OAuth is not fully configured yet. No Gmail network call was made.",
+        max_length=300,
+    )
+    safety_message = _safe_text(
+        data.get("safety_message")
+        or "Do not enable real sending until OAuth config, final preflight, and readiness audit all pass.",
+        max_length=300,
+    )
+    return {
+        "report_present": bool(report.get("present")),
+        "report_loaded": report_loaded,
+        "relative_path": _safe_text(
+            report.get("relative_path")
+            or "logs/shopify_review_request_trustpilot_gmail_oauth_config_helper.json",
+            max_length=160,
+        ),
+        "html_relative_path": "logs/shopify_review_request_trustpilot_gmail_oauth_config_helper.html",
+        "config_helper_status": config_status,
+        "message": dashboard_message,
+        "safety_message": safety_message,
+        "gmail_dependencies_importable": dependencies_importable,
+        "gmail_dependencies_status": _present_missing_label(dependencies_importable, report_loaded),
+        "gmail_send_from_email_configured": from_configured,
+        "gmail_send_from_email_configured_label": _yes_no_unknown(from_configured, report_loaded),
+        "gmail_oauth_client_secret_file_configured": client_secret_configured,
+        "gmail_oauth_client_secret_file_configured_label": _yes_no_unknown(
+            client_secret_configured,
+            report_loaded,
+        ),
+        "gmail_oauth_client_secret_path_exists": client_secret_exists,
+        "gmail_oauth_client_secret_path_exists_label": _yes_no_unknown(client_secret_exists, report_loaded),
+        "gmail_oauth_token_file_configured": token_configured,
+        "gmail_oauth_token_file_configured_label": _yes_no_unknown(token_configured, report_loaded),
+        "gmail_oauth_token_path_exists": token_exists,
+        "gmail_oauth_token_path_exists_label": _yes_no_unknown(token_exists, report_loaded),
+        "gmail_required_scope_configured": scope_configured,
+        "gmail_required_scope_configured_label": _yes_no_unknown(scope_configured, report_loaded),
+        "gmail_required_scope_matches_expected": scope_matches,
+        "gmail_required_scope_matches_expected_label": _yes_no_unknown(scope_matches, report_loaded),
+        "required_scope_expected": required_scope,
+        "required_scope_status": _scope_status(scope_configured, scope_matches, report_loaded),
+        "required_ack_name_documented": required_ack_documented,
+        "required_ack_name_documented_label": _yes_no_unknown(required_ack_documented, report_loaded),
+        "required_execute_flag_name_documented": required_execute_documented,
+        "required_execute_flag_name_documented_label": _yes_no_unknown(required_execute_documented, report_loaded),
+        "blocking_conditions": (
+            data.get("blocking_conditions") if isinstance(data.get("blocking_conditions"), list) else []
+        ),
+        "setup_steps": data.get("setup_steps") if isinstance(data.get("setup_steps"), list) else [],
+        "next_admin_action": _safe_text(
+            data.get("next_admin_action")
+            or (
+                "Configure Gmail OAuth client secret file path and token file path, then rerun the helper. "
+                "Do not enable real send until final preflight and real-send readiness pass."
+            ),
+            max_length=500,
+        ),
+        "readiness_audit_status": _safe_text(
+            trustpilot_gmail_real_send_readiness_audit.get("readiness_audit_status"),
+            max_length=120,
+        ),
+        "source_error": _safe_text(report.get("error", ""), max_length=300),
+        "privacy_scan_summary": (
+            data.get("privacy_scan_summary") if isinstance(data.get("privacy_scan_summary"), dict) else {}
+        ),
+        "raw_flags": {
+            "gmail_network_call_performed": data.get("gmail_network_call_performed") is True,
+            "gmail_api_call_performed": data.get("gmail_api_call_performed") is True,
+            "gmail_send_performed": data.get("gmail_send_performed") is True,
+            "gmail_draft_create_performed": data.get("gmail_draft_create_performed") is True,
+            "token_file_read": data.get("token_file_read") is True,
+            "credential_file_read": data.get("credential_file_read") is True,
+            "secret_value_printed": data.get("secret_value_printed") is True,
+            "shopify_api_call_performed": data.get("shopify_api_call_performed") is True,
+            "shopify_write_performed": data.get("shopify_write_performed") is True,
+            "external_review_api_call_performed": data.get("external_review_api_call_performed") is True,
+        },
+    }
+
+
 def _present_missing_label(value, report_loaded):
     if not report_loaded:
         return "unknown"
     return "ready" if value else "missing"
+
+
+def _yes_no_unknown(value, report_loaded):
+    if not report_loaded:
+        return "Unknown"
+    return "Yes" if value else "No"
+
+
+def _scope_status(configured, matches_expected, report_loaded):
+    if not report_loaded:
+        return "unknown"
+    if not configured:
+        return "missing"
+    if not matches_expected:
+        return "configured_wrong_scope"
+    return "configured"
 
 
 def _auto_refresh_trigger_label(trigger):
@@ -3073,6 +3206,7 @@ def _operating_dashboard(
     trustpilot_real_send_final_preflight,
     trustpilot_real_send_execute,
     trustpilot_gmail_real_send_readiness_audit,
+    trustpilot_gmail_oauth_config_helper,
 ):
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
@@ -3143,6 +3277,7 @@ def _operating_dashboard(
         "trustpilot_real_send_final_preflight": trustpilot_real_send_final_preflight,
         "trustpilot_real_send_execute": trustpilot_real_send_execute,
         "trustpilot_gmail_real_send_readiness_audit": trustpilot_gmail_real_send_readiness_audit,
+        "trustpilot_gmail_oauth_config_helper": trustpilot_gmail_oauth_config_helper,
         "next_actions": _next_actions(focus, ready_count),
         "recent_activity": _recent_activity(
             focus=focus,

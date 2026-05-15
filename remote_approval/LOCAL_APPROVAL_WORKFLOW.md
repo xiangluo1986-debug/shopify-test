@@ -266,6 +266,33 @@ ready, explicit ACK name
 duplicate suppression, privacy masking, and a post-send audit before any
 Shopify tag-write phase.
 
+## Review Request Trustpilot Gmail OAuth Config Helper
+
+`shopify_review_request_trustpilot_gmail_oauth_config_helper` is a Phase 5.16
+local helper for diagnosing missing Gmail OAuth/config requirements before any
+future Trustpilot real-send implementation.
+
+It writes local review files only:
+
+```text
+logs/shopify_review_request_trustpilot_gmail_oauth_config_helper.json
+logs/shopify_review_request_trustpilot_gmail_oauth_config_helper.html
+```
+
+The helper may check Gmail dependency importability, process environment
+variable presence, `.env.example` placeholder names, and whether configured
+credential/token path variables point to existing paths. It must not read
+credential or token file contents, print secret values, exchange OAuth tokens,
+or contact Gmail. It must not create/update/delete drafts, send email, call
+Shopify APIs, write Shopify tags, call Trustpilot/Kudosi/Ali Reviews APIs, or
+create tracking redirects/tokens.
+
+Required placeholder names for future setup are
+`GMAIL_SEND_FROM_EMAIL`, `GMAIL_OAUTH_CLIENT_SECRET_FILE`,
+`GMAIL_OAUTH_TOKEN_FILE`, `GMAIL_REQUIRED_SCOPE`,
+`SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK`, and
+`SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE`.
+
 ## Interrupt Flag
 
 Create this file to request a pause before the next checked task stage:

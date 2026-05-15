@@ -688,3 +688,31 @@ Future tracking design note:
   preflight ready, explicit ACK, explicit real-send execute flag, single-send
   limit, duplicate suppression, privacy masking, and post-send audit before any
   Shopify tag write.
+
+## Phase 5.16 Trustpilot Gmail OAuth / Config Helper
+
+- [x] Add the fixed local approval task
+  `shopify_review_request_trustpilot_gmail_oauth_config_helper`.
+- [x] Generate local JSON/HTML helper reports only:
+  `logs/shopify_review_request_trustpilot_gmail_oauth_config_helper.json` and
+  `logs/shopify_review_request_trustpilot_gmail_oauth_config_helper.html`.
+- [x] Check Gmail dependency/config presence only: dependency importability,
+  process environment variable presence, `.env.example` placeholder names, and
+  configured path existence booleans.
+- [x] Do not read Gmail token or credential file contents.
+- [x] Do not print token values, client secret values, private environment
+  values, raw customer emails, or full Gmail draft/message IDs.
+- [x] Do not call Gmail network/API, create/update/delete Gmail drafts, or send
+  email.
+- [x] Do not call Shopify APIs, write Shopify tags, call Trustpilot/Kudosi/Ali
+  Reviews APIs, or create tracking redirects/tokens.
+- [x] Document required placeholders:
+  `GMAIL_SEND_FROM_EMAIL`, `GMAIL_OAUTH_CLIENT_SECRET_FILE`,
+  `GMAIL_OAUTH_TOKEN_FILE`, `GMAIL_REQUIRED_SCOPE`,
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_GMAIL_SEND_ACK`, and
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_REAL_SEND_EXECUTE`.
+- [x] Current blocker remains Gmail OAuth config missing and no eligible
+  Trustpilot candidate.
+- [x] Next phase can add local OAuth setup verification only after config paths
+  are provided, still without enabling real send until final preflight and
+  readiness audit pass.
