@@ -529,6 +529,35 @@
     background: #dcfce7;
     color: #14532d;
   }
+  .tw-library-note {
+    margin-top: 12px;
+    padding: 10px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+  .tw-library-note-title {
+    margin-bottom: 4px;
+    color: #111827;
+    font-weight: 700;
+  }
+  .tw-library-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .tw-library-chip {
+    display: inline-block;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.4;
+    padding: 3px 8px;
+  }
   @media (max-width: 900px) {
     .tw-picker-controls {
       grid-template-columns: 1fr;
@@ -1203,7 +1232,7 @@
       <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
       <div>
         <label for="id_workbench_product_search">Search product</label><br>
-        <input id="id_workbench_product_search" type="text" name="product_search" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="Search by title, model, SKU, or product ID">
+        <input id="id_workbench_product_search" type="text" name="product_search" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="Search by title, SKU, model, handle, vendor, type, or ID">
       </div>
       <div>
         <label for="id_workbench_search_locale">Preview locale</label><br>
@@ -1216,13 +1245,28 @@
       <button type="submit" class="button">Search local products</button>
       <a class="button" href="?ui_mode=workbench&selected_product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Clear search</a>
     </form>
+    <div class="tw-library-note">
+      <div class="tw-library-note-title">Product library source</div>
+      <div class="tw-muted">Source: {{ product_library_status.source }}.</div>
+      <div class="tw-muted">Sync: {{ product_library_status.sync }}.</div>
+      <div class="tw-muted">{{ product_library_status.search_note }}</div>
+      <div class="tw-library-chips">
+        <span class="tw-library-chip">Products {{ product_library_status.distinct_product_count }}</span>
+        <span class="tw-library-chip">Variant rows {{ product_library_status.product_variant_count }}</span>
+        <span class="tw-library-chip">Latest Shopify update {{ product_library_status.latest_shopify_product_updated_at|default:"-" }}</span>
+        <span class="tw-library-chip">Latest local update {{ product_library_status.latest_local_updated_at|default:"-" }}</span>
+        <span class="tw-library-chip">Sync task {{ product_library_status.sync_task_name }}</span>
+        <span class="tw-library-chip">Last success {{ product_library_status.sync_last_success_at|default:"-" }}</span>
+        <span class="tw-library-chip">Last error {{ product_library_status.sync_last_error|default:"-" }}</span>
+      </div>
+    </div>
     <p class="tw-muted">
-      {% if product_search_text %}Showing matching products: {{ product_selector.matching_result_count }}{% else %}Showing latest products: {{ product_selector.result_count }}{% endif %}.
+      {% if product_search_text %}Showing matching local products: {{ product_selector.matching_result_count }}{% else %}Search the local product library to show product matches.{% endif %}
       {% if product_search_text %}Search results for: <strong>{{ product_search_text }}</strong>.{% endif %}
-      {% if product_selector.included_selected_product %}Current selected product is included even though it is outside the filtered results.{% endif %}
+      {% if product_search_text and product_selector.selected_product %}Current selected product is shown separately and is not added to nonmatching search results.{% endif %}
     </p>
     {% if product_selector.no_matching_products %}
-      <p class="tw-warning">No matching products in this list. Try another keyword.</p>
+      <p class="tw-warning">No matching products in the local product library. Try another keyword.</p>
     {% endif %}
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       <input type="hidden" name="ui_mode" value="workbench">
@@ -1232,7 +1276,7 @@
         <select id="id_workbench_selected_product_gid" name="selected_product_gid" style="min-width: 620px;">
           {% if product_selector.product_options %}
             {% for product in product_selector.product_options %}
-              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} | {{ product.handle }}{% endif %}{% if product.sku %} | SKU {{ product.sku }}{% endif %}{% if product.numeric_id %} | ID {{ product.numeric_id }}{% endif %}{% if product.sort_timestamp %} | {{ product.sort_timestamp }}{% endif %}</option>
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} | {{ product.handle }}{% endif %}{% if product.sku %} | SKU {{ product.sku }}{% endif %}{% if product.variant_title %} | Model {{ product.variant_title }}{% endif %}{% if product.numeric_id %} | Product ID {{ product.numeric_id }}{% endif %}{% if product.variant_numeric_id %} | Variant ID {{ product.variant_numeric_id }}{% endif %}{% if product.sort_timestamp %} | {{ product.sort_timestamp }}{% endif %}</option>
             {% endfor %}
           {% else %}
             <option value="">No products available</option>
@@ -1398,7 +1442,7 @@
   {% elif ui_mode == "editor" %}
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Choose product and language</h2>
-    <form method="get" class="tw-product-picker" data-product-picker style="margin-bottom: 12px;">
+    <form method="get" class="tw-product-picker" data-product-picker data-product-search-url="{% url 'shopify_translation_console_product_search' %}" data-selected-product-gid="{{ selected_product_gid }}" style="margin-bottom: 12px;">
       <input type="hidden" name="ui_mode" value="editor">
       <input type="hidden" name="product_gid" value="{{ selected_product_gid }}">
       <input type="hidden" name="locale" value="{{ selected_locale }}" data-product-locale-hidden>
@@ -1407,10 +1451,10 @@
         <div class="tw-compact-field tw-product-field">
           <label for="id_editor_product_search">Choose product</label><br>
           <div class="tw-product-combobox">
-            <input id="id_editor_product_search" type="search" name="product_search" value="{{ product_search_text }}" placeholder="Search product title, model, SKU, or handle" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tw-product-picker-dropdown" data-product-filter-input>
+            <input id="id_editor_product_search" type="search" name="product_search" value="{{ product_search_text }}" placeholder="Search title, SKU, model, handle, vendor, type, or ID" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tw-product-picker-dropdown" data-product-filter-input>
             <div id="tw-product-picker-dropdown" class="tw-product-results" role="listbox" data-product-dropdown hidden>
               <div class="tw-product-dropdown-status">
-                <span data-product-picker-summary>{% if product_search_text %}Showing matching products{% else %}Showing latest products{% endif %}</span>: <span data-product-picker-count>{% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}{{ product_selector.result_count }}{% endif %}</span>
+                <span data-product-picker-summary>{% if product_search_text %}Showing matching products{% else %}Search products{% endif %}</span>: <span data-product-picker-count>{% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}0{% endif %}</span>
               </div>
               {% if product_selector.product_options %}
                 {% for product in product_selector.product_options %}
@@ -1427,7 +1471,8 @@
                         {% if product.sku %}<span>SKU {{ product.sku }}</span>{% endif %}
                         {% if product.variant_title %}<span>Model {{ product.variant_title }}</span>{% endif %}
                         {% if product.handle %}<span>{{ product.handle }}</span>{% endif %}
-                        {% if product.numeric_id %}<span>ID {{ product.numeric_id }}</span>{% endif %}
+                        {% if product.numeric_id %}<span>Product ID {{ product.numeric_id }}</span>{% endif %}
+                        {% if product.variant_numeric_id %}<span>Variant ID {{ product.variant_numeric_id }}</span>{% endif %}
                       </span>
                     </span>
                   </button>
@@ -1469,7 +1514,8 @@
               {% if product_selector.selected_product.sku %}<span>SKU {{ product_selector.selected_product.sku }}</span>{% endif %}
               {% if product_selector.selected_product.variant_title %}<span>Model {{ product_selector.selected_product.variant_title }}</span>{% endif %}
               {% if product_selector.selected_product.handle %}<span>{{ product_selector.selected_product.handle }}</span>{% endif %}
-              {% if product_selector.selected_product.numeric_id %}<span>ID {{ product_selector.selected_product.numeric_id }}</span>{% endif %}
+              {% if product_selector.selected_product.numeric_id %}<span>Product ID {{ product_selector.selected_product.numeric_id }}</span>{% endif %}
+              {% if product_selector.selected_product.variant_numeric_id %}<span>Variant ID {{ product_selector.selected_product.variant_numeric_id }}</span>{% endif %}
             </div>
           </div>
         {% else %}
@@ -1481,10 +1527,25 @@
           </div>
         {% endif %}
       </div>
-      <p class="tw-muted" style="margin: 12px 0 0;">
-        {% if product_search_text %}Matching products{% else %}Latest products{% endif %}: {% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}{{ product_selector.result_count }}{% endif %}.
-        {% if product_search_text %}Search results for: <strong>{{ product_search_text }}</strong>.{% endif %}
-        {% if product_selector.included_selected_product %}Current selected product stays available even when it is outside the search results.{% endif %}
+      <div class="tw-library-note">
+        <div class="tw-library-note-title">Product library source</div>
+        <div class="tw-muted">Source: {{ product_library_status.source }}.</div>
+        <div class="tw-muted">Sync: {{ product_library_status.sync }}.</div>
+        <div class="tw-muted">{{ product_library_status.search_note }}</div>
+        <div class="tw-library-chips">
+          <span class="tw-library-chip">Products {{ product_library_status.distinct_product_count }}</span>
+          <span class="tw-library-chip">Variant rows {{ product_library_status.product_variant_count }}</span>
+          <span class="tw-library-chip">Latest Shopify update {{ product_library_status.latest_shopify_product_updated_at|default:"-" }}</span>
+          <span class="tw-library-chip">Latest local update {{ product_library_status.latest_local_updated_at|default:"-" }}</span>
+          <span class="tw-library-chip">Sync task {{ product_library_status.sync_task_name }}</span>
+          <span class="tw-library-chip">Last success {{ product_library_status.sync_last_success_at|default:"-" }}</span>
+          <span class="tw-library-chip">Last error {{ product_library_status.sync_last_error|default:"-" }}</span>
+        </div>
+      </div>
+      <p class="tw-muted" style="margin: 12px 0 0;" data-product-search-status>
+        <span data-product-search-status-text>{% if product_search_text %}Matching local products: {{ product_selector.matching_result_count }}.{% else %}Search the local product library to show product matches.{% endif %}</span>
+        <span data-product-search-query-line{% if not product_search_text %} hidden{% endif %}>Search results for: <strong data-product-current-query>{{ product_search_text }}</strong>.</span>
+        <span data-product-selected-note{% if not product_search_text or not product_selector.selected_product %} hidden{% endif %}>Current selected product is shown separately and is not added to nonmatching search results.</span>
       </p>
     </form>
     <details class="tw-advanced-details" style="margin-bottom: 12px;">
@@ -1497,7 +1558,7 @@
           <select id="id_editor_selected_product_gid" name="product_gid">
             {% if product_selector.product_options %}
               {% for product in product_selector.product_options %}
-                <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} - {{ product.handle }}{% endif %}{% if product.sku %} - SKU {{ product.sku }}{% endif %}{% if product.variant_title %} - Model {{ product.variant_title }}{% endif %}{% if product.numeric_id %} - ID {{ product.numeric_id }}{% endif %}</option>
+                <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} - {{ product.handle }}{% endif %}{% if product.sku %} - SKU {{ product.sku }}{% endif %}{% if product.variant_title %} - Model {{ product.variant_title }}{% endif %}{% if product.numeric_id %} - Product ID {{ product.numeric_id }}{% endif %}{% if product.variant_numeric_id %} - Variant ID {{ product.variant_numeric_id }}{% endif %}</option>
               {% endfor %}
             {% else %}
               <option value="">No products available</option>
@@ -1877,11 +1938,26 @@
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
     <h2>Product selector</h2>
-    <p>This selector uses local synced ShopifyProduct rows only. It does not call Shopify or OpenAI.</p>
+    <p>This selector uses local synced ShopifyProduct rows only. It does not call Shopify or OpenAI while searching products.</p>
+    <div class="tw-library-note" style="margin-bottom: 12px;">
+      <div class="tw-library-note-title">Product library source</div>
+      <div class="tw-muted">Source: {{ product_library_status.source }}.</div>
+      <div class="tw-muted">Sync: {{ product_library_status.sync }}.</div>
+      <div class="tw-muted">{{ product_library_status.search_note }}</div>
+      <div class="tw-library-chips">
+        <span class="tw-library-chip">Products {{ product_library_status.distinct_product_count }}</span>
+        <span class="tw-library-chip">Variant rows {{ product_library_status.product_variant_count }}</span>
+        <span class="tw-library-chip">Latest Shopify update {{ product_library_status.latest_shopify_product_updated_at|default:"-" }}</span>
+        <span class="tw-library-chip">Latest local update {{ product_library_status.latest_local_updated_at|default:"-" }}</span>
+        <span class="tw-library-chip">Sync task {{ product_library_status.sync_task_name }}</span>
+        <span class="tw-library-chip">Last success {{ product_library_status.sync_last_success_at|default:"-" }}</span>
+        <span class="tw-library-chip">Last error {{ product_library_status.sync_last_error|default:"-" }}</span>
+      </div>
+    </div>
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 12px;">
       <div>
         <label for="id_product_search">Search product</label><br>
-        <input id="id_product_search" type="text" name="product_search" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="Search by title, model, SKU, or product ID">
+        <input id="id_product_search" type="text" name="product_search" value="{{ product_search_text }}" style="min-width: 420px;" placeholder="Search by title, SKU, model, handle, vendor, type, or ID">
       </div>
       <div>
         <label for="id_product_search_locale">Preview locale</label><br>
@@ -1894,15 +1970,15 @@
       <button type="submit" class="button">Search local products</button>
       <a class="button" href="?">Clear search</a>
     </form>
-    <p>Current search: {% if product_search_text %}<strong>{{ product_search_text }}</strong>{% else %}recent products{% endif %}. Results shown: {{ product_selector.result_count }} of max {{ product_selector.limit }}.</p>
-    {% if product_selector.included_selected_product %}
-      <p class="tw-muted">Current selected product is included even though it is outside the filtered results.</p>
+    <p>Current search: {% if product_search_text %}<strong>{{ product_search_text }}</strong>{% else %}none{% endif %}. Results shown: {{ product_selector.result_count }} of max {{ product_selector.limit }}.</p>
+    {% if product_search_text and product_selector.selected_product %}
+      <p class="tw-muted">Current selected product is shown separately and is not added to nonmatching search results.</p>
     {% endif %}
     <p>Sort order: {{ product_selector.sort_fields|join:", " }} descending, newest first. Search fields: {{ product_selector.search_supported_fields|join:", " }}.</p>
     {% if product_selector.no_products_available %}
-      <p><strong>No products available.</strong> Sync Shopify products first, or use the manual product ID fallback below.</p>
+      <p><strong>No products available.</strong> Run the existing Shopify product sync first, or use the manual product ID fallback below.</p>
     {% elif product_selector.no_matching_products %}
-      <p><strong>No matching products in this list.</strong> Try another keyword.</p>
+      <p><strong>No matching products in the local product library.</strong> Try another keyword.</p>
     {% endif %}
     <form method="get" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end;">
       <input type="hidden" name="product_search" value="{{ product_search_text }}">
@@ -1911,7 +1987,7 @@
         <select id="id_selected_product_gid" name="selected_product_gid" style="min-width: 620px;">
           {% if product_selector.product_options %}
             {% for product in product_selector.product_options %}
-              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} | {{ product.handle }}{% endif %}{% if product.sku %} | SKU {{ product.sku }}{% endif %}{% if product.numeric_id %} | ID {{ product.numeric_id }}{% endif %}{% if product.sort_timestamp %} | {{ product.sort_timestamp }}{% endif %}</option>
+              <option value="{{ product.gid }}"{% if product.gid == selected_product_gid %} selected{% endif %}>{{ product.title }}{% if product.handle %} | {{ product.handle }}{% endif %}{% if product.sku %} | SKU {{ product.sku }}{% endif %}{% if product.variant_title %} | Model {{ product.variant_title }}{% endif %}{% if product.numeric_id %} | Product ID {{ product.numeric_id }}{% endif %}{% if product.variant_numeric_id %} | Variant ID {{ product.variant_numeric_id }}{% endif %}{% if product.sort_timestamp %} | {{ product.sort_timestamp }}{% endif %}</option>
             {% endfor %}
           {% else %}
             <option value="">No products available</option>
@@ -3599,7 +3675,6 @@
         return;
       }
       var input = picker.querySelector("[data-product-filter-input]");
-      var items = Array.prototype.slice.call(picker.querySelectorAll("[data-product-option]"));
       var dropdown = picker.querySelector("[data-product-dropdown]");
       var selectedToggle = picker.querySelector("[data-product-selected-toggle]");
       var summary = picker.querySelector("[data-product-picker-summary]");
@@ -3607,52 +3682,20 @@
       var empty = picker.querySelector("[data-product-picker-empty]");
       var localeSelect = picker.querySelector("[data-product-locale-select]");
       var localeHidden = picker.querySelector("[data-product-locale-hidden]");
-      if (!input || !dropdown) {
+      var searchStatusText = picker.querySelector("[data-product-search-status-text]");
+      var searchQueryLine = picker.querySelector("[data-product-search-query-line]");
+      var currentQueryLabel = picker.querySelector("[data-product-current-query]");
+      var selectedNote = picker.querySelector("[data-product-selected-note]");
+      var searchUrl = picker.getAttribute("data-product-search-url") || "";
+      var debounceTimer = null;
+      var requestSequence = 0;
+      var debounceDelay = 250;
+      if (!input || !dropdown || !searchUrl) {
         return;
       }
 
-      function normalizeProductSearchText(value) {
-        return String(value || "")
-          .toLowerCase()
-          .trim()
-          .replace(/[^a-z0-9]+/g, "");
-      }
-
-      function rawProductSearchText(value) {
-        return String(value || "").toLowerCase().trim();
-      }
-
       function hasSearchText() {
-        return Boolean(normalizeProductSearchText(input.value));
-      }
-
-      function queryTokens(value) {
-        return String(value || "")
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .map(function (token) { return normalizeProductSearchText(token); })
-          .filter(Boolean);
-      }
-
-      function itemMatches(item, query) {
-        var rawQuery = rawProductSearchText(query);
-        var normalizedQuery = normalizeProductSearchText(query);
-        if (!normalizedQuery) {
-          return false;
-        }
-        var rawSearch = String(item.getAttribute("data-search") || "").toLowerCase();
-        var normalizedSearch = normalizeProductSearchText(
-          rawSearch + " " + String(item.getAttribute("data-search-normalized") || "")
-        );
-        if (rawQuery && rawSearch.indexOf(rawQuery) !== -1) {
-          return true;
-        }
-        if (normalizedSearch.indexOf(normalizedQuery) !== -1) {
-          return true;
-        }
-        return queryTokens(query).every(function (token) {
-          return normalizedSearch.indexOf(token) !== -1 || rawSearch.indexOf(token) !== -1;
-        });
+        return Boolean(input.value.trim());
       }
 
       function setDropdownOpen(isOpen) {
@@ -3661,36 +3704,35 @@
         input.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
       }
 
-      function filterProductRows() {
-        var matchingCount = 0;
-        var hasQuery = hasSearchText();
-        items.forEach(function (item) {
-          var matches = itemMatches(item, input.value);
-          var visible = hasQuery && matches;
-          item.hidden = !visible;
-          if (hasQuery && matches) {
-            matchingCount += 1;
-          }
-        });
+      function setPickerSummary(label, value) {
         if (summary) {
-          summary.textContent = hasQuery ? "Showing matching products" : "Search products";
+          summary.textContent = label;
         }
         if (count) {
-          count.textContent = String(hasQuery ? matchingCount : 0);
+          count.textContent = String(value);
         }
+      }
+
+      function setEmptyState(message, isVisible) {
         if (empty) {
-          empty.hidden = !hasQuery || matchingCount > 0;
+          empty.textContent = message;
+          empty.hidden = !isVisible;
         }
-        return matchingCount;
       }
 
-      function openDropdown() {
-        filterProductRows();
-        setDropdownOpen(true);
+      function clearProductRows() {
+        Array.prototype.slice.call(dropdown.querySelectorAll("[data-product-option]"))
+          .forEach(function (item) {
+            item.parentNode.removeChild(item);
+          });
       }
 
-      function closeDropdown() {
-        setDropdownOpen(false);
+      function currentSelectedGid() {
+        var hiddenProductInput = picker.querySelector('input[name="product_gid"]');
+        if (hiddenProductInput && hiddenProductInput.value) {
+          return hiddenProductInput.value;
+        }
+        return picker.getAttribute("data-selected-product-gid") || "";
       }
 
       function syncLocaleParam() {
@@ -3699,15 +3741,194 @@
         }
       }
 
+      function updateSearchStatus(query, resultCount, isLoading) {
+        var trimmedQuery = String(query || "").trim();
+        if (searchStatusText) {
+          if (!trimmedQuery) {
+            searchStatusText.textContent = "Search the local product library to show product matches.";
+          } else if (isLoading) {
+            searchStatusText.textContent = "Searching local products for: " + trimmedQuery + ".";
+          } else {
+            searchStatusText.textContent = "Matching local products: " + String(resultCount || 0) + ".";
+          }
+        }
+        if (currentQueryLabel) {
+          currentQueryLabel.textContent = trimmedQuery;
+        }
+        if (searchQueryLine) {
+          searchQueryLine.hidden = !trimmedQuery;
+        }
+        if (selectedNote) {
+          selectedNote.hidden = !trimmedQuery || !currentSelectedGid();
+        }
+      }
+
+      function buildSearchRequestUrl(query) {
+        var url = new URL(searchUrl, window.location.href);
+        url.searchParams.set("q", query);
+        return url.toString();
+      }
+
+      function createChip(text) {
+        if (!text) {
+          return null;
+        }
+        var chip = document.createElement("span");
+        chip.textContent = text;
+        return chip;
+      }
+
+      function appendChip(container, text) {
+        var chip = createChip(text);
+        if (chip) {
+          container.appendChild(chip);
+        }
+      }
+
+      function createProductOption(product) {
+        var selectedGid = currentSelectedGid();
+        var button = document.createElement("button");
+        button.type = "submit";
+        button.name = "product_gid";
+        button.value = product.gid || "";
+        button.className = "tw-product-option";
+        button.setAttribute("data-product-option", "");
+        button.setAttribute("data-search", product.searchable_text || "");
+        button.setAttribute("data-search-normalized", product.searchable_normalized || "");
+        button.setAttribute("role", "option");
+        button.setAttribute("aria-selected", product.gid && product.gid === selectedGid ? "true" : "false");
+        if (product.gid && product.gid === selectedGid) {
+          button.className += " is-selected";
+        }
+
+        if (product.thumbnail_url) {
+          var image = document.createElement("img");
+          image.className = "tw-product-thumb";
+          image.src = product.thumbnail_url;
+          image.alt = "";
+          image.loading = "lazy";
+          button.appendChild(image);
+        } else {
+          var noImage = document.createElement("span");
+          noImage.className = "tw-product-thumb-placeholder";
+          noImage.textContent = "No image";
+          button.appendChild(noImage);
+        }
+
+        var body = document.createElement("span");
+        var title = document.createElement("span");
+        title.className = "tw-product-title";
+        title.textContent = product.title || "(untitled product)";
+        body.appendChild(title);
+
+        var meta = document.createElement("span");
+        meta.className = "tw-product-meta";
+        if (product.gid && product.gid === selectedGid) {
+          var selectedBadge = document.createElement("span");
+          selectedBadge.className = "tw-selected-badge";
+          selectedBadge.textContent = "Selected";
+          meta.appendChild(selectedBadge);
+        }
+        appendChip(meta, product.sku ? "SKU " + product.sku : "");
+        appendChip(meta, product.variant_title ? "Model " + product.variant_title : "");
+        appendChip(meta, product.handle || "");
+        appendChip(meta, product.numeric_id ? "Product ID " + product.numeric_id : "");
+        appendChip(meta, product.variant_numeric_id ? "Variant ID " + product.variant_numeric_id : "");
+        body.appendChild(meta);
+        button.appendChild(body);
+        button.addEventListener("click", function () {
+          syncLocaleParam();
+          closeDropdown();
+        });
+        return button;
+      }
+
+      function renderProductResults(data, query) {
+        var results = data && Array.isArray(data.results) ? data.results : [];
+        clearProductRows();
+        results.forEach(function (product) {
+          dropdown.insertBefore(createProductOption(product), empty || null);
+        });
+        setPickerSummary("Showing matching products", results.length);
+        updateSearchStatus(query, results.length, false);
+        setEmptyState("No matching products", results.length === 0 && hasSearchText());
+        setDropdownOpen(hasSearchText());
+      }
+
+      function closeDropdown() {
+        setDropdownOpen(false);
+      }
+
+      function resetProductResults() {
+        requestSequence += 1;
+        clearTimeout(debounceTimer);
+        clearProductRows();
+        setPickerSummary("Search products", "0");
+        updateSearchStatus("", 0, false);
+        setEmptyState("No matching products", false);
+        closeDropdown();
+      }
+
+      function fetchProductResults(query) {
+        var sequence = requestSequence + 1;
+        requestSequence = sequence;
+        fetch(buildSearchRequestUrl(query), {
+          credentials: "same-origin",
+          headers: {
+            "Accept": "application/json"
+          }
+        })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("Product search failed with HTTP " + response.status);
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            var currentQuery = input.value.trim();
+            if (
+              sequence !== requestSequence ||
+              String(data.query || "") !== currentQuery
+            ) {
+              return;
+            }
+            renderProductResults(data, currentQuery);
+          })
+          .catch(function () {
+            if (sequence !== requestSequence) {
+              return;
+            }
+            clearProductRows();
+            setPickerSummary("Search failed", "0");
+            updateSearchStatus(input.value.trim(), 0, false);
+            setEmptyState("Product search failed. Try again.", hasSearchText());
+            setDropdownOpen(hasSearchText());
+          });
+      }
+
+      function scheduleProductSearch() {
+        var query = input.value.trim();
+        clearTimeout(debounceTimer);
+        if (!query) {
+          resetProductResults();
+          return;
+        }
+        clearProductRows();
+        setPickerSummary("Searching local products", "...");
+        updateSearchStatus(query, 0, true);
+        setEmptyState("Searching local products...", true);
+        setDropdownOpen(true);
+        debounceTimer = setTimeout(function () {
+          fetchProductResults(query);
+        }, debounceDelay);
+      }
+
       input.addEventListener("focus", function () {
         if (hasSearchText()) {
-          openDropdown();
+          scheduleProductSearch();
         }
       });
-      input.addEventListener("input", function () {
-        filterProductRows();
-        setDropdownOpen(hasSearchText());
-      });
+      input.addEventListener("input", scheduleProductSearch);
       input.addEventListener("keydown", function (event) {
         if (event.key === "Escape") {
           closeDropdown();
@@ -3718,7 +3939,7 @@
         selectedToggle.addEventListener("click", function () {
           input.focus();
           if (hasSearchText()) {
-            openDropdown();
+            scheduleProductSearch();
           } else {
             closeDropdown();
           }
@@ -3728,18 +3949,19 @@
             event.preventDefault();
             input.focus();
             if (hasSearchText()) {
-              openDropdown();
+              scheduleProductSearch();
             } else {
               closeDropdown();
             }
           }
         });
       }
-      items.forEach(function (item) {
-        item.addEventListener("click", function () {
-          syncLocaleParam();
-          closeDropdown();
-        });
+      Array.prototype.slice.call(dropdown.querySelectorAll("[data-product-option]"))
+        .forEach(function (item) {
+          item.addEventListener("click", function () {
+            syncLocaleParam();
+            closeDropdown();
+          });
       });
       if (localeSelect) {
         localeSelect.addEventListener("change", syncLocaleParam);
@@ -3751,7 +3973,11 @@
         }
       });
       syncLocaleParam();
-      filterProductRows();
+      if (!hasSearchText()) {
+        resetProductResults();
+      } else {
+        updateSearchStatus(input.value.trim(), count ? count.textContent : 0, false);
+      }
       closeDropdown();
     }());
   </script>

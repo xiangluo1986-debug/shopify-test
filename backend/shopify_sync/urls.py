@@ -12,4 +12,9 @@ urlpatterns = [
     path("sync-shenzhen-orders/", views.sync_shenzhen_orders, name="shopify_sync_shenzhen_orders"),
     path("update-shenzhen-tracking/", views.update_shenzhen_tracking, name="shopify_update_shenzhen_tracking"),
     path("sync-dashboard/", views.sync_dashboard, name="shopify_sync_dashboard"),
+    path(
+        "translation-console/product-search/",
+        views.translation_console_product_search,
+        name="shopify_translation_console_product_search",
+    ),
 ]
