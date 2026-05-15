@@ -214,6 +214,42 @@ TRANSLATION_WORKSPACE_DRAFT_FIELDS = [
     "body_html",
     "meta_title",
     "meta_description",
+    "handle",
+]
+TRANSLATION_WORKSPACE_DRAFT_GROUPS = [
+    {
+        "value": "product_basics",
+        "label": "Product basics",
+        "description": "Title and product description/body HTML",
+    },
+    {
+        "value": "seo",
+        "label": "SEO",
+        "description": "SEO title, SEO description, and cautious URL handle preview",
+    },
+    {
+        "value": "options",
+        "label": "Options",
+        "description": "Product option names and values",
+    },
+    {
+        "value": "variants",
+        "label": "Variants",
+        "description": "Variant display text and option values when Shopify exposes them",
+    },
+    {
+        "value": "important_metafields",
+        "label": "Important metafields",
+        "description": "Customer-facing product page metafields",
+    },
+    {
+        "value": "media",
+        "label": "Media alt text",
+        "description": "Image/media alt text when Shopify exposes it",
+    },
+]
+TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS = [
+    option["value"] for option in TRANSLATION_WORKSPACE_DRAFT_GROUPS
 ]
 TRANSLATION_CONSOLE_EDITOR_FILTERS = {
     "all",
@@ -226,12 +262,13 @@ TRANSLATION_CONSOLE_EDITOR_FILTERS = {
     "seo",
     "variants_options",
     "metafields",
+    "media",
 }
 TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
     {
         "section_key": "basic",
-        "section_label": "Basic",
-        "section_hint": "Core product fields shown first for daily review.",
+        "section_label": "Product basics",
+        "section_hint": "Product title and product description/body HTML.",
         "collapsible": False,
         "collapsed_by_default": False,
     },
@@ -264,9 +301,16 @@ TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
         "collapsed_by_default": True,
     },
     {
+        "section_key": "media",
+        "section_label": "Media alt text",
+        "section_hint": "Image/media alt text when Shopify exposes it as translatable content.",
+        "collapsible": False,
+        "collapsed_by_default": False,
+    },
+    {
         "section_key": "technical_metafields",
-        "section_label": "Other metafields / technical fields",
-        "section_hint": "Low-signal or system-like fields are folded to reduce daily noise.",
+        "section_label": "Technical / not translated",
+        "section_hint": "System, review, rating, ID, JSON, inventory, and unclear fields stay view-only.",
         "collapsible": True,
         "collapsed_by_default": True,
     },
@@ -305,12 +349,20 @@ TRANSLATION_WORKSPACE_FIELD_COVERAGE_CORE_AREAS = [
         "field_keys": ("meta_description",),
         "note": "SEO description translation field.",
     },
+    {
+        "area_key": "handle",
+        "area_label": "URL handle",
+        "group_label": "SEO",
+        "field_keys": ("handle",),
+        "note": "URL handle is shown when Shopify returns it. Any draft is cautious/manual-review only.",
+    },
 ]
 TRANSLATION_WORKSPACE_FIELD_COVERAGE_EXTRA_SECTIONS = [
     ("options", "Product options"),
     ("variants", "Variants"),
     ("important_metafields", "Important metafields"),
-    ("technical_metafields", "Other metafields / technical fields"),
+    ("media", "Media alt text"),
+    ("technical_metafields", "Technical / not translated"),
 ]
 TRANSLATION_EDITOR_IMPORTANT_METAFIELD_NAMESPACES = {
     "custom",
@@ -951,6 +1003,13 @@ def translation_console(request):
             requested_draft_locales if is_multi_locale_draft_post else [locale]
         ),
     )
+    requested_draft_groups, invalid_draft_groups = _translation_workspace_requested_draft_groups(
+        request,
+        is_multi_locale_draft_post=is_multi_locale_draft_post,
+    )
+    draft_group_options = _translation_workspace_draft_group_options(
+        requested_draft_groups
+    )
     product_selector = _build_translation_console_product_selector(
         product_search_text=product_search_text,
         requested_product_gid=(
@@ -1046,12 +1105,14 @@ def translation_console(request):
             if installation is None:
                 error_message = f"Shopify installation not found for {shop_domain}."
             elif is_multi_locale_draft_post:
-                if not requested_draft_locales:
+                if not requested_draft_locales or not requested_draft_groups:
                     multi_locale_draft_result = _translation_workspace_empty_multi_locale_result(
                         product_id=action_product_query,
                         selected_locale=locale,
                         requested_locales=requested_draft_locales,
                         invalid_locales=invalid_draft_locales,
+                        requested_groups=requested_draft_groups,
+                        invalid_groups=invalid_draft_groups,
                     )
                     draft_error_message = multi_locale_draft_result["message"]
                     safe_action_result = _translation_console_safe_action_result(
@@ -1077,6 +1138,8 @@ def translation_console(request):
                             selected_locale=locale,
                             target_locales=requested_draft_locales,
                             invalid_locales=invalid_draft_locales,
+                            draft_groups=requested_draft_groups,
+                            invalid_groups=invalid_draft_groups,
                             product_search_text=product_search_text,
                             editor_filter=editor_filter,
                             editor_search_query=editor_search_query,
@@ -1098,6 +1161,8 @@ def translation_console(request):
                                 has_product=False,
                                 requested_locales=requested_draft_locales,
                                 invalid_locales=invalid_draft_locales,
+                                requested_groups=requested_draft_groups,
+                                invalid_groups=invalid_draft_groups,
                             )
                         )
                         multi_locale_draft_result = _translation_workspace_empty_multi_locale_result(
@@ -1105,6 +1170,8 @@ def translation_console(request):
                             selected_locale=locale,
                             requested_locales=requested_draft_locales,
                             invalid_locales=invalid_draft_locales,
+                            requested_groups=requested_draft_groups,
+                            invalid_groups=invalid_draft_groups,
                             message=blocked_message,
                             action_status="multi_locale_draft_blocked",
                             blocking_conditions=["missing_selected_product"],
@@ -1499,12 +1566,16 @@ def translation_console(request):
             has_product=bool(action_product_query),
             requested_locales=requested_draft_locales,
             invalid_locales=invalid_draft_locales,
+            requested_groups=requested_draft_groups,
+            invalid_groups=invalid_draft_groups,
         )
         multi_locale_draft_result = _translation_workspace_empty_multi_locale_result(
             product_id=action_product_query,
             selected_locale=locale,
             requested_locales=requested_draft_locales,
             invalid_locales=invalid_draft_locales,
+            requested_groups=requested_draft_groups,
+            invalid_groups=invalid_draft_groups,
             message=(
                 draft_error_message
                 or error_message
@@ -1593,6 +1664,8 @@ def translation_console(request):
                 for supported_locale in SUPPORTED_TRANSLATION_LOCALES
             ],
             "draft_locale_options": draft_locale_options,
+            "draft_group_options": draft_group_options,
+            "requested_draft_groups": requested_draft_groups,
             "ui_mode": ui_mode,
             "editor_filter": editor_filter,
             "editor_search_query": editor_search_query,
@@ -2361,23 +2434,86 @@ def _translation_workspace_draft_locale_options(
     ]
 
 
+def _translation_workspace_requested_draft_groups(
+    request,
+    is_multi_locale_draft_post: bool,
+):
+    allowed = {option["value"] for option in TRANSLATION_WORKSPACE_DRAFT_GROUPS}
+    if not is_multi_locale_draft_post:
+        return list(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS), []
+
+    raw_groups = request.POST.getlist("draft_groups")
+    requested = []
+    invalid = []
+    for raw_group in raw_groups:
+        group = str(raw_group or "").strip()
+        if not group:
+            continue
+        if group not in allowed:
+            if group not in invalid:
+                invalid.append(group)
+            continue
+        if group not in requested:
+            requested.append(group)
+    return requested, invalid
+
+
+def _translation_workspace_draft_group_options(
+    requested_groups: list[str] | None = None,
+):
+    selected = set(requested_groups or TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS)
+    return [
+        {
+            **option,
+            "checked": option["value"] in selected,
+        }
+        for option in TRANSLATION_WORKSPACE_DRAFT_GROUPS
+    ]
+
+
+def _translation_workspace_draft_scopes(draft_groups: list[str] | None):
+    groups = list(draft_groups or TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS)
+    scopes = []
+    group_fields = {
+        "product_basics": ["title", "body_html"],
+        "seo": ["meta_title", "meta_description", "handle"],
+        "options": ["options"],
+        "variants": ["variants"],
+        "important_metafields": ["important_metafields"],
+        "media": ["media"],
+    }
+    for group in groups:
+        for scope in group_fields.get(group, []):
+            if scope not in scopes:
+                scopes.append(scope)
+    return scopes
+
+
 def _translation_workspace_empty_multi_locale_result(
     product_id: str,
     selected_locale: str,
     requested_locales: list[str] | None,
     invalid_locales: list[str] | None,
+    requested_groups: list[str] | None = None,
+    invalid_groups: list[str] | None = None,
     message: str = "",
     action_status: str = "multi_locale_draft_blocked",
     blocking_conditions: list[str] | None = None,
 ):
     requested_locales = list(requested_locales or [])
     invalid_locales = list(invalid_locales or [])
+    requested_groups = list(requested_groups or [])
+    invalid_groups = list(invalid_groups or [])
     blocking_conditions = list(blocking_conditions or [])
     locale_results = []
     if invalid_locales and "unsupported_target_language" not in blocking_conditions:
         blocking_conditions.append("unsupported_target_language")
+    if invalid_groups and "unsupported_draft_group" not in blocking_conditions:
+        blocking_conditions.append("unsupported_draft_group")
     if not requested_locales and not invalid_locales:
         blocking_conditions.append("no_target_language_selected")
+    if not requested_groups and not invalid_groups:
+        blocking_conditions.append("no_draft_group_selected")
     for invalid_locale in invalid_locales:
         locale_results.append(
             {
@@ -2396,8 +2532,12 @@ def _translation_workspace_empty_multi_locale_result(
             }
         )
     if not message:
-        if invalid_locales:
+        if invalid_groups:
+            message = "Choose only supported draft coverage groups."
+        elif invalid_locales:
             message = "Choose only supported target languages."
+        elif not requested_groups:
+            message = "Choose at least one draft coverage group."
         else:
             message = "Choose at least one target language."
     summary = _translation_workspace_multi_locale_summary(locale_results)
@@ -2409,10 +2549,12 @@ def _translation_workspace_empty_multi_locale_result(
         "selected_locale": selected_locale,
         "requested_locales": requested_locales,
         "invalid_locales": invalid_locales,
+        "requested_groups": requested_groups,
+        "invalid_groups": invalid_groups,
         "locale_results": locale_results,
         "selected_locale_draft_result": None,
-        "draft_fields": list(TRANSLATION_WORKSPACE_DRAFT_FIELDS),
-        "field_scope_labels": _translation_workspace_draft_field_labels(),
+        "draft_fields": _translation_workspace_draft_scopes(requested_groups),
+        "field_scope_labels": _translation_workspace_draft_field_labels(requested_groups),
         "summary": summary,
         "blocking_conditions": blocking_conditions,
         "read_only": True,
@@ -2429,18 +2571,23 @@ def _generate_translation_workspace_multi_locale_drafts(
     selected_locale: str,
     target_locales: list[str],
     invalid_locales: list[str] | None = None,
+    draft_groups: list[str] | None = None,
+    invalid_groups: list[str] | None = None,
     product_search_text: str = "",
     editor_filter: str = "all",
     editor_search_query: str = "",
 ):
     locale_results = []
     selected_locale_draft_result = None
+    draft_groups = list(draft_groups or TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS)
+    invalid_groups = list(invalid_groups or [])
+    draft_scopes = _translation_workspace_draft_scopes(draft_groups)
     for target_locale in target_locales:
         try:
             locale_draft_result = generate_selected_product_missing_translation_draft_package(
                 product_id=product_id,
                 target_locales=[target_locale],
-                fields=TRANSLATION_WORKSPACE_DRAFT_FIELDS,
+                fields=draft_scopes,
                 installation=installation,
             )
             _attach_translation_console_draft_detail(locale_draft_result)
@@ -2451,7 +2598,7 @@ def _generate_translation_workspace_multi_locale_drafts(
                 "error": f"{type(exc).__name__}: draft generation failed",
                 "product_id": product_id,
                 "target_locales": [target_locale],
-                "requested_fields": list(TRANSLATION_WORKSPACE_DRAFT_FIELDS),
+                "requested_fields": list(draft_scopes),
                 "blocking_conditions": ["draft_generation_failed"],
                 "translation_console_detail": {
                     "summary_counts": {
@@ -2508,10 +2655,12 @@ def _generate_translation_workspace_multi_locale_drafts(
         "selected_locale": selected_locale,
         "requested_locales": list(target_locales),
         "invalid_locales": list(invalid_locales or []),
+        "requested_groups": draft_groups,
+        "invalid_groups": invalid_groups,
         "locale_results": locale_results,
         "selected_locale_draft_result": selected_locale_draft_result,
-        "draft_fields": list(TRANSLATION_WORKSPACE_DRAFT_FIELDS),
-        "field_scope_labels": _translation_workspace_draft_field_labels(),
+        "draft_fields": list(draft_scopes),
+        "field_scope_labels": _translation_workspace_draft_field_labels(draft_groups),
         "summary": summary,
         "blocking_conditions": summary.get("blocking_conditions", []),
         "read_only": True,
@@ -2617,9 +2766,17 @@ def _translation_workspace_multi_locale_blocked_message(
     has_product: bool,
     requested_locales: list[str] | None,
     invalid_locales: list[str] | None,
+    requested_groups: list[str] | None = None,
+    invalid_groups: list[str] | None = None,
 ):
     has_requested_locale = bool(requested_locales)
     has_invalid_locale = bool(invalid_locales)
+    has_requested_group = bool(requested_groups)
+    has_invalid_group = bool(invalid_groups)
+    if has_invalid_group and not has_requested_group:
+        return "Choose at least one supported draft coverage group."
+    if not has_requested_group:
+        return "Choose at least one draft coverage group."
     if not has_product and not has_requested_locale and not has_invalid_locale:
         return "Select one product and choose at least one target language before generating drafts."
     if not has_product and has_invalid_locale and not has_requested_locale:
@@ -2767,14 +2924,22 @@ def _translation_workspace_multi_locale_status(summary: dict):
     )
 
 
-def _translation_workspace_draft_field_labels():
+def _translation_workspace_draft_field_labels(draft_groups: list[str] | None = None):
     labels = {
         "title": "product title",
         "body_html": "product description/body",
         "meta_title": "SEO title",
         "meta_description": "SEO description",
+        "handle": "URL handle draft preview",
+        "options": "product options",
+        "variants": "variants",
+        "important_metafields": "important metafields",
+        "media": "media alt text",
     }
-    return [labels.get(field, field) for field in TRANSLATION_WORKSPACE_DRAFT_FIELDS]
+    return [
+        labels.get(field, field)
+        for field in _translation_workspace_draft_scopes(draft_groups)
+    ]
 
 
 def build_apply_plan_preview_from_draft_result(draft_result: dict | None):
@@ -3009,7 +3174,7 @@ def build_translation_workspace_single_product_mvp(
         _translation_workspace_mvp_group(
             "seo",
             "SEO",
-            ("meta_title", "meta_description"),
+            ("meta_title", "meta_description", "handle"),
             coverage_by_area,
             draft_coverage_by_group,
             product_gid=product_gid,
@@ -3043,8 +3208,17 @@ def build_translation_workspace_single_product_mvp(
             source_data_loaded=source_data_loaded,
         ),
         _translation_workspace_mvp_group(
+            "media",
+            "Media alt text",
+            ("media",),
+            coverage_by_area,
+            draft_coverage_by_group,
+            product_gid=product_gid,
+            source_data_loaded=source_data_loaded,
+        ),
+        _translation_workspace_mvp_group(
             "technical_fields",
-            "Other technical fields",
+            "Technical / not translated",
             ("technical_metafields",),
             coverage_by_area,
             draft_coverage_by_group,
@@ -3227,9 +3401,11 @@ def _translation_workspace_mvp_area_label(area_key: str) -> str:
         "body_html": "Description / body HTML",
         "meta_title": "SEO meta title",
         "meta_description": "SEO meta description",
+        "handle": "URL handle",
         "options": "Product options",
         "variants": "Variants",
         "important_metafields": "Important metafields",
+        "media": "Media alt text",
         "technical_metafields": "Other technical fields",
     }
     return labels.get(area_key, _translation_editor_humanize_key(area_key))
@@ -3239,9 +3415,10 @@ def _translation_workspace_mvp_group_note(group_key: str) -> str:
     notes = {
         "product_basics": "Title and body HTML are draft-supported for local previews. Body HTML remains review-only for later approval steps.",
         "seo": "Meta title and meta description are draft-supported.",
-        "options": "Option names or values are not drafted until Shopify row keys are mapped safely.",
-        "variants": "Variant titles or labels are not drafted until Shopify row keys are mapped safely. SKU remains context only.",
-        "important_metafields": "Important metafields are editor-only in this phase.",
+        "options": "Option names or values can get local drafts. Future Shopify write mapping remains blocked.",
+        "variants": "Variant titles or labels can get local drafts when Shopify exposes them. SKU remains context only.",
+        "important_metafields": "Important customer-facing metafields can get local drafts. Future Shopify write mapping remains blocked.",
+        "media": "Media/image alt text can get local drafts when Shopify exposes it.",
         "technical_fields": "Other technical fields stay collapsed and out of the MVP draft package.",
     }
     return notes.get(group_key, "")
@@ -3383,6 +3560,7 @@ def build_translation_console_editor_view(
         ("seo", "SEO"),
         ("variants_options", "Variants/options"),
         ("metafields", "Metafields"),
+        ("media", "Media"),
     ]
     status_summary = {
         "visible": len(visible_rows),
@@ -3703,18 +3881,23 @@ def _build_translation_workspace_section_coverage_entry(
         }
     )
     notes = (
-        "Rows in this section are visible for review only; current draft generation does not cover them."
+        _translation_workspace_section_coverage_notes(section_key, section_rows)
         if section_rows
         else "No rows in this section were returned by the current product translation data."
     )
+    has_draft_eligible_rows = any(row.get("draft_eligible") for row in section_rows)
     return {
         "area_key": section_key,
         "area_label": section_label,
         "group_label": "Additional sections",
         "coverage_status": coverage_status,
         "coverage_label": coverage_label,
-        "support_status": "review_only",
-        "support_label": "Review-only in editor",
+        "support_status": "draft_supported" if has_draft_eligible_rows else "review_only",
+        "support_label": (
+            "Local drafts supported"
+            if has_draft_eligible_rows
+            else "Review-only in editor"
+        ),
         "field_keys": field_keys,
         "row_count": len(section_rows),
         "visible_row_count": visible_count,
@@ -3722,14 +3905,25 @@ def _build_translation_workspace_section_coverage_entry(
     }
 
 
+def _translation_workspace_section_coverage_notes(section_key: str, section_rows: list[dict]):
+    eligible_count = sum(1 for row in section_rows if row.get("draft_eligible"))
+    if section_key == "options":
+        return f"{eligible_count} option row(s) are draft eligible; future Shopify writes remain blocked pending resource mapping."
+    if section_key == "variants":
+        return f"{eligible_count} variant row(s) are draft eligible; SKU, barcode, ID, and code-like values stay context-only."
+    if section_key == "important_metafields":
+        return f"{eligible_count} customer-facing metafield row(s) are draft eligible; future Shopify writes remain blocked pending resource mapping."
+    if section_key == "media":
+        return f"{eligible_count} media alt row(s) are draft eligible when source alt text is present."
+    return "Rows in this section are visible for review only and excluded from draft generation."
+
+
 def _translation_editor_draft_entries_by_key(draft_result: dict, locale: str):
     entries = {}
     for entry in draft_result.get("entries") or []:
         if not isinstance(entry, dict) or entry.get("locale") != locale:
             continue
-        field_key = _translation_editor_normalize_field_key(
-            entry.get("source_key") or entry.get("field")
-        )
+        field_key = _translation_editor_row_identity(entry)
         if field_key:
             entries[field_key] = entry
     return entries
@@ -3740,10 +3934,21 @@ def _translation_editor_source_rows_by_key(result: dict):
     for row in result.get("translatable_rows") or []:
         if not isinstance(row, dict):
             continue
-        field_key = _translation_editor_normalize_field_key(row.get("key"))
+        field_key = _translation_editor_row_identity(row)
         if field_key:
             rows[field_key] = row
     return rows
+
+
+def _translation_editor_row_identity(row: dict) -> str:
+    return str(
+        row.get("entry_key")
+        or row.get("draft_key")
+        or row.get("field_key")
+        or row.get("key")
+        or row.get("field")
+        or ""
+    )
 
 
 def _build_translation_editor_row(
@@ -3753,7 +3958,9 @@ def _build_translation_editor_row(
     locale: str,
     source_identity_context: dict | None = None,
 ):
-    field_key = _translation_editor_normalize_field_key(field_key)
+    field_key = _translation_editor_normalize_field_key(
+        source_row.get("field_key") or draft_entry.get("field_key") or field_key
+    )
     source_value = str(
         source_row.get("source_value")
         or draft_entry.get("source_value")
@@ -3855,6 +4062,15 @@ def _build_translation_editor_row(
         translation_status = "translated"
     elif draft_value:
         translation_status = "draft_only"
+    elif (
+        source_row.get("draft_eligible") is False
+        or (
+            draft_entry
+            and draft_entry.get("draft_eligible") is False
+            and draft_entry.get("skip_reason")
+        )
+    ):
+        translation_status = "not_eligible"
     elif draft_entry.get("skip_reason"):
         translation_status = "skipped"
     else:
@@ -3871,6 +4087,10 @@ def _build_translation_editor_row(
         badges.append("outdated")
     if draft_value and not existing_translation_present:
         badges.append("GPT draft")
+    if source_value and source_row.get("draft_eligible") is False:
+        badges.append("not eligible")
+    if draft_entry.get("future_write_needs_mapping") or source_row.get("future_write_needs_mapping"):
+        badges.append("future write blocked")
     if seo_notes:
         badges.append("SEO warning")
     if product_identity_mismatch:
@@ -3886,19 +4106,37 @@ def _build_translation_editor_row(
     exceeds_limit = bool(char_limit and target_chars > char_limit)
     if exceeds_limit:
         badges.append("exceeds limit")
-    section_key = _translation_editor_section_key(field_key)
-    resource_type_label = _translation_editor_resource_type_label(field_key)
+    section_key = (
+        source_row.get("section_key")
+        or draft_entry.get("section_key")
+        or _translation_editor_section_key(field_key)
+    )
+    resource_type_label = (
+        source_row.get("resource_type_label")
+        or draft_entry.get("resource_type_label")
+        or _translation_editor_resource_type_label(field_key)
+    )
     resource_detail = _translation_editor_resource_detail(field_key, source_row, draft_entry)
     resource_note = _translation_editor_resource_note(field_key, source_row, draft_entry)
     has_html_preview = field_key == "body_html"
     return {
         "section_key": section_key,
         "field_key": field_key,
-        "field_label": _translation_editor_field_label(field_key),
+        "field_label": (
+            source_row.get("field_label")
+            or draft_entry.get("field_label")
+            or _translation_editor_field_label(field_key)
+        ),
         "resource_type_label": resource_type_label,
         "resource_detail": resource_detail,
         "resource_note": resource_note,
-        "resource_key": source_row.get("key") or draft_entry.get("source_key") or field_key,
+        "resource_key": (
+            source_row.get("source_key")
+            or source_row.get("key")
+            or draft_entry.get("source_key")
+            or field_key
+        ),
+        "resource_id": source_row.get("resource_id") or draft_entry.get("resource_id", ""),
         "source_value": source_value,
         "source_value_preview": _translation_editor_preview_text(
             source_value,
@@ -3910,6 +4148,14 @@ def _build_translation_editor_row(
             else ""
         ),
         "target_value_display": target_value,
+        "existing_value_preview": _translation_editor_preview_text(
+            existing_value,
+            field_key=field_key,
+        ),
+        "draft_value_preview": _translation_editor_preview_text(
+            draft_value,
+            field_key=field_key,
+        ),
         "target_value_preview": _translation_editor_preview_text(
             target_value,
             field_key=field_key,
@@ -3955,6 +4201,19 @@ def _build_translation_editor_row(
         "existing_translation_present": existing_translation_present,
         "outdated": outdated,
         "digest": source_row.get("digest") or draft_entry.get("source_digest") or "",
+        "draft_eligible": (
+            source_row.get("draft_eligible")
+            if "draft_eligible" in source_row
+            else draft_entry.get("draft_eligible")
+        ),
+        "draft_ineligible_reason": source_row.get("draft_ineligible_reason")
+        or draft_entry.get("draft_ineligible_reason", ""),
+        "future_write_needs_mapping": bool(
+            source_row.get("future_write_needs_mapping")
+            or draft_entry.get("future_write_needs_mapping")
+        ),
+        "apply_plan_blocked_reason": source_row.get("apply_plan_blocked_reason")
+        or draft_entry.get("apply_plan_blocked_reason", ""),
         "needs_review": needs_review,
         "full_description_display": has_html_preview,
         "has_html_preview": has_html_preview,
@@ -3969,6 +4228,7 @@ def _translation_editor_status_label(status: str) -> str:
         "needs_review": "Needs review",
         "draft_only": "Draft only",
         "skipped": "Needs review",
+        "not_eligible": "Not eligible",
         "untranslated": "Needs translation",
     }
     return labels.get(str(status or ""), _translation_editor_humanize_key(status))
@@ -3986,6 +4246,8 @@ def _translation_editor_badge_label(badge: str) -> str:
         "blocked": "Needs review",
         "untranslated": "Needs translation",
         "exceeds limit": "Too long",
+        "not eligible": "Not eligible",
+        "future write blocked": "Future write blocked",
     }
     return labels.get(str(badge or ""), _translation_editor_humanize_key(badge))
 
@@ -4032,6 +4294,7 @@ def _translation_editor_row_matches_filter(row: dict, editor_filter: str) -> boo
             "outdated",
             "needs_review",
             "skipped",
+            "not_eligible",
         }
     if editor_filter == "seo":
         return row.get("section_key") == "seo"
@@ -4039,6 +4302,8 @@ def _translation_editor_row_matches_filter(row: dict, editor_filter: str) -> boo
         return row.get("section_key") in {"options", "variants"}
     if editor_filter == "metafields":
         return row.get("section_key") in {"important_metafields", "technical_metafields"}
+    if editor_filter == "media":
+        return row.get("section_key") == "media"
     return True
 
 
@@ -4060,6 +4325,8 @@ def _translation_editor_section_key(field_key: str) -> str:
         return "options"
     if "variant" in key:
         return "variants"
+    if key.startswith("media.") or "image_alt" in key or key.endswith(".alt"):
+        return "media"
     if _translation_editor_is_metafield_key(key):
         if _translation_editor_is_important_metafield(key):
             return "important_metafields"
@@ -4098,12 +4365,15 @@ def _translation_editor_resource_type_label(field_key: str) -> str:
         "options": "Option field",
         "variants": "Variant field",
         "important_metafields": "Important metafield",
+        "media": "Media alt text",
         "technical_metafields": "Technical / other field",
     }
     return labels.get(section_key, "Product field")
 
 
 def _translation_editor_resource_detail(field_key: str, source_row: dict, draft_entry: dict) -> str:
+    if source_row.get("context_label") or draft_entry.get("context_label"):
+        return source_row.get("context_label") or draft_entry.get("context_label")
     section_key = _translation_editor_section_key(field_key)
     if section_key in {"important_metafields", "technical_metafields"}:
         namespace, key = _translation_editor_metafield_parts(field_key)
@@ -4118,6 +4388,8 @@ def _translation_editor_resource_detail(field_key: str, source_row: dict, draft_
 
 
 def _translation_editor_resource_note(field_key: str, source_row: dict, draft_entry: dict) -> str:
+    if source_row.get("resource_note") or draft_entry.get("resource_note"):
+        return source_row.get("resource_note") or draft_entry.get("resource_note")
     section_key = _translation_editor_section_key(field_key)
     if section_key in {"important_metafields", "technical_metafields"}:
         namespace, key = _translation_editor_metafield_parts(field_key)
@@ -4151,9 +4423,10 @@ def _translation_editor_is_metafield_key(field_key: str) -> bool:
         "handle",
         "meta_title",
         "meta_description",
+        "media.alt",
     }:
         return False
-    if "option" in key or "variant" in key:
+    if "option" in key or "variant" in key or key.startswith("media."):
         return False
     return "metafield" in key or "." in key
 
@@ -4275,8 +4548,11 @@ def _translation_editor_existing_variant_bits(source_row: dict, draft_entry: dic
         ("option_value", "variant_option", "selected_option_value"),
     )
     sku = _translation_editor_first_value(source_row, draft_entry, ("sku", "variant_sku"))
+    variant_id = _translation_editor_first_value(source_row, draft_entry, ("variant_id", "resource_id"))
     if variant_title:
         bits.append(f"Variant: {variant_title}")
+    if variant_id:
+        bits.append(f"Variant ID: {variant_id}")
     if option_value:
         bits.append(f"Option: {option_value}")
     if sku:
@@ -4427,6 +4703,9 @@ def _normalize_apply_plan_preview_entry(entry: dict):
         "locale": entry.get("locale", ""),
         "field": entry.get("field", ""),
         "resource_key": entry.get("source_key") or entry.get("field", ""),
+        "resource_id": entry.get("resource_id", ""),
+        "resource_group": entry.get("resource_group", ""),
+        "context_label": entry.get("context_label", ""),
         "proposed_translation_preview": _preview_text(proposed_value),
         "planned_value": proposed_value,
         "source_preview": _preview_text(entry.get("source_value")),
@@ -4450,6 +4729,8 @@ def _normalize_apply_plan_preview_entry(entry: dict):
         or entry.get("warning_text", ""),
         "product_identity_mismatch": bool(entry.get("product_identity_mismatch")),
         "draft_blocked": bool(entry.get("draft_blocked")),
+        "future_write_needs_mapping": bool(entry.get("future_write_needs_mapping")),
+        "apply_plan_blocked_reason": entry.get("apply_plan_blocked_reason", ""),
         "blocking_reasons": ", ".join(reasons),
         "current_translation_present": current_translation_present,
         "outdated": outdated,
@@ -4471,6 +4752,7 @@ def _translation_console_draft_summary(draft_result: dict):
         int(draft_result.get("skipped_existing_translation_count") or 0)
         + int(draft_result.get("skipped_outdated_translation_count") or 0)
         + int(draft_result.get("skipped_source_empty_count") or 0)
+        + int(draft_result.get("skipped_not_draft_eligible_count") or 0)
     )
     return {
         "selected_product_title": draft_result.get("product_title", ""),
@@ -4552,6 +4834,9 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "locale": entry.get("locale", ""),
         "field": entry.get("field", ""),
         "resource_key": entry.get("source_key") or entry.get("field", ""),
+        "resource_id": entry.get("resource_id", ""),
+        "resource_group": entry.get("resource_group", ""),
+        "context_label": entry.get("context_label", ""),
         "source_value_preview": _preview_text(entry.get("source_value")),
         "proposed_translation_preview": _preview_text(entry.get("draft_value")),
         "proposed_chars": entry.get("draft_value_chars") or 0,
@@ -4568,6 +4853,10 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "seo_validation_status": entry.get("seo_validation_status", ""),
         "seo_warning": ", ".join(seo_notes),
         "eligible_for_apply_plan": bool(entry.get("eligible_for_apply_plan")),
+        "future_write_needs_mapping": bool(entry.get("future_write_needs_mapping")),
+        "apply_plan_blocked_reason": entry.get("apply_plan_blocked_reason", ""),
+        "draft_eligible": entry.get("draft_eligible"),
+        "draft_ineligible_reason": entry.get("draft_ineligible_reason", ""),
         "blocking_reasons": ", ".join(blocking_reasons),
         "skip_reason": entry.get("skip_reason", ""),
         "current_translation_present": bool(entry.get("existing_translation_present")),
@@ -4585,6 +4874,7 @@ def _translation_console_draft_detail_counts(
         int(draft_result.get("skipped_existing_translation_count") or 0)
         + int(draft_result.get("skipped_outdated_translation_count") or 0)
         + int(draft_result.get("skipped_source_empty_count") or 0)
+        + int(draft_result.get("skipped_not_draft_eligible_count") or 0)
     )
     return {
         "draft_entry_count": len(draft_entries),
@@ -4615,6 +4905,10 @@ def _draft_entry_blocking_reasons(entry: dict, seo_notes: list[str], quality_not
     reasons.extend(seo_notes)
     if entry.get("draft_blocked"):
         reasons.append("draft_blocked")
+    if entry.get("future_write_needs_mapping"):
+        reasons.append(entry.get("apply_plan_blocked_reason") or "future_write_needs_resource_mapping")
+    if entry.get("draft_ineligible_reason"):
+        reasons.append(str(entry.get("draft_ineligible_reason")))
     if entry.get("product_identity_mismatch"):
         reasons.append("product_identity_mismatch")
     if entry.get("validation_status") not in {

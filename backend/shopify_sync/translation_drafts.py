@@ -12,7 +12,16 @@ DEFAULT_PRODUCT_ID = "gid://shopify/Product/7655686799427"
 DEFAULT_TARGET_LOCALES = ["ja", "de", "fr", "es", "it"]
 DEFAULT_FIELDS = ["title", "meta_title", "meta_description"]
 SUPPORTED_LOCALES = ["ja", "de", "fr", "es", "it"]
-ALLOWED_FIELDS = ["title", "body_html", "meta_title", "meta_description"]
+ALLOWED_FIELDS = ["title", "body_html", "meta_title", "meta_description", "handle"]
+ALLOWED_DRAFT_GROUP_SCOPES = [
+    "product_basics",
+    "seo",
+    "options",
+    "variants",
+    "important_metafields",
+    "media",
+]
+ALLOWED_DRAFT_SCOPES = set(ALLOWED_FIELDS) | set(ALLOWED_DRAFT_GROUP_SCOPES)
 DRAFT_COVERAGE_GROUP_CONFIGS = [
     {
         "group_key": "product_basics",
@@ -25,36 +34,43 @@ DRAFT_COVERAGE_GROUP_CONFIGS = [
         "group_key": "seo",
         "label": "SEO",
         "expected_field_keys": ("meta_title", "meta_description"),
-        "draft_field_keys": ("meta_title", "meta_description"),
-        "notes": "SEO title and description are in the current draft package.",
+        "draft_field_keys": ("meta_title", "meta_description", "handle"),
+        "notes": "SEO title and description are draft-supported. URL handle is draft-preview only and requires manual review.",
     },
     {
         "group_key": "options",
         "label": "Product options",
         "expected_field_keys": (),
-        "draft_field_keys": (),
-        "notes": "Option rows returned by Shopify are classified for editor review only until their keys are mapped safely.",
+        "draft_field_keys": ("options",),
+        "notes": "Option names and values returned by Shopify can get local drafts. Future write mapping remains blocked.",
     },
     {
         "group_key": "variants",
         "label": "Variants",
         "expected_field_keys": (),
-        "draft_field_keys": (),
-        "notes": "Variant rows returned by Shopify are classified for editor review only until their keys are mapped safely.",
+        "draft_field_keys": ("variants",),
+        "notes": "Variant display text returned by Shopify can get local drafts. SKU, barcode, IDs, and technical codes remain context-only.",
     },
     {
         "group_key": "important_metafields",
         "label": "Important metafields",
         "expected_field_keys": (),
-        "draft_field_keys": (),
-        "notes": "Only metafield rows already returned by Shopify are counted. They are editor-only in this phase.",
+        "draft_field_keys": ("important_metafields",),
+        "notes": "Customer-facing metafields returned by Shopify can get local drafts. Future write mapping remains blocked.",
+    },
+    {
+        "group_key": "media",
+        "label": "Media alt text",
+        "expected_field_keys": (),
+        "draft_field_keys": ("media",),
+        "notes": "Media/image alt text returned by Shopify can get local draft alt text.",
     },
     {
         "group_key": "technical_fields",
-        "label": "Other technical fields",
+        "label": "Technical / not translated",
         "expected_field_keys": (),
         "draft_field_keys": (),
-        "notes": "Technical or unclear rows are visible for review only and excluded from the MVP draft package.",
+        "notes": "Technical, review, rating, ID, JSON, inventory, and system fields stay visible only and are never drafted.",
     },
 ]
 IMPORTANT_METAFIELD_NAMESPACES = {
@@ -119,7 +135,7 @@ TECHNICAL_METAFIELD_HINTS = (
     "token",
     "updated",
 )
-FIELD_MAX_CHARS = {"title": 65, "meta_title": 60, "meta_description": 155}
+FIELD_MAX_CHARS = {"title": 65, "meta_title": 60, "meta_description": 155, "handle": 80, "media.alt": 125}
 FIELD_RECOMMENDED_MIN_CHARS = {"title": 25, "meta_title": 30, "meta_description": 80}
 FIELD_RECOMMENDED_MAX_CHARS = dict(FIELD_MAX_CHARS)
 MAX_REWRITE_ATTEMPTS = 2
@@ -200,6 +216,12 @@ FIELD_STYLE_GUIDANCE = {
     "body_html": "Customer-facing product description. Preserve the source HTML structure, links, images, lists, specs, model names, and compatibility facts.",
     "meta_title": "Short SEO title with the source brand/model, one core part keyword, and RC spare/replacement meaning.",
     "meta_description": "Natural SEO description with use, compatibility, part type, and one value point; no CTA.",
+    "handle": "URL handle draft preview only. Keep it short, lowercase if natural for the locale, and require manual review before any future use.",
+    "option.name": "Short option name shown to customers. Preserve units, model numbers, and option structure.",
+    "option.value": "Short option value shown to customers. Preserve units, model numbers, and variant meaning.",
+    "variant.title": "Variant display text. Translate only customer-facing words and preserve SKU-like codes and model names.",
+    "variant.option": "Variant option value. Preserve SKU-like codes, dimensions, battery specs, and model names.",
+    "media.alt": "Concise image alt text describing the visible product or part. Do not keyword-stuff.",
 }
 SEO_TERMS = {
     "ja": {
@@ -247,7 +269,7 @@ def generate_selected_product_missing_translation_draft_package(
     installation=None,
 ):
     target_locales = list(target_locales or DEFAULT_TARGET_LOCALES)
-    fields = list(fields or DEFAULT_FIELDS)
+    fields = _normalize_requested_scopes(fields or DEFAULT_FIELDS)
     result = _empty_result(product_id, target_locales, fields)
     validation_errors = _validate_scope(product_id, target_locales, fields)
     if validation_errors:
@@ -285,12 +307,10 @@ def generate_selected_product_missing_translation_draft_package(
         )
         if not result["product_identity_context"]:
             result["product_identity_context"] = source_identity_context
-        rows_by_key = {
-            row.get("key"): row for row in translatable_rows if row.get("key")
-        }
         result["source_read_summary"][locale] = {
             "translatable_content_count": len(translatable_rows),
             "translation_count": (data.get("translatable_resource") or {}).get("translation_count", 0),
+            "draft_eligible_count": sum(1 for row in translatable_rows if row.get("draft_eligible")),
         }
         result["per_locale_draft_coverage"][locale] = _draft_coverage_groups_for_rows(
             translatable_rows,
@@ -298,13 +318,20 @@ def generate_selected_product_missing_translation_draft_package(
         )
         _refresh_draft_coverage_summary(result)
 
-        for field in fields:
-            row = rows_by_key.get(field) or {}
+        for row in _requested_draft_rows(translatable_rows, fields):
+            field = _entry_field_from_row(row)
             source_value = str(row.get("source_value") or "")
             existing_present = bool(row.get("has_translation"))
             existing_outdated = row.get("translation_outdated") is True
             if not source_value.strip():
                 entry = _entry_template(locale, field, row, "source_empty")
+            elif not row.get("draft_eligible"):
+                entry = _entry_template(
+                    locale,
+                    field,
+                    row,
+                    row.get("draft_ineligible_reason") or "not_draft_eligible",
+                )
             elif existing_present and existing_outdated:
                 entry = _entry_template(locale, field, row, "existing_translation_outdated_manual_review_required")
             elif existing_present:
@@ -315,6 +342,12 @@ def generate_selected_product_missing_translation_draft_package(
             _attach_source_identity_context(entry, source_identity_context)
             if existing_present:
                 _attach_existing_translation_identity_validation(entry)
+            result["entries"].append(entry)
+            _count_entry(result, entry)
+
+        for field in _missing_requested_static_fields(translatable_rows, fields):
+            entry = _entry_template(locale, field, {}, "source_empty")
+            _attach_source_identity_context(entry, source_identity_context)
             result["entries"].append(entry)
             _count_entry(result, entry)
 
@@ -329,7 +362,11 @@ def generate_selected_product_missing_translation_draft_package(
             result["success"] = False
             return result
         for entry in missing_entries:
-            draft = str(translations.get(entry["field"]) or "").strip()
+            draft = str(
+                translations.get(entry.get("draft_key"))
+                or translations.get(entry["field"])
+                or ""
+            ).strip()
             draft, rewrite_attempts = _rewrite_over_length_draft(locale, entry, draft, result)
             if draft is None:
                 result["success"] = False
@@ -351,9 +388,78 @@ def _validate_scope(product_id, target_locales, fields):
         errors.append("blocked_invalid_product_id")
     if not target_locales or any(locale not in SUPPORTED_LOCALES for locale in target_locales):
         errors.append("blocked_unsupported_locale")
-    if not fields or any(field not in ALLOWED_FIELDS for field in fields):
+    if not fields or any(field not in ALLOWED_DRAFT_SCOPES for field in fields):
         errors.append("blocked_invalid_field")
     return errors
+
+
+def _normalize_requested_scopes(fields):
+    scopes = []
+    for field in fields or []:
+        normalized = _normalize_draft_field_key(field)
+        if normalized and normalized not in scopes:
+            scopes.append(normalized)
+    return scopes
+
+
+def _requested_draft_rows(rows, requested_scopes):
+    requested_scopes = set(_normalize_requested_scopes(requested_scopes))
+    output = []
+    seen = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if not _row_matches_requested_scopes(row, requested_scopes):
+            continue
+        entry_key = row.get("entry_key") or row.get("key") or id(row)
+        if entry_key in seen:
+            continue
+        seen.add(entry_key)
+        output.append(row)
+    return output
+
+
+def _row_matches_requested_scopes(row, requested_scopes):
+    field_key = _normalize_draft_field_key(
+        row.get("field_key") or row.get("key") or row.get("source_key")
+    )
+    group_key = _draft_coverage_group_key_for_row(row)
+    if field_key in requested_scopes:
+        return True
+    if group_key in {"options", "variants", "important_metafields", "media"} and group_key in requested_scopes:
+        return True
+    if group_key == "product_basics" and "product_basics" in requested_scopes:
+        return field_key in {"title", "body_html"}
+    if group_key == "seo" and "seo" in requested_scopes:
+        return field_key in {"meta_title", "meta_description", "handle"}
+    return False
+
+
+def _entry_field_from_row(row):
+    return _normalize_draft_field_key(row.get("field_key") or row.get("key")) or str(
+        row.get("source_key") or ""
+    )
+
+
+def _missing_requested_static_fields(rows, requested_scopes):
+    requested_scopes = set(_normalize_requested_scopes(requested_scopes))
+    static_fields = {
+        field for field in requested_scopes if field in ALLOWED_FIELDS
+    }
+    if "product_basics" in requested_scopes:
+        static_fields.update({"title", "body_html"})
+    if "seo" in requested_scopes:
+        static_fields.update({"meta_title", "meta_description"})
+    present_fields = {
+        _normalize_draft_field_key(row.get("field_key") or row.get("key"))
+        for row in rows or []
+        if isinstance(row, dict)
+    }
+    return [
+        field
+        for field in ["title", "body_html", "meta_title", "meta_description"]
+        if field in static_fields and field not in present_fields
+    ]
 
 
 def _empty_result(product_id, target_locales, fields):
@@ -384,6 +490,7 @@ def _empty_result(product_id, target_locales, fields):
         "skipped_existing_translation_count": 0,
         "skipped_outdated_translation_count": 0,
         "skipped_source_empty_count": 0,
+        "skipped_not_draft_eligible_count": 0,
         "per_locale_results": {},
         "per_field_results": {},
         "entries": [],
@@ -420,7 +527,7 @@ def _empty_draft_coverage_summary(fields):
         "summary_status": "not_loaded",
         "requested_fields": requested_fields,
         "draft_generation_included_fields": [
-            field for field in requested_fields if field in ALLOWED_FIELDS
+            field for field in requested_fields if field in ALLOWED_DRAFT_SCOPES
         ],
         "target_locale_count": 0,
         "groups": [
@@ -435,7 +542,11 @@ def _empty_draft_coverage_group(config, requested_fields):
     configured_draft_fields = [
         field
         for field in config.get("draft_field_keys", ())
-        if field in requested_fields and field in ALLOWED_FIELDS
+        if (
+            field in requested_fields
+            or config.get("group_key") in requested_fields
+        )
+        and field in ALLOWED_DRAFT_SCOPES
     ]
     return {
         "group_key": config["group_key"],
@@ -473,19 +584,21 @@ def _draft_coverage_groups_for_rows(rows, requested_fields):
     for row in rows or []:
         if not isinstance(row, dict):
             continue
-        field_key = _normalize_draft_field_key(row.get("key"))
+        field_key = _normalize_draft_field_key(
+            row.get("field_key") or row.get("key")
+        )
         if not field_key:
             continue
-        group_key = _draft_coverage_group_key_for_field(field_key)
+        group_key = _draft_coverage_group_key_for_row(row)
         group = groups[group_key]
         group["source_row_count"] += 1
         if field_key not in group["visible_source_keys"]:
             group["visible_source_keys"].append(field_key)
-        if field_key in requested_fields and field_key in ALLOWED_FIELDS:
+        if _row_matches_requested_scopes(row, requested_fields) and row.get("draft_eligible"):
             group["included_in_draft_count"] += 1
             if field_key not in group["included_in_draft_fields"]:
                 group["included_in_draft_fields"].append(field_key)
-        elif group_key in {"options", "variants"}:
+        elif group_key in {"options", "variants", "important_metafields", "media"} and row.get("draft_eligible"):
             group["needs_mapping_count"] += 1
         else:
             group["editor_only_count"] += 1
@@ -550,7 +663,7 @@ def _refresh_draft_coverage_summary(result):
         "summary_status": "source_rows_classified",
         "requested_fields": requested_fields,
         "draft_generation_included_fields": [
-            field for field in requested_fields if field in ALLOWED_FIELDS
+            field for field in requested_fields if field in ALLOWED_DRAFT_SCOPES
         ],
         "target_locale_count": len(per_locale),
         "groups": [groups[config["group_key"]] for config in DRAFT_COVERAGE_GROUP_CONFIGS],
@@ -584,17 +697,37 @@ def _draft_coverage_group_key_for_field(field_key):
     lower_key = field_key.lower()
     if lower_key in {"title", "body_html", "description"}:
         return "product_basics"
-    if lower_key in {"meta_title", "meta_description"}:
+    if lower_key in {"handle", "meta_title", "meta_description"}:
         return "seo"
     if "option" in lower_key:
         return "options"
     if "variant" in lower_key:
         return "variants"
+    if lower_key.startswith("media.") or "image_alt" in lower_key or lower_key.endswith(".alt"):
+        return "media"
     if _is_metafield_key(lower_key):
         if _is_important_metafield(lower_key):
             return "important_metafields"
         return "technical_fields"
     return "technical_fields"
+
+
+def _draft_coverage_group_key_for_row(row):
+    group = str((row or {}).get("resource_group") or "").strip()
+    if group == "technical_metafields":
+        return "technical_fields"
+    if group in {
+        "product_basics",
+        "seo",
+        "options",
+        "variants",
+        "important_metafields",
+        "media",
+    }:
+        return group
+    return _draft_coverage_group_key_for_field(
+        (row or {}).get("field_key") or (row or {}).get("key")
+    )
 
 
 def _normalize_draft_field_key(value):
@@ -612,11 +745,13 @@ def _is_metafield_key(field_key):
         "title",
         "body_html",
         "description",
+        "handle",
         "meta_title",
         "meta_description",
+        "media.alt",
     }:
         return False
-    if "option" in key or "variant" in key:
+    if "option" in key or "variant" in key or key.startswith("media."):
         return False
     return "metafield" in key or "." in key
 
@@ -671,26 +806,70 @@ def _key_matches_hint(field_key, hints):
     return False
 
 
+def _max_chars_for_entry(field_key, resource_group):
+    if field_key in FIELD_MAX_CHARS:
+        return FIELD_MAX_CHARS[field_key]
+    if resource_group == "media":
+        return FIELD_MAX_CHARS.get("media.alt")
+    return None
+
+
 def _entry_template(locale, field, row, reason):
+    row = row or {}
+    field_key = _normalize_draft_field_key(row.get("field_key") or field)
+    resource_group = row.get("resource_group") or _draft_coverage_group_key_for_field(field_key)
+    source_key = str(row.get("source_key") or row.get("key") or field_key)
+    future_write_needs_mapping = bool(
+        row.get("future_write_needs_mapping")
+        or resource_group in {"options", "variants", "important_metafields", "media"}
+        or field_key == "handle"
+    )
+    apply_plan_blocked_reason = str(row.get("apply_plan_blocked_reason") or "")
+    if future_write_needs_mapping and not apply_plan_blocked_reason:
+        apply_plan_blocked_reason = "future_write_needs_resource_mapping"
     return {
         "locale": locale,
-        "field": field,
-        "source_key": field,
-        "source_value": str((row or {}).get("source_value") or ""),
-        "source_digest": str((row or {}).get("digest") or ""),
-        "existing_translation_present": bool((row or {}).get("has_translation")),
+        "field": field_key,
+        "field_key": field_key,
+        "entry_key": row.get("entry_key") or field_key,
+        "draft_key": row.get("draft_key") or field_key,
+        "source_key": source_key,
+        "resource_id": row.get("resource_id", ""),
+        "resource_type": row.get("resource_type", ""),
+        "resource_group": resource_group,
+        "section_key": row.get("section_key", ""),
+        "context_label": row.get("context_label", ""),
+        "resource_note": row.get("resource_note", ""),
+        "field_label": row.get("field_label", ""),
+        "resource_type_label": row.get("resource_type_label", ""),
+        "option_name": row.get("option_name", ""),
+        "option_value": row.get("option_value", ""),
+        "variant_title": row.get("variant_title", ""),
+        "variant_id": row.get("variant_id", ""),
+        "sku": row.get("sku", ""),
+        "barcode": row.get("barcode", ""),
+        "selected_options": row.get("selected_options", []),
+        "metafield_namespace": row.get("metafield_namespace", ""),
+        "metafield_key": row.get("metafield_key", ""),
+        "metafield_type": row.get("metafield_type", ""),
+        "media_alt": row.get("media_alt", ""),
+        "media_content_type": row.get("media_content_type", ""),
+        "media_url": row.get("media_url", ""),
+        "source_value": str(row.get("source_value") or ""),
+        "source_digest": str(row.get("digest") or ""),
+        "existing_translation_present": bool(row.get("has_translation")),
         "existing_translation_value": str(
-            (row or {}).get("translation_value")
-            or (row or {}).get("target_value_display")
-            or (row or {}).get("target_value")
+            row.get("translation_value")
+            or row.get("target_value_display")
+            or row.get("target_value")
             or ""
         ),
-        "existing_translation_outdated": (row or {}).get("translation_outdated"),
+        "existing_translation_outdated": row.get("translation_outdated"),
         "draft_value": "",
         "draft_value_chars": 0,
-        "max_chars": FIELD_MAX_CHARS.get(field),
-        "recommended_min_chars": FIELD_RECOMMENDED_MIN_CHARS.get(field),
-        "recommended_max_chars": FIELD_RECOMMENDED_MAX_CHARS.get(field),
+        "max_chars": _max_chars_for_entry(field_key, resource_group),
+        "recommended_min_chars": FIELD_RECOMMENDED_MIN_CHARS.get(field_key),
+        "recommended_max_chars": FIELD_RECOMMENDED_MAX_CHARS.get(field_key),
         "validation_status": "skipped",
         "product_identity_validation_status": "skipped",
         "validation_reasons": [],
@@ -705,6 +884,12 @@ def _entry_template(locale, field, row, reason):
         "source_identity_context": {},
         "seo_validation_status": "skipped",
         "skip_reason": reason,
+        "draft_eligible": bool(row.get("draft_eligible")),
+        "draft_ineligible_reason": row.get("draft_ineligible_reason", ""),
+        "draft_requires_manual_review": bool(row.get("draft_requires_manual_review")),
+        "draft_manual_review_reason": row.get("draft_manual_review_reason", ""),
+        "future_write_needs_mapping": future_write_needs_mapping,
+        "apply_plan_blocked_reason": apply_plan_blocked_reason,
         "eligible_for_apply_plan": False,
         "seo_eligible_for_apply_plan": False,
         "seo_notes": [],
@@ -989,6 +1174,7 @@ def _summary_bucket(result, key, value):
             "skipped_existing_translation_count": 0,
             "skipped_outdated_translation_count": 0,
             "skipped_source_empty_count": 0,
+            "skipped_not_draft_eligible_count": 0,
             "missing_translation_count": 0,
         },
     )
@@ -1019,6 +1205,10 @@ def _count_entry(result, entry):
         per_locale["skipped_source_empty_count"] += 1
         per_field["skipped_source_empty_count"] += 1
         result["skipped_source_empty_count"] += 1
+    elif reason and reason != "missing_translation":
+        per_locale["skipped_not_draft_eligible_count"] += 1
+        per_field["skipped_not_draft_eligible_count"] += 1
+        result["skipped_not_draft_eligible_count"] += 1
     elif reason == "missing_translation":
         per_locale["missing_translation_count"] += 1
         per_field["missing_translation_count"] += 1
@@ -1078,22 +1268,30 @@ def _openai_prompt(locale, missing_entries):
         },
         "fields": [
             {
+                "draft_key": item["draft_key"],
                 "field": item["field"],
+                "source_key": item.get("source_key", ""),
+                "resource_group": item.get("resource_group", ""),
+                "resource_id": item.get("resource_id", ""),
+                "context": item.get("context_label", ""),
                 "source_value": item["source_value"],
                 "max_chars": item["max_chars"],
                 "recommended_min_chars": FIELD_RECOMMENDED_MIN_CHARS.get(item["field"]),
                 "recommended_max_chars": FIELD_RECOMMENDED_MAX_CHARS.get(item["field"]),
-                "style_guidance": FIELD_STYLE_GUIDANCE.get(item["field"], ""),
+                "style_guidance": _field_style_guidance(item),
             }
             for item in missing_entries
         ],
         "locale_term_guidance": LOCALE_TERM_GUIDANCE.get(locale, ""),
         "rules": [
-            "Return JSON only with a translations object keyed by field.",
+            "Return JSON only with a translations object keyed by draft_key exactly.",
             f"Preserve these source product identity terms when they appear in the source: {identity_term_text}.",
             "Do not introduce a different product brand, product line, aircraft name, vehicle name, or model number.",
+            "Preserve brand names, model names, SKU-like codes, dimensions, battery specs, and option structure.",
+            "Do not translate product model numbers such as P-51D, F-16, C184, MD530, or similar model codes.",
             "Localize part names naturally; do not mechanically keep English phrases such as RC Plane Clevis.",
             "Do not add Buy now, Shop now, Free shipping, Worldwide shipping, Made in China, Best, Cheap, guaranteed, official, original OEM, Herkunft, or Provenance.",
+            "Do not invent variants, options, metafields, media, product facts, compatibility, or package contents.",
             "Product title must be 25-65 characters where possible, and never over 65 characters.",
             "SEO meta_title must be 30-60 characters where possible, and never over 60 characters.",
             "SEO meta_description must be 80-155 characters where possible, and never over 155 characters.",
@@ -1103,8 +1301,24 @@ def _openai_prompt(locale, missing_entries):
             "Do not make title and meta_title exactly the same.",
             "For body_html, preserve the original HTML structure and translate only customer-facing text.",
         ],
-        "output_contract": {"type": "JSON object", "shape": {"translations": {"field_name": "draft translated value"}}},
+        "output_contract": {"type": "JSON object", "shape": {"translations": {"draft_key": "draft translated value"}}},
     }
+
+
+def _field_style_guidance(entry):
+    field = str((entry or {}).get("field") or "")
+    resource_group = str((entry or {}).get("resource_group") or "")
+    if field in FIELD_STYLE_GUIDANCE:
+        return FIELD_STYLE_GUIDANCE[field]
+    if resource_group == "options":
+        return "Short customer-facing option name or value. Preserve units, model numbers, and option structure."
+    if resource_group == "variants":
+        return "Customer-facing variant display text. Preserve SKU-like codes, dimensions, option values, and model names."
+    if resource_group == "important_metafields":
+        return "Customer-facing product page text. Keep factual meaning and do not add claims."
+    if resource_group == "media":
+        return FIELD_STYLE_GUIDANCE.get("media.alt", "")
+    return ""
 
 
 def _request_openai_rewrite(locale, entry, current_value, attempt, result):
@@ -1133,6 +1347,9 @@ def _request_openai_rewrite(locale, entry, current_value, attempt, result):
                         "target_locale": locale,
                         "target_language": LANGUAGE_NAMES.get(locale, locale),
                         "field": entry["field"],
+                        "draft_key": entry.get("draft_key", entry["field"]),
+                        "resource_group": entry.get("resource_group", ""),
+                        "context": entry.get("context_label", ""),
                         "source_value": entry["source_value"],
                         "current_draft": str(current_value or ""),
                         "current_chars": len(str(current_value or "")),
@@ -1141,12 +1358,13 @@ def _request_openai_rewrite(locale, entry, current_value, attempt, result):
                         "recommended_max_chars": FIELD_RECOMMENDED_MAX_CHARS.get(entry["field"]),
                         "attempt": attempt,
                         "locale_term_guidance": LOCALE_TERM_GUIDANCE.get(locale, ""),
-                        "field_style_guidance": FIELD_STYLE_GUIDANCE.get(entry["field"], ""),
+                        "field_style_guidance": _field_style_guidance(entry),
                         "rules": [
                             "Return JSON only with a value string.",
                             "Rewrite naturally; do not truncate crudely.",
                             "The value must be at or under max_chars.",
                             f"Preserve these source product identity terms when they appear in the source: {identity_term_text}.",
+                            "Preserve brand names, model names, SKU-like codes, dimensions, battery specs, and option structure.",
                             "Do not introduce a different product brand, product line, aircraft name, vehicle name, or model number.",
                             "Do not add CTA, shipping, origin, Made in China, Best, Cheap, guaranteed, official, or original OEM claims.",
                         ],
@@ -1249,31 +1467,37 @@ def _attach_draft_quality(entry, draft, rewrite_attempts):
     entry["draft_value_chars"] = len(draft)
     entry["rewrite_attempts"] = rewrite_attempts
     entry["rewrite_attempt_count"] = len(rewrite_attempts)
-    entry["quality_notes"] = _quality_notes_for_draft(entry["field"], draft)
-    entry["validation_status"] = _validate_draft(entry["field"], draft)
+    entry["quality_notes"] = _quality_notes_for_draft(entry, draft)
+    entry["validation_status"] = _validate_draft(entry, draft)
     entry["skip_reason"] = ""
     _attach_product_identity_validation(entry, draft)
     _attach_seo_quality(entry)
 
 
-def _quality_notes_for_draft(field, draft):
+def _quality_notes_for_draft(entry, draft):
+    entry_data = entry if isinstance(entry, dict) else {}
+    field = entry_data.get("field", str(entry or ""))
     draft = str(draft or "").strip()
     notes = []
     if not draft:
         notes.append("draft_empty")
         return notes
-    max_chars = int(FIELD_MAX_CHARS.get(field) or 0)
+    max_chars = int(entry_data.get("max_chars") or FIELD_MAX_CHARS.get(field) or 0)
     if max_chars and len(draft) > max_chars:
         notes.append("draft_over_max_chars")
     if FORBIDDEN_OUTPUT_RE.search(draft):
         notes.append("forbidden_marketing_or_origin_phrase")
     if UNNATURAL_PHRASE_RE.search(draft):
         notes.append("unnatural_english_phrase")
+    if entry_data.get("draft_requires_manual_review"):
+        notes.append(entry_data.get("draft_manual_review_reason") or "manual_review_required")
+    if entry_data.get("future_write_needs_mapping"):
+        notes.append(entry_data.get("apply_plan_blocked_reason") or "future_write_needs_resource_mapping")
     return notes
 
 
-def _validate_draft(field, draft):
-    notes = _quality_notes_for_draft(field, draft)
+def _validate_draft(entry, draft):
+    notes = _quality_notes_for_draft(entry, draft)
     if notes:
         if "draft_empty" in notes:
             return "draft_needs_manual_review_empty"
@@ -1304,11 +1528,17 @@ def _attach_seo_quality(entry):
         entry["seo_validation_status"] = "seo_needs_manual_review"
     entry["seo_eligible_for_apply_plan"] = (
         field != "body_html"
+        and not entry.get("future_write_needs_mapping")
+        and entry.get("resource_group") in {"product_basics", "seo"}
+        and field in {"title", "meta_title", "meta_description"}
         and entry["seo_validation_status"] == "seo_ready"
         and not entry.get("draft_blocked")
     )
     entry["eligible_for_apply_plan"] = (
         field != "body_html"
+        and not entry.get("future_write_needs_mapping")
+        and entry.get("resource_group") in {"product_basics", "seo"}
+        and field in {"title", "meta_title", "meta_description"}
         and entry["validation_status"] == "draft_ready_for_manual_review"
         and entry["seo_validation_status"] == "seo_ready"
         and not entry.get("draft_blocked")
@@ -1329,7 +1559,7 @@ def _seo_notes_for_draft(entry, draft):
     notes = []
     if len(draft) < int(FIELD_RECOMMENDED_MIN_CHARS.get(field) or 0):
         notes.append("too_short_for_seo")
-    max_chars = int(FIELD_MAX_CHARS.get(field) or 0)
+    max_chars = int(entry.get("max_chars") or FIELD_MAX_CHARS.get(field) or 0)
     if max_chars and len(draft) > max_chars:
         notes.append("draft_over_max_chars")
     if FORBIDDEN_OUTPUT_RE.search(draft):

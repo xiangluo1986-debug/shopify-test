@@ -107,6 +107,9 @@ def _entry_is_apply_eligible(entry):
         and not entry.get("existing_translation_present")
         and entry.get("existing_translation_outdated") is not True
         and not entry.get("skip_reason")
+        and not entry.get("future_write_needs_mapping")
+        and entry.get("resource_group") in {"product_basics", "seo"}
+        and entry.get("field") in {"title", "meta_title", "meta_description"}
         and bool(str(entry.get("draft_value") or "").strip())
     )
 
@@ -118,6 +121,8 @@ def _apply_entry(payload, entry):
         "locale": entry.get("locale", ""),
         "field": entry.get("field", ""),
         "source_key": entry.get("source_key", entry.get("field", "")),
+        "resource_id": entry.get("resource_id", ""),
+        "resource_group": entry.get("resource_group", ""),
         "source_value": entry.get("source_value", ""),
         "proposed_translation": entry.get("draft_value", ""),
         "proposed_value": entry.get("draft_value", ""),
@@ -154,9 +159,13 @@ def _skipped_entry(entry):
         reason = "draft_not_ready_for_manual_review"
     if entry.get("seo_validation_status") != "seo_ready" and not entry.get("skip_reason"):
         reason = "seo_not_ready_for_apply_plan"
+    if entry.get("future_write_needs_mapping"):
+        reason = entry.get("apply_plan_blocked_reason") or "future_write_needs_resource_mapping"
     return {
         "locale": entry.get("locale", ""),
         "field": entry.get("field", ""),
+        "resource_id": entry.get("resource_id", ""),
+        "resource_group": entry.get("resource_group", ""),
         "source_value": entry.get("source_value", ""),
         "draft_value": entry.get("draft_value", ""),
         "validation_status": entry.get("validation_status", ""),

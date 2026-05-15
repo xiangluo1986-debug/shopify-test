@@ -690,7 +690,8 @@
     color: #8a1f11;
   }
   .tw-status-badge.is-untranslated,
-  .tw-status-badge.is-skipped {
+  .tw-status-badge.is-skipped,
+  .tw-status-badge.is-not_eligible {
     background: #f2f4f7;
     color: #475467;
   }
@@ -1083,7 +1084,8 @@
     color: #713f12;
   }
   .translation-workspace .tw-status-badge.is-blocked,
-  .translation-workspace .tw-status-badge.is-blocked_draft {
+  .translation-workspace .tw-status-badge.is-blocked_draft,
+  .translation-workspace .tw-status-badge.is-not_eligible {
     border-color: #fca5a5;
     background: #fee2e2;
     color: #7f1d1d;
@@ -1660,10 +1662,18 @@
           </label>
         {% endfor %}
       </div>
+      <h3>Include areas</h3>
+      <div class="tw-checkbox-grid" aria-label="Draft coverage areas">
+        {% for group_option in draft_group_options %}
+          <label class="tw-checkbox-option">
+            <input type="checkbox" name="draft_groups" value="{{ group_option.value }}"{% if group_option.checked %} checked{% endif %}>
+            <span>{{ group_option.label }}<br><span class="tw-muted">{{ group_option.description }}</span></span>
+          </label>
+        {% endfor %}
+      </div>
       <button type="submit" class="button">Generate drafts</button>
     </form>
-    <p class="tw-muted" style="margin-top: 10px;">Drafts include product title, product description/body, SEO title, and SEO description.</p>
-    <p class="tw-muted">Variants, options, and metafields are visible for review but are not included in automatic drafts yet.</p>
+    <p class="tw-muted" style="margin-top: 10px;">Drafts can include product basics, SEO, options, variants, important metafields, and media alt text when Shopify returns customer-facing rows. Technical fields remain view-only.</p>
 
     {% if multi_locale_draft_result %}
       <h3>Draft results</h3>
@@ -1712,6 +1722,9 @@
                         {% for selected_locale_code in multi_locale_draft_result.requested_locales %}
                           <input type="hidden" name="draft_target_locales" value="{{ selected_locale_code }}">
                         {% endfor %}
+                        {% for selected_group_code in multi_locale_draft_result.requested_groups %}
+                          <input type="hidden" name="draft_groups" value="{{ selected_group_code }}">
+                        {% endfor %}
                         <button type="submit" class="button">Open preview</button>
                       </form>
                     {% else %}
@@ -1729,6 +1742,7 @@
         <table>
           <tbody>
             <tr><th>Selected languages</th><td>{{ multi_locale_draft_result.requested_locales|join:", " }}</td></tr>
+            <tr><th>Selected areas</th><td>{{ multi_locale_draft_result.requested_groups|join:", " }}</td></tr>
             <tr><th>Draft fields</th><td>{{ multi_locale_draft_result.field_scope_labels|join:", " }}</td></tr>
             <tr><th>Total draft fields</th><td>{{ multi_locale_draft_result.summary.draft_field_count }}</td></tr>
             <tr><th>Blocked drafts</th><td>{{ multi_locale_draft_result.summary.blocked_draft_count }}</td></tr>
@@ -1780,6 +1794,7 @@
                   <details class="tw-cell-details">
                     <summary>More details</summary>
                     <div class="tw-resource-key">Raw key: {{ row.resource_key }}</div>
+                    {% if row.resource_id %}<div class="tw-resource-key">Resource ID: {{ row.resource_id }}</div>{% endif %}
                     {% if row.resource_note %}<div class="tw-resource-key">{{ row.resource_note }}</div>{% endif %}
                   </details>
                 </td>
@@ -1833,7 +1848,7 @@
                         <span class="tw-status-badge">{{ row.target_value_source_label }}</span>
                       {% endif %}
                       {% for badge in row.status_badge_labels %}
-                        <span class="tw-status-badge{% if badge == 'Blocked draft' or badge == 'Possible wrong product' %} is-blocked{% endif %}">{{ badge }}</span>
+                        <span class="tw-status-badge{% if badge == 'Blocked draft' or badge == 'Possible wrong product' or badge == 'Future write blocked' or badge == 'Not eligible' %} is-blocked{% endif %}">{{ badge }}</span>
                       {% endfor %}
                     </div>
                   {% endif %}
@@ -1853,6 +1868,8 @@
                       {% if row.char_limit %}<span>Recommended limit {{ row.char_limit }}</span>{% endif %}
                     </div>
                     {% if row.validation_status %}<div class="tw-resource-key">Validation: {{ row.validation_status }}</div>{% endif %}
+                    {% if row.draft_eligible == False %}<div class="tw-resource-key">Draft eligibility: {{ row.draft_ineligible_reason }}</div>{% endif %}
+                    {% if row.future_write_needs_mapping %}<div class="tw-resource-key">Future write: {{ row.apply_plan_blocked_reason }}</div>{% endif %}
                     {% if row.product_identity_validation_status %}<div class="tw-resource-key">Product identity: {{ row.product_identity_validation_status }}</div>{% endif %}
                     {% if row.validation_reasons %}<div class="tw-resource-key">Review reasons: {{ row.validation_reasons }}</div>{% endif %}
                     {% if row.suspicious_terms %}<div class="tw-resource-key">Suspicious terms: {{ row.suspicious_terms }}</div>{% endif %}
