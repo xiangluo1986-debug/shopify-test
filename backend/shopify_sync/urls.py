@@ -17,4 +17,9 @@ urlpatterns = [
         views.translation_console_product_search,
         name="shopify_translation_console_product_search",
     ),
+    path(
+        "translation-console/job-status/",
+        views.translation_console_job_status,
+        name="shopify_translation_console_job_status",
+    ),
 ]

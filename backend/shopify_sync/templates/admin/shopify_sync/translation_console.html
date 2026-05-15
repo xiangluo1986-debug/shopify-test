@@ -1832,62 +1832,67 @@
         <input type="hidden" name="target_locale" value="{{ selected_locale }}">
         <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
         <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-        <button type="submit" class="button"{% if translation_background_job.is_active %} disabled{% endif %}>Translate all in background</button>
+        <button type="submit" class="button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Translate all in background</button>
         <div class="tw-muted" style="margin-top: 8px;">Starts a local background draft job for missing and outdated translations. The request returns quickly and does not write to Shopify.</div>
       </form>
     {% endif %}
     {% if selected_product_gid %}
-      <div id="translation-background-job" class="tw-run-banner is-{{ translation_background_job.status_key|default:'pending' }}">
+      <div id="translation-background-job" class="tw-run-banner is-{{ translation_background_job.status_key|default:'pending' }}" data-translation-job-panel data-job-status-url="{% url 'shopify_translation_console_job_status' %}" data-job-id="{{ translation_background_job.job_id|default:'' }}" data-product-gid="{{ selected_product_gid }}" data-job-initial-status="{{ translation_background_job.status|default:'not_started' }}" data-poll-interval-ms="3000">
         <div class="tw-run-header">
           <div>
             <h3>Background translation job</h3>
             {% if translation_background_job.exists %}
-              <p>{{ translation_background_job.status_message }}</p>
+              <p data-job-status-message>{{ translation_background_job.status_message }}</p>
             {% else %}
-              <p>No background draft job has been recorded for this product.</p>
+              <p data-job-status-message>No background draft job has been recorded for this product.</p>
             {% endif %}
+            <p class="tw-muted" data-job-polling-state>Updating automatically every few seconds. Refresh status remains available as a manual fallback.</p>
           </div>
-          <span class="tw-status-badge is-{{ translation_background_job.status_key|default:'pending' }}">{{ translation_background_job.status_label|default:"Not started" }}</span>
+          <span class="tw-status-badge is-{{ translation_background_job.status_key|default:'pending' }}" data-job-status-badge>{{ translation_background_job.status_label|default:"Not started" }}</span>
         </div>
         <div class="tw-progress" aria-label="Translation job progress">
-          <span class="tw-progress-bar" style="width: {{ translation_background_job.progress_percent|default:0 }}%;"></span>
+          <span class="tw-progress-bar" data-job-progress-bar style="width: {{ translation_background_job.progress_percent|default:0 }}%;"></span>
         </div>
         <div class="tw-run-grid">
           <div class="tw-run-item">
             <div class="tw-run-label">Progress</div>
-            <div class="tw-run-value">{{ translation_background_job.progress_percent|default:0 }}%</div>
+            <div class="tw-run-value" data-job-field="progress_percent">{{ translation_background_job.progress_percent|default:0 }}%</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Current locale</div>
-            <div class="tw-run-value">{{ translation_background_job.current_locale|default:"-" }}</div>
+            <div class="tw-run-value" data-job-field="current_locale">{{ translation_background_job.current_locale|default:"-" }}</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Current group</div>
-            <div class="tw-run-value">{{ translation_background_job.current_group|default:"-" }}</div>
+            <div class="tw-run-value" data-job-field="current_group">{{ translation_background_job.current_group|default:"-" }}</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Completed locales</div>
-            <div class="tw-run-value">{{ translation_background_job.counts.completed_locales|default:0 }} / {{ translation_background_job.counts.total_locales|default:5 }}</div>
+            <div class="tw-run-value" data-job-field="completed_locales">{{ translation_background_job.counts.completed_locales|default:0 }} / {{ translation_background_job.counts.total_locales|default:5 }}</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Failed locales</div>
-            <div class="tw-run-value">{{ translation_background_job.counts.failed_locales|default:0 }}</div>
+            <div class="tw-run-value" data-job-field="failed_locales">{{ translation_background_job.counts.failed_locales|default:0 }}</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Generated drafts</div>
-            <div class="tw-run-value">{{ translation_background_job.counts.generated_draft_count|default:0 }}</div>
+            <div class="tw-run-value" data-job-field="generated_draft_count">{{ translation_background_job.counts.generated_draft_count|default:0 }}</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Skipped</div>
-            <div class="tw-run-value">{{ translation_background_job.counts.skipped_count|default:0 }}</div>
+            <div class="tw-run-value" data-job-field="skipped_count">{{ translation_background_job.counts.skipped_count|default:0 }}</div>
+          </div>
+          <div class="tw-run-item">
+            <div class="tw-run-label">Blocked</div>
+            <div class="tw-run-value" data-job-field="blocked_count">{{ translation_background_job.counts.blocked_count|default:0 }}</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Last updated</div>
-            <div class="tw-run-value">{{ translation_background_job.updated_at|default:"-" }}</div>
+            <div class="tw-run-value" data-job-field="updated_at">{{ translation_background_job.updated_at|default:"-" }}</div>
           </div>
           <div class="tw-run-item">
             <div class="tw-run-label">Report path</div>
-            <div class="tw-run-value">{{ translation_background_job.report_path|default:"-" }}</div>
+            <div class="tw-run-value" data-job-field="report_path">{{ translation_background_job.report_path|default:"-" }}</div>
           </div>
         </div>
         <div class="tw-job-actions">
@@ -1921,7 +1926,7 @@
                   <th class="translation-job-progress-header translation-job-progress-cell">Blocked</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody data-job-locale-body>
                 {% for row in translation_background_job.per_locale_status %}
                   <tr class="translation-job-progress-row">
                     <td class="translation-job-progress-cell"><strong>{{ row.locale_label }}</strong> ({{ row.locale }})</td>
@@ -1950,7 +1955,7 @@
                   <th class="translation-job-progress-header translation-job-progress-cell">Blocked</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody data-job-group-body>
                 {% for row in translation_background_job.per_group_status %}
                   <tr class="translation-job-progress-row">
                     <td class="translation-job-progress-cell">{{ row.label }}</td>
@@ -4579,6 +4584,281 @@
   {% endif %}
   </details>
   <script>
+    (function () {
+      var panel = document.querySelector("[data-translation-job-panel]");
+      if (!panel) {
+        return;
+      }
+      var statusUrl = panel.getAttribute("data-job-status-url") || "";
+      var productGid = panel.getAttribute("data-product-gid") || "";
+      var jobId = panel.getAttribute("data-job-id") || "";
+      var pollDelay = parseInt(panel.getAttribute("data-poll-interval-ms") || "3000", 10);
+      var timer = null;
+      var inFlight = false;
+      var lastStatus = panel.getAttribute("data-job-initial-status") || "not_started";
+      if (!statusUrl) {
+        return;
+      }
+      if (!pollDelay || pollDelay < 1000) {
+        pollDelay = 3000;
+      }
+
+      function safeStatusKey(value) {
+        return String(value || "unknown").toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      }
+
+      function titleStatus(value) {
+        var text = String(value || "unknown").replace(/_/g, " ").trim();
+        return text ? text.charAt(0).toUpperCase() + text.slice(1) : "Unknown";
+      }
+
+      function numberOrZero(value) {
+        var numberValue = parseInt(value, 10);
+        return Number.isFinite(numberValue) ? numberValue : 0;
+      }
+
+      function percentValue(value) {
+        return Math.max(0, Math.min(100, numberOrZero(value)));
+      }
+
+      function textOrDash(value) {
+        var text = String(value || "").trim();
+        return text || "-";
+      }
+
+      function isActiveStatus(status) {
+        return status === "pending" || status === "running";
+      }
+
+      function setClassWithStatus(element, baseClass, statusKey) {
+        if (element) {
+          element.className = baseClass + " is-" + safeStatusKey(statusKey);
+        }
+      }
+
+      function setText(selector, value) {
+        var element = panel.querySelector(selector);
+        if (element) {
+          element.textContent = value;
+        }
+      }
+
+      function setJobField(name, value) {
+        Array.prototype.slice.call(panel.querySelectorAll('[data-job-field="' + name + '"]'))
+          .forEach(function (element) {
+            element.textContent = value;
+          });
+      }
+
+      function clearChildren(element) {
+        while (element.firstChild) {
+          element.removeChild(element.firstChild);
+        }
+      }
+
+      function appendTextCell(row, value) {
+        var cell = document.createElement("td");
+        cell.className = "translation-job-progress-cell";
+        cell.textContent = textOrDash(value);
+        row.appendChild(cell);
+        return cell;
+      }
+
+      function appendStatusCell(row, item) {
+        var cell = document.createElement("td");
+        var badge = document.createElement("span");
+        var statusKey = item.status_key || item.status || "unknown";
+        badge.className = "tw-status-badge is-" + safeStatusKey(statusKey);
+        badge.textContent = item.status_label || titleStatus(item.status);
+        cell.className = "translation-job-progress-cell";
+        cell.appendChild(badge);
+        row.appendChild(cell);
+      }
+
+      function appendEmptyRow(body, message) {
+        var row = document.createElement("tr");
+        var cell = document.createElement("td");
+        row.className = "translation-job-progress-row";
+        cell.className = "translation-job-progress-cell";
+        cell.colSpan = 7;
+        cell.textContent = message;
+        row.appendChild(cell);
+        body.appendChild(row);
+      }
+
+      function renderLocaleRows(rows) {
+        var body = panel.querySelector("[data-job-locale-body]");
+        if (!body) {
+          return;
+        }
+        clearChildren(body);
+        if (!rows || !rows.length) {
+          appendEmptyRow(body, "No per-language progress recorded yet.");
+          return;
+        }
+        rows.forEach(function (item) {
+          var row = document.createElement("tr");
+          var languageCell = document.createElement("td");
+          var languageLabel = document.createElement("strong");
+          row.className = "translation-job-progress-row";
+          languageCell.className = "translation-job-progress-cell";
+          languageLabel.textContent = item.locale_label || item.locale || "-";
+          languageCell.appendChild(languageLabel);
+          languageCell.appendChild(document.createTextNode(" (" + textOrDash(item.locale) + ")"));
+          row.appendChild(languageCell);
+          appendStatusCell(row, item);
+          appendTextCell(row, numberOrZero(item.source_rows_checked));
+          appendTextCell(row, numberOrZero(item.missing_draft_count));
+          appendTextCell(row, numberOrZero(item.outdated_update_draft_count));
+          appendTextCell(row, numberOrZero(item.skipped_count));
+          appendTextCell(row, numberOrZero(item.blocked_count));
+          body.appendChild(row);
+        });
+      }
+
+      function renderGroupRows(rows) {
+        var body = panel.querySelector("[data-job-group-body]");
+        if (!body) {
+          return;
+        }
+        clearChildren(body);
+        if (!rows || !rows.length) {
+          appendEmptyRow(body, "No per-content group progress recorded yet.");
+          return;
+        }
+        rows.forEach(function (item) {
+          var row = document.createElement("tr");
+          row.className = "translation-job-progress-row";
+          appendTextCell(row, item.label || item.group_key);
+          appendStatusCell(row, item);
+          appendTextCell(row, numberOrZero(item.source_rows_checked));
+          appendTextCell(row, numberOrZero(item.generated_draft_count));
+          appendTextCell(row, numberOrZero(item.already_translated_skipped_count));
+          appendTextCell(row, numberOrZero(item.not_eligible_skipped_count));
+          appendTextCell(row, numberOrZero(item.blocked_count));
+          body.appendChild(row);
+        });
+      }
+
+      function setPollingMessage(shouldContinue, statusLabel, failed) {
+        var message = "Updating automatically every few seconds. Refresh status remains available as a manual fallback.";
+        if (failed) {
+          message = "Automatic status update failed. Refresh status remains available as a manual fallback.";
+        } else if (!shouldContinue && statusLabel) {
+          message = "Automatic updates stopped because the job is " + statusLabel + ". Refresh status remains available as a manual fallback.";
+        }
+        setText("[data-job-polling-state]", message);
+      }
+
+      function updateFromStatus(data) {
+        var status = String(data.status || "not_started");
+        var statusKey = data.status_key || status;
+        var statusLabel = data.status_label || titleStatus(status);
+        var progress = percentValue(data.progress_percent);
+        var shouldContinue = data.polling_should_continue === true || isActiveStatus(status);
+        lastStatus = status;
+        if (data.job_id) {
+          jobId = data.job_id;
+          panel.setAttribute("data-job-id", jobId);
+        }
+        if (data.product_gid) {
+          productGid = data.product_gid;
+          panel.setAttribute("data-product-gid", productGid);
+        }
+        panel.setAttribute("data-job-initial-status", status);
+        setClassWithStatus(panel, "tw-run-banner", statusKey);
+        setText("[data-job-status-message]", data.status_message || "No background draft job has been recorded for this product.");
+        var badge = panel.querySelector("[data-job-status-badge]");
+        if (badge) {
+          setClassWithStatus(badge, "tw-status-badge", statusKey);
+          badge.textContent = statusLabel;
+        }
+        var progressBar = panel.querySelector("[data-job-progress-bar]");
+        if (progressBar) {
+          progressBar.style.width = String(progress) + "%";
+        }
+        setJobField("progress_percent", String(progress) + "%");
+        setJobField("current_locale", textOrDash(data.current_locale));
+        setJobField("current_group", textOrDash(data.current_group));
+        setJobField("completed_locales", numberOrZero(data.completed_locales) + " / " + numberOrZero(data.total_locales));
+        setJobField("failed_locales", String(numberOrZero(data.failed_locales)));
+        setJobField("generated_draft_count", String(numberOrZero(data.generated_draft_count)));
+        setJobField("skipped_count", String(numberOrZero(data.skipped_count)));
+        setJobField("blocked_count", String(numberOrZero(data.blocked_count)));
+        setJobField("updated_at", textOrDash(data.updated_at));
+        setJobField("report_path", textOrDash(data.report_path));
+        renderLocaleRows(data.per_locale_progress || data.per_locale_status || []);
+        renderGroupRows(data.per_group_progress || data.per_group_status || []);
+        setPollingMessage(shouldContinue, statusLabel, false);
+        Array.prototype.slice.call(document.querySelectorAll("[data-job-start-button]"))
+          .forEach(function (button) {
+            button.disabled = shouldContinue;
+          });
+        if (shouldContinue) {
+          schedulePoll();
+        } else {
+          stopPoll();
+        }
+      }
+
+      function buildStatusUrl() {
+        var url = new URL(statusUrl, window.location.href);
+        if (jobId) {
+          url.searchParams.set("job_id", jobId);
+        } else if (productGid) {
+          url.searchParams.set("product_gid", productGid);
+        }
+        return url.toString();
+      }
+
+      function stopPoll() {
+        if (timer) {
+          window.clearTimeout(timer);
+          timer = null;
+        }
+      }
+
+      function schedulePoll() {
+        stopPoll();
+        timer = window.setTimeout(pollStatus, pollDelay);
+      }
+
+      function pollStatus() {
+        if (inFlight || (!jobId && !productGid)) {
+          schedulePoll();
+          return;
+        }
+        inFlight = true;
+        fetch(buildStatusUrl(), {
+          credentials: "same-origin",
+          headers: {
+            "Accept": "application/json"
+          }
+        })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("Job status failed with HTTP " + response.status);
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            inFlight = false;
+            updateFromStatus(data || {});
+          })
+          .catch(function () {
+            inFlight = false;
+            setPollingMessage(isActiveStatus(lastStatus), "", true);
+            if (isActiveStatus(lastStatus)) {
+              schedulePoll();
+            }
+          });
+      }
+
+      window.addEventListener("beforeunload", stopPoll);
+      if (isActiveStatus(lastStatus)) {
+        pollStatus();
+      }
+    }());
     (function () {
       var filterPanel = document.querySelector("[data-report-filters]");
       var table = document.querySelector("[data-report-review-table]");
