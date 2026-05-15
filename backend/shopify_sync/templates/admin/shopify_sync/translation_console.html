@@ -1471,6 +1471,32 @@
   .translation-workspace .tw-warning {
     color: #713f12;
   }
+  .tw-real-write-panel {
+    margin-top: 16px;
+    border: 1px solid #dc2626;
+    border-radius: 8px;
+    background: #fff7f7;
+    padding: 12px;
+  }
+  .tw-real-write-panel summary {
+    color: #7f1d1d;
+  }
+  .tw-real-write-warning {
+    border: 1px solid #dc2626;
+    border-radius: 6px;
+    background: #fee2e2;
+    color: #7f1d1d;
+    font-weight: 700;
+    padding: 9px 10px;
+  }
+  .translation-workspace .button.tw-danger-button {
+    border-color: #b91c1c;
+    background: #b91c1c;
+  }
+  .translation-workspace .button.tw-danger-button:hover {
+    border-color: #991b1b;
+    background: #991b1b;
+  }
 </style>
 <div id="content-main" class="translation-workspace">
   <div class="tw-hero">
@@ -2345,6 +2371,71 @@
                 </table>
               </div>
             {% endif %}
+            <details class="tw-real-write-panel"{% if workspace_real_write_display.execution_status %} open{% endif %}>
+              <summary>Real Shopify update</summary>
+              <p class="tw-real-write-warning">This will update one Shopify translation.</p>
+              <table class="tw-results-table">
+                <tbody>
+                  <tr><th>Selected locked package</th><td style="word-break: break-all;">{{ workspace_locked_execution_display.json_report_path|default:"Prepare a locked Shopify update first." }}</td></tr>
+                  <tr><th>Selected product</th><td>{{ workspace_locked_execution_display.product_title|default:safe_write_readiness_display.product_title }}</td></tr>
+                  <tr><th>Product GID</th><td style="word-break: break-all;">{{ workspace_locked_execution_display.product_gid|default:safe_write_readiness_display.product_gid }}</td></tr>
+                  <tr><th>Locale</th><td>{{ workspace_locked_execution_display.locale|default:selected_locale }}</td></tr>
+                  <tr><th>Field/key</th><td>{{ workspace_locked_execution_display.key|default:"-" }}</td></tr>
+                  <tr><th>Current/source value</th><td style="white-space: pre-wrap;">{{ workspace_locked_execution_display.source_value }}</td></tr>
+                  <tr><th>Previous translation value</th><td style="white-space: pre-wrap;">{{ workspace_locked_execution_display.existing_translation_value }}</td></tr>
+                  <tr><th>Proposed value</th><td style="white-space: pre-wrap;">{{ workspace_locked_execution_display.proposed_translation_value }}</td></tr>
+                  <tr><th>Package status</th><td>{{ workspace_locked_execution_display.package_status|default:"locked_execution_not_prepared" }}</td></tr>
+                </tbody>
+              </table>
+              <form method="post" action="{% url 'shopify_translation_console' %}" style="margin-top: 12px;">
+                {% csrf_token %}
+                <input type="hidden" name="ui_mode" value="editor">
+                <input type="hidden" name="action" value="{{ translation_single_locked_write_action_name }}">
+                <input type="hidden" name="product_search" value="{{ product_search_text }}">
+                <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+                <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+                <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+                <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+                <input type="hidden" name="selected_entry_id" value="{{ workspace_locked_execution_display.selected_entry.entry_id }}">
+                <input type="hidden" name="selected_entry_checksum" value="{{ workspace_locked_execution_display.locked_entry_checksum }}">
+                <div class="tw-job-actions" style="align-items: flex-end;">
+                  <div>
+                    <label for="id_locked_execution_package_path">Locked execution package</label><br>
+                    <input id="id_locked_execution_package_path" type="text" name="locked_execution_package_path" value="{{ workspace_locked_execution_display.json_report_path }}" readonly style="min-width: 520px;">
+                  </div>
+                  <div>
+                    <label for="id_real_write_ack_phrase">Required ACK phrase</label><br>
+                    <input id="id_real_write_ack_phrase" type="text" value="{{ locked_execution_ack_phrase }}" readonly style="min-width: 420px;">
+                  </div>
+                  <div>
+                    <label for="id_real_write_manual_ack">Manual ACK</label><br>
+                    <input id="id_real_write_manual_ack" type="text" name="real_write_manual_ack" value="" autocomplete="off" style="min-width: 420px;">
+                  </div>
+                  <button type="submit" class="button tw-danger-button"{% if not workspace_real_write_can_submit %} disabled{% endif %}>Execute one Shopify update</button>
+                </div>
+                {% if not workspace_real_write_can_submit %}
+                  <p class="tw-muted">Submit is disabled until one locked package is ready for manual ACK with exactly one selected title/meta_title/meta_description entry.</p>
+                {% endif %}
+              </form>
+              {% if workspace_real_write_display.execution_status %}
+                <h4>Real update audit result</h4>
+                <table class="tw-results-table">
+                  <tbody>
+                    <tr><th>execution_status</th><td>{{ workspace_real_write_display.execution_status }}</td></tr>
+                    <tr><th>ack_matched</th><td>{{ workspace_real_write_display.ack_matched }}</td></tr>
+                    <tr><th>mutation_called</th><td>{{ workspace_real_write_display.mutation_called }}</td></tr>
+                    <tr><th>translations_register_called</th><td>{{ workspace_real_write_display.translations_register_called }}</td></tr>
+                    <tr><th>shopify_write_performed</th><td>{{ workspace_real_write_display.shopify_write_performed }}</td></tr>
+                    <tr><th>readback_performed</th><td>{{ workspace_real_write_display.readback_performed }}</td></tr>
+                    <tr><th>readback_matched</th><td>{{ workspace_real_write_display.readback_matched }}</td></tr>
+                    <tr><th>rollback_needed</th><td>{{ workspace_real_write_display.rollback_needed }}</td></tr>
+                    <tr><th>JSON report path</th><td>{{ workspace_real_write_display.json_report_path }}</td></tr>
+                    <tr><th>HTML report path</th><td>{{ workspace_real_write_display.html_report_path }}</td></tr>
+                    <tr><th>blocking_conditions</th><td>{{ workspace_real_write_display.blocking_conditions|join:", " }}</td></tr>
+                  </tbody>
+                </table>
+              {% endif %}
+            </details>
             <h3>Needs review and skipped reasons</h3>
             {% if translation_background_job.blocked_reason_summary %}
               <div class="tw-editor-table-wrap">
