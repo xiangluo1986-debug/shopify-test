@@ -356,6 +356,26 @@ safe loader markers. It must not print values, read token or credential file
 contents, call Gmail, create/update/delete drafts, send email, call Shopify,
 write tags, call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
 
+## Review Request Trustpilot Gmail Env Loading Fix
+
+Phase 5.22 adds safe project-root `.env` loading to the local remote approval
+runner before task execution. The loader parses simple `KEY=VALUE` assignments
+from the project `.env`, ignores blank lines and comments, loads values into
+the local runner process environment, and does not overwrite existing process
+environment values.
+
+The loader reports only counts and booleans, including whether the loader was
+enabled, whether the project `.env` file was found, how many keys were loaded,
+how many keys were skipped because they already existed, and how many
+Gmail-related keys were loaded. It never prints secret values and does not call
+Gmail, create/update/delete drafts, send email, call Shopify, write tags, call
+Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
+This lets local Review Request Gmail tasks such as the scope resolver,
+draft-only preflight, and one-draft locked runner see the existing Gmail
+scope/config already present in `.env` while preserving the local approval
+safety boundary.
+
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 
 `shopify_review_request_trustpilot_gmail_draft_only_preflight` is a Phase

@@ -88,7 +88,8 @@ def run_shopify_review_request_trustpilot_gmail_env_loading_audit_task(mode: str
     env_summary = _process_env_summary()
     dot_env_summary = _dot_env_key_summary()
     file_scan = _file_loading_scan()
-    decision = _decision_summary(env_summary, dot_env_summary, file_scan)
+    dotenv_loader_summary = _runner_dotenv_loader_summary()
+    decision = _decision_summary(env_summary, dot_env_summary, file_scan, dotenv_loader_summary)
     generated_at = utc_now_iso()
     payload = {
         "timestamp": generated_at,
@@ -111,7 +112,17 @@ def run_shopify_review_request_trustpilot_gmail_env_loading_audit_task(mode: str
         "missing_link_explanation": decision["missing_link_explanation"],
         "process_environment_summary": env_summary,
         "dot_env_summary": dot_env_summary,
+        "dot_env_loader_summary": dotenv_loader_summary,
         "file_loading_scan_summary": file_scan,
+        "dot_env_loader_enabled": dotenv_loader_summary["dot_env_loader_enabled"],
+        "dot_env_file_found": dotenv_loader_summary["dot_env_file_found"],
+        "dot_env_keys_loaded_count": dotenv_loader_summary["dot_env_keys_loaded_count"],
+        "dot_env_keys_skipped_existing_count": dotenv_loader_summary[
+            "dot_env_keys_skipped_existing_count"
+        ],
+        "gmail_related_keys_loaded_count": dotenv_loader_summary["gmail_related_keys_loaded_count"],
+        "dot_env_values_printed": False,
+        "existing_env_values_overwritten": dotenv_loader_summary["existing_env_values_overwritten"],
         "os_environ_legacy_gmail_key_count": env_summary["legacy_gmail_key_count"],
         "os_environ_new_gmail_key_count": env_summary["new_gmail_key_count"],
         "os_environ_gmail_keys_detected": env_summary["gmail_keys_detected"],
@@ -144,6 +155,7 @@ def run_shopify_review_request_trustpilot_gmail_env_loading_audit_task(mode: str
         "token_file_read": False,
         "credential_file_read": False,
         "secret_value_printed": False,
+        "secret_values_printed": False,
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "shopify_tag_write_performed": False,
@@ -205,6 +217,39 @@ def _process_env_summary() -> dict:
         "broad_mail_scope_detected": scope_summary["broad_mail_scope_detected"],
         "recognized_scope_detected": scope_summary["recognized_scope_detected"],
     }
+
+
+def _runner_dotenv_loader_summary() -> dict:
+    return {
+        "dot_env_loader_enabled": _env_flag("REMOTE_APPROVAL_DOTENV_LOADER_ENABLED"),
+        "dot_env_file_found": _env_flag("REMOTE_APPROVAL_DOTENV_FILE_FOUND"),
+        "dot_env_keys_loaded_count": _env_int("REMOTE_APPROVAL_DOTENV_KEYS_LOADED_COUNT"),
+        "dot_env_keys_skipped_existing_count": _env_int(
+            "REMOTE_APPROVAL_DOTENV_KEYS_SKIPPED_EXISTING_COUNT"
+        ),
+        "gmail_related_keys_loaded_count": _env_int(
+            "REMOTE_APPROVAL_DOTENV_GMAIL_RELATED_KEYS_LOADED_COUNT"
+        ),
+        "secret_values_printed": _env_flag("REMOTE_APPROVAL_DOTENV_SECRET_VALUES_PRINTED"),
+        "dot_env_values_printed": _env_flag("REMOTE_APPROVAL_DOTENV_VALUES_PRINTED"),
+        "existing_env_values_overwritten": _env_flag(
+            "REMOTE_APPROVAL_DOTENV_EXISTING_VALUES_OVERWRITTEN"
+        ),
+        "dot_env_invalid_line_count": _env_int("REMOTE_APPROVAL_DOTENV_INVALID_LINE_COUNT"),
+        "dot_env_unsafe_path_blocked": _env_flag("REMOTE_APPROVAL_DOTENV_UNSAFE_PATH_BLOCKED"),
+        "summary_values_only": True,
+    }
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str) -> int:
+    try:
+        return max(int(str(os.environ.get(name, "0")).strip() or "0"), 0)
+    except ValueError:
+        return 0
 
 
 def _expected_key_presence(names: tuple[str, ...], style: str, environ) -> list[dict]:
@@ -407,11 +452,13 @@ def _marker(row: dict, marker: str) -> bool:
     return ((row or {}).get("markers") or {}).get(marker) is True
 
 
-def _decision_summary(env_summary: dict, dot_env_summary: dict, file_scan: dict) -> dict:
+def _decision_summary(
+    env_summary: dict, dot_env_summary: dict, file_scan: dict, dotenv_loader_summary: dict
+) -> dict:
     if env_summary["send_scope_detected"]:
         return {
             "audit_status": "gmail_send_scope_available_in_runner_env",
-            "dashboard_message": "Gmail send permission is available.",
+            "dashboard_message": "Gmail send permission is available. Final approval is still required before sending.",
             "probable_missing_link": "none_runner_env_has_gmail_send_scope",
             "missing_link_explanation": (
                 "The runner process environment has a recognized Gmail send scope."
@@ -427,7 +474,7 @@ def _decision_summary(env_summary: dict, dot_env_summary: dict, file_scan: dict)
     if env_summary["broad_mail_scope_detected"]:
         return {
             "audit_status": "gmail_send_scope_available_in_runner_env",
-            "dashboard_message": "Gmail send permission is available.",
+            "dashboard_message": "Gmail send permission is available. Final approval is still required before sending.",
             "probable_missing_link": "none_runner_env_has_broad_mail_scope",
             "missing_link_explanation": (
                 "The runner process environment has the broad Gmail mail scope, which can cover send."
@@ -443,7 +490,7 @@ def _decision_summary(env_summary: dict, dot_env_summary: dict, file_scan: dict)
     if env_summary["compose_scope_detected"]:
         return {
             "audit_status": "gmail_compose_scope_available_in_runner_env",
-            "dashboard_message": "Gmail draft permission is available.",
+            "dashboard_message": "Gmail draft permission is available. Staff can review drafts before sending.",
             "probable_missing_link": "none_runner_env_has_gmail_compose_scope",
             "missing_link_explanation": (
                 "The runner process environment has a recognized Gmail compose scope."
@@ -453,6 +500,42 @@ def _decision_summary(env_summary: dict, dot_env_summary: dict, file_scan: dict)
             ),
             "detected_issue_summary": (
                 "Gmail compose scope is visible in the runner environment. No Gmail API call was made."
+            ),
+        }
+    if dotenv_loader_summary["dot_env_loader_enabled"] and dotenv_loader_summary["dot_env_file_found"]:
+        if env_summary["scope_key_detected"]:
+            return {
+                "audit_status": "gmail_scope_loaded_but_unrecognized",
+                "dashboard_message": "Gmail settings loaded, but permission scope is not recognized.",
+                "probable_missing_link": "runner_env_has_scope_key_without_recognized_gmail_scope",
+                "missing_link_explanation": (
+                    "The remote approval runner loaded `.env`, and a supported Gmail scope key is present in "
+                    "the process environment, but no recognized compose/send scope was detected."
+                ),
+                "recommendation": (
+                    f"Use `{GMAIL_COMPOSE_SCOPE}` for draft-only mode or `{GMAIL_SEND_SCOPE}` for direct send "
+                    "after approval."
+                ),
+                "detected_issue_summary": (
+                    "The runner loaded `.env`, but the Gmail scope value is missing or unrecognized. "
+                    "No Gmail API call was made."
+                ),
+            }
+        return {
+            "audit_status": "env_file_loaded_but_scope_still_missing",
+            "dashboard_message": "Gmail settings loaded, but permission scope is missing.",
+            "probable_missing_link": "env_file_loaded_without_supported_scope_key",
+            "missing_link_explanation": (
+                "The remote approval runner loaded the project `.env`, but neither supported Gmail scope key "
+                "name is present in the runner process environment."
+            ),
+            "recommendation": (
+                f"Add `GOOGLE_GMAIL_SCOPES={GMAIL_COMPOSE_SCOPE}` for draft-only mode, or "
+                f"`GMAIL_REQUIRED_SCOPE={GMAIL_SEND_SCOPE}` for direct send after approval."
+            ),
+            "detected_issue_summary": (
+                "The runner loaded `.env`, but no supported Gmail scope key was detected in the process "
+                "environment. No Gmail API call was made."
             ),
         }
     if dot_env_summary["dot_env_scope_key_detected"] and not env_summary["scope_key_detected"]:
@@ -493,8 +576,8 @@ def _decision_summary(env_summary: dict, dot_env_summary: dict, file_scan: dict)
         }
     if env_summary["scope_key_detected"] and not env_summary["recognized_scope_detected"]:
         return {
-            "audit_status": "gmail_scope_key_present_but_scope_unrecognized",
-            "dashboard_message": "Gmail permission is not configured yet.",
+            "audit_status": "gmail_scope_loaded_but_unrecognized",
+            "dashboard_message": "Gmail settings loaded, but permission scope is not recognized.",
             "probable_missing_link": "runner_env_has_scope_key_without_recognized_gmail_scope",
             "missing_link_explanation": (
                 "A supported Gmail scope key is present in process environment, but no recognized compose/send scope "
@@ -655,6 +738,12 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>.env new Gmail keys</th><td>{payload["dot_env_new_gmail_key_count"]}</td></tr>
       <tr><th>Scope key in process env</th><td>{payload["scope_key_detected_in_os_environ"]}</td></tr>
       <tr><th>Scope key in .env</th><td>{payload["scope_key_detected_in_dot_env"]}</td></tr>
+      <tr><th>Runner .env loader enabled</th><td>{payload["dot_env_loader_enabled"]}</td></tr>
+      <tr><th>Runner .env file found</th><td>{payload["dot_env_file_found"]}</td></tr>
+      <tr><th>.env keys loaded into process</th><td>{payload["dot_env_keys_loaded_count"]}</td></tr>
+      <tr><th>.env keys skipped because already set</th><td>{payload["dot_env_keys_skipped_existing_count"]}</td></tr>
+      <tr><th>Gmail-related .env keys loaded</th><td>{payload["gmail_related_keys_loaded_count"]}</td></tr>
+      <tr><th>Existing env values overwritten</th><td>{payload["existing_env_values_overwritten"]}</td></tr>
       <tr><th>Docker Compose env_file detected</th><td>{payload["docker_compose_env_file_detected"]}</td></tr>
       <tr><th>Remote approval dotenv loader detected</th><td>{payload["remote_approval_dotenv_loader_detected"]}</td></tr>
       <tr><th>Probable missing link</th><td><code>{escape(payload["probable_missing_link"])}</code></td></tr>
@@ -722,6 +811,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "html_trustpilot_gmail_env_loading_audit_path": str(html_path),
         "audit_status": payload["audit_status"],
         "env_loading_audit_status": payload["env_loading_audit_status"],
+        "dot_env_loader_enabled": payload["dot_env_loader_enabled"],
+        "dot_env_file_found": payload["dot_env_file_found"],
+        "dot_env_keys_loaded_count": payload["dot_env_keys_loaded_count"],
+        "dot_env_keys_skipped_existing_count": payload["dot_env_keys_skipped_existing_count"],
+        "gmail_related_keys_loaded_count": payload["gmail_related_keys_loaded_count"],
         "os_environ_legacy_gmail_key_count": payload["os_environ_legacy_gmail_key_count"],
         "os_environ_new_gmail_key_count": payload["os_environ_new_gmail_key_count"],
         "dot_env_file_exists": payload["dot_env_file_exists"],
@@ -748,7 +842,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "ali_reviews_api_call_performed": False,
         "translations_register_called": False,
         "secret_value_printed": False,
+        "secret_values_printed": False,
         "dot_env_value_read_or_printed": False,
+        "dot_env_values_printed": False,
+        "existing_env_values_overwritten": payload["existing_env_values_overwritten"],
         "privacy_scan_summary": payload["privacy_scan_summary"],
         "detected_issue_summary": payload["detected_issue_summary"],
         "approval_message": _approval_message(payload, json_path, html_path),
@@ -766,6 +863,12 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f".env new Gmail key count: {payload.get('dot_env_new_gmail_key_count')}\n"
         f"Scope key in os.environ: {payload.get('scope_key_detected_in_os_environ')}\n"
         f"Scope key in .env: {payload.get('scope_key_detected_in_dot_env')}\n"
+        f"Runner .env loader enabled: {payload.get('dot_env_loader_enabled')}\n"
+        f"Runner .env file found: {payload.get('dot_env_file_found')}\n"
+        f".env keys loaded into process: {payload.get('dot_env_keys_loaded_count')}\n"
+        f".env keys skipped because already set: {payload.get('dot_env_keys_skipped_existing_count')}\n"
+        f"Gmail-related .env keys loaded: {payload.get('gmail_related_keys_loaded_count')}\n"
+        f"Existing env values overwritten: {payload.get('existing_env_values_overwritten')}\n"
         f"Docker Compose env_file detected: {payload.get('docker_compose_env_file_detected')}\n"
         f"Remote approval dotenv loader detected: {payload.get('remote_approval_dotenv_loader_detected')}\n"
         f"Probable missing link: {payload.get('probable_missing_link')}\n"

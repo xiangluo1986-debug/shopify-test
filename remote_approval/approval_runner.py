@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -26,6 +27,9 @@ from remote_approval.utils import (
     setup_logging,
     utc_now_iso,
 )
+
+DOTENV_META_ENV_PREFIX = "REMOTE_APPROVAL_DOTENV_"
+GMAIL_RELATED_ENV_PREFIXES = ("GMAIL_", "GOOGLE_GMAIL_")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -71,6 +75,18 @@ def main() -> int:
             return _finish_stopped_by_interrupt(args, approval_id, interrupt_reply, logger)
 
         os.environ["REMOTE_APPROVAL_MODE"] = args.approval
+        dotenv_summary = _load_project_dotenv(overwrite_existing=False)
+        _publish_dotenv_loader_summary(dotenv_summary)
+        logger.info(
+            "dotenv loader summary: enabled=%s found=%s loaded_count=%s skipped_existing_count=%s "
+            "gmail_related_loaded_count=%s secret_values_printed=%s",
+            dotenv_summary["dot_env_loader_enabled"],
+            dotenv_summary["dot_env_file_found"],
+            dotenv_summary["dot_env_keys_loaded_count"],
+            dotenv_summary["dot_env_keys_skipped_existing_count"],
+            dotenv_summary["gmail_related_keys_loaded_count"],
+            dotenv_summary["secret_values_printed"],
+        )
         task_func = get_task(args.task)
         result = task_func(args.mode)
         task_summary = _build_task_summary(args.task, args.mode, args.approval, result)
@@ -207,6 +223,101 @@ def _parse_timeout(value: str) -> int:
     except (TypeError, ValueError):
         return 3600
     return max(timeout, 1)
+
+
+def _load_project_dotenv(overwrite_existing: bool = False) -> dict:
+    """Load the project-root .env into os.environ without logging values."""
+    summary = {
+        "dot_env_loader_enabled": True,
+        "dot_env_file_found": False,
+        "dot_env_keys_loaded_count": 0,
+        "dot_env_keys_skipped_existing_count": 0,
+        "gmail_related_keys_loaded_count": 0,
+        "secret_values_printed": False,
+        "dot_env_values_printed": False,
+        "existing_env_values_overwritten": False,
+        "dot_env_invalid_line_count": 0,
+        "dot_env_unsafe_path_blocked": False,
+    }
+    dotenv_path = PROJECT_ROOT / ".env"
+    try:
+        project_root = PROJECT_ROOT.resolve()
+        resolved_path = dotenv_path.resolve(strict=False)
+    except OSError:
+        summary["dot_env_unsafe_path_blocked"] = True
+        return summary
+
+    if resolved_path.name != ".env" or resolved_path.parent != project_root:
+        summary["dot_env_unsafe_path_blocked"] = True
+        return summary
+    if not dotenv_path.exists():
+        return summary
+    summary["dot_env_file_found"] = True
+    if not dotenv_path.is_file():
+        summary["dot_env_unsafe_path_blocked"] = True
+        return summary
+
+    try:
+        with dotenv_path.open("r", encoding="utf-8", errors="replace") as env_file:
+            for raw_line in env_file:
+                parsed = _parse_dotenv_assignment(raw_line)
+                if parsed is None:
+                    if raw_line.strip() and not raw_line.strip().startswith("#"):
+                        summary["dot_env_invalid_line_count"] += 1
+                    continue
+                key, value = parsed
+                if key in os.environ and not overwrite_existing:
+                    summary["dot_env_keys_skipped_existing_count"] += 1
+                    continue
+                os.environ[key] = value
+                summary["dot_env_keys_loaded_count"] += 1
+                if key.startswith(GMAIL_RELATED_ENV_PREFIXES):
+                    summary["gmail_related_keys_loaded_count"] += 1
+                if overwrite_existing:
+                    summary["existing_env_values_overwritten"] = True
+    except OSError:
+        summary["dot_env_unsafe_path_blocked"] = True
+    return summary
+
+
+def _parse_dotenv_assignment(raw_line: str) -> tuple[str, str] | None:
+    line = raw_line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        return None
+    key, raw_value = line.split("=", 1)
+    key = key.strip()
+    if key.startswith("export "):
+        key = key[len("export ") :].strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        return None
+
+    value = raw_value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return key, value
+
+
+def _publish_dotenv_loader_summary(summary: dict) -> None:
+    metadata = {
+        "LOADER_ENABLED": summary.get("dot_env_loader_enabled") is True,
+        "FILE_FOUND": summary.get("dot_env_file_found") is True,
+        "KEYS_LOADED_COUNT": int(summary.get("dot_env_keys_loaded_count") or 0),
+        "KEYS_SKIPPED_EXISTING_COUNT": int(summary.get("dot_env_keys_skipped_existing_count") or 0),
+        "GMAIL_RELATED_KEYS_LOADED_COUNT": int(summary.get("gmail_related_keys_loaded_count") or 0),
+        "SECRET_VALUES_PRINTED": False,
+        "VALUES_PRINTED": False,
+        "EXISTING_VALUES_OVERWRITTEN": summary.get("existing_env_values_overwritten") is True,
+        "INVALID_LINE_COUNT": int(summary.get("dot_env_invalid_line_count") or 0),
+        "UNSAFE_PATH_BLOCKED": summary.get("dot_env_unsafe_path_blocked") is True,
+    }
+    for suffix, value in metadata.items():
+        os.environ[f"{DOTENV_META_ENV_PREFIX}{suffix}"] = _metadata_value(value)
+
+
+def _metadata_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def _execute_selected_action(
@@ -420,6 +531,11 @@ def _summarize_task_result(result: dict) -> str:
         "scope_resolver_status",
         "scope_compatibility_status",
         "env_loading_audit_status",
+        "dot_env_loader_enabled",
+        "dot_env_file_found",
+        "dot_env_keys_loaded_count",
+        "dot_env_keys_skipped_existing_count",
+        "gmail_related_keys_loaded_count",
         "os_environ_legacy_gmail_key_count",
         "os_environ_new_gmail_key_count",
         "dot_env_file_exists",

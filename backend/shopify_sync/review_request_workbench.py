@@ -107,6 +107,8 @@ ADMIN_STATUS_LABELS = {
     "blocked_missing_vendor_api_documentation": "Waiting for API docs",
     "no_eligible_delivered_review_request_candidate": "No orders ready",
     "env_file_has_gmail_scope_but_runner_env_missing": "Runner cannot see .env Gmail settings",
+    "env_file_loaded_but_scope_still_missing": "Gmail permission missing",
+    "gmail_scope_loaded_but_unrecognized": "Gmail permission unrecognized",
     "gmail_scope_not_configured_anywhere_detected": "Gmail permission missing",
     "gmail_compose_scope_available_in_runner_env": "Gmail draft permission available",
     "gmail_send_scope_available_in_runner_env": "Gmail send permission available",
@@ -3404,6 +3406,13 @@ def _trustpilot_gmail_env_loading_audit_status(report):
         "env_loading_audit_status": audit_status,
         "message": message,
         "dashboard_message": message,
+        "dot_env_loader_enabled": data.get("dot_env_loader_enabled") is True,
+        "dot_env_file_found": data.get("dot_env_file_found") is True,
+        "dot_env_keys_loaded_count": _int_or_zero(data.get("dot_env_keys_loaded_count")),
+        "dot_env_keys_skipped_existing_count": _int_or_zero(
+            data.get("dot_env_keys_skipped_existing_count")
+        ),
+        "gmail_related_keys_loaded_count": _int_or_zero(data.get("gmail_related_keys_loaded_count")),
         "os_environ_legacy_gmail_key_count": _int_or_zero(
             data.get("os_environ_legacy_gmail_key_count")
         ),
@@ -3448,9 +3457,13 @@ def _gmail_env_loading_plain_message(status):
     if status == "env_file_has_gmail_scope_but_runner_env_missing":
         return "Gmail settings may exist in `.env`, but the automation runner cannot see them yet."
     if status == "gmail_compose_scope_available_in_runner_env":
-        return "Gmail draft permission is available."
+        return "Gmail draft permission is available. Staff can review drafts before sending."
     if status == "gmail_send_scope_available_in_runner_env":
-        return "Gmail send permission is available."
+        return "Gmail send permission is available. Final approval is still required before sending."
+    if status == "env_file_loaded_but_scope_still_missing":
+        return "Gmail settings loaded, but permission scope is missing."
+    if status == "gmail_scope_loaded_but_unrecognized":
+        return "Gmail settings loaded, but permission scope is not recognized."
     return "Gmail permission is not configured yet."
 
 
@@ -4148,10 +4161,16 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_message = "Gmail permission is not configured yet."
     elif env_audit_status == "gmail_compose_scope_available_in_runner_env":
         status_value = "Draft permission"
-        status_message = "Gmail draft permission is available."
+        status_message = "Gmail draft permission is available. Staff can review drafts before sending."
     elif env_audit_status == "gmail_send_scope_available_in_runner_env":
         status_value = "Ready"
-        status_message = "Gmail send permission is available."
+        status_message = "Gmail send permission is available. Final approval is still required before sending."
+    elif env_audit_status == "env_file_loaded_but_scope_still_missing":
+        status_value = "Permission needed"
+        status_message = "Gmail settings loaded, but permission scope is missing."
+    elif env_audit_status == "gmail_scope_loaded_but_unrecognized":
+        status_value = "Permission issue"
+        status_message = "Gmail settings loaded, but permission scope is not recognized."
     elif env_audit_message:
         status_value = _admin_status_label(env_audit_status)
         status_message = env_audit_message
@@ -4160,10 +4179,10 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_message = "Gmail permission is not configured yet."
     elif compose_scope_present and not real_send_scope_available:
         status_value = "Draft-only config"
-        status_message = "Gmail can prepare drafts. Staff will review and send manually."
+        status_message = "Gmail draft permission is available. Staff can review drafts before sending."
     elif real_send_scope_available:
         status_value = "Ready"
-        status_message = "Gmail send permission is available. Final approval is still required."
+        status_message = "Gmail send permission is available. Final approval is still required before sending."
     elif legacy_config_detected:
         status_value = "Legacy config found"
         status_message = "Gmail permission is not configured yet."
@@ -4248,9 +4267,9 @@ def _gmail_scope_plain_message(status):
     if status == "scope_missing":
         return "Gmail permission is not configured yet."
     if status == "gmail_compose_only":
-        return "Gmail can prepare drafts. Staff will review and send manually."
+        return "Gmail draft permission is available. Staff can review drafts before sending."
     if status in {"gmail_send_scope_available", "broad_mail_scope_available"}:
-        return "Gmail send permission is available. Final approval is still required."
+        return "Gmail send permission is available. Final approval is still required before sending."
     return "Gmail permission is not configured yet."
 
 

@@ -875,3 +875,24 @@ Future tracking design note:
     one eligible candidate exists.
   - If `gmail.send` exists, continue the real-send path carefully with final
     preflight, exactly one eligible candidate, and explicit approvals.
+
+## Phase 5.22 Trustpilot Gmail Env Loading Fix
+
+- [x] Add safe project-root `.env` loading to the local remote approval runner
+  before fixed task execution.
+- [x] Load simple `KEY=VALUE` assignments into the runner process environment
+  so Review Request Gmail tasks can see existing Gmail scope/config.
+- [x] Do not overwrite existing process environment values; skipped keys are
+  reported by count only.
+- [x] Report loader status by booleans and counts only: loader enabled, `.env`
+  file found, keys loaded, existing keys skipped, and Gmail-related keys loaded.
+- [x] Never print secret values, token values, client secret values, private
+  keys, raw customer emails, or full Gmail draft/message IDs.
+- [x] Keep the loader local-only: no Gmail API call, no Gmail draft
+  create/update/delete, no email send, no Shopify API/write/tag mutation, no
+  Trustpilot/Kudosi/Ali Reviews API call, and no `translationsRegister`.
+- [x] Update the env loading audit so the fixed runner path can report
+  `gmail_compose_scope_available_in_runner_env`,
+  `gmail_send_scope_available_in_runner_env`,
+  `gmail_scope_loaded_but_unrecognized`, or
+  `env_file_loaded_but_scope_still_missing`.
