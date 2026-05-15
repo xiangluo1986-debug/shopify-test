@@ -721,6 +721,42 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
+  .tw-report-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+    align-items: end;
+    margin: 12px 0;
+    padding: 10px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #f8fafc;
+  }
+  .tw-report-filter-check {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    font-weight: 600;
+  }
+  .tw-report-value {
+    max-width: 280px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .tw-report-value details {
+    max-width: 280px;
+  }
+  .tw-report-value summary {
+    cursor: pointer;
+    color: #374151;
+    font-weight: 600;
+  }
+  .tw-report-empty[hidden],
+  .tw-report-row[hidden] {
+    display: none !important;
+  }
   .tw-compact-form {
     gap: 10px;
     align-items: flex-end;
@@ -1934,9 +1970,16 @@
             <table>
               <tbody>
                 <tr><th>job_id</th><td>{{ translation_background_job.job_id }}</td></tr>
+                <tr><th>product title</th><td>{{ translation_background_job.report_detail_summary.product_title }}</td></tr>
                 <tr><th>product_gid</th><td>{{ translation_background_job.product_gid }}</td></tr>
+                <tr><th>job status</th><td>{{ translation_background_job.report_detail_summary.job_status }}</td></tr>
                 <tr><th>selected_locales</th><td>{{ translation_background_job.selected_locales|join:", " }}</td></tr>
                 <tr><th>selected_groups</th><td>{{ translation_background_job.selected_groups|join:", " }}</td></tr>
+                <tr><th>generated draft count</th><td>{{ translation_background_job.report_detail_summary.generated_draft_count }}</td></tr>
+                <tr><th>skipped count</th><td>{{ translation_background_job.report_detail_summary.skipped_count }}</td></tr>
+                <tr><th>blocked count</th><td>{{ translation_background_job.report_detail_summary.blocked_count }}</td></tr>
+                <tr><th>no Shopify write performed</th><td>{{ translation_background_job.report_detail_summary.no_shopify_write_performed }}</td></tr>
+                <tr><th>report path</th><td>{{ translation_background_job.report_detail_summary.report_path }}</td></tr>
                 <tr><th>shopify_read_only</th><td>{{ translation_background_job.shopify_read_only }}</td></tr>
                 <tr><th>shopify_write_performed</th><td>{{ translation_background_job.shopify_write_performed }}</td></tr>
                 <tr><th>mutation_performed</th><td>{{ translation_background_job.mutation_performed }}</td></tr>
@@ -1946,6 +1989,187 @@
                 <tr><th>rollback_performed</th><td>{{ translation_background_job.rollback_performed }}</td></tr>
               </tbody>
             </table>
+            <h3>Apply readiness summary</h3>
+            <div class="tw-run-grid">
+              <div class="tw-run-item">
+                <div class="tw-run-label">Eligible apply count</div>
+                <div class="tw-run-value">{{ translation_background_job.apply_readiness_summary.eligible_apply_count }}</div>
+              </div>
+              <div class="tw-run-item">
+                <div class="tw-run-label">Blocked apply count</div>
+                <div class="tw-run-value">{{ translation_background_job.apply_readiness_summary.blocked_apply_count }}</div>
+              </div>
+              <div class="tw-run-item">
+                <div class="tw-run-label">Needs mapping count</div>
+                <div class="tw-run-value">{{ translation_background_job.apply_readiness_summary.needs_mapping_count }}</div>
+              </div>
+              <div class="tw-run-item">
+                <div class="tw-run-label">Needs manual review count</div>
+                <div class="tw-run-value">{{ translation_background_job.apply_readiness_summary.needs_manual_review_count }}</div>
+              </div>
+            </div>
+            <table class="tw-results-table">
+              <tbody>
+                <tr><th>Eligible now fields</th><td>{{ translation_background_job.apply_readiness_summary.eligible_now_fields|join:", " }}</td></tr>
+                <tr><th>Blocked for future mapping</th><td>{{ translation_background_job.apply_readiness_summary.blocked_for_future_mapping_groups|join:", " }}</td></tr>
+                <tr><th>shopify_write_performed</th><td>{{ translation_background_job.apply_readiness_summary.shopify_write_performed }}</td></tr>
+                <tr><th>mutation_performed</th><td>{{ translation_background_job.apply_readiness_summary.mutation_performed }}</td></tr>
+                <tr><th>translations_register_called</th><td>{{ translation_background_job.apply_readiness_summary.translations_register_called }}</td></tr>
+              </tbody>
+            </table>
+            <h3>Blocked and skipped reasons</h3>
+            {% if translation_background_job.blocked_reason_summary %}
+              <div class="tw-editor-table-wrap">
+                <table class="tw-results-table">
+                  <thead>
+                    <tr>
+                      <th>Reason</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for item in translation_background_job.blocked_reason_summary %}
+                      <tr>
+                        <td>{{ item.reason }}</td>
+                        <td>{{ item.count }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p>No blocked or skipped reasons were recorded in the local report.</p>
+            {% endif %}
+            <h3>Options and variants diagnosis</h3>
+            <div class="tw-editor-table-wrap">
+              <table class="tw-results-table">
+                <thead>
+                  <tr>
+                    <th>Area</th>
+                    <th>Discovery status</th>
+                    <th>Resource count</th>
+                    <th>Translatable rows</th>
+                    <th>Generated drafts</th>
+                    <th>Blocked apply</th>
+                    <th>Needs mapping</th>
+                    <th>Reason if zero rows</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Options</td>
+                    <td>{{ translation_background_job.report_diagnostics.options.discovery_status }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.options.resource_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.options.translatable_row_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.options.generated_draft_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.options.blocked_apply_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.options.needs_mapping_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.options.zero_row_reason }}</td>
+                  </tr>
+                  <tr>
+                    <td>Variants</td>
+                    <td>{{ translation_background_job.report_diagnostics.variants.discovery_status }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.variants.resource_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.variants.translatable_row_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.variants.generated_draft_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.variants.blocked_apply_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.variants.needs_mapping_count }}</td>
+                    <td>{{ translation_background_job.report_diagnostics.variants.zero_row_reason }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {% if translation_background_job.review_rows %}
+              <h3>Draft review table</h3>
+              <div class="tw-report-filters" data-report-filters>
+                <div>
+                  <label for="tw-report-language-filter">Language</label>
+                  <select id="tw-report-language-filter" data-report-filter-language>
+                    <option value="">All languages</option>
+                    {% for option in translation_background_job.review_filter_options.languages %}
+                      <option value="{{ option.value }}">{{ option.label }} ({{ option.value }})</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div>
+                  <label for="tw-report-group-filter">Group</label>
+                  <select id="tw-report-group-filter" data-report-filter-group>
+                    <option value="">All groups</option>
+                    {% for option in translation_background_job.review_filter_options.groups %}
+                      <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-generated> Generated only</label>
+                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-blocked> Blocked only</label>
+                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-apply-eligible> Apply eligible only</label>
+                <label class="tw-report-filter-check"><input type="checkbox" data-report-filter-needs-mapping> Needs mapping only</label>
+              </div>
+              <div class="tw-editor-table-wrap">
+                <table class="tw-results-table" data-report-review-table>
+                  <thead>
+                    <tr>
+                      <th>Language</th>
+                      <th>Group</th>
+                      <th>Resource ID</th>
+                      <th>Key</th>
+                      <th>Context label</th>
+                      <th>Source value</th>
+                      <th>Existing translation</th>
+                      <th>Outdated</th>
+                      <th>Generated draft</th>
+                      <th>Status</th>
+                      <th>Write eligibility</th>
+                      <th>Block reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in translation_background_job.review_rows %}
+                      <tr class="tw-report-row" data-report-review-row data-language="{{ row.language }}" data-group="{{ row.group_key }}" data-generated="{{ row.has_generated_draft_flag }}" data-blocked="{{ row.is_blocked_flag }}" data-apply-eligible="{{ row.apply_eligible_flag }}" data-needs-mapping="{{ row.needs_mapping_flag }}">
+                        <td>{{ row.language }}</td>
+                        <td>{{ row.group_label }}</td>
+                        <td style="word-break: break-all;">{{ row.resource_id }}</td>
+                        <td>{{ row.key }}</td>
+                        <td>{{ row.context_label }}</td>
+                        <td class="tw-report-value">
+                          {% if row.source_value_is_long %}
+                            <details><summary>{{ row.source_value_summary }}</summary>{{ row.source_value_display }}</details>
+                          {% else %}
+                            {{ row.source_value_display }}
+                          {% endif %}
+                        </td>
+                        <td class="tw-report-value">
+                          {% if row.existing_translation_is_long %}
+                            <details><summary>{{ row.existing_translation_summary }}</summary>{{ row.existing_translation_display }}</details>
+                          {% else %}
+                            {{ row.existing_translation_display }}
+                          {% endif %}
+                        </td>
+                        <td>{{ row.outdated }}</td>
+                        <td class="tw-report-value">
+                          {% if row.generated_draft_is_long %}
+                            <details><summary>{{ row.generated_draft_summary }}</summary>{{ row.generated_draft_display }}</details>
+                          {% else %}
+                            {{ row.generated_draft_display }}
+                          {% endif %}
+                        </td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.write_eligibility }}</td>
+                        <td>{{ row.block_reason }}</td>
+                      </tr>
+                    {% endfor %}
+                    <tr class="tw-report-empty" data-report-filter-empty hidden>
+                      <td colspan="12">No rows match the selected filters.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              {% if translation_background_job.review_rows_truncated %}
+                <p>Review rows are capped at {{ translation_background_job.review_row_count }} rows in this page.</p>
+              {% endif %}
+            {% else %}
+              <p>No row-level draft review data was recorded in the local report.</p>
+            {% endif %}
             {% if translation_background_job.errors %}
               <h3>Sanitized errors</h3>
               <ul>
@@ -4282,6 +4506,73 @@
   {% endif %}
   </details>
   <script>
+    (function () {
+      var filterPanel = document.querySelector("[data-report-filters]");
+      var table = document.querySelector("[data-report-review-table]");
+      if (!filterPanel || !table) {
+        return;
+      }
+      var languageFilter = filterPanel.querySelector("[data-report-filter-language]");
+      var groupFilter = filterPanel.querySelector("[data-report-filter-group]");
+      var generatedFilter = filterPanel.querySelector("[data-report-filter-generated]");
+      var blockedFilter = filterPanel.querySelector("[data-report-filter-blocked]");
+      var applyEligibleFilter = filterPanel.querySelector("[data-report-filter-apply-eligible]");
+      var needsMappingFilter = filterPanel.querySelector("[data-report-filter-needs-mapping]");
+      var rows = Array.prototype.slice.call(table.querySelectorAll("[data-report-review-row]"));
+      var empty = table.querySelector("[data-report-filter-empty]");
+
+      function checked(input) {
+        return Boolean(input && input.checked);
+      }
+
+      function selected(select) {
+        return select ? select.value : "";
+      }
+
+      function rowMatches(row) {
+        if (selected(languageFilter) && row.getAttribute("data-language") !== selected(languageFilter)) {
+          return false;
+        }
+        if (selected(groupFilter) && row.getAttribute("data-group") !== selected(groupFilter)) {
+          return false;
+        }
+        if (checked(generatedFilter) && row.getAttribute("data-generated") !== "1") {
+          return false;
+        }
+        if (checked(blockedFilter) && row.getAttribute("data-blocked") !== "1") {
+          return false;
+        }
+        if (checked(applyEligibleFilter) && row.getAttribute("data-apply-eligible") !== "1") {
+          return false;
+        }
+        if (checked(needsMappingFilter) && row.getAttribute("data-needs-mapping") !== "1") {
+          return false;
+        }
+        return true;
+      }
+
+      function applyFilters() {
+        var visible = 0;
+        rows.forEach(function (row) {
+          var matches = rowMatches(row);
+          row.hidden = !matches;
+          if (matches) {
+            visible += 1;
+          }
+        });
+        if (empty) {
+          empty.hidden = visible !== 0;
+        }
+      }
+
+      [languageFilter, groupFilter, generatedFilter, blockedFilter, applyEligibleFilter, needsMappingFilter]
+        .forEach(function (control) {
+          if (control) {
+            control.addEventListener("change", applyFilters);
+          }
+        });
+      applyFilters();
+    }());
     (function () {
       var picker = document.querySelector("[data-product-picker]");
       if (!picker) {

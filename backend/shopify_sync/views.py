@@ -160,8 +160,10 @@ TRANSLATION_CONSOLE_PRODUCT_SEARCH_FIELDS = [
     "status",
 ]
 TRANSLATION_CONSOLE_DRAFT_DETAIL_MAX_ROWS = 50
-TRANSLATION_CONSOLE_TRANSLATE_ALL_DETAIL_MAX_ROWS = 20
+TRANSLATION_CONSOLE_TRANSLATE_ALL_DETAIL_MAX_ROWS = 1000
 TRANSLATION_CONSOLE_DRAFT_PREVIEW_CHARS = 120
+TRANSLATION_CONSOLE_REVIEW_TEXT_CHARS = 900
+TRANSLATION_CONSOLE_REVIEW_SUMMARY_CHARS = 160
 TRANSLATION_CONSOLE_EDITOR_PREVIEW_CHARS = 1200
 TRANSLATION_CONSOLE_HTML_PREVIEW_ALLOWED_TAGS = {
     "a",
@@ -258,6 +260,17 @@ TRANSLATION_WORKSPACE_DRAFT_GROUPS = [
 TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS = [
     option["value"] for option in TRANSLATION_WORKSPACE_DRAFT_GROUPS
 ]
+TRANSLATION_WORKSPACE_APPLY_SUPPORTED_FIELDS = {
+    "title",
+    "meta_title",
+    "meta_description",
+}
+TRANSLATION_WORKSPACE_MAPPING_REQUIRED_GROUPS = {
+    "options",
+    "variants",
+    "important_metafields",
+    "media",
+}
 TRANSLATION_WORKSPACE_JOB_DIR = Path("logs/shopify_translation_workspace_jobs")
 TRANSLATION_WORKSPACE_JOB_STALE_SECONDS = 30 * 60
 TRANSLATION_WORKSPACE_JOB_ACTIVE_STATUSES = {"pending", "running"}
@@ -269,6 +282,7 @@ TRANSLATION_WORKSPACE_JOB_TERMINAL_STATUSES = {
     "stale",
 }
 TRANSLATION_WORKSPACE_JOB_DETAIL_PREVIEW_LIMIT = 60
+TRANSLATION_WORKSPACE_JOB_REVIEW_ROW_LIMIT = 1000
 TRANSLATION_WORKSPACE_JOB_ERROR_LIMIT = 20
 TRANSLATION_WORKSPACE_JOB_SECRET_RE = re.compile(
     r"\b(?:shpat_|shpca_|shppa_|shpss_|sk-)[A-Za-z0-9_\-]+\b"
@@ -3289,6 +3303,8 @@ def _translation_workspace_empty_job_status(
         "counts": _translation_workspace_empty_job_counts(selected_locales),
         "errors": [],
         "detail_preview_rows": [],
+        "review_rows": [],
+        "review_rows_truncated": False,
         "report_path": "",
         "lock_path": "",
         "safety_flags": _translation_workspace_job_safety_flags(),
@@ -3561,30 +3577,41 @@ def _translation_workspace_append_child_discovery_errors(
 
 def _translation_workspace_append_locale_preview_rows(status: dict, draft_result: dict):
     detail = (draft_result or {}).get("translation_console_detail") or {}
+    all_rows = [
+        row for row in (detail.get("all_entries") or []) if isinstance(row, dict)
+    ]
+
+    review_rows = status.setdefault("review_rows", [])
+    review_remaining = TRANSLATION_WORKSPACE_JOB_REVIEW_ROW_LIMIT - len(review_rows)
+    if review_remaining > 0:
+        for row in all_rows[:review_remaining]:
+            review_rows.append(_translation_workspace_job_review_row(row))
+    if len(all_rows) > review_remaining or detail.get("all_entries_truncated"):
+        status["review_rows_truncated"] = True
+
     preview_rows = status.setdefault("detail_preview_rows", [])
     remaining = TRANSLATION_WORKSPACE_JOB_DETAIL_PREVIEW_LIMIT - len(preview_rows)
     if remaining <= 0:
         status["detail_preview_truncated"] = True
         return
-    for row in (detail.get("all_entries") or [])[:remaining]:
-        if isinstance(row, dict):
-            preview_rows.append(
-                {
-                    "locale": row.get("locale", ""),
-                    "section": row.get("section", ""),
-                    "key": row.get("key", ""),
-                    "status": row.get("status", ""),
-                    "reason": row.get("reason", ""),
-                    "source_value_preview": row.get("source_value_preview", ""),
-                    "existing_translation_preview": row.get(
-                        "existing_translation_preview", ""
-                    ),
-                    "proposed_translation_preview": row.get(
-                        "proposed_translation_preview", ""
-                    ),
-                }
-            )
-    if detail.get("all_entries_truncated") or len(detail.get("all_entries") or []) > remaining:
+    for row in all_rows[:remaining]:
+        preview_rows.append(
+            {
+                "locale": row.get("locale", ""),
+                "section": row.get("section", ""),
+                "key": row.get("key", ""),
+                "status": row.get("status", ""),
+                "reason": row.get("reason", ""),
+                "source_value_preview": row.get("source_value_preview", ""),
+                "existing_translation_preview": row.get(
+                    "existing_translation_preview", ""
+                ),
+                "proposed_translation_preview": row.get(
+                    "proposed_translation_preview", ""
+                ),
+            }
+        )
+    if detail.get("all_entries_truncated") or len(all_rows) > remaining:
         status["detail_preview_truncated"] = True
 
 
@@ -3708,7 +3735,408 @@ def _translation_workspace_job_status_for_view(status: dict):
     for row in view.get("per_group_status") or []:
         row["status_label"] = _translation_workspace_title_status(row.get("status"))
         row["status_key"] = str(row.get("status") or "unknown").replace(" ", "_")
+    _translation_workspace_attach_report_detail_view(view)
     return view
+
+
+def _translation_workspace_attach_report_detail_view(view: dict):
+    review_rows = _translation_workspace_job_review_rows(view)
+    view["review_rows"] = review_rows
+    view["review_row_count"] = len(review_rows)
+    view["report_detail_summary"] = _translation_workspace_report_detail_summary(view)
+    view["review_filter_options"] = _translation_workspace_review_filter_options(
+        review_rows
+    )
+    view["blocked_reason_summary"] = _translation_workspace_reason_summary(review_rows)
+    view["apply_readiness_summary"] = _translation_workspace_apply_readiness_summary(
+        review_rows
+    )
+    view["report_diagnostics"] = _translation_workspace_report_diagnostics(
+        view,
+        review_rows,
+    )
+
+
+def _translation_workspace_report_detail_summary(status: dict):
+    counts = status.get("counts") or {}
+    return {
+        "product_title": status.get("product_title", ""),
+        "product_gid": status.get("product_gid", ""),
+        "job_status": status.get("status_label") or status.get("status", ""),
+        "locales": status.get("selected_locales") or [],
+        "generated_draft_count": int(counts.get("generated_draft_count") or 0),
+        "skipped_count": int(counts.get("skipped_count") or 0),
+        "blocked_count": int(counts.get("blocked_count") or 0),
+        "no_shopify_write_performed": not bool(status.get("shopify_write_performed")),
+        "report_path": status.get("report_path", ""),
+    }
+
+
+def _translation_workspace_job_review_rows(status: dict):
+    rows = [
+        _translation_workspace_job_review_row(row)
+        for row in (status.get("review_rows") or [])
+        if isinstance(row, dict)
+    ]
+    if not rows:
+        rows = [
+            _translation_workspace_job_review_row(row)
+            for row in (status.get("detail_preview_rows") or [])
+            if isinstance(row, dict)
+        ]
+    group_order = {
+        value: index for index, value in enumerate(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS)
+    }
+    locale_order = {
+        locale: index for index, locale in enumerate(status.get("selected_locales") or [])
+    }
+    rows.sort(
+        key=lambda row: (
+            locale_order.get(row.get("language", ""), 999),
+            group_order.get(row.get("group_key", ""), 999),
+            row.get("key", ""),
+            row.get("context_label", ""),
+        )
+    )
+    for index, row in enumerate(rows):
+        row["row_id"] = f"translation-report-row-{index}"
+    return rows
+
+
+def _translation_workspace_job_review_row(row: dict):
+    group_key = _translation_workspace_review_group_key(row)
+    field = str(row.get("field") or row.get("key") or "").strip()
+    has_generated_draft = bool(
+        row.get("has_generated_draft")
+        or str(row.get("proposed_translation_display") or "").strip()
+        or str(row.get("proposed_translation_preview") or "").strip()
+    )
+    needs_mapping = bool(
+        row.get("future_write_needs_mapping")
+        or group_key in TRANSLATION_WORKSPACE_MAPPING_REQUIRED_GROUPS
+    )
+    apply_eligible = bool(
+        has_generated_draft
+        and row.get("eligible_for_apply_plan") is True
+        and field in TRANSLATION_WORKSPACE_APPLY_SUPPORTED_FIELDS
+        and not needs_mapping
+    )
+    write_eligibility = _translation_workspace_review_write_eligibility(
+        row,
+        field=field,
+        has_generated_draft=has_generated_draft,
+        needs_mapping=needs_mapping,
+        apply_eligible=apply_eligible,
+    )
+    block_reason = _translation_workspace_review_block_reason(
+        row,
+        has_generated_draft=has_generated_draft,
+        needs_mapping=needs_mapping,
+        apply_eligible=apply_eligible,
+    )
+    is_blocked = bool(
+        has_generated_draft
+        and (
+            block_reason
+            or row.get("draft_blocked")
+            or row.get("product_identity_mismatch")
+            or not apply_eligible
+        )
+    )
+    source_fields = _translation_workspace_existing_or_review_text_fields(
+        row,
+        "source_value",
+        row.get("source_value_preview", ""),
+        field,
+    )
+    existing_fields = _translation_workspace_existing_or_review_text_fields(
+        row,
+        "existing_translation",
+        row.get("existing_translation_preview", ""),
+        field,
+    )
+    draft_fields = _translation_workspace_existing_or_review_text_fields(
+        row,
+        "proposed_translation",
+        row.get("proposed_translation_preview", ""),
+        field,
+    )
+    return {
+        "language": row.get("language") or row.get("locale", ""),
+        "locale": row.get("locale") or row.get("language", ""),
+        "group_key": group_key,
+        "group_label": _translation_workspace_group_label(group_key),
+        "resource_id": row.get("resource_id", ""),
+        "key": row.get("key") or row.get("resource_key") or field,
+        "context_label": row.get("context_label", ""),
+        "source_value_summary": source_fields["summary"],
+        "source_value_display": source_fields["display"],
+        "source_value_is_long": source_fields["is_long"],
+        "source_value_truncated": source_fields["truncated"],
+        "existing_translation_summary": existing_fields["summary"],
+        "existing_translation_display": existing_fields["display"],
+        "existing_translation_is_long": existing_fields["is_long"],
+        "existing_translation_truncated": existing_fields["truncated"],
+        "outdated": row.get("outdated"),
+        "generated_draft_summary": draft_fields["summary"],
+        "generated_draft_display": draft_fields["display"],
+        "generated_draft_is_long": draft_fields["is_long"],
+        "generated_draft_truncated": draft_fields["truncated"],
+        "status": row.get("status", ""),
+        "write_eligibility": write_eligibility,
+        "block_reason": block_reason,
+        "reason": row.get("reason", ""),
+        "blocking_reasons": row.get("blocking_reasons", ""),
+        "has_generated_draft": has_generated_draft,
+        "is_blocked": is_blocked,
+        "apply_eligible": apply_eligible,
+        "needs_mapping": needs_mapping,
+        "has_generated_draft_flag": _translation_workspace_bool_flag(
+            has_generated_draft
+        ),
+        "is_blocked_flag": _translation_workspace_bool_flag(is_blocked),
+        "apply_eligible_flag": _translation_workspace_bool_flag(apply_eligible),
+        "needs_mapping_flag": _translation_workspace_bool_flag(needs_mapping),
+    }
+
+
+def _translation_workspace_review_group_key(row: dict):
+    group = str(row.get("resource_group") or "").strip()
+    if group == "technical_metafields":
+        return "important_metafields"
+    if group in TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS:
+        return group
+    section = str(row.get("section") or row.get("section_label") or "").strip().lower()
+    section_map = {
+        "product basics": "product_basics",
+        "seo": "seo",
+        "options": "options",
+        "product options": "options",
+        "variants": "variants",
+        "important metafields": "important_metafields",
+        "media": "media",
+        "media alt text": "media",
+    }
+    if section in section_map:
+        return section_map[section]
+    section_key = _translation_editor_section_key(row.get("field") or row.get("key") or "")
+    if section_key == "basic":
+        return "product_basics"
+    if section_key == "technical_metafields":
+        return "important_metafields"
+    return section_key
+
+
+def _translation_workspace_review_write_eligibility(
+    row: dict,
+    *,
+    field: str,
+    has_generated_draft: bool,
+    needs_mapping: bool,
+    apply_eligible: bool,
+):
+    if not has_generated_draft:
+        return "not applicable"
+    if apply_eligible:
+        return "apply eligible"
+    if needs_mapping:
+        return "needs mapping"
+    if field == "body_html":
+        return "manual review"
+    if row.get("draft_blocked") or row.get("product_identity_mismatch"):
+        return "blocked"
+    return "manual review"
+
+
+def _translation_workspace_review_block_reason(
+    row: dict,
+    *,
+    has_generated_draft: bool,
+    needs_mapping: bool,
+    apply_eligible: bool,
+):
+    reasons = []
+    if needs_mapping:
+        reasons.append(
+            row.get("apply_plan_blocked_reason")
+            or "future_write_needs_resource_mapping"
+        )
+    reasons.extend(_translation_workspace_split_reasons(row.get("blocking_reasons")))
+    if row.get("reason"):
+        reasons.append(_translation_workspace_normalized_reason(row.get("reason")))
+    if has_generated_draft and not apply_eligible and not reasons:
+        reasons.append("manual_review_required")
+    if not has_generated_draft and not reasons:
+        reasons.append("no_generated_draft")
+    return ", ".join(list(dict.fromkeys(reason for reason in reasons if reason)))
+
+
+def _translation_workspace_review_filter_options(rows: list[dict]):
+    languages = []
+    groups = []
+    for row in rows or []:
+        locale = row.get("language") or row.get("locale") or ""
+        group_key = row.get("group_key", "")
+        if locale and locale not in [item["value"] for item in languages]:
+            languages.append(
+                {
+                    "value": locale,
+                    "label": _translation_editor_locale_label(locale),
+                }
+            )
+        if group_key and group_key not in [item["value"] for item in groups]:
+            groups.append(
+                {
+                    "value": group_key,
+                    "label": _translation_workspace_group_label(group_key),
+                }
+            )
+    return {"languages": languages, "groups": groups}
+
+
+def _translation_workspace_reason_summary(rows: list[dict]):
+    counts = {}
+    for row in rows or []:
+        reason = _translation_workspace_reason_key(row)
+        if not reason:
+            continue
+        counts[reason] = counts.get(reason, 0) + 1
+    return [
+        {"reason": reason, "count": count}
+        for reason, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _translation_workspace_reason_key(row: dict):
+    if row.get("needs_mapping"):
+        return "future_write_needs_resource_mapping"
+    reason = _translation_workspace_normalized_reason(
+        row.get("block_reason") or row.get("reason") or row.get("status")
+    )
+    if reason:
+        return reason
+    if row.get("apply_eligible"):
+        return "apply_eligible"
+    if row.get("has_generated_draft"):
+        return "manual_review_required"
+    return ""
+
+
+def _translation_workspace_normalized_reason(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    first_reason = _translation_workspace_split_reasons(text)
+    if first_reason:
+        text = first_reason[0]
+    if text == "already_translated":
+        return "existing_translation_current"
+    if text == "not_draft_eligible":
+        return "not_eligible_technical_field"
+    if text == "skipped_child_resource_query_failed":
+        return "child_resource_query_failed"
+    return text
+
+
+def _translation_workspace_apply_readiness_summary(rows: list[dict]):
+    eligible = []
+    blocked = []
+    needs_mapping = []
+    needs_manual_review = []
+    for row in rows or []:
+        if not row.get("has_generated_draft"):
+            continue
+        if row.get("apply_eligible"):
+            eligible.append(row)
+        else:
+            blocked.append(row)
+            if row.get("needs_mapping"):
+                needs_mapping.append(row)
+            else:
+                needs_manual_review.append(row)
+    return {
+        "eligible_apply_count": len(eligible),
+        "blocked_apply_count": len(blocked),
+        "needs_mapping_count": len(needs_mapping),
+        "needs_manual_review_count": len(needs_manual_review),
+        "eligible_now_fields": [
+            "title",
+            "meta_title",
+            "meta_description",
+        ],
+        "blocked_for_future_mapping_groups": [
+            "options",
+            "variants",
+            "important_metafields",
+            "media",
+        ],
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "apply_performed": False,
+        "publish_performed": False,
+        "rollback_performed": False,
+    }
+
+
+def _translation_workspace_report_diagnostics(status: dict, rows: list[dict]):
+    return {
+        "variants": _translation_workspace_group_diagnosis(status, rows, "variants"),
+        "options": _translation_workspace_group_diagnosis(status, rows, "options"),
+    }
+
+
+def _translation_workspace_group_diagnosis(
+    status: dict,
+    rows: list[dict],
+    group_key: str,
+):
+    group_rows = [row for row in rows or [] if row.get("group_key") == group_key]
+    group_status = _translation_workspace_group_status_row(status, group_key)
+    translatable_row_count = max(
+        len(group_rows),
+        int(group_status.get("source_rows_checked") or 0),
+    )
+    resource_ids = {
+        row.get("resource_id", "")
+        for row in group_rows
+        if row.get("resource_id")
+    }
+    generated_count = sum(1 for row in group_rows if row.get("has_generated_draft"))
+    needs_mapping_count = sum(1 for row in group_rows if row.get("needs_mapping"))
+    blocked_count = sum(1 for row in group_rows if row.get("is_blocked"))
+    zero_row_reason = ""
+    if translatable_row_count == 0:
+        zero_row_reason = (
+            group_status.get("message")
+            or "No translatable rows were returned in the local report."
+        )
+    reason_counts = _translation_workspace_reason_summary(group_rows)
+    return {
+        "group_key": group_key,
+        "label": _translation_workspace_group_label(group_key),
+        "discovery_status": group_status.get("status_label")
+        or group_status.get("status")
+        or "Not loaded",
+        "resource_count": len(resource_ids),
+        "translatable_row_count": translatable_row_count,
+        "generated_draft_count": generated_count,
+        "blocked_apply_count": blocked_count,
+        "needs_mapping_count": needs_mapping_count,
+        "zero_row_reason": zero_row_reason,
+        "reason_counts": reason_counts,
+    }
+
+
+def _translation_workspace_group_status_row(status: dict, group_key: str):
+    for row in status.get("per_group_status") or []:
+        if row.get("group_key") == group_key:
+            return row
+    return {}
+
+
+def _translation_workspace_bool_flag(value):
+    return "1" if value else "0"
 
 
 def _translation_workspace_title_status(value):
@@ -6221,6 +6649,97 @@ def _normalize_apply_plan_preview_entry(entry: dict):
     }
 
 
+def _translation_workspace_entry_write_eligibility(entry: dict):
+    if not str(entry.get("draft_value") or "").strip():
+        return "not applicable"
+    if (
+        entry.get("eligible_for_apply_plan") is True
+        and entry.get("field") in TRANSLATION_WORKSPACE_APPLY_SUPPORTED_FIELDS
+        and not entry.get("future_write_needs_mapping")
+    ):
+        return "apply eligible"
+    if entry.get("future_write_needs_mapping"):
+        return "needs mapping"
+    if entry.get("draft_blocked") or entry.get("product_identity_mismatch"):
+        return "blocked"
+    return "manual review"
+
+
+def _translation_workspace_entry_write_eligibility_key(entry: dict):
+    return _translation_workspace_locale_status_key(
+        _translation_workspace_entry_write_eligibility(entry)
+    )
+
+
+def _translation_workspace_existing_or_review_text_fields(
+    row: dict,
+    prefix: str,
+    fallback_preview: str,
+    field: str,
+):
+    display = str(row.get(f"{prefix}_display") or "")
+    summary = str(row.get(f"{prefix}_summary") or "")
+    if display or summary:
+        return {
+            "display": display or summary,
+            "summary": summary or _preview_text(display, TRANSLATION_CONSOLE_REVIEW_SUMMARY_CHARS),
+            "is_long": bool(row.get(f"{prefix}_is_long")),
+            "truncated": bool(row.get(f"{prefix}_truncated")),
+        }
+    return _translation_workspace_review_text_fields(
+        prefix,
+        fallback_preview,
+        field,
+        unprefixed=True,
+    )
+
+
+def _translation_workspace_review_text_fields(
+    prefix: str,
+    value,
+    field: str,
+    *,
+    unprefixed: bool = False,
+):
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    display = _translation_workspace_review_text(text)
+    is_long = (
+        _translation_editor_normalize_field_key(field) == "body_html"
+        or len(text) > TRANSLATION_CONSOLE_REVIEW_SUMMARY_CHARS
+        or "\n" in text
+    )
+    payload = {
+        "summary": _preview_text(text, TRANSLATION_CONSOLE_REVIEW_SUMMARY_CHARS),
+        "display": display,
+        "is_long": is_long,
+        "truncated": len(text) > len(display),
+    }
+    if unprefixed:
+        return payload
+    return {f"{prefix}_{key}": value for key, value in payload.items()}
+
+
+def _translation_workspace_review_text(value):
+    text = str(value or "").strip()
+    if len(text) <= TRANSLATION_CONSOLE_REVIEW_TEXT_CHARS:
+        return text
+    return text[: TRANSLATION_CONSOLE_REVIEW_TEXT_CHARS - 3].rstrip() + "..."
+
+
+def _translation_workspace_split_reasons(value):
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        source_values = value
+    else:
+        source_values = re.split(r"\s*,\s*", str(value))
+    return [
+        str(item).strip()
+        for item in source_values
+        if str(item).strip()
+    ]
+
+
 def _translation_console_draft_summary(draft_result: dict):
     if not draft_result:
         return {"blocking_conditions": ["missing_draft_result"]}
@@ -6363,8 +6882,17 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "context_label": entry.get("context_label", ""),
         "status": entry.get("row_status") or entry.get("status") or "",
         "reason": entry.get("status_reason") or entry.get("skip_reason", ""),
+        "has_generated_draft": bool(str(entry.get("draft_value") or "").strip()),
+        "write_eligibility": _translation_workspace_entry_write_eligibility(entry),
+        "write_eligibility_key": _translation_workspace_entry_write_eligibility_key(entry),
         "source_value_preview": _preview_text(entry.get("source_value")),
+        **_translation_workspace_review_text_fields(
+            "source_value", entry.get("source_value"), entry.get("field", "")
+        ),
         "proposed_translation_preview": _preview_text(entry.get("draft_value")),
+        **_translation_workspace_review_text_fields(
+            "proposed_translation", entry.get("draft_value"), entry.get("field", "")
+        ),
         "proposed_chars": entry.get("draft_value_chars") or 0,
         "validation_status": entry.get("validation_status", ""),
         "product_identity_validation_status": entry.get(
@@ -6389,6 +6917,11 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "outdated": entry.get("existing_translation_outdated"),
         "existing_translation_preview": _preview_text(
             entry.get("existing_translation_value") or entry.get("translation_value")
+        ),
+        **_translation_workspace_review_text_fields(
+            "existing_translation",
+            entry.get("existing_translation_value") or entry.get("translation_value"),
+            entry.get("field", ""),
         ),
     }
 
