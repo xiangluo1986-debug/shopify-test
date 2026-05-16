@@ -1321,6 +1321,16 @@
   .tw-result-card.is-editing .tw-manual-edit-panel {
     display: block;
   }
+  .translation-workspace .button.tw-secondary-button {
+    border-color: #cfd8e3;
+    background: #ffffff;
+    color: #1f2937 !important;
+  }
+  .translation-workspace .button.tw-secondary-button:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+    color: #111827 !important;
+  }
   .tw-manual-edit-textarea {
     box-sizing: border-box;
     width: 100%;
@@ -1329,6 +1339,26 @@
     border-radius: 6px;
     padding: 8px;
     font-family: inherit;
+  }
+  .tw-manual-edit-textarea.is-html-code {
+    min-height: 360px;
+    font-family: Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .tw-manual-html-editor {
+    margin-top: 8px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 10px;
+  }
+  .tw-manual-html-preview {
+    min-height: 300px;
+  }
+  .tw-manual-html-code-label {
+    display: block;
+    margin-top: 4px;
   }
   .tw-manual-edit-note {
     margin-top: 6px;
@@ -2619,9 +2649,30 @@
                           <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
                           <input type="hidden" name="translation_job_id" value="{{ translation_background_job.job_id }}">
                           <input type="hidden" name="manual_edit_entry_id" value="{{ row.safe_write_entry_id|default:row.entry_id }}">
-                          <label for="manual-edit-{{ row.safe_write_entry_id|default:row.row_id }}">Translation</label>
-                          <textarea id="manual-edit-{{ row.safe_write_entry_id|default:row.row_id }}" name="manual_edit_value" class="tw-manual-edit-textarea" required>{{ row.proposed_translation }}</textarea>
-                          <div class="tw-manual-edit-note">OpenAI original available in Technical details. Manual save only updates the local report override.</div>
+                          {% if row.is_html_field %}
+                            <label for="manual-edit-{{ row.safe_write_entry_id|default:row.row_id }}">Full product description HTML</label>
+                            <div class="tw-manual-edit-note">This is the full translated product description. The preview above may be scrolled to a different section.</div>
+                            <div class="tw-manual-edit-note">Saving only updates the local translation result. Shopify is not updated.</div>
+                            <div class="tw-manual-html-editor">
+                              <input class="tw-html-mode-input tw-html-preview-mode" type="radio" id="tw-manual-preview-{{ row.safe_write_entry_id|default:row.row_id }}" name="tw-manual-mode-{{ row.safe_write_entry_id|default:row.row_id }}" checked>
+                              <label class="tw-html-mode-tab" for="tw-manual-preview-{{ row.safe_write_entry_id|default:row.row_id }}">Preview</label>
+                              <input class="tw-html-mode-input tw-html-code-mode" type="radio" id="tw-manual-code-{{ row.safe_write_entry_id|default:row.row_id }}" name="tw-manual-mode-{{ row.safe_write_entry_id|default:row.row_id }}">
+                              <label class="tw-html-mode-tab" for="tw-manual-code-{{ row.safe_write_entry_id|default:row.row_id }}">HTML code</label>
+                              <button type="button" class="button tw-secondary-button" data-jump-preview-top>Jump preview to top</button>
+                              <div class="tw-html-pane tw-html-preview-pane">
+                                <div class="tw-html-preview is-target tw-manual-html-preview">{{ row.comparison_translation_html_preview|default:row.generated_draft_html_preview }}</div>
+                              </div>
+                              <div class="tw-html-pane tw-html-code-pane">
+                                <label class="tw-manual-html-code-label" for="manual-edit-{{ row.safe_write_entry_id|default:row.row_id }}">HTML code starts from the beginning of the description</label>
+                                <textarea id="manual-edit-{{ row.safe_write_entry_id|default:row.row_id }}" name="manual_edit_value" class="tw-manual-edit-textarea is-html-code" required>{{ row.proposed_translation }}</textarea>
+                              </div>
+                            </div>
+                            <div class="tw-manual-edit-note">OpenAI original available in Technical details.</div>
+                          {% else %}
+                            <label for="manual-edit-{{ row.safe_write_entry_id|default:row.row_id }}">Translation</label>
+                            <textarea id="manual-edit-{{ row.safe_write_entry_id|default:row.row_id }}" name="manual_edit_value" class="tw-manual-edit-textarea" required>{{ row.proposed_translation }}</textarea>
+                            <div class="tw-manual-edit-note">OpenAI original available in Technical details. Saving only updates the local translation result. Shopify is not updated.</div>
+                          {% endif %}
                           <div class="tw-manual-edit-actions">
                             <button type="submit" class="button">Save local edit</button>
                             <button type="button" class="button" data-manual-edit-cancel>Cancel edit</button>
@@ -6308,8 +6359,21 @@
         }
         card.classList.toggle("is-editing", isEditing);
         var textarea = card.querySelector("[data-manual-edit-form] textarea");
-        if (isEditing && textarea) {
+        if (isEditing && textarea && !card.classList.contains("is-description")) {
           textarea.focus();
+        }
+      }
+      function jumpPreviewToTop(card) {
+        if (!card) {
+          return;
+        }
+        Array.prototype.slice.call(card.querySelectorAll(".tw-html-preview"))
+          .forEach(function (preview) {
+            preview.scrollTop = 0;
+          });
+        var targetPreview = card.querySelector(".tw-html-preview.is-target") || card.querySelector(".tw-html-preview");
+        if (targetPreview && targetPreview.scrollIntoView) {
+          targetPreview.scrollIntoView({ block: "nearest" });
         }
       }
       Array.prototype.slice.call(document.querySelectorAll("[data-manual-edit-toggle]"))
@@ -6322,6 +6386,12 @@
         .forEach(function (button) {
           button.addEventListener("click", function () {
             setEditing(button.closest("[data-result-card]"), false);
+          });
+        });
+      Array.prototype.slice.call(document.querySelectorAll("[data-jump-preview-top]"))
+        .forEach(function (button) {
+          button.addEventListener("click", function () {
+            jumpPreviewToTop(button.closest("[data-result-card]"));
           });
         });
     }());
