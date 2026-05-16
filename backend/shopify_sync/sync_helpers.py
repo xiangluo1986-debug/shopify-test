@@ -1,7 +1,9 @@
 import re
+import random
 import time
+from email.utils import parsedate_to_datetime
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -45,6 +47,13 @@ ORDER_SYNC_TASK_NAMES = [
     "orders_manual_60",
     "orders_manual",
 ]
+
+SHOPIFY_READ_MAX_RETRIES = 10
+SHOPIFY_RETRY_MAX_DELAY_SECONDS = 60
+
+
+class ShopifyRateLimitError(requests.exceptions.HTTPError):
+    """Raised when Shopify 429 handling is intentionally stopped or exhausted."""
 
 
 def summarize_sync_result(result):
@@ -167,40 +176,115 @@ def has_ship_from_china_tag(order):
     return "ship from china" in normalized_tags
 
 
-def _shopify_retry_delay(response, attempt):
+def _parse_retry_after_seconds(value):
+    if value is None:
+        return None
+    try:
+        return max(float(value), 0)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        retry_at = parsedate_to_datetime(str(value))
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if retry_at is None:
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=datetime_timezone.utc)
+    return max((retry_at - timezone.now()).total_seconds(), 0)
+
+
+def _shopify_retry_delay(response, retry_index):
     retry_after = response.headers.get("Retry-After")
-    if retry_after:
-        try:
-            return max(float(retry_after), 0)
-        except ValueError:
-            pass
-    return min(2 + attempt, 5)
+    retry_after_seconds = _parse_retry_after_seconds(retry_after)
+    if retry_after_seconds is not None:
+        return retry_after_seconds, "Retry-After"
+
+    base_delay = min(2 * (2 ** retry_index), SHOPIFY_RETRY_MAX_DELAY_SECONDS)
+    jitter = random.uniform(0, min(1.0, base_delay * 0.1))
+    return min(base_delay + jitter, SHOPIFY_RETRY_MAX_DELAY_SECONDS), "exponential backoff"
 
 
-def shopify_get(url, access_token, params=None, timeout=30, max_retries=5):
+def _shopify_request_context(url, request_context=None):
+    if request_context:
+        return request_context
+    parsed = urlparse(url)
+    return parsed.path or "Shopify API request"
+
+
+def _coerce_delay_seconds(value):
+    try:
+        return max(float(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def shopify_get(
+    url,
+    access_token,
+    params=None,
+    timeout=30,
+    max_retries=SHOPIFY_READ_MAX_RETRIES,
+    request_context=None,
+    stop_on_429=False,
+    retry_callback=None,
+    request_delay=0,
+):
     headers = {
         "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json",
     }
+    max_retries = max(int(max_retries), 0)
+    context = _shopify_request_context(url, request_context)
+    success_delay = _coerce_delay_seconds(request_delay)
+    response = None
 
     for attempt in range(max_retries + 1):
         response = requests.get(url, params=params, headers=headers, timeout=timeout)
-        if response.status_code == 429 or 500 <= response.status_code < 600:
+        status_code = response.status_code
+        if status_code == 429 and stop_on_429:
+            raise ShopifyRateLimitError(
+                f"Shopify API returned 429 for {context}; stopped because stop_on_429 is enabled.",
+                response=response,
+            )
+
+        if status_code == 429 or 500 <= status_code < 600:
             if attempt >= max_retries:
+                if status_code == 429:
+                    raise ShopifyRateLimitError(
+                        f"Shopify API returned 429 after {max_retries} retries for {context}.",
+                        response=response,
+                    )
                 response.raise_for_status()
-            delay = _shopify_retry_delay(response, attempt)
+            delay, delay_source = _shopify_retry_delay(response, attempt)
+            retry_attempt = attempt + 1
+            retry_event = {
+                "status_code": status_code,
+                "delay_seconds": delay,
+                "delay_source": delay_source,
+                "retry_attempt": retry_attempt,
+                "max_retries": max_retries,
+                "context": context,
+            }
+            if retry_callback:
+                retry_callback(retry_event)
             print(
-                f"Warning: Shopify API returned {response.status_code}; "
-                f"retrying in {delay:.1f}s ({attempt + 1}/{max_retries})."
+                f"Warning: Shopify API returned {status_code} for {context}; "
+                f"retry attempt {retry_attempt}/{max_retries} in {delay:.1f}s "
+                f"({delay_source})."
             )
             time.sleep(delay)
             continue
 
         response.raise_for_status()
+        if success_delay:
+            time.sleep(success_delay)
         return response
 
-    response.raise_for_status()
-    return response
+    if response is not None:
+        response.raise_for_status()
+    raise requests.exceptions.RequestException("Shopify GET failed before receiving a response.")
 
 
 def normalize_location_name(name):
@@ -235,16 +319,54 @@ def summarize_current_locations(fulfillment_orders):
     return "mixed", ", ".join(sorted(raw_names))
 
 
-def shopify_request_json(url, access_token, params=None, timeout=30):
-    response = shopify_get(url, access_token, params=params, timeout=timeout)
+def shopify_request_json(
+    url,
+    access_token,
+    params=None,
+    timeout=30,
+    max_retries=SHOPIFY_READ_MAX_RETRIES,
+    request_context=None,
+    stop_on_429=False,
+    retry_callback=None,
+    request_delay=0,
+):
+    response = shopify_get(
+        url,
+        access_token,
+        params=params,
+        timeout=timeout,
+        max_retries=max_retries,
+        request_context=request_context,
+        stop_on_429=stop_on_429,
+        retry_callback=retry_callback,
+        request_delay=request_delay,
+    )
     return response.json()
 
 
-def fetch_shopify_orders(shop_domain, access_token, start_date_str):
+def fetch_shopify_order_pages(
+    shop_domain,
+    access_token,
+    start_date_str,
+    request_delay=0,
+    max_pages=None,
+    max_retries=SHOPIFY_READ_MAX_RETRIES,
+    stop_on_429=False,
+    retry_callback=None,
+):
     api_url = f"https://{shop_domain}/admin/api/2024-01/orders.json"
     page_info = None
     seen_page_info = set()
+    page_number = 0
+    total_fetched = 0
+    request_delay = _coerce_delay_seconds(request_delay)
+    if max_pages is not None:
+        max_pages = max(int(max_pages), 0)
+
     while True:
+        if max_pages is not None and page_number >= max_pages:
+            break
+        page_number += 1
         if page_info:
             params = {"limit": 250, "page_info": page_info}
         else:
@@ -255,17 +377,45 @@ def fetch_shopify_orders(shop_domain, access_token, start_date_str):
                 "fields": "id,name,order_number,created_at,financial_status,fulfillment_status,total_price,total_tip_received,currency,customer,shipping_address,line_items,tags,note,note_attributes"
             }
 
-        response = shopify_get(api_url, access_token, params=params, timeout=30)
+        response = shopify_get(
+            api_url,
+            access_token,
+            params=params,
+            timeout=30,
+            max_retries=max_retries,
+            request_context=f"orders page {page_number}",
+            stop_on_429=stop_on_429,
+            retry_callback=retry_callback,
+            request_delay=request_delay,
+        )
         data = response.json()
         orders = data.get("orders", [])
-        for order in orders:
-            yield order, data
-
+        total_fetched += len(orders)
         link_header = response.headers.get("Link", "")
         next_page_info = get_next_page_info_from_link_header(link_header)
+        repeated_page_info = bool(next_page_info and next_page_info in seen_page_info)
+        stopped_by_max_pages = bool(
+            next_page_info and max_pages is not None and page_number >= max_pages
+        )
+        page_meta = {
+            "page_number": page_number,
+            "orders_fetched": len(orders),
+            "total_fetched": total_fetched,
+            "has_next_page": bool(next_page_info)
+            and not repeated_page_info
+            and not stopped_by_max_pages,
+            "request_delay_seconds": request_delay,
+            "stopped_by_max_pages": stopped_by_max_pages,
+            "repeated_page_info": repeated_page_info,
+        }
+        yield orders, data, page_meta
+
         if next_page_info:
-            if next_page_info in seen_page_info:
+            if repeated_page_info:
                 print("Warning: repeated Shopify orders page_info detected; stopping pagination.")
+                break
+            if stopped_by_max_pages:
+                print(f"Info: reached max_pages={max_pages}; stopping Shopify order pagination.")
                 break
             seen_page_info.add(next_page_info)
             page_info = next_page_info
@@ -273,21 +423,93 @@ def fetch_shopify_orders(shop_domain, access_token, start_date_str):
         break
 
 
-def fetch_order_fulfillment_orders(shop_domain, order_id, access_token):
+def fetch_shopify_orders(
+    shop_domain,
+    access_token,
+    start_date_str,
+    request_delay=0,
+    max_pages=None,
+    max_retries=SHOPIFY_READ_MAX_RETRIES,
+    stop_on_429=False,
+    retry_callback=None,
+):
+    for orders, data, _page_meta in fetch_shopify_order_pages(
+        shop_domain,
+        access_token,
+        start_date_str,
+        request_delay=request_delay,
+        max_pages=max_pages,
+        max_retries=max_retries,
+        stop_on_429=stop_on_429,
+        retry_callback=retry_callback,
+    ):
+        for order in orders:
+            yield order, data
+
+
+def fetch_order_fulfillment_orders(
+    shop_domain,
+    order_id,
+    access_token,
+    request_delay=0,
+    max_retries=SHOPIFY_READ_MAX_RETRIES,
+    stop_on_429=False,
+    retry_callback=None,
+):
     api_url = f"https://{shop_domain}/admin/api/2024-01/orders/{order_id}/fulfillment_orders.json"
-    data = shopify_request_json(api_url, access_token)
+    data = shopify_request_json(
+        api_url,
+        access_token,
+        max_retries=max_retries,
+        request_context=f"fulfillment orders for order {order_id}",
+        stop_on_429=stop_on_429,
+        retry_callback=retry_callback,
+        request_delay=request_delay,
+    )
     return data.get("fulfillment_orders", [])
 
 
-def fetch_order_fulfillments(shop_domain, order_id, access_token):
+def fetch_order_fulfillments(
+    shop_domain,
+    order_id,
+    access_token,
+    request_delay=0,
+    max_retries=SHOPIFY_READ_MAX_RETRIES,
+    stop_on_429=False,
+    retry_callback=None,
+):
     api_url = f"https://{shop_domain}/admin/api/2024-01/orders/{order_id}/fulfillments.json"
-    data = shopify_request_json(api_url, access_token)
+    data = shopify_request_json(
+        api_url,
+        access_token,
+        max_retries=max_retries,
+        request_context=f"fulfillments for order {order_id}",
+        stop_on_429=stop_on_429,
+        retry_callback=retry_callback,
+        request_delay=request_delay,
+    )
     return data.get("fulfillments", [])
 
 
-def fetch_location_name(shop_domain, location_id, access_token):
+def fetch_location_name(
+    shop_domain,
+    location_id,
+    access_token,
+    request_delay=0,
+    max_retries=SHOPIFY_READ_MAX_RETRIES,
+    stop_on_429=False,
+    retry_callback=None,
+):
     api_url = f"https://{shop_domain}/admin/api/2024-01/locations/{location_id}.json"
-    data = shopify_request_json(api_url, access_token)
+    data = shopify_request_json(
+        api_url,
+        access_token,
+        max_retries=max_retries,
+        request_context=f"location {location_id}",
+        stop_on_429=stop_on_429,
+        retry_callback=retry_callback,
+        request_delay=request_delay,
+    )
     location = data.get("location", {})
     return location.get("name", "")
 
