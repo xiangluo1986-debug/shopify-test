@@ -43,6 +43,13 @@ SAFE_WRITE_READINESS_FIELD_SET = set(SAFE_WRITE_READINESS_FIELDS)
 LOCKED_EXECUTION_ALLOWED_FIELDS = SAFE_WRITE_READINESS_FIELDS
 LOCKED_EXECUTION_ALLOWED_FIELD_SET = set(LOCKED_EXECUTION_ALLOWED_FIELDS)
 LOCKED_EXECUTION_SUPPORTED_LOCALES = {"de", "es", "fr", "it", "ja"}
+LOCKED_EXECUTION_LOCALE_LABEL_ALIASES = {
+    "japanese": "ja",
+    "german": "de",
+    "french": "fr",
+    "spanish": "es",
+    "italian": "it",
+}
 LOCKED_EXECUTION_EXCLUDED_SCOPE_GROUPS = (
     "body_html",
     "options",
@@ -101,7 +108,7 @@ def build_translation_workspace_safe_write_readiness_state(
     product_gid = str(selected_product_gid or report.get("product_gid") or "").strip()
     report_product_gid = str(report.get("product_gid") or "").strip()
     report_detail_summary = report.get("report_detail_summary") or {}
-    locale = str(selected_locale or "").strip()
+    locale = _safe_write_canonical_locale(selected_locale)
     rows = [
         _safe_write_entry_from_row(row, product_gid=product_gid)
         for row in (report.get("review_rows") or [])
@@ -244,7 +251,7 @@ def build_translation_workspace_selected_apply_state(
     product_gid = str(selected_product_gid or report.get("product_gid") or "").strip()
     report_product_gid = str(report.get("product_gid") or "").strip()
     report_detail_summary = report.get("report_detail_summary") or {}
-    locale = str(selected_locale or "").strip()
+    locale = _safe_write_canonical_locale(selected_locale)
     rows = [
         _selected_apply_entry_from_row(row, product_gid=product_gid)
         for row in (report.get("review_rows") or [])
@@ -1218,7 +1225,7 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
         "existing_translation_preview",
     )
     digest = str(row.get("source_digest") or row.get("digest") or "").strip()
-    locale = str(row.get("locale") or row.get("language") or "").strip()
+    locale = _safe_write_canonical_locale(row.get("locale") or row.get("language"))
     resource_id = str(row.get("resource_id") or "").strip()
     existing_present = _safe_write_bool(
         row.get("current_translation_present", row.get("existing_translation_present"))
@@ -1380,7 +1387,7 @@ def _selected_apply_block_reason(entry: dict, *, product_gid: str):
     group_key = entry.get("field_group", "")
     proposed_value = str(entry.get("proposed_translation_value") or "").strip()
     source_value = str(entry.get("source_value") or "").strip()
-    locale = str(entry.get("locale") or "").strip()
+    locale = _safe_write_canonical_locale(entry.get("locale"))
     if group_key in SAFE_WRITE_MAPPING_REQUIRED_GROUPS:
         return "blocked_future_write_needs_resource_mapping"
     if group_key in SAFE_WRITE_TECHNICAL_GROUPS:
@@ -1577,12 +1584,38 @@ def _safe_write_entry_id(resource_id: str, key: str, locale: str, digest: str):
 def _safe_write_locale_options(rows: list[dict], selected_locale: str):
     seen = []
     for row in rows or []:
-        locale = row.get("locale", "")
+        locale = _safe_write_canonical_locale(row.get("locale", ""))
         if locale and locale not in seen:
             seen.append(locale)
+    selected_locale = _safe_write_canonical_locale(selected_locale)
     if selected_locale and selected_locale not in seen:
         seen.insert(0, selected_locale)
     return [{"value": locale, "label": locale} for locale in seen]
+
+
+def _safe_write_canonical_locale(locale: str) -> str:
+    text = str(locale or "").strip()
+    if not text:
+        return ""
+    normalized = text.lower().replace("_", "-")
+    candidates = [normalized]
+    if "(" in normalized and ")" in normalized:
+        candidates.append(normalized.rsplit("(", 1)[1].split(")", 1)[0].strip())
+    if " " in normalized:
+        candidates.append(normalized.split(" ", 1)[0].strip())
+    if "-" in normalized:
+        candidates.append(normalized.split("-", 1)[0].strip())
+    alias = LOCKED_EXECUTION_LOCALE_LABEL_ALIASES.get(normalized)
+    if alias:
+        candidates.append(alias)
+    for candidate in candidates:
+        candidate = str(candidate or "").strip().lower()
+        if candidate in LOCKED_EXECUTION_SUPPORTED_LOCALES:
+            return candidate
+        base_locale = candidate.split("-", 1)[0]
+        if base_locale in LOCKED_EXECUTION_SUPPORTED_LOCALES:
+            return base_locale
+    return text
 
 
 def _safe_write_state_blocking_conditions(

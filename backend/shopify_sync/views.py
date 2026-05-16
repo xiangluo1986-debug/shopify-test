@@ -277,6 +277,16 @@ TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS = [
 ]
 TRANSLATION_WORKSPACE_RESULT_VISIBLE_STATUSES = {"completed", "partial"}
 TRANSLATION_WORKSPACE_RESULT_PRIMARY_GROUPS = {"product_basics", "seo"}
+TRANSLATION_EDITOR_LOCALE_LABELS = {
+    "ja": "Japanese",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+}
+TRANSLATION_EDITOR_LOCALE_LABEL_ALIASES = {
+    label.lower(): code for code, label in TRANSLATION_EDITOR_LOCALE_LABELS.items()
+}
 TRANSLATION_WORKSPACE_RESULT_GROUP_ORDER = {
     "product_basics": 0,
     "seo": 1,
@@ -1242,11 +1252,11 @@ def translation_console(request):
     raw_locale = (
         request_params.get("target_locale", "") or request_params.get("locale", "ja")
     )
-    requested_action_locale = ((raw_locale or "ja") or "ja").strip()
+    requested_action_locale = _translation_editor_canonical_locale(raw_locale or "ja") or "ja"
     locale = requested_action_locale
     if locale not in SUPPORTED_TRANSLATION_LOCALES:
         translation_console_warnings.append(
-            f"Unsupported locale '{locale}' was ignored; using {SUPPORTED_TRANSLATION_LOCALES[0]}."
+            f"Unsupported locale '{raw_locale}' was ignored; using {SUPPORTED_TRANSLATION_LOCALES[0]}."
         )
         locale = SUPPORTED_TRANSLATION_LOCALES[0]
     raw_ui_mode = request_params.get("ui_mode", "") or request_params.get("view_mode", "")
@@ -3404,7 +3414,7 @@ def _translation_workspace_requested_draft_locales(
     requested = []
     invalid = []
     for raw_locale in raw_locales:
-        locale = str(raw_locale or "").strip()
+        locale = _translation_editor_canonical_locale(raw_locale)
         if not locale:
             continue
         if locale not in allowed_locales:
@@ -3420,7 +3430,10 @@ def _translation_workspace_draft_locale_options(
     selected_locale: str,
     requested_locales: list[str] | None = None,
 ):
-    checked_locales = set(requested_locales or [selected_locale])
+    checked_locales = {
+        _translation_editor_canonical_locale(locale)
+        for locale in (requested_locales or [selected_locale])
+    }
     return [
         {
             "value": locale,
@@ -3965,17 +3978,24 @@ def _translation_workspace_find_review_row(status: dict, entry_id: str):
     for row in status.get("review_rows") or []:
         if not isinstance(row, dict):
             continue
-        row_entry_id = (
-            row.get("safe_write_entry_id")
-            or row.get("entry_id")
-            or _translation_workspace_safe_write_entry_id(
+        raw_locale = row.get("locale") or row.get("language", "")
+        row_entry_ids = [
+            row.get("safe_write_entry_id"),
+            row.get("entry_id"),
+            _translation_workspace_safe_write_entry_id(
                 row.get("resource_id", ""),
                 row.get("field") or row.get("key", ""),
-                row.get("locale") or row.get("language", ""),
+                raw_locale,
                 row.get("digest") or row.get("source_digest", ""),
-            )
-        )
-        if row_entry_id == entry_id:
+            ),
+            _translation_workspace_safe_write_entry_id(
+                row.get("resource_id", ""),
+                row.get("field") or row.get("key", ""),
+                _translation_editor_canonical_locale(raw_locale),
+                row.get("digest") or row.get("source_digest", ""),
+            ),
+        ]
+        if entry_id in {str(row_entry_id or "").strip() for row_entry_id in row_entry_ids}:
             return row
     return None
 
@@ -5091,13 +5111,13 @@ def _translation_workspace_translation_result_groups(
     language_groups = []
     language_lookup = {}
     locale_status_lookup = {
-        row.get("locale"): _translation_workspace_locale_status_view(row)
+        _translation_editor_canonical_locale(row.get("locale")): _translation_workspace_locale_status_view(row)
         for row in (locale_status_rows or [])
-        if isinstance(row, dict) and row.get("locale")
+        if isinstance(row, dict) and _translation_editor_canonical_locale(row.get("locale"))
     }
 
     def language_group_for(language: str):
-        language = str(language or "").strip() or "-"
+        language = _translation_editor_canonical_locale(language) or "-"
         language_group = language_lookup.get(language)
         if language_group:
             return language_group
@@ -5161,7 +5181,10 @@ def _translation_workspace_translation_result_groups(
     for row in review_rows or []:
         if not _translation_workspace_should_show_result_row(row):
             continue
-        language = str(row.get("language") or row.get("locale") or "").strip() or "-"
+        language = (
+            _translation_editor_canonical_locale(row.get("language") or row.get("locale"))
+            or "-"
+        )
         language_group = language_group_for(language)
         group_key = str(row.get("group_key") or "").strip() or "other"
         group_lookup = language_group["_group_lookup"]
@@ -5281,7 +5304,7 @@ def _translation_workspace_language_group_status(group: dict):
 def _translation_workspace_language_empty_message(locale_status: dict):
     status_value = str((locale_status or {}).get("status") or "pending")
     locale_label = (locale_status or {}).get("locale_label") or _translation_editor_locale_label(
-        (locale_status or {}).get("locale", "")
+        _translation_editor_canonical_locale((locale_status or {}).get("locale", ""))
     )
     if status_value == "running":
         return "Translation is still running for this language."
@@ -5334,6 +5357,9 @@ def _translation_workspace_should_show_result_row(row: dict):
 
 def _translation_workspace_result_card_row(row: dict):
     display_row = dict(row)
+    locale = _translation_editor_canonical_locale(
+        row.get("language") or row.get("locale", "")
+    )
     status_key, status_label = _translation_workspace_result_row_status(row)
     raw_reasons = _translation_workspace_result_raw_reason_codes(row)
     reason_labels = _translation_workspace_human_reason_labels(raw_reasons, row=row)
@@ -5370,8 +5396,10 @@ def _translation_workspace_result_card_row(row: dict):
     display_row.update(
         {
             "language_label": _translation_editor_locale_label(
-                row.get("language") or row.get("locale", "")
+                locale
             ),
+            "language": locale,
+            "locale": locale,
             "field_label": _translation_workspace_result_field_label(row),
             "result_status_key": status_key,
             "result_status_label": status_label,
@@ -5781,7 +5809,7 @@ def _translation_workspace_job_review_row(row: dict):
     field = str(row.get("field") or row.get("key") or "").strip()
     normalized_field = _translation_editor_normalize_field_key(field)
     resource_key = str(row.get("key") or row.get("resource_key") or field).strip()
-    locale = str(row.get("locale") or row.get("language") or "").strip()
+    locale = _translation_editor_canonical_locale(row.get("locale") or row.get("language"))
     resource_id = str(row.get("resource_id") or "").strip()
     digest = str(row.get("source_digest") or row.get("digest") or "").strip()
     safe_write_entry_id = _translation_workspace_safe_write_entry_id(
@@ -5892,7 +5920,7 @@ def _translation_workspace_job_review_row(row: dict):
         unprefixed=True,
     )
     return {
-        "language": row.get("language") or row.get("locale", ""),
+        "language": locale,
         "locale": locale,
         "group_key": group_key,
         "resource_group": row.get("resource_group") or group_key,
@@ -6311,7 +6339,7 @@ def _translation_workspace_locale_status_message(value, *, locale_label: str = "
 
 def _translation_workspace_locale_status_view(row: dict):
     item = dict(row or {})
-    locale = item.get("locale", "")
+    locale = _translation_editor_canonical_locale(item.get("locale", ""))
     locale_label = item.get("locale_label") or _translation_editor_locale_label(locale)
     status_value = str(item.get("status") or "pending")
     error_message = _translation_workspace_safe_text(
@@ -6336,6 +6364,7 @@ def _translation_workspace_locale_status_view(row: dict):
     item.update(
         {
             "locale_label": locale_label,
+            "locale": locale,
             "status": status_value,
             "status_label": _translation_workspace_locale_status_label(status_value),
             "status_key": status_value.replace(" ", "_"),
@@ -8799,14 +8828,34 @@ def _translation_editor_humanize_key(field_key: str) -> str:
 
 
 def _translation_editor_locale_label(locale: str) -> str:
-    labels = {
-        "ja": "Japanese",
-        "de": "German",
-        "fr": "French",
-        "es": "Spanish",
-        "it": "Italian",
-    }
-    return labels.get(locale, locale)
+    canonical_locale = _translation_editor_canonical_locale(locale)
+    return TRANSLATION_EDITOR_LOCALE_LABELS.get(canonical_locale, locale)
+
+
+def _translation_editor_canonical_locale(locale: str) -> str:
+    text = str(locale or "").strip()
+    if not text:
+        return ""
+    normalized = text.lower().replace("_", "-")
+    supported = set(SUPPORTED_TRANSLATION_LOCALES)
+    candidates = [normalized]
+    if "(" in normalized and ")" in normalized:
+        candidates.append(normalized.rsplit("(", 1)[1].split(")", 1)[0].strip())
+    if " " in normalized:
+        candidates.append(normalized.split(" ", 1)[0].strip())
+    if "-" in normalized:
+        candidates.append(normalized.split("-", 1)[0].strip())
+    alias = TRANSLATION_EDITOR_LOCALE_LABEL_ALIASES.get(normalized)
+    if alias:
+        candidates.append(alias)
+    for candidate in candidates:
+        candidate = str(candidate or "").strip().lower()
+        if candidate in supported:
+            return candidate
+        base_locale = candidate.split("-", 1)[0]
+        if base_locale in supported:
+            return base_locale
+    return text
 
 
 def _empty_apply_plan_preview_result(reason: str):

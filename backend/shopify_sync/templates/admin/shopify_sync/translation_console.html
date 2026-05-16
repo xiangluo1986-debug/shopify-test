@@ -6034,32 +6034,64 @@
             return;
           }
 
+          function canonicalLocale(value) {
+            var text = String(value || "").trim();
+            var normalized = text.toLowerCase().replace(/_/g, "-");
+            var aliases = {
+              "japanese": "ja",
+              "german": "de",
+              "french": "fr",
+              "spanish": "es",
+              "italian": "it"
+            };
+            var supported = {"ja": true, "de": true, "fr": true, "es": true, "it": true};
+            var candidates = [normalized];
+            var parenMatch = normalized.match(/\(([a-z]{2})(?:[-_][a-z0-9]+)?\)\s*$/);
+            if (parenMatch) {
+              candidates.push(parenMatch[1]);
+            }
+            candidates.push(normalized.split(/\s+/)[0]);
+            candidates.push(normalized.split("-")[0]);
+            if (aliases[normalized]) {
+              candidates.push(aliases[normalized]);
+            }
+            for (var i = 0; i < candidates.length; i += 1) {
+              var candidate = String(candidates[i] || "").trim();
+              if (supported[candidate]) {
+                return candidate;
+              }
+            }
+            return text;
+          }
+
           function setApplyLocale(language) {
             var applyLocale = container.querySelector("[data-shopify-apply-locale]");
             if (!applyLocale) {
               return;
             }
-            var hasOption = Array.prototype.slice.call(applyLocale.options)
-              .some(function (option) {
-                return option.value === language;
-              });
-            if (!hasOption || applyLocale.value === language) {
+            var targetLocale = canonicalLocale(language);
+            var targetOption = Array.prototype.slice.call(applyLocale.options)
+              .filter(function (option) {
+                return canonicalLocale(option.value || option.textContent) === targetLocale;
+              })[0];
+            if (!targetOption || canonicalLocale(applyLocale.value) === targetLocale) {
               return;
             }
-            applyLocale.value = language;
+            applyLocale.value = targetOption.value;
             applyLocale.dispatchEvent(new Event("change", { bubbles: true }));
           }
 
           function selectLanguage(language) {
+            var targetLocale = canonicalLocale(language);
             buttons.forEach(function (button) {
-              var active = button.getAttribute("data-language-tab") === language;
+              var active = canonicalLocale(button.getAttribute("data-language-tab")) === targetLocale;
               button.classList.toggle("is-active", active);
               button.setAttribute("aria-selected", active ? "true" : "false");
             });
             panels.forEach(function (panel) {
-              panel.hidden = panel.getAttribute("data-language-panel") !== language;
+              panel.hidden = canonicalLocale(panel.getAttribute("data-language-panel")) !== targetLocale;
             });
-            setApplyLocale(language);
+            setApplyLocale(targetLocale);
           }
 
           buttons.forEach(function (button) {
@@ -6704,6 +6736,36 @@
       var disabledReason = form.querySelector("[data-shopify-apply-disabled-reason]");
       var resultCards = Array.prototype.slice.call(document.querySelectorAll("[data-result-card]"));
 
+      function canonicalLocale(value) {
+        var text = String(value || "").trim();
+        var normalized = text.toLowerCase().replace(/_/g, "-");
+        var aliases = {
+          "japanese": "ja",
+          "german": "de",
+          "french": "fr",
+          "spanish": "es",
+          "italian": "it"
+        };
+        var supported = {"ja": true, "de": true, "fr": true, "es": true, "it": true};
+        var candidates = [normalized];
+        var parenMatch = normalized.match(/\(([a-z]{2})(?:[-_][a-z0-9]+)?\)\s*$/);
+        if (parenMatch) {
+          candidates.push(parenMatch[1]);
+        }
+        candidates.push(normalized.split(/\s+/)[0]);
+        candidates.push(normalized.split("-")[0]);
+        if (aliases[normalized]) {
+          candidates.push(aliases[normalized]);
+        }
+        for (var i = 0; i < candidates.length; i += 1) {
+          var candidate = String(candidates[i] || "").trim();
+          if (supported[candidate]) {
+            return candidate;
+          }
+        }
+        return text;
+      }
+
       function selectedBoxes() {
         return checkboxes.filter(function (box) {
           return box.checked && !box.disabled;
@@ -6722,7 +6784,7 @@
       }
 
       function checkboxLocaleMatches(box, selectedLocale) {
-        return !selectedLocale || box.getAttribute("data-locale") === selectedLocale;
+        return !selectedLocale || canonicalLocale(box.getAttribute("data-locale")) === selectedLocale;
       }
 
       function setCheckboxAvailability(selectedLocale) {
@@ -6747,19 +6809,20 @@
 
       function hasSupportedCardForLocale(selectedLocale) {
         return resultCards.some(function (card) {
-          return (!selectedLocale || card.getAttribute("data-locale") === selectedLocale) &&
+          return (!selectedLocale || canonicalLocale(card.getAttribute("data-locale")) === selectedLocale) &&
             card.getAttribute("data-shopify-apply-supported") === "true";
         });
       }
 
       function switchLanguageToSelectedLocale(selectedLocale) {
-        if (!selectedLocale) {
+        var targetLocale = canonicalLocale(selectedLocale);
+        if (!targetLocale) {
           return;
         }
         var targetButton = null;
         Array.prototype.slice.call(document.querySelectorAll("[data-language-tab]"))
           .some(function (button) {
-            if (button.getAttribute("data-language-tab") === selectedLocale) {
+            if (canonicalLocale(button.getAttribute("data-language-tab")) === targetLocale) {
               targetButton = button;
               return true;
             }
@@ -6788,7 +6851,7 @@
         fieldLabel.textContent = "Field";
         var fieldValue = document.createElement("div");
         fieldValue.className = "tw-shopify-preview-value";
-        fieldValue.textContent = (box.getAttribute("data-locale") || "") + " / " + (box.getAttribute("data-field") || "");
+        fieldValue.textContent = (canonicalLocale(box.getAttribute("data-locale")) || "") + " / " + (box.getAttribute("data-field") || "");
         if (box.getAttribute("data-manual-edit") === "true") {
           fieldValue.textContent += " / manual edit";
         }
@@ -6822,14 +6885,14 @@
       }
 
       function updateApplyPanel() {
-        var selectedLocale = localeSelect ? localeSelect.value : "";
+        var selectedLocale = canonicalLocale(localeSelect ? localeSelect.value : "");
         setCheckboxAvailability(selectedLocale);
         var selected = selectedBoxes();
         var selectedFields = unique(selected.map(function (box) {
           return box.getAttribute("data-field-label") || box.getAttribute("data-field") || "";
         }));
         var localeMatches = selected.every(function (box) {
-          return !selectedLocale || box.getAttribute("data-locale") === selectedLocale;
+          return checkboxLocaleMatches(box, selectedLocale);
         });
         var productGid = productInput ? productInput.value : "";
         var eligibleForLocale = eligibleCountForLocale(selectedLocale);
@@ -6895,7 +6958,7 @@
       }
       if (localeSelect) {
         localeSelect.addEventListener("change", function () {
-          switchLanguageToSelectedLocale(localeSelect.value);
+          switchLanguageToSelectedLocale(canonicalLocale(localeSelect.value));
           updateApplyPanel();
         });
       }
