@@ -529,7 +529,7 @@
     align-items: center;
     margin: 8px 0;
     color: #374151;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
   }
   .tw-shopify-select-row label {
@@ -537,6 +537,28 @@
     gap: 6px;
     align-items: center;
     margin: 0;
+    min-height: 34px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #ffffff;
+    color: #111827;
+    padding: 6px 9px;
+  }
+  .tw-shopify-select-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+  }
+  .tw-shopify-select-row.is-eligible label {
+    border-color: #2563eb;
+    background: #eff6ff;
+  }
+  .tw-shopify-select-row.is-blocked label {
+    background: #f8fafc;
+    color: #475467;
+  }
+  .tw-shopify-select-row.is-wrong-locale {
+    opacity: 0.65;
   }
   .tw-shopify-selected-preview {
     display: grid;
@@ -563,6 +585,15 @@
     margin: 6px 0 0;
     color: #7c2d12;
     font-weight: 700;
+  }
+  .tw-shopify-apply-disabled-reason {
+    margin: 8px 0 0;
+    border: 1px solid #facc15;
+    border-radius: 6px;
+    background: #fffbeb;
+    color: #713f12;
+    font-weight: 700;
+    padding: 7px 9px;
   }
   .tw-shopify-preview-row {
     display: grid;
@@ -2621,10 +2652,21 @@
           <span class="tw-count-badge">Preview only</span>
         </div>
       </div>
+      <div class="tw-language-tabs" role="tablist" aria-label="Translation result languages">
+        {% for language_group in translation_background_job.translation_result_groups %}
+          <button type="button" class="tw-language-tab{% if language_group.is_default %} is-active{% endif %}" data-language-tab="{{ language_group.language }}" data-language-default="{% if language_group.is_default %}true{% else %}false{% endif %}" role="tab">
+            <span>
+              <span class="tw-language-tab-main">{{ language_group.language_label }} ({{ language_group.language }})</span>
+              <span class="tw-language-tab-counts" data-language-tab-counts>{{ language_group.tab_summary }}</span>
+            </span>
+            <span class="tw-status-badge is-{{ language_group.status_key }}" data-language-tab-status-badge>{{ language_group.status_label }}</span>
+          </button>
+        {% endfor %}
+      </div>
       <div class="tw-shopify-apply-panel" data-shopify-apply-panel>
         <div class="tw-results-heading">
           <h3>Shopify update</h3>
-          <span class="tw-count-badge">Preview only &mdash; Shopify has not been updated yet</span>
+          <span class="tw-count-badge">Preview only - Shopify has not been updated yet</span>
         </div>
         <form id="id_selected_translations_apply_form" method="post" action="{% url 'shopify_translation_console' %}" data-shopify-apply-form data-required-ack="{{ selected_translations_real_write_ack_phrase }}" data-max-selected="{{ selected_translations_apply_display.max_entry_count|default:3 }}">
           {% csrf_token %}
@@ -2657,6 +2699,7 @@
             </div>
             <button type="submit" class="button tw-danger-button" data-shopify-apply-submit disabled>Apply selected translations to Shopify</button>
           </div>
+          <div class="tw-shopify-apply-disabled-reason" data-shopify-apply-disabled-reason>Select 1-3 eligible translations first.</div>
           <div class="tw-shopify-selected-preview" data-shopify-selected-preview>
             <div class="tw-muted" data-shopify-selected-empty>Select title, SEO title, or SEO description to update Shopify.</div>
           </div>
@@ -2692,17 +2735,6 @@
           {% endif %}
         {% endif %}
       </div>
-      <div class="tw-language-tabs" role="tablist" aria-label="Translation result languages">
-        {% for language_group in translation_background_job.translation_result_groups %}
-          <button type="button" class="tw-language-tab{% if language_group.is_default %} is-active{% endif %}" data-language-tab="{{ language_group.language }}" data-language-default="{% if language_group.is_default %}true{% else %}false{% endif %}" role="tab">
-            <span>
-              <span class="tw-language-tab-main">{{ language_group.language_label }} ({{ language_group.language }})</span>
-              <span class="tw-language-tab-counts" data-language-tab-counts>{{ language_group.tab_summary }}</span>
-            </span>
-            <span class="tw-status-badge is-{{ language_group.status_key }}" data-language-tab-status-badge>{{ language_group.status_label }}</span>
-          </button>
-        {% endfor %}
-      </div>
       {% for language_group in translation_background_job.translation_result_groups %}
         <section class="tw-language-panel" data-language-panel="{{ language_group.language }}"{% if not language_group.is_default %} hidden{% endif %}>
           {% if language_group.count == 0 %}
@@ -2721,7 +2753,7 @@
                 </div>
                 <div class="tw-result-list">
                   {% for row in content_group.rows %}
-                    <article class="tw-result-card{% if row.is_html_field %} is-description{% endif %}" data-result-card data-locale="{{ language_group.language }}" data-group="{{ content_group.group_key }}">
+                    <article class="tw-result-card{% if row.is_html_field %} is-description{% endif %}" data-result-card data-locale="{{ language_group.language }}" data-group="{{ content_group.group_key }}" data-shopify-apply-supported="{% if row.shopify_apply_supported_field %}true{% else %}false{% endif %}">
                       <div class="tw-result-card-header">
                         <div>
                           <div class="tw-result-eyebrow">{{ row.language_label }} ({{ row.language }})</div>
@@ -2729,14 +2761,14 @@
                           {% if row.context_label %}<div class="tw-muted">{{ row.context_label }}</div>{% endif %}
                           {% if row.option_context_line %}<div class="tw-muted">{{ row.option_context_line }}</div>{% endif %}
                           {% if row.related_variants_label %}<div class="tw-muted">Related variants: {{ row.related_variants_label }}</div>{% endif %}
-                          {% if row.visible_product_option %}<div class="tw-muted">This option can be reviewed now; Shopify update support needs extra mapping.</div>{% endif %}
+                          {% if row.visible_product_option %}<div class="tw-muted">Options need extra Shopify mapping before update.</div>{% endif %}
                         </div>
                         <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
                       </div>
-                      <div class="tw-shopify-select-row">
+                      <div class="tw-shopify-select-row{% if row.shopify_apply_selectable %} is-eligible{% else %} is-blocked{% endif %}">
                         {% if row.shopify_apply_selectable %}
                           <label>
-                            <input type="checkbox" name="selected_shopify_entry_ids" value="{{ row.safe_write_entry_id|default:row.entry_id }}" form="id_selected_translations_apply_form" data-shopify-apply-checkbox data-field="{{ row.key }}" data-locale="{{ row.language }}" data-current-value="{{ row.existing_translation_summary|default:row.existing_translation_display|default:'-' }}" data-new-value="{{ row.generated_draft_summary|default:row.generated_draft_display|default:'Translation result ready' }}" data-manual-edit="{% if row.using_manual_edit %}true{% else %}false{% endif %}">
+                            <input type="checkbox" name="selected_shopify_entry_ids" value="{{ row.safe_write_entry_id|default:row.entry_id }}" form="id_selected_translations_apply_form" data-shopify-apply-checkbox data-field="{{ row.shopify_apply_field|default:row.field }}" data-field-label="{{ row.field_label }}" data-locale="{{ row.language }}" data-current-value="{{ row.existing_translation_summary|default:row.existing_translation_display|default:'-' }}" data-new-value="{{ row.generated_draft_summary|default:row.generated_draft_display|default:'Translation result ready' }}" data-manual-edit="{% if row.using_manual_edit %}true{% else %}false{% endif %}">
                             <span>Select for Shopify update</span>
                           </label>
                           {% if row.using_manual_edit %}<span class="tw-reason-chip">Manual edit will be used</span>{% endif %}
@@ -2745,7 +2777,7 @@
                             <input type="checkbox" disabled>
                             <span>Not eligible for Shopify update</span>
                           </label>
-                          <span class="tw-muted">{{ row.shopify_apply_block_reason_label|default:"Choose this language in the Shopify update panel to select it." }}</span>
+                          <span class="tw-muted">{{ row.shopify_apply_block_reason_label|default:"Switch to this language tab to select this row." }}</span>
                         {% endif %}
                       </div>
                       <div class="tw-result-compare-grid">
@@ -6002,6 +6034,22 @@
             return;
           }
 
+          function setApplyLocale(language) {
+            var applyLocale = container.querySelector("[data-shopify-apply-locale]");
+            if (!applyLocale) {
+              return;
+            }
+            var hasOption = Array.prototype.slice.call(applyLocale.options)
+              .some(function (option) {
+                return option.value === language;
+              });
+            if (!hasOption || applyLocale.value === language) {
+              return;
+            }
+            applyLocale.value = language;
+            applyLocale.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+
           function selectLanguage(language) {
             buttons.forEach(function (button) {
               var active = button.getAttribute("data-language-tab") === language;
@@ -6011,6 +6059,7 @@
             panels.forEach(function (panel) {
               panel.hidden = panel.getAttribute("data-language-panel") !== language;
             });
+            setApplyLocale(language);
           }
 
           buttons.forEach(function (button) {
@@ -6133,6 +6182,7 @@
         var preview = form.querySelector("[data-shopify-selected-preview]");
         var empty = form.querySelector("[data-shopify-selected-empty]");
         var ackWrap = form.querySelector("[data-shopify-ack-wrap]");
+        var disabledReason = form.querySelector("[data-shopify-apply-disabled-reason]");
         if (submit) {
           submit.disabled = true;
         }
@@ -6157,6 +6207,10 @@
         }
         if (ackWrap) {
           ackWrap.hidden = true;
+        }
+        if (disabledReason) {
+          disabledReason.textContent = "Select 1-3 eligible translations first.";
+          disabledReason.hidden = false;
         }
       }
 
@@ -6647,6 +6701,8 @@
       var localeSelect = form.querySelector("[data-shopify-apply-locale]");
       var productInput = form.querySelector("input[name='selected_product_gid']");
       var ackWrap = form.querySelector("[data-shopify-ack-wrap]");
+      var disabledReason = form.querySelector("[data-shopify-apply-disabled-reason]");
+      var resultCards = Array.prototype.slice.call(document.querySelectorAll("[data-result-card]"));
 
       function selectedBoxes() {
         return checkboxes.filter(function (box) {
@@ -6663,6 +6719,55 @@
           seen[value] = true;
           return true;
         });
+      }
+
+      function checkboxLocaleMatches(box, selectedLocale) {
+        return !selectedLocale || box.getAttribute("data-locale") === selectedLocale;
+      }
+
+      function setCheckboxAvailability(selectedLocale) {
+        checkboxes.forEach(function (box) {
+          var matches = checkboxLocaleMatches(box, selectedLocale);
+          if (!matches) {
+            box.checked = false;
+          }
+          box.disabled = !matches;
+          var row = box.closest ? box.closest(".tw-shopify-select-row") : null;
+          if (row) {
+            row.classList.toggle("is-wrong-locale", !matches);
+          }
+        });
+      }
+
+      function eligibleCountForLocale(selectedLocale) {
+        return checkboxes.filter(function (box) {
+          return checkboxLocaleMatches(box, selectedLocale);
+        }).length;
+      }
+
+      function hasSupportedCardForLocale(selectedLocale) {
+        return resultCards.some(function (card) {
+          return (!selectedLocale || card.getAttribute("data-locale") === selectedLocale) &&
+            card.getAttribute("data-shopify-apply-supported") === "true";
+        });
+      }
+
+      function switchLanguageToSelectedLocale(selectedLocale) {
+        if (!selectedLocale) {
+          return;
+        }
+        var targetButton = null;
+        Array.prototype.slice.call(document.querySelectorAll("[data-language-tab]"))
+          .some(function (button) {
+            if (button.getAttribute("data-language-tab") === selectedLocale) {
+              targetButton = button;
+              return true;
+            }
+            return false;
+          });
+        if (targetButton && !targetButton.classList.contains("is-active")) {
+          targetButton.click();
+        }
       }
 
       function clearPreviewRows() {
@@ -6717,15 +6822,44 @@
       }
 
       function updateApplyPanel() {
-        var selected = selectedBoxes();
         var selectedLocale = localeSelect ? localeSelect.value : "";
+        setCheckboxAvailability(selectedLocale);
+        var selected = selectedBoxes();
         var selectedFields = unique(selected.map(function (box) {
-          return box.getAttribute("data-field") || "";
+          return box.getAttribute("data-field-label") || box.getAttribute("data-field") || "";
         }));
         var localeMatches = selected.every(function (box) {
           return !selectedLocale || box.getAttribute("data-locale") === selectedLocale;
         });
         var productGid = productInput ? productInput.value : "";
+        var eligibleForLocale = eligibleCountForLocale(selectedLocale);
+        var enabled = (
+          selected.length >= 1 &&
+          selected.length <= maxSelected &&
+          localeMatches &&
+          Boolean(selectedLocale) &&
+          productGid.indexOf("gid://shopify/Product/") === 0 &&
+          ackInput &&
+          ackInput.value === requiredAck
+        );
+        var disabledMessage = "";
+        if (!enabled) {
+          if (!selectedLocale) {
+            disabledMessage = "Choose a language tab first.";
+          } else if (eligibleForLocale === 0) {
+            disabledMessage = hasSupportedCardForLocale(selectedLocale)
+              ? "No eligible Shopify update fields found for this language."
+              : "Only Product title, SEO title, and SEO description can be updated in this version.";
+          } else if (selected.length < 1 || selected.length > maxSelected) {
+            disabledMessage = "Select 1-3 eligible translations first.";
+          } else if (!localeMatches) {
+            disabledMessage = "Switch to this language tab to select this row.";
+          } else if (productGid.indexOf("gid://shopify/Product/") !== 0) {
+            disabledMessage = "Select a Shopify product first.";
+          } else if (!ackInput || ackInput.value !== requiredAck) {
+            disabledMessage = "Enter the exact ACK phrase.";
+          }
+        }
         if (countTarget) {
           countTarget.textContent = String(selected.length);
         }
@@ -6743,16 +6877,13 @@
         if (ackWrap) {
           ackWrap.hidden = selected.length === 0;
         }
+        if (disabledReason) {
+          disabledReason.textContent = disabledMessage;
+          disabledReason.hidden = enabled;
+        }
         if (submitButton) {
-          submitButton.disabled = !(
-            selected.length >= 1 &&
-            selected.length <= maxSelected &&
-            localeMatches &&
-            Boolean(selectedLocale) &&
-            productGid.indexOf("gid://shopify/Product/") === 0 &&
-            ackInput &&
-            ackInput.value === requiredAck
-          );
+          submitButton.disabled = !enabled;
+          submitButton.title = disabledMessage;
         }
       }
 
@@ -6763,7 +6894,10 @@
         ackInput.addEventListener("input", updateApplyPanel);
       }
       if (localeSelect) {
-        localeSelect.addEventListener("change", updateApplyPanel);
+        localeSelect.addEventListener("change", function () {
+          switchLanguageToSelectedLocale(localeSelect.value);
+          updateApplyPanel();
+        });
       }
       updateApplyPanel();
     }());

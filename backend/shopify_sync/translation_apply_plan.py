@@ -273,6 +273,7 @@ def build_translation_workspace_selected_apply_state(
         "product_title": report.get("product_title")
         or report_detail_summary.get("product_title", ""),
         "locale": locale,
+        "all_entries": rows,
         "locale_options": locale_options,
         "eligible_entries": eligible_entries,
         "blocked_entries": blocked_entries,
@@ -374,6 +375,7 @@ def apply_selected_translations_to_shopify(
         "product_gid": product_gid,
         "product_title": state.get("product_title", ""),
         "locale": locale,
+        "locale_options": state.get("locale_options", []),
         "selected_entry_count": len(selected_entries),
         "requested_selected_entry_count": len(selected_entry_ids),
         "max_entry_count": SAFE_WRITE_READINESS_MAX_ENTRY_COUNT,

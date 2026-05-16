@@ -332,20 +332,20 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "seo_description_over_160_chars": "SEO description is over 160 characters",
 }
 TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS = {
-    "blocked_body_html_forbidden_in_selected_apply": "Product description is not enabled for Shopify update yet.",
-    "blocked_body_html_manual_review_required": "Product description is not enabled for Shopify update yet.",
+    "blocked_body_html_forbidden_in_selected_apply": "Product description update is not enabled yet.",
+    "blocked_body_html_manual_review_required": "Product description update is not enabled yet.",
     "blocked_field_not_allowed_for_selected_apply": "Only title, SEO title, and SEO description can be updated in this phase.",
-    "blocked_future_write_needs_resource_mapping": "This option can be reviewed now; Shopify update support needs extra mapping.",
+    "blocked_future_write_needs_resource_mapping": "Missing Shopify write mapping.",
     "blocked_missing_generated_or_manual_translation": "No translation result is available for Shopify update.",
     "blocked_missing_generated_draft": "No translation result is available for Shopify update.",
-    "blocked_missing_resource_id_key_or_digest": "Shopify update mapping is incomplete for this row.",
-    "blocked_missing_write_mapping": "Shopify update mapping is incomplete for this row.",
+    "blocked_missing_resource_id_key_or_digest": "Missing Shopify write mapping.",
+    "blocked_missing_write_mapping": "Missing Shopify write mapping.",
     "blocked_no_selected_apply_eligible_entries": "Select title, SEO title, or SEO description to update Shopify.",
     "blocked_not_customer_write_safe": "This row is not enabled for Shopify update.",
     "blocked_product_identity_mismatch": "This row belongs to another product and cannot be selected.",
     "blocked_scope_group_not_allowed": "This row is not enabled for Shopify update.",
     "blocked_selected_product_report_mismatch": "Previous report belongs to another product and was hidden.",
-    "blocked_existing_current_translation": "Shopify already has a current translation for this row.",
+    "blocked_existing_current_translation": "Already up to date.",
     "blocked_proposed_translation_empty": "No translation result is available for Shopify update.",
     "blocked_proposed_translation_equals_source": "Translation matches the source text and cannot be selected.",
     "blocked_product_title_over_80_chars": "Product title is over 80 characters.",
@@ -356,7 +356,7 @@ TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS = {
     "blocked_draft_status": "This translation needs review before Shopify update.",
     "blocked_draft_manual_review_required": "This translation needs review before Shopify update.",
     "blocked_seo_manual_review_required": "SEO text needs review before Shopify update.",
-    "not_in_selected_locale": "Choose this language in the Shopify update panel to select it.",
+    "not_in_selected_locale": "Switch to this language tab to select this row.",
 }
 TRANSLATION_WORKSPACE_REVIEW_REASON_CODES = {
     "body_html_structure_broken",
@@ -5615,20 +5615,33 @@ def _attach_translation_workspace_safe_write_ui(
         )
         if entry.get("entry_id")
     }
-    selected_apply_entries_by_id = {
-        entry.get("entry_id"): entry
-        for entry in (
+    selected_apply_entries = list(
+        (selected_translations_apply_state or {}).get("all_entries") or []
+    )
+    if not selected_apply_entries:
+        selected_apply_entries = (
             list((selected_translations_apply_state or {}).get("eligible_entries") or [])
             + list((selected_translations_apply_state or {}).get("blocked_entries") or [])
         )
+    selected_apply_entries_by_id = {
+        entry.get("entry_id"): entry
+        for entry in selected_apply_entries
         if entry.get("entry_id")
     }
     for row in translation_background_job.get("review_rows") or []:
         entry_id = row.get("safe_write_entry_id") or row.get("entry_id")
         entry = entries_by_id.get(entry_id)
         selected_apply_entry = selected_apply_entries_by_id.get(entry_id)
+        apply_field = (
+            (selected_apply_entry or {}).get("key")
+            or _translation_editor_normalize_field_key(row.get("field") or row.get("key"))
+        )
+        row["shopify_apply_field"] = apply_field
+        row["shopify_apply_supported_field"] = (
+            apply_field in TRANSLATION_WORKSPACE_APPLY_SUPPORTED_FIELDS
+        )
         if not entry:
-            row["safe_write_entry_id"] = ""
+            row["safe_write_entry_id"] = (selected_apply_entry or {}).get("entry_id", "")
             row["safe_write_selectable"] = False
             row["safe_write_eligibility_status"] = "not_in_selected_locale"
             row["safe_write_block_reason"] = "not_in_selected_locale"
@@ -5680,15 +5693,15 @@ def _translation_workspace_shopify_apply_block_reason_label(row: dict):
     group_key = str(row.get("group_key") or row.get("resource_group") or "").strip()
     reason = str(row.get("shopify_apply_block_reason") or "").strip()
     if field == "body_html":
-        return "Product description is not enabled for Shopify update yet."
+        return "Product description update is not enabled yet."
     if group_key == "options":
-        return "This option can be reviewed now; Shopify update support needs extra mapping."
+        return "Options need extra Shopify mapping before update."
     if group_key == "variants":
-        return "Variants need extra mapping before Shopify update."
+        return "Variants need extra Shopify mapping before update."
     if group_key in {"important_metafields", "technical_metafields", "metafields"}:
-        return "Metafields need extra mapping before Shopify update."
+        return "Metafields need extra Shopify mapping before update."
     if group_key in {"media", "media_alt_text"}:
-        return "Media alt text needs extra mapping before Shopify update."
+        return "Media alt text update is not enabled yet."
     return TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS.get(
         reason,
         _translation_workspace_title_status(reason or "Not eligible for Shopify update"),
