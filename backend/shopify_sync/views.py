@@ -331,6 +331,33 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "seo_title_over_60_chars": "SEO title is over 60 characters",
     "seo_description_over_160_chars": "SEO description is over 160 characters",
 }
+TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS = {
+    "blocked_body_html_forbidden_in_selected_apply": "Product description is not enabled for Shopify update yet.",
+    "blocked_body_html_manual_review_required": "Product description is not enabled for Shopify update yet.",
+    "blocked_field_not_allowed_for_selected_apply": "Only title, SEO title, and SEO description can be updated in this phase.",
+    "blocked_future_write_needs_resource_mapping": "This option can be reviewed now; Shopify update support needs extra mapping.",
+    "blocked_missing_generated_or_manual_translation": "No translation result is available for Shopify update.",
+    "blocked_missing_generated_draft": "No translation result is available for Shopify update.",
+    "blocked_missing_resource_id_key_or_digest": "Shopify update mapping is incomplete for this row.",
+    "blocked_missing_write_mapping": "Shopify update mapping is incomplete for this row.",
+    "blocked_no_selected_apply_eligible_entries": "Select title, SEO title, or SEO description to update Shopify.",
+    "blocked_not_customer_write_safe": "This row is not enabled for Shopify update.",
+    "blocked_product_identity_mismatch": "This row belongs to another product and cannot be selected.",
+    "blocked_scope_group_not_allowed": "This row is not enabled for Shopify update.",
+    "blocked_selected_product_report_mismatch": "Previous report belongs to another product and was hidden.",
+    "blocked_existing_current_translation": "Shopify already has a current translation for this row.",
+    "blocked_proposed_translation_empty": "No translation result is available for Shopify update.",
+    "blocked_proposed_translation_equals_source": "Translation matches the source text and cannot be selected.",
+    "blocked_product_title_over_80_chars": "Product title is over 80 characters.",
+    "blocked_seo_title_over_60_chars": "SEO title is over 60 characters.",
+    "blocked_seo_description_over_160_chars": "SEO description is over 160 characters.",
+    "blocked_forbidden_phrase_detected": "Translation contains a blocked phrase.",
+    "blocked_identity_review_required": "This translation needs product identity review first.",
+    "blocked_draft_status": "This translation needs review before Shopify update.",
+    "blocked_draft_manual_review_required": "This translation needs review before Shopify update.",
+    "blocked_seo_manual_review_required": "SEO text needs review before Shopify update.",
+    "not_in_selected_locale": "Choose this language in the Shopify update panel to select it.",
+}
 TRANSLATION_WORKSPACE_REVIEW_REASON_CODES = {
     "body_html_structure_broken",
     "blocked",
@@ -1320,6 +1347,14 @@ def translation_console(request):
     multi_locale_draft_result = None
     translate_all_result = None
     translation_background_job = {}
+    translation_report_guard = {
+        "selected_product_gid": "",
+        "report_product_gid": "",
+        "report_visible": False,
+        "hidden_previous_report": False,
+        "warning": "",
+        "empty_message": "Select this product and click Translate all languages.",
+    }
     draft_error_message = ""
     apply_plan_result = None
     apply_plan_error_message = ""
@@ -1834,6 +1869,12 @@ def translation_console(request):
     translation_background_job = load_translation_workspace_background_job_status(
         translation_job_product_id
     )
+    translation_report_guard = _translation_workspace_report_guard(
+        translation_background_job,
+        selected_product_gid=translation_job_product_id,
+    )
+    if translation_report_guard["hidden_previous_report"]:
+        translation_background_job = {}
     if is_manual_translation_edit_post:
         manual_translation_edit_result = save_translation_workspace_manual_edit(
             product_gid=translation_job_product_id,
@@ -1844,6 +1885,12 @@ def translation_console(request):
         translation_background_job = load_translation_workspace_background_job_status(
             translation_job_product_id
         )
+        translation_report_guard = _translation_workspace_report_guard(
+            translation_background_job,
+            selected_product_gid=translation_job_product_id,
+        )
+        if translation_report_guard["hidden_previous_report"]:
+            translation_background_job = {}
     safe_write_readiness_state = build_translation_workspace_safe_write_readiness_state(
         translation_background_job,
         selected_product_gid=translation_job_product_id,
@@ -2516,6 +2563,7 @@ def translation_console(request):
             "multi_locale_draft_result": multi_locale_draft_result,
             "translate_all_result": translate_all_result,
             "translation_background_job": translation_background_job,
+            "translation_report_guard": translation_report_guard,
             "draft_error_message": draft_error_message,
             "apply_plan_result": apply_plan_result,
             "apply_plan_error_message": apply_plan_error_message,
@@ -2632,6 +2680,8 @@ def translation_console_job_status(request):
         return HttpResponseBadRequest("Invalid product_gid.")
     if raw_job_id and not _translation_workspace_valid_job_id(raw_job_id):
         return HttpResponseBadRequest("Invalid job_id.")
+    if raw_job_id and not product_gid:
+        return HttpResponseBadRequest("product_gid is required with job_id.")
 
     status = {}
     if raw_job_id:
@@ -3754,6 +3804,24 @@ def load_translation_workspace_background_job_status(product_gid: str):
         return {}
     status = _translation_workspace_mark_stale_if_needed(status)
     return _translation_workspace_job_status_for_view(status)
+
+
+def _translation_workspace_report_guard(report: dict | None, *, selected_product_gid: str):
+    selected_gid = normalize_product_gid(selected_product_gid or "") or ""
+    report_gid = normalize_product_gid((report or {}).get("product_gid") or "") or ""
+    hidden_previous_report = bool(report_gid and selected_gid and report_gid != selected_gid)
+    return {
+        "selected_product_gid": selected_gid,
+        "report_product_gid": report_gid,
+        "report_visible": bool(report) and not hidden_previous_report,
+        "hidden_previous_report": hidden_previous_report,
+        "warning": (
+            "Previous report belongs to another product and was hidden."
+            if hidden_previous_report
+            else ""
+        ),
+        "empty_message": "Select this product and click Translate all languages.",
+    }
 
 
 def save_translation_workspace_manual_edit(
@@ -5371,16 +5439,62 @@ def _translation_workspace_result_row_status(row: dict):
 
 
 def _translation_workspace_result_field_label(row: dict):
+    group_key = str(row.get("group_key") or row.get("resource_group") or "").strip()
+    field = str(row.get("field") or row.get("key") or "").strip()
+    normalized_field = _translation_editor_normalize_field_key(field)
+    if group_key == "options":
+        option_name = str(row.get("option_name") or "").strip()
+        option_value = str(row.get("option_value") or "").strip()
+        source_value = str(row.get("source_value") or "").strip()
+        if normalized_field == "option.name":
+            return f"Option name: {option_name or source_value or '-'}"
+        if normalized_field == "option.value":
+            return f"Option value: {option_value or source_value or '-'}"
     context_label = str(row.get("context_label") or "").strip()
     if context_label:
         return context_label
-    field = str(row.get("field") or row.get("key") or "").strip()
-    normalized_field = _translation_editor_normalize_field_key(field)
     if normalized_field in TRANSLATION_WORKSPACE_RESULT_FIELD_LABELS:
         return TRANSLATION_WORKSPACE_RESULT_FIELD_LABELS[normalized_field]
     if field in TRANSLATION_WORKSPACE_RESULT_FIELD_LABELS:
         return TRANSLATION_WORKSPACE_RESULT_FIELD_LABELS[field]
     return _translation_workspace_title_status(field)
+
+
+def _translation_workspace_option_context_line(row: dict):
+    option_name = str((row or {}).get("option_name") or "").strip()
+    option_value = str((row or {}).get("option_value") or "").strip()
+    option_position = str((row or {}).get("option_position") or "").strip()
+    parts = []
+    if option_name:
+        parts.append(f"Option: {option_name}")
+    if option_position:
+        parts.append(f"Position: {option_position}")
+    if option_value:
+        parts.append(f"Value: {option_value}")
+    return " | ".join(parts)
+
+
+def _translation_workspace_related_variants_label(related_variants):
+    labels = []
+    for item in related_variants or []:
+        if not isinstance(item, dict):
+            continue
+        label = " / ".join(
+            part
+            for part in (
+                str(item.get("title") or "").strip(),
+                f"SKU {item.get('sku')}" if item.get("sku") else "",
+            )
+            if part
+        )
+        if label and label not in labels:
+            labels.append(label)
+    if not labels:
+        return ""
+    suffix = ""
+    if len(labels) > 4:
+        suffix = f" and {len(labels) - 4} more"
+    return "; ".join(labels[:4]) + suffix
 
 
 def _translation_workspace_result_main_value(
@@ -5529,6 +5643,9 @@ def _attach_translation_workspace_safe_write_ui(
                 (selected_apply_entry or {}).get("blocked_reason")
                 or "not_in_selected_locale"
             )
+            row["shopify_apply_block_reason_label"] = (
+                _translation_workspace_shopify_apply_block_reason_label(row)
+            )
             continue
         row["safe_write_entry_id"] = entry.get("entry_id", "")
         row["safe_write_selectable"] = bool(entry.get("selectable"))
@@ -5538,6 +5655,9 @@ def _attach_translation_workspace_safe_write_ui(
             row["shopify_apply_selectable"] = False
             row["shopify_apply_eligibility_status"] = "not_in_selected_locale"
             row["shopify_apply_block_reason"] = "not_in_selected_locale"
+            row["shopify_apply_block_reason_label"] = (
+                _translation_workspace_shopify_apply_block_reason_label(row)
+            )
             continue
         row["shopify_apply_selectable"] = bool(selected_apply_entry.get("selectable"))
         row["shopify_apply_eligibility_status"] = selected_apply_entry.get(
@@ -5548,6 +5668,31 @@ def _attach_translation_workspace_safe_write_ui(
             "blocked_reason",
             "",
         )
+        row["shopify_apply_block_reason_label"] = (
+            _translation_workspace_shopify_apply_block_reason_label(row)
+        )
+
+
+def _translation_workspace_shopify_apply_block_reason_label(row: dict):
+    if row.get("shopify_apply_selectable"):
+        return ""
+    field = _translation_editor_normalize_field_key(row.get("field") or row.get("key"))
+    group_key = str(row.get("group_key") or row.get("resource_group") or "").strip()
+    reason = str(row.get("shopify_apply_block_reason") or "").strip()
+    if field == "body_html":
+        return "Product description is not enabled for Shopify update yet."
+    if group_key == "options":
+        return "This option can be reviewed now; Shopify update support needs extra mapping."
+    if group_key == "variants":
+        return "Variants need extra mapping before Shopify update."
+    if group_key in {"important_metafields", "technical_metafields", "metafields"}:
+        return "Metafields need extra mapping before Shopify update."
+    if group_key in {"media", "media_alt_text"}:
+        return "Media alt text needs extra mapping before Shopify update."
+    return TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS.get(
+        reason,
+        _translation_workspace_title_status(reason or "Not eligible for Shopify update"),
+    )
 
 
 def _translation_workspace_report_detail_summary(status: dict):
@@ -5749,6 +5894,25 @@ def _translation_workspace_job_review_row(row: dict):
         "entry_id": safe_write_entry_id,
         "safe_write_entry_id": safe_write_entry_id,
         "context_label": row.get("context_label", ""),
+        "resource_note": row.get("resource_note", ""),
+        "option_name": row.get("option_name", ""),
+        "option_value": row.get("option_value", ""),
+        "option_position": row.get("option_position", ""),
+        "related_variants": list(row.get("related_variants") or []),
+        "option_context_line": _translation_workspace_option_context_line(row),
+        "related_variants_label": _translation_workspace_related_variants_label(
+            row.get("related_variants") or []
+        ),
+        "visible_product_option": bool(row.get("visible_product_option")),
+        "translation_preview_available": bool(
+            row.get("translation_preview_available")
+        ),
+        "shopify_update_mapping_ready": bool(
+            row.get("shopify_update_mapping_ready")
+        ),
+        "translation_preview_without_digest": bool(
+            row.get("translation_preview_without_digest")
+        ),
         "source_value": source_value_raw,
         "source_identity_context": row.get("source_identity_context") or {},
         "source_value_summary": source_fields["summary"],
@@ -8999,6 +9163,21 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "digest": entry.get("source_digest", ""),
         "resource_group": entry.get("resource_group", ""),
         "context_label": entry.get("context_label", ""),
+        "resource_note": entry.get("resource_note", ""),
+        "option_name": entry.get("option_name", ""),
+        "option_value": entry.get("option_value", ""),
+        "option_position": entry.get("option_position", ""),
+        "related_variants": entry.get("related_variants", []),
+        "visible_product_option": bool(entry.get("visible_product_option")),
+        "translation_preview_available": bool(
+            entry.get("translation_preview_available")
+        ),
+        "shopify_update_mapping_ready": bool(
+            entry.get("shopify_update_mapping_ready")
+        ),
+        "translation_preview_without_digest": bool(
+            entry.get("translation_preview_without_digest")
+        ),
         "status": entry.get("row_status") or entry.get("status") or "",
         "reason": entry.get("status_reason") or entry.get("skip_reason", ""),
         "has_generated_draft": bool(str(entry.get("draft_value") or "").strip()),

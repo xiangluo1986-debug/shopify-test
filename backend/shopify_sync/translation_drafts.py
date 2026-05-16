@@ -1162,6 +1162,18 @@ def _entry_template(locale, field, row, reason):
         "resource_type_label": row.get("resource_type_label", ""),
         "option_name": row.get("option_name", ""),
         "option_value": row.get("option_value", ""),
+        "option_position": row.get("option_position", ""),
+        "related_variants": row.get("related_variants", []),
+        "visible_product_option": bool(row.get("visible_product_option")),
+        "translation_preview_available": bool(
+            row.get("translation_preview_available")
+        ),
+        "shopify_update_mapping_ready": bool(
+            row.get("shopify_update_mapping_ready")
+        ),
+        "translation_preview_without_digest": bool(
+            row.get("translation_preview_without_digest")
+        ),
         "variant_title": row.get("variant_title", ""),
         "variant_id": row.get("variant_id", ""),
         "sku": row.get("sku", ""),

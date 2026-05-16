@@ -15,6 +15,42 @@ MAX_PRODUCT_OPTIONS = 20
 MAX_PRODUCT_VARIANTS = 100
 MAX_PRODUCT_METAFIELDS = 100
 MAX_PRODUCT_MEDIA = 100
+OPTIONAL_CHILD_RESOURCE_GROUPS = ("options", "variants", "metafields", "media")
+DISCOVERY_STATUS_KEYS = (
+    "product_basics",
+    "seo",
+    "options",
+    "variants",
+    "important_metafields",
+    "technical_metafields",
+    "media",
+    "media_alt_text",
+)
+CHILD_RESOURCE_STATUS_KEYS = {
+    "options": ("options",),
+    "variants": ("variants",),
+    "metafields": ("important_metafields", "technical_metafields"),
+    "media": ("media", "media_alt_text"),
+}
+DISCOVERY_GROUP_LABELS = {
+    "product": "Product",
+    "product_basics": "Product basics",
+    "seo": "SEO",
+    "options": "Options",
+    "variants": "Variants",
+    "metafields": "Metafields",
+    "important_metafields": "Important metafields",
+    "technical_metafields": "Technical metafields",
+    "media": "Media",
+    "media_alt_text": "Media alt text",
+}
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"\b(access[_-]?token|secret|password|api[_-]?key|authorization)\s*[:=]\s*[^,\s;]+",
+    flags=re.IGNORECASE,
+)
+SECRET_LIKE_RE = re.compile(
+    r"\b(?:shpat_|shpca_|shppa_|shpss_|sk-)[A-Za-z0-9_\-]+\b|\b[A-Za-z0-9_\-]{48,}\b"
+)
 
 IMPORTANT_METAFIELD_NAMESPACES = {
     "custom",
@@ -94,10 +130,66 @@ IDENTIFIER_LIKE_RE = re.compile(
     r"^(?:gid://|[A-Z0-9._:-]{6,}|[0-9]+|[0-9A-F]{8,})$",
     flags=re.IGNORECASE,
 )
+DEFAULT_OPTION_SOURCE_VALUES = {"default title", "title"}
 
 
 class ShopifyTranslationConsoleError(Exception):
-    pass
+    def __init__(
+        self,
+        message,
+        stage="read_only_shopify_query",
+        resource_group="product",
+        query_failure_type="shopify_read_query_failed",
+    ):
+        self.stage = stage or "read_only_shopify_query"
+        self.resource_group = resource_group or "product"
+        self.query_failure_type = query_failure_type or "shopify_read_query_failed"
+        self.safe_message = sanitize_shopify_error_message(message)
+        super().__init__(self.safe_message)
+
+
+def sanitize_shopify_error_message(message):
+    text = str(message or "").strip()
+    if not text:
+        return "Shopify read-only query failed."
+    text = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}=[redacted]", text)
+    text = SECRET_LIKE_RE.sub("[redacted]", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:500] or "Shopify read-only query failed."
+
+
+def translation_console_error_details(exc, stage="", resource_group=""):
+    if isinstance(exc, ShopifyTranslationConsoleError):
+        return {
+            "stage": exc.stage or stage or "read_only_shopify_query",
+            "resource_group": exc.resource_group or resource_group or "product",
+            "query_failure_type": exc.query_failure_type or "shopify_read_query_failed",
+            "message": exc.safe_message,
+        }
+    return {
+        "stage": stage or "read_only_shopify_query",
+        "resource_group": resource_group or "product",
+        "query_failure_type": _query_failure_type_for_exception(exc),
+        "message": sanitize_shopify_error_message(str(exc) or type(exc).__name__),
+    }
+
+
+def safe_translation_console_error_message(exc, stage="", resource_group=""):
+    details = translation_console_error_details(exc, stage=stage, resource_group=resource_group)
+    return (
+        "Read-only Shopify query failed during "
+        f"{details['stage']} for {details['resource_group']}: {details['message']}"
+    )
+
+
+def _query_failure_type_for_exception(exc):
+    if isinstance(exc, requests.HTTPError):
+        return "shopify_http_error"
+    if isinstance(exc, requests.RequestException):
+        return "shopify_request_error"
+    if isinstance(exc, ValueError):
+        return "shopify_invalid_json"
+    return f"unexpected_{_slug(type(exc).__name__)}"
 
 
 def normalize_product_gid(value):
@@ -134,72 +226,97 @@ def fetch_translation_console_data(installation, search_text, locale):
 
 
 def _fetch_product_translation_resource(installation, product_gid, locale):
+    product, resource = _fetch_product_base_translation_resource(
+        installation,
+        product_gid,
+        locale,
+    )
+    product_context = _build_product_resource_context(product)
+    resource_by_id = {
+        resource.get("resourceId"): resource,
+    }
+    per_group_status, per_group_reasons = _initial_discovery_status()
+    per_group_status["product_basics"] = "ok"
+    per_group_status["seo"] = "ok"
+    child_discovery_errors = []
+
+    for child_group in OPTIONAL_CHILD_RESOURCE_GROUPS:
+        try:
+            child_product = _fetch_product_child_context(installation, product_gid, child_group)
+            child_context = _build_product_resource_context(child_product)
+            _merge_product_resource_context(product_context, child_context)
+            child_resource_ids = _product_child_resource_ids(child_context)
+            for child_resource in _fetch_translatable_resources_by_ids(
+                installation,
+                child_resource_ids[:MAX_CHILD_RESOURCE_ID_LOOKUP],
+                locale,
+                resource_group=child_group,
+            ):
+                if child_resource.get("resourceId"):
+                    resource_by_id[child_resource["resourceId"]] = child_resource
+            _mark_discovery_status(per_group_status, per_group_reasons, child_group, "ok")
+        except Exception as exc:
+            child_discovery_errors.append(
+                _child_discovery_error(
+                    exc,
+                    stage=f"{child_group}_child_resource_discovery",
+                    resource_group=child_group,
+                )
+            )
+            _mark_discovery_status(
+                per_group_status,
+                per_group_reasons,
+                child_group,
+                "skipped",
+                "skipped_child_resource_query_failed",
+            )
+
+    rows = []
+    for normalized_resource in resource_by_id.values():
+        rows.extend(
+            _normalize_translatable_resource_rows(
+                normalized_resource,
+                locale,
+                product_context,
+            )
+        )
+    rows.extend(
+        _visible_product_option_fallback_rows(
+            product_context,
+            resource_by_id,
+            rows,
+            locale,
+        )
+    )
+
+    return {
+        "product": _normalize_product(product),
+        "search_results": [],
+        "translatable_resource": {
+            "resource_id": resource.get("resourceId", ""),
+            "translatable_content_count": len(rows),
+            "translation_count": len(resource.get("translations", [])),
+            "nested_resource_count": 0,
+            "child_resource_count": len(resource_by_id) - 1,
+            "child_resource_discovery_error_count": len(child_discovery_errors),
+        },
+        "translatable_rows": rows,
+        "child_resource_discovery_errors": child_discovery_errors,
+        "per_group_discovery_status": per_group_status,
+        "per_group_discovery_reasons": per_group_reasons,
+    }
+
+
+def _fetch_product_base_translation_resource(installation, product_gid, locale):
     query = """
     query($id: ID!, $locale: String!) {
-      product: node(id: $id) {
-        ... on Product {
-          id
-          title
-          handle
-          status
-          productType
-          vendor
-          options(first: 20) {
-            id
-            name
-            position
-            values
-            optionValues {
-              id
-              name
-              hasVariants
-              linkedMetafieldValue
-            }
-          }
-          variants(first: 100) {
-            edges {
-              node {
-                id
-                title
-                sku
-                barcode
-                selectedOptions {
-                  name
-                  value
-                  optionValue {
-                    id
-                    name
-                  }
-                }
-              }
-            }
-          }
-          metafields(first: 100) {
-            edges {
-              node {
-                id
-                namespace
-                key
-                type
-                value
-              }
-            }
-          }
-          media(first: 100) {
-            edges {
-              node {
-                mediaContentType
-                ... on MediaImage {
-                  id
-                  alt
-                  image {
-                    url
-                  }
-                }
-              }
-            }
-          }
-        }
+      product(id: $id) {
+        id
+        title
+        handle
+        status
+        productType
+        vendor
       }
       translatableResource(resourceId: $id) {
         resourceId
@@ -215,86 +332,190 @@ def _fetch_product_translation_resource(installation, product_gid, locale):
           locale
           outdated
         }
-        nestedTranslatableResources(first: 250) {
-          edges {
-            node {
-              resourceId
-              translatableContent {
-                key
-                value
-                digest
-                locale
-              }
-              translations(locale: $locale) {
-                key
-                value
-                locale
-                outdated
+      }
+    }
+    """
+    data = shopify_graphql_read_only(
+        installation,
+        query,
+        {"id": product_gid, "locale": locale},
+        stage="product_base_translatable_resource_query",
+        resource_group="product",
+    )
+    product = data.get("product")
+    resource = data.get("translatableResource")
+    if not product:
+        raise ShopifyTranslationConsoleError(
+            f"Shopify product not found for {product_gid}.",
+            stage="product_base_lookup",
+            resource_group="product",
+            query_failure_type="shopify_product_not_found",
+        )
+    if not resource:
+        raise ShopifyTranslationConsoleError(
+            f"Translatable resource not found for {product_gid}.",
+            stage="product_base_translatable_resource_query",
+            resource_group="product",
+            query_failure_type="shopify_translatable_resource_not_found",
+        )
+    return product, resource
+
+
+def _fetch_product_child_context(installation, product_gid, resource_group):
+    if resource_group == "options":
+        return _fetch_product_options_child_context(installation, product_gid)
+    query = _child_context_query(resource_group)
+    data = shopify_graphql_read_only(
+        installation,
+        query,
+        {"id": product_gid},
+        stage=f"{resource_group}_product_child_context_query",
+        resource_group=resource_group,
+    )
+    product = data.get("product")
+    if not product:
+        raise ShopifyTranslationConsoleError(
+            "Shopify product child query returned no product.",
+            stage=f"{resource_group}_product_child_context_query",
+            resource_group=resource_group,
+            query_failure_type="shopify_product_child_context_missing",
+        )
+    return product
+
+
+def _fetch_product_options_child_context(installation, product_gid):
+    try:
+        data = shopify_graphql_read_only(
+            installation,
+            _child_context_query("options"),
+            {"id": product_gid},
+            stage="options_product_child_context_query",
+            resource_group="options",
+        )
+    except ShopifyTranslationConsoleError:
+        data = shopify_graphql_read_only(
+            installation,
+            _child_context_query("options_fallback"),
+            {"id": product_gid},
+            stage="options_product_child_context_fallback_query",
+            resource_group="options",
+        )
+    product = data.get("product")
+    if not product:
+        raise ShopifyTranslationConsoleError(
+            "Shopify product options query returned no product.",
+            stage="options_product_child_context_query",
+            resource_group="options",
+            query_failure_type="shopify_product_child_context_missing",
+        )
+    return product
+
+
+def _child_context_query(resource_group):
+    if resource_group == "options":
+        return """
+        query($id: ID!) {
+          product(id: $id) {
+            id
+            options(first: 20) {
+            id
+            name
+            position
+            values
+            optionValues {
+              id
+              name
+            }
+            }
+          }
+        }
+        """
+    if resource_group == "options_fallback":
+        return """
+        query($id: ID!) {
+          product(id: $id) {
+            id
+            options(first: 20) {
+              id
+              name
+              position
+              values
+            }
+          }
+        }
+        """
+    if resource_group == "variants":
+        return """
+        query($id: ID!) {
+          product(id: $id) {
+            id
+            variants(first: 100) {
+              edges {
+                node {
+                  id
+                  title
+                  sku
+                  barcode
+                  selectedOptions {
+                    name
+                    value
+                  }
+                }
               }
             }
           }
         }
-      }
-    }
-    """
-    data = shopify_graphql_read_only(installation, query, {"id": product_gid, "locale": locale})
-    product = data.get("product")
-    resource = data.get("translatableResource")
-    if not product:
-        raise ShopifyTranslationConsoleError(f"Shopify product not found for {product_gid}.")
-    if not resource:
-        raise ShopifyTranslationConsoleError(f"Translatable resource not found for {product_gid}.")
-
-    product_context = _build_product_resource_context(product)
-    nested_resources = [
-        (edge.get("node") or {})
-        for edge in ((resource.get("nestedTranslatableResources") or {}).get("edges") or [])
-        if edge.get("node")
-    ]
-    resource_by_id = {
-        item.get("resourceId"): item
-        for item in [resource, *nested_resources]
-        if item.get("resourceId")
-    }
-    child_resource_ids = _product_child_resource_ids(product_context)
-    missing_resource_ids = [
-        resource_id
-        for resource_id in child_resource_ids
-        if resource_id not in resource_by_id
-    ][:MAX_CHILD_RESOURCE_ID_LOOKUP]
-    for child_resource in _fetch_translatable_resources_by_ids(
-        installation,
-        missing_resource_ids,
-        locale,
-    ):
-        if child_resource.get("resourceId"):
-            resource_by_id[child_resource["resourceId"]] = child_resource
-
-    rows = []
-    for normalized_resource in resource_by_id.values():
-        rows.extend(
-            _normalize_translatable_resource_rows(
-                normalized_resource,
-                locale,
-                product_context,
-            )
-        )
-
-    return {
-        "product": _normalize_product(product),
-        "search_results": [],
-        "translatable_resource": {
-            "resource_id": resource.get("resourceId", ""),
-            "translatable_content_count": len(rows),
-            "translation_count": len(resource.get("translations", [])),
-            "nested_resource_count": len(nested_resources),
-            "child_resource_count": len(resource_by_id) - 1,
-        },
-        "translatable_rows": rows,
-    }
+        """
+    if resource_group == "metafields":
+        return """
+        query($id: ID!) {
+          product(id: $id) {
+            id
+            metafields(first: 100) {
+              edges {
+                node {
+                  id
+                  namespace
+                  key
+                  type
+                  value
+                }
+              }
+            }
+          }
+        }
+        """
+    if resource_group == "media":
+        return """
+        query($id: ID!) {
+          product(id: $id) {
+            id
+            media(first: 100) {
+              edges {
+                node {
+                  id
+                  alt
+                  mediaContentType
+                  ... on MediaImage {
+                    image {
+                      url
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+    raise ShopifyTranslationConsoleError(
+        f"Unsupported child resource group: {resource_group}",
+        stage="child_resource_discovery",
+        resource_group=resource_group,
+        query_failure_type="unsupported_child_resource_group",
+    )
 
 
-def _fetch_translatable_resources_by_ids(installation, resource_ids, locale):
+def _fetch_translatable_resources_by_ids(installation, resource_ids, locale, resource_group="child"):
     resource_ids = [resource_id for resource_id in resource_ids or [] if resource_id]
     if not resource_ids:
         return []
@@ -325,6 +546,8 @@ def _fetch_translatable_resources_by_ids(installation, resource_ids, locale):
         installation,
         query,
         {"ids": resource_ids, "locale": locale, "first": len(resource_ids)},
+        stage=f"{resource_group}_child_translatable_resource_query",
+        resource_group=resource_group,
     )
     return [
         edge.get("node") or {}
@@ -393,6 +616,18 @@ def _normalize_translatable_content_row(
         "resource_type_label": _resource_type_label(resource_group),
         "option_name": context.get("option_name", ""),
         "option_value": context.get("option_value", ""),
+        "option_position": context.get("option_position", ""),
+        "related_variants": list(context.get("related_variants") or []),
+        "visible_product_option": bool(context.get("visible_product_option")),
+        "translation_preview_available": bool(
+            context.get("translation_preview_available")
+        ),
+        "shopify_update_mapping_ready": bool(
+            context.get("shopify_update_mapping_ready")
+        ),
+        "translation_preview_without_digest": bool(
+            context.get("translation_preview_without_digest")
+        ),
         "variant_title": context.get("variant_title", ""),
         "variant_id": context.get("variant_id", ""),
         "sku": context.get("sku", ""),
@@ -419,16 +654,112 @@ def _normalize_translatable_content_row(
 
 def _build_product_resource_context(product):
     product = product or {}
+    product_id = product.get("id", "")
     resources = {
-        product.get("id", ""): {
+        product_id: {
             "context_label": "Product",
             "resource_note": "Main product translatable resource",
         }
     }
+    visible_option_rows_by_key = {}
+    option_position_by_name = {}
+    option_id_by_name = {}
+
+    def remember_option(option_name, option_position="", option_id=""):
+        normalized_name = _option_context_key(option_name)
+        if not normalized_name:
+            return
+        if option_position and not option_position_by_name.get(normalized_name):
+            option_position_by_name[normalized_name] = option_position
+        if option_id and not option_id_by_name.get(normalized_name):
+            option_id_by_name[normalized_name] = option_id
+
+    def add_visible_option_row(
+        field_key,
+        option_name,
+        option_value="",
+        option_position="",
+        resource_id="",
+        resource_type="",
+        related_variant=None,
+    ):
+        option_name = str(option_name or "").strip()
+        option_value = str(option_value or "").strip()
+        source_value = option_value if field_key == "option.value" else option_name
+        if not source_value or _is_default_option_source_value(source_value):
+            return
+        normalized_name = _option_context_key(option_name)
+        normalized_value = _option_context_key(option_value)
+        key = (field_key, normalized_name, normalized_value)
+        row = visible_option_rows_by_key.get(key)
+        if not row:
+            option_position = (
+                option_position
+                or option_position_by_name.get(normalized_name, "")
+            )
+            resource_id = resource_id or _visible_option_resource_id(
+                product_id,
+                field_key,
+                option_name,
+                option_value,
+                option_position,
+            )
+            row = {
+                "field_key": field_key,
+                "source_key": "name" if field_key == "option.name" else "value",
+                "source_value": source_value,
+                "resource_id": resource_id,
+                "resource_type": resource_type
+                or (
+                    "VisibleProductOption"
+                    if field_key == "option.name"
+                    else "VisibleProductOptionValue"
+                ),
+                "resource_group": "options",
+                "option_name": option_name,
+                "option_value": option_value,
+                "option_position": option_position,
+                "context_label": _option_context_label(
+                    field_key,
+                    option_name,
+                    option_value,
+                    option_position,
+                ),
+                "resource_note": (
+                    "Visible product option. Translation preview available; "
+                    "Shopify update mapping not ready."
+                ),
+                "field_label": (
+                    "Option name" if field_key == "option.name" else "Option value"
+                ),
+                "related_variants": [],
+                "visible_product_option": True,
+                "translation_preview_available": True,
+                "shopify_update_mapping_ready": False,
+                "translation_preview_without_digest": True,
+            }
+            visible_option_rows_by_key[key] = row
+        else:
+            if option_position and not row.get("option_position"):
+                row["option_position"] = option_position
+                row["context_label"] = _option_context_label(
+                    field_key,
+                    row.get("option_name", ""),
+                    row.get("option_value", ""),
+                    option_position,
+                )
+            if resource_id and row.get("resource_id", "").startswith("visible://"):
+                row["resource_id"] = resource_id
+            if resource_type and row.get("resource_type", "").startswith("Visible"):
+                row["resource_type"] = resource_type
+        if related_variant:
+            _append_related_variant(row.setdefault("related_variants", []), related_variant)
+
     for option in (product.get("options") or [])[:MAX_PRODUCT_OPTIONS]:
         option_id = option.get("id", "")
         option_name = option.get("name", "")
         option_position = option.get("position", "")
+        remember_option(option_name, option_position, option_id)
         if option_id:
             resources[option_id] = {
                 "option_name": option_name,
@@ -440,23 +771,59 @@ def _build_product_resource_context(product):
                 ),
                 "resource_note": "Product option name",
             }
+        add_visible_option_row(
+            "option.name",
+            option_name,
+            option_position=option_position,
+            resource_id=option_id,
+            resource_type="ProductOption" if option_id else "VisibleProductOption",
+        )
+        option_value_names = []
+        for value_name in option.get("values") or []:
+            value_name = str(value_name or "").strip()
+            if value_name and value_name not in option_value_names:
+                option_value_names.append(value_name)
         for value in option.get("optionValues") or []:
             value_id = value.get("id", "")
-            if not value_id:
-                continue
             value_name = value.get("name", "")
-            resources[value_id] = {
-                "option_name": option_name,
-                "option_value": value_name,
-                "option_position": option_position,
-                "context_label": _join_context(option_name, value_name),
-                "resource_note": "Product option value",
-            }
+            if value_name and value_name not in option_value_names:
+                option_value_names.append(value_name)
+            if value_id:
+                resources[value_id] = {
+                    "option_name": option_name,
+                    "option_value": value_name,
+                    "option_position": option_position,
+                    "context_label": _join_context(option_name, value_name),
+                    "resource_note": "Product option value",
+                }
+            add_visible_option_row(
+                "option.value",
+                option_name,
+                option_value=value_name,
+                option_position=option_position,
+                resource_id=value_id,
+                resource_type=(
+                    "ProductOptionValue" if value_id else "VisibleProductOptionValue"
+                ),
+            )
+        for value_name in option_value_names:
+            add_visible_option_row(
+                "option.value",
+                option_name,
+                option_value=value_name,
+                option_position=option_position,
+                resource_type="VisibleProductOptionValue",
+            )
     for edge in ((product.get("variants") or {}).get("edges") or [])[:MAX_PRODUCT_VARIANTS]:
         variant = edge.get("node") or {}
         variant_id = variant.get("id", "")
         if not variant_id:
             continue
+        related_variant = {
+            "variant_id": variant_id,
+            "title": variant.get("title", ""),
+            "sku": variant.get("sku", ""),
+        }
         selected_options = [
             {
                 "name": option.get("name", ""),
@@ -465,6 +832,40 @@ def _build_product_resource_context(product):
             }
             for option in variant.get("selectedOptions") or []
         ]
+        for selected_option in selected_options:
+            option_name = selected_option.get("name", "")
+            option_value = selected_option.get("value", "")
+            normalized_name = _option_context_key(option_name)
+            remember_option(
+                option_name,
+                option_position_by_name.get(normalized_name, ""),
+                option_id_by_name.get(normalized_name, ""),
+            )
+            add_visible_option_row(
+                "option.name",
+                option_name,
+                option_position=option_position_by_name.get(normalized_name, ""),
+                resource_id=option_id_by_name.get(normalized_name, ""),
+                resource_type=(
+                    "ProductOption"
+                    if option_id_by_name.get(normalized_name, "")
+                    else "VisibleProductOption"
+                ),
+                related_variant=related_variant,
+            )
+            add_visible_option_row(
+                "option.value",
+                option_name,
+                option_value=option_value,
+                option_position=option_position_by_name.get(normalized_name, ""),
+                resource_id=selected_option.get("option_value_id", ""),
+                resource_type=(
+                    "ProductOptionValue"
+                    if selected_option.get("option_value_id")
+                    else "VisibleProductOptionValue"
+                ),
+                related_variant=related_variant,
+            )
         option_text = ", ".join(
             _join_context(option.get("name"), option.get("value"))
             for option in selected_options
@@ -513,7 +914,69 @@ def _build_product_resource_context(product):
             ),
             "resource_note": "Media/image alt text",
         }
-    return {"product_id": product.get("id", ""), "resources": resources}
+    return {
+        "product_id": product_id,
+        "resources": resources,
+        "visible_option_rows": list(visible_option_rows_by_key.values()),
+    }
+
+
+def _option_context_key(value):
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _is_default_option_source_value(value):
+    return _option_context_key(value) in DEFAULT_OPTION_SOURCE_VALUES
+
+
+def _visible_option_resource_id(
+    product_id,
+    field_key,
+    option_name,
+    option_value="",
+    option_position="",
+):
+    resource_type = (
+        "ProductOption" if field_key == "option.name" else "ProductOptionValue"
+    )
+    suffix = "_".join(
+        item
+        for item in (
+            _slug(product_id.rsplit("/", 1)[-1] if product_id else "product"),
+            _slug(option_position),
+            _slug(option_name),
+            _slug(option_value),
+        )
+        if item
+    )
+    return f"visible://shopify/{resource_type}/{suffix or _slug(field_key)}"
+
+
+def _option_context_label(field_key, option_name, option_value="", option_position=""):
+    position_label = f"Option {option_position}" if option_position else "Option"
+    if field_key == "option.name":
+        return _join_context(position_label, option_name)
+    return _join_context(position_label, option_name, option_value)
+
+
+def _append_related_variant(target, related_variant):
+    variant_id = str((related_variant or {}).get("variant_id") or "").strip()
+    title = str((related_variant or {}).get("title") or "").strip()
+    sku = str((related_variant or {}).get("sku") or "").strip()
+    key = variant_id or _join_context(title, sku)
+    if not key:
+        return
+    for existing in target:
+        existing_key = (
+            str((existing or {}).get("variant_id") or "").strip()
+            or _join_context(
+                (existing or {}).get("title", ""),
+                (existing or {}).get("sku", ""),
+            )
+        )
+        if existing_key == key:
+            return
+    target.append({"variant_id": variant_id, "title": title, "sku": sku})
 
 
 def _product_child_resource_ids(product_context):
@@ -523,6 +986,189 @@ def _product_child_resource_ids(product_context):
         for resource_id in (product_context.get("resources") or {})
         if resource_id and resource_id != product_id
     ]
+
+
+def _merge_product_resource_context(target_context, source_context):
+    target_resources = target_context.setdefault("resources", {})
+    target_product_id = target_context.get("product_id", "")
+    for resource_id, context in (source_context.get("resources") or {}).items():
+        if not resource_id or resource_id == target_product_id:
+            continue
+        target_resources[resource_id] = context
+    target_visible_rows = target_context.setdefault("visible_option_rows", [])
+    target_visible_by_key = {
+        _visible_option_row_key(row): row
+        for row in target_visible_rows
+        if isinstance(row, dict)
+    }
+    for row in source_context.get("visible_option_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        key = _visible_option_row_key(row)
+        existing = target_visible_by_key.get(key)
+        if not existing:
+            target_visible_rows.append(row)
+            target_visible_by_key[key] = row
+            continue
+        if row.get("option_position") and not existing.get("option_position"):
+            existing["option_position"] = row.get("option_position")
+        if row.get("resource_id") and str(existing.get("resource_id") or "").startswith(
+            "visible://"
+        ):
+            existing["resource_id"] = row.get("resource_id")
+        if row.get("resource_type") and str(existing.get("resource_type") or "").startswith(
+            "Visible"
+        ):
+            existing["resource_type"] = row.get("resource_type")
+        for related_variant in row.get("related_variants") or []:
+            _append_related_variant(
+                existing.setdefault("related_variants", []),
+                related_variant,
+            )
+
+
+def _visible_option_row_key(row):
+    return (
+        str((row or {}).get("field_key") or "").strip(),
+        _option_context_key((row or {}).get("option_name")),
+        _option_context_key((row or {}).get("option_value")),
+    )
+
+
+def _visible_product_option_fallback_rows(
+    product_context,
+    resource_by_id,
+    existing_rows,
+    locale,
+):
+    resource_by_id = resource_by_id or {}
+    existing_keys = {
+        _visible_option_row_key(row)
+        for row in existing_rows or []
+        if (row or {}).get("resource_group") == "options"
+    }
+    fallback_rows = []
+    for option_row in product_context.get("visible_option_rows") or []:
+        if not isinstance(option_row, dict):
+            continue
+        field_key = option_row.get("field_key", "")
+        if field_key not in {"option.name", "option.value"}:
+            continue
+        source_value = str(option_row.get("source_value") or "").strip()
+        if not source_value or _is_default_option_source_value(source_value):
+            continue
+        row_key = _visible_option_row_key(option_row)
+        if row_key in existing_keys:
+            continue
+        resource_id = option_row.get("resource_id", "")
+        if (
+            resource_id in resource_by_id
+            and (resource_by_id.get(resource_id) or {}).get("translatableContent")
+        ):
+            continue
+        fallback_rows.append(
+            _visible_product_option_row_from_context(option_row, locale)
+        )
+        existing_keys.add(row_key)
+    return fallback_rows
+
+
+def _visible_product_option_row_from_context(option_row, locale):
+    field_key = option_row.get("field_key", "")
+    resource_id = option_row.get("resource_id", "")
+    source_key = option_row.get("source_key") or (
+        "name" if field_key == "option.name" else "value"
+    )
+    source_value = str(option_row.get("source_value") or "")
+    row = {
+        "entry_key": _entry_key_for_row(resource_id, source_key, field_key),
+        "draft_key": _draft_key_for_row(resource_id, source_key, field_key),
+        "key": field_key,
+        "source_key": source_key,
+        "field_key": field_key,
+        "resource_id": resource_id,
+        "resource_type": option_row.get("resource_type", ""),
+        "resource_group": "options",
+        "section_key": "options",
+        "source_value": source_value,
+        "digest": "",
+        "source_locale": "en",
+        "target_locale": locale,
+        "has_translation": False,
+        "translation_value": "",
+        "translation_locale": "",
+        "translation_outdated": False,
+        "context_label": option_row.get("context_label", ""),
+        "resource_note": option_row.get("resource_note", ""),
+        "field_label": option_row.get("field_label", ""),
+        "resource_type_label": "Product option",
+        "option_name": option_row.get("option_name", ""),
+        "option_value": option_row.get("option_value", ""),
+        "option_position": option_row.get("option_position", ""),
+        "related_variants": list(option_row.get("related_variants") or []),
+        "variant_title": "",
+        "variant_id": "",
+        "sku": "",
+        "barcode": "",
+        "selected_options": [],
+        "metafield_namespace": "",
+        "metafield_key": "",
+        "metafield_type": "",
+        "media_alt": "",
+        "media_content_type": "",
+        "media_url": "",
+        "visible_product_option": True,
+        "translation_preview_available": True,
+        "shopify_update_mapping_ready": False,
+        "translation_preview_without_digest": True,
+        "source_is_customer_facing": True,
+        "draft_eligible": False,
+        "draft_ineligible_reason": "",
+        "draft_requires_manual_review": False,
+        "draft_manual_review_reason": "",
+        "future_write_needs_mapping": True,
+        "apply_plan_blocked_reason": "future_write_needs_resource_mapping",
+    }
+    _attach_draft_eligibility(row)
+    row["future_write_needs_mapping"] = True
+    row["apply_plan_blocked_reason"] = "future_write_needs_resource_mapping"
+    return row
+
+
+
+def _initial_discovery_status():
+    return (
+        {key: "skipped" for key in DISCOVERY_STATUS_KEYS},
+        {key: "" for key in DISCOVERY_STATUS_KEYS},
+    )
+
+
+def _mark_discovery_status(statuses, reasons, resource_group, status, reason=""):
+    for status_key in CHILD_RESOURCE_STATUS_KEYS.get(resource_group, (resource_group,)):
+        statuses[status_key] = status
+        reasons[status_key] = reason or ""
+
+
+def _child_discovery_error(exc, stage, resource_group):
+    details = translation_console_error_details(
+        exc,
+        stage=stage,
+        resource_group=resource_group,
+    )
+    skipped_groups = list(CHILD_RESOURCE_STATUS_KEYS.get(resource_group, (resource_group,)))
+    return {
+        "stage": details["stage"],
+        "resource_group": resource_group,
+        "group_label": DISCOVERY_GROUP_LABELS.get(resource_group, resource_group),
+        "skipped_groups": skipped_groups,
+        "skipped_group_labels": [
+            DISCOVERY_GROUP_LABELS.get(group, group) for group in skipped_groups
+        ],
+        "status": "skipped",
+        "reason": "skipped_child_resource_query_failed",
+        "query_failure_type": details["query_failure_type"],
+        "message": details["message"],
+    }
 
 
 def _resource_group_for_row(resource_type, raw_key, context):
@@ -634,7 +1280,10 @@ def _attach_draft_eligibility(row):
     }
     if not source_value.strip():
         row["draft_ineligible_reason"] = "source_empty"
-    elif not row.get("resource_id") or not row.get("digest"):
+    elif (
+        not row.get("resource_id")
+        or (not row.get("digest") and not row.get("translation_preview_without_digest"))
+    ):
         row["draft_ineligible_reason"] = "missing_resource_id_or_digest"
     elif resource_group == "technical_metafields":
         row["draft_ineligible_reason"] = "technical_or_internal_field"
@@ -807,7 +1456,13 @@ def _search_products(installation, search_text):
       }
     }
     """
-    data = shopify_graphql_read_only(installation, query, {"query": _normalize_product_search_query(search_text)})
+    data = shopify_graphql_read_only(
+        installation,
+        query,
+        {"query": _normalize_product_search_query(search_text)},
+        stage="product_search_query",
+        resource_group="product",
+    )
     edges = (data.get("products") or {}).get("edges") or []
     return {
         "product": {},
@@ -837,22 +1492,71 @@ def _normalize_product(product):
     }
 
 
-def shopify_graphql_read_only(installation, query, variables=None):
+def shopify_graphql_read_only(
+    installation,
+    query,
+    variables=None,
+    stage="read_only_shopify_query",
+    resource_group="product",
+):
     url = f"https://{installation.shop}/admin/api/{SHOPIFY_API_VERSION}/graphql.json"
-    response = requests.post(
-        url,
-        headers={
-            "X-Shopify-Access-Token": installation.access_token,
-            "Content-Type": "application/json",
-        },
-        json={"query": query, "variables": variables or {}},
-        timeout=30,
-    )
-    response.raise_for_status()
-    data = response.json()
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "X-Shopify-Access-Token": installation.access_token,
+                "Content-Type": "application/json",
+            },
+            json={"query": query, "variables": variables or {}},
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        status_code = getattr(getattr(exc, "response", None), "status_code", "")
+        raise ShopifyTranslationConsoleError(
+            f"Shopify HTTP {status_code} returned for read-only GraphQL query.",
+            stage=stage,
+            resource_group=resource_group,
+            query_failure_type="shopify_http_error",
+        ) from exc
+    except requests.RequestException as exc:
+        raise ShopifyTranslationConsoleError(
+            f"Shopify request failed: {exc}",
+            stage=stage,
+            resource_group=resource_group,
+            query_failure_type="shopify_request_error",
+        ) from exc
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ShopifyTranslationConsoleError(
+            "Shopify returned a non-JSON response for read-only GraphQL query.",
+            stage=stage,
+            resource_group=resource_group,
+            query_failure_type="shopify_invalid_json_response",
+        ) from exc
     if data.get("errors"):
-        raise ShopifyTranslationConsoleError("Shopify GraphQL returned errors.")
+        raise ShopifyTranslationConsoleError(
+            _shopify_graphql_error_summary(data.get("errors")),
+            stage=stage,
+            resource_group=resource_group,
+            query_failure_type="shopify_graphql_errors",
+        )
     return data.get("data") or {}
+
+
+def _shopify_graphql_error_summary(errors):
+    messages = []
+    for item in (errors or [])[:3]:
+        if isinstance(item, dict):
+            message = item.get("message") or "Shopify GraphQL error"
+            path = ".".join(str(part) for part in (item.get("path") or []) if part is not None)
+            if path:
+                message = f"{message} (path: {path})"
+            messages.append(message)
+        else:
+            messages.append(str(item))
+    return "; ".join(messages) or "Shopify GraphQL returned errors."
 
 
 def _safety_flags(shopify_api_call_performed=False):
