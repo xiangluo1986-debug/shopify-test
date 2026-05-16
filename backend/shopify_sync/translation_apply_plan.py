@@ -20,13 +20,23 @@ READY_DRAFT_STATUSES = {READY_DRAFT_STATUS, TRANSLATE_ALL_READY_DRAFT_STATUS}
 SAFE_WRITE_READINESS_ACTION_NAME = "prepare_translation_safe_write_readiness_package"
 LOCKED_EXECUTION_ACTION_NAME = "prepare_translation_locked_execution_shell"
 REAL_WRITE_ACTION_NAME = "execute_translation_single_locked_write"
+SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME = "apply_selected_translations_to_shopify"
 LOCKED_EXECUTION_ACK_PHRASE = "I UNDERSTAND THIS WILL WRITE ONE SHOPIFY TRANSLATION"
+SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE = (
+    "I UNDERSTAND THIS WILL WRITE SELECTED SHOPIFY TRANSLATIONS"
+)
 LOCKED_EXECUTION_READY_STATUS = "locked_execution_ready_for_manual_ack"
 LOCKED_EXECUTION_BLOCKED_STATUS = "locked_execution_blocked"
 REAL_WRITE_BLOCKED_STATUS = "write_blocked"
 REAL_WRITE_MUTATION_FAILED_STATUS = "write_mutation_failed"
 REAL_WRITE_AUDIT_PASSED_STATUS = "write_audit_passed"
 REAL_WRITE_AUDIT_FAILED_STATUS = "write_audit_failed"
+SELECTED_TRANSLATIONS_WRITTEN_AND_VERIFIED_STATUS = (
+    "selected_shopify_translations_written_and_verified"
+)
+SELECTED_TRANSLATIONS_WRITE_PARTIAL_STATUS = "selected_shopify_translations_write_partial"
+SELECTED_TRANSLATIONS_WRITE_FAILED_STATUS = "selected_shopify_translations_write_failed"
+SELECTED_TRANSLATIONS_BLOCKED_STATUS = "selected_shopify_translations_blocked"
 SAFE_WRITE_READINESS_MAX_ENTRY_COUNT = 3
 SAFE_WRITE_READINESS_FIELDS = ("title", "meta_title", "meta_description")
 SAFE_WRITE_READINESS_FIELD_SET = set(SAFE_WRITE_READINESS_FIELDS)
@@ -222,6 +232,329 @@ def build_translation_workspace_safe_write_readiness_package(
     if write_reports:
         _write_safe_write_readiness_reports(payload, json_path, html_path)
     return payload
+
+
+def build_translation_workspace_selected_apply_state(
+    background_report: dict | None,
+    *,
+    selected_product_gid: str = "",
+    selected_locale: str = "",
+):
+    report = dict(background_report or {})
+    product_gid = str(selected_product_gid or report.get("product_gid") or "").strip()
+    report_product_gid = str(report.get("product_gid") or "").strip()
+    report_detail_summary = report.get("report_detail_summary") or {}
+    locale = str(selected_locale or "").strip()
+    rows = [
+        _selected_apply_entry_from_row(row, product_gid=product_gid)
+        for row in (report.get("review_rows") or [])
+        if isinstance(row, dict)
+    ]
+    locale_options = _safe_write_locale_options(rows, locale)
+    locale_rows = [row for row in rows if row.get("locale") == locale] if locale else []
+    eligible_entries = [row for row in locale_rows if row.get("selectable")]
+    blocked_entries = [row for row in locale_rows if not row.get("selectable")]
+    blocking_conditions = _selected_apply_state_blocking_conditions(
+        report=report,
+        product_gid=product_gid,
+        report_product_gid=report_product_gid,
+        locale=locale,
+        locale_rows=locale_rows,
+        eligible_entries=eligible_entries,
+    )
+    return {
+        "status": "selected_shopify_translations_not_submitted",
+        "report_exists": bool(report.get("exists") or report.get("job_id")),
+        "report_status": report.get("status", ""),
+        "report_status_label": report.get("status_label") or report.get("status", ""),
+        "report_path": report.get("report_path", ""),
+        "product_gid": product_gid,
+        "report_product_gid": report_product_gid,
+        "product_title": report.get("product_title")
+        or report_detail_summary.get("product_title", ""),
+        "locale": locale,
+        "locale_options": locale_options,
+        "eligible_entries": eligible_entries,
+        "blocked_entries": blocked_entries,
+        "eligible_entries_count": len(eligible_entries),
+        "blocked_entries_count": len(blocked_entries),
+        "selected_entry_count": 0,
+        "max_entry_count": SAFE_WRITE_READINESS_MAX_ENTRY_COUNT,
+        "allowed_fields": list(SAFE_WRITE_READINESS_FIELDS),
+        "blocked_fields": [
+            "body_html",
+            "options",
+            "variants",
+            "metafields",
+            "media_alt_text",
+            "technical_fields",
+        ],
+        "blocked_scope_groups": list(LOCKED_EXECUTION_EXCLUDED_SCOPE_GROUPS),
+        "blocked_entries_summary": _safe_write_blocked_entries_summary(blocked_entries),
+        "blocking_conditions": blocking_conditions,
+        "can_submit": not blocking_conditions and bool(eligible_entries),
+        "manual_ack_phrase_required": SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE,
+        "json_report_path": "",
+        "html_report_path": "",
+        "mutation_called": False,
+        "translations_register_called": False,
+        "shopify_write_performed": False,
+        "shopify_api_call_performed": False,
+        "mutation_performed": False,
+        "readback_performed": False,
+        "readback_verified_count": 0,
+        "readback_failed_count": 0,
+        "rollback_needed": False,
+        "rollback_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "real_apply_performed": False,
+        "shopify_read_only": True,
+        "no_new_shopify_writes_performed": True,
+        "all_new_actions_no_write_confirmed": True,
+    }
+
+
+def apply_selected_translations_to_shopify(
+    background_report: dict | None,
+    *,
+    installation=None,
+    selected_product_gid: str = "",
+    selected_locale: str = "",
+    selected_entry_ids=None,
+    manual_ack_text: str = "",
+    write_reports: bool = True,
+):
+    selected_entry_ids = _unique_strings(
+        str(entry_id or "").strip()
+        for entry_id in (selected_entry_ids or [])
+        if str(entry_id or "").strip()
+    )
+    manual_ack_text = str(manual_ack_text or "")
+    state = build_translation_workspace_selected_apply_state(
+        background_report,
+        selected_product_gid=selected_product_gid,
+        selected_locale=selected_locale,
+    )
+    product_gid = str(state.get("product_gid") or "").strip()
+    locale = str(state.get("locale") or "").strip()
+    generated_at = _utc_now()
+    json_path, html_path = _selected_translations_report_paths(
+        product_gid,
+        locale,
+        generated_at,
+    )
+    ack_matched = manual_ack_text == SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE
+    eligible_by_id = {
+        entry.get("entry_id"): entry
+        for entry in state.get("eligible_entries") or []
+        if entry.get("entry_id")
+    }
+    selected_entries = [
+        _selected_apply_report_entry(eligible_by_id[entry_id])
+        for entry_id in selected_entry_ids
+        if entry_id in eligible_by_id
+    ]
+    blocking_conditions = list(state.get("blocking_conditions") or [])
+    blocking_conditions.extend(
+        _selected_apply_request_blocking_conditions(
+            selected_entry_ids=selected_entry_ids,
+            selected_entries=selected_entries,
+            eligible_by_id=eligible_by_id,
+            ack_matched=ack_matched,
+            installation=installation,
+        )
+    )
+    selected_fields = [entry.get("key", "") for entry in selected_entries]
+    payload = {
+        "action": SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME,
+        "status": "",
+        "audit_status": "",
+        "generated_at": generated_at,
+        "product_gid": product_gid,
+        "product_title": state.get("product_title", ""),
+        "locale": locale,
+        "selected_entry_count": len(selected_entries),
+        "requested_selected_entry_count": len(selected_entry_ids),
+        "max_entry_count": SAFE_WRITE_READINESS_MAX_ENTRY_COUNT,
+        "selected_fields": selected_fields,
+        "allowed_fields": list(SAFE_WRITE_READINESS_FIELDS),
+        "blocked_fields": state.get("blocked_fields", []),
+        "blocked_scope_groups": state.get("blocked_scope_groups", []),
+        "selected_entries": selected_entries,
+        "previous_translation_values": {
+            entry.get("entry_id", ""): entry.get("previous_translation_value", "")
+            for entry in selected_entries
+        },
+        "proposed_translation_values": {
+            entry.get("entry_id", ""): entry.get("proposed_translation_value", "")
+            for entry in selected_entries
+        },
+        "manual_edit_used": any(
+            bool(entry.get("manual_edit_used")) for entry in selected_entries
+        ),
+        "manual_ack_required": True,
+        "manual_ack_phrase_required": SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE,
+        "ack_matched": ack_matched,
+        "mutation_called": False,
+        "translations_register_called": False,
+        "shopify_write_performed": False,
+        "shopify_api_call_performed": False,
+        "mutation_performed": False,
+        "readback_performed": False,
+        "readback_verified_count": 0,
+        "readback_failed_count": 0,
+        "rollback_needed": False,
+        "rollback_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "real_apply_performed": False,
+        "blocking_conditions": _unique_strings(blocking_conditions),
+        "sanitized_errors": [],
+        "mutation_summary": {},
+        "readback_summary": {},
+        "translations_register_payload_preview": (
+            _selected_apply_payload_preview(selected_entries)
+        ),
+        "json_report_path": json_path.as_posix(),
+        "html_report_path": html_path.as_posix(),
+        "shopify_read_only": True,
+        "no_new_shopify_writes_performed": True,
+        "all_new_actions_no_write_confirmed": True,
+    }
+    if payload["blocking_conditions"]:
+        payload["status"] = (
+            "blocked_manual_ack_phrase_not_exact"
+            if not ack_matched
+            else SELECTED_TRANSLATIONS_BLOCKED_STATUS
+        )
+        payload["audit_status"] = SELECTED_TRANSLATIONS_BLOCKED_STATUS
+        return _finalize_selected_translations_payload(
+            payload,
+            json_path,
+            html_path,
+            write_reports,
+        )
+
+    by_resource_id = {}
+    for entry in selected_entries:
+        by_resource_id.setdefault(entry.get("resource_id", ""), []).append(entry)
+
+    mutation_summaries = {}
+    for resource_id, resource_entries in by_resource_id.items():
+        mutation_result = _real_write_translations_register(
+            installation,
+            resource_id,
+            [
+                {
+                    "locale": locale,
+                    "key": entry.get("key", ""),
+                    "value": entry.get("proposed_translation_value", ""),
+                    "translatableContentDigest": entry.get("digest", ""),
+                }
+                for entry in resource_entries
+            ],
+        )
+        payload["mutation_called"] = (
+            payload["mutation_called"] or mutation_result.get("called", False)
+        )
+        payload["translations_register_called"] = (
+            payload["translations_register_called"]
+            or mutation_result.get("called", False)
+        )
+        payload["mutation_performed"] = (
+            payload["mutation_performed"] or mutation_result.get("called", False)
+        )
+        payload["shopify_api_call_performed"] = (
+            payload["shopify_api_call_performed"]
+            or mutation_result.get("called", False)
+        )
+        payload["sanitized_errors"].extend(
+            mutation_result.get("sanitized_errors") or []
+        )
+        mutation_summaries[resource_id] = {
+            "http_status": mutation_result.get("http_status"),
+            "request_failed": mutation_result.get("request_failed", False),
+            "user_errors_count": len(mutation_result.get("user_errors") or []),
+            "translation_count": len(mutation_result.get("translations") or []),
+            "selected_entry_count": len(resource_entries),
+        }
+        if mutation_result.get("request_failed") or mutation_result.get("user_errors"):
+            payload["status"] = SELECTED_TRANSLATIONS_WRITE_FAILED_STATUS
+            payload["audit_status"] = SELECTED_TRANSLATIONS_WRITE_FAILED_STATUS
+            payload["mutation_summary"] = mutation_summaries
+            return _finalize_selected_translations_payload(
+                payload,
+                json_path,
+                html_path,
+                write_reports,
+            )
+
+    payload["shopify_write_performed"] = True
+    payload["real_apply_performed"] = True
+    payload["mutation_summary"] = mutation_summaries
+    readback_summaries = {}
+    verified_count = 0
+    failed_count = 0
+    for resource_id, resource_entries in by_resource_id.items():
+        readback_result = _real_write_readback(installation, resource_id, locale)
+        payload["readback_performed"] = (
+            payload["readback_performed"] or readback_result.get("called", False)
+        )
+        payload["shopify_api_call_performed"] = True
+        payload["sanitized_errors"].extend(readback_result.get("sanitized_errors") or [])
+        resource_summary = {
+            "request_failed": readback_result.get("request_failed", False),
+            "http_status": readback_result.get("http_status"),
+            "entries": [],
+        }
+        for entry in resource_entries:
+            match = _real_write_readback_match(
+                readback_result.get("translations") or [],
+                key=entry.get("key", ""),
+                locale=locale,
+                proposed_translation_value=entry.get("proposed_translation_value", ""),
+            )
+            readback_verified = bool(match.get("matched")) and not readback_result.get(
+                "request_failed"
+            )
+            if readback_verified:
+                verified_count += 1
+            else:
+                failed_count += 1
+            entry["readback"] = match
+            entry["readback_verified"] = readback_verified
+            entry["rollback_needed"] = not readback_verified
+            resource_summary["entries"].append(
+                {
+                    "entry_id": entry.get("entry_id", ""),
+                    "key": entry.get("key", ""),
+                    "readback_verified": readback_verified,
+                    "key_exists": match.get("key_exists", False),
+                    "locale_matches": match.get("locale_matches", False),
+                    "value_matches": match.get("value_matches", False),
+                    "outdated_acceptable": match.get("outdated_acceptable", False),
+                }
+            )
+        readback_summaries[resource_id] = resource_summary
+
+    payload["readback_verified_count"] = verified_count
+    payload["readback_failed_count"] = failed_count
+    payload["rollback_needed"] = failed_count > 0
+    payload["readback_summary"] = readback_summaries
+    if verified_count == len(selected_entries) and failed_count == 0:
+        payload["status"] = SELECTED_TRANSLATIONS_WRITTEN_AND_VERIFIED_STATUS
+    elif verified_count:
+        payload["status"] = SELECTED_TRANSLATIONS_WRITE_PARTIAL_STATUS
+    else:
+        payload["status"] = SELECTED_TRANSLATIONS_WRITE_FAILED_STATUS
+    payload["audit_status"] = payload["status"]
+    return _finalize_selected_translations_payload(
+        payload,
+        json_path,
+        html_path,
+        write_reports,
+    )
 
 
 def build_translation_workspace_locked_execution_package(
@@ -1031,6 +1364,181 @@ def _safe_write_block_reason(entry: dict, *, product_gid: str):
     return ""
 
 
+def _selected_apply_entry_from_row(row: dict, *, product_gid: str):
+    entry = _safe_write_entry_from_row(row, product_gid=product_gid)
+    reason = _selected_apply_block_reason(entry, product_gid=product_gid)
+    entry["eligibility_status"] = reason or "eligible_selected_shopify_translation"
+    entry["selectable"] = not reason
+    entry["blocked_reason"] = reason
+    return entry
+
+
+def _selected_apply_block_reason(entry: dict, *, product_gid: str):
+    field_key = entry.get("key", "")
+    group_key = entry.get("field_group", "")
+    proposed_value = str(entry.get("proposed_translation_value") or "").strip()
+    source_value = str(entry.get("source_value") or "").strip()
+    locale = str(entry.get("locale") or "").strip()
+    if group_key in SAFE_WRITE_MAPPING_REQUIRED_GROUPS:
+        return "blocked_future_write_needs_resource_mapping"
+    if group_key in SAFE_WRITE_TECHNICAL_GROUPS:
+        return "blocked_not_customer_write_safe"
+    if field_key == "body_html":
+        return "blocked_body_html_forbidden_in_selected_apply"
+    if group_key not in SAFE_WRITE_READINESS_GROUP_SET:
+        return "blocked_scope_group_not_allowed"
+    if field_key not in SAFE_WRITE_READINESS_FIELD_SET:
+        return "blocked_field_not_allowed_for_selected_apply"
+    if not (entry.get("has_generated_draft") or proposed_value):
+        return "blocked_missing_generated_or_manual_translation"
+    if not proposed_value:
+        return "blocked_proposed_translation_empty"
+    if (
+        not entry.get("resource_id")
+        or not field_key
+        or not entry.get("digest")
+    ):
+        return "blocked_missing_resource_id_key_or_digest"
+    if not product_gid or entry.get("resource_id") != product_gid:
+        return "blocked_product_identity_mismatch"
+    if locale and locale not in LOCKED_EXECUTION_SUPPORTED_LOCALES:
+        return "blocked_target_locale_unsupported"
+    if locale != "en" and source_value and proposed_value == source_value:
+        return "blocked_proposed_translation_equals_source"
+    if field_key == "title" and len(proposed_value) > 80:
+        return "blocked_product_title_over_80_chars"
+    if field_key == "meta_title" and len(proposed_value) > 60:
+        return "blocked_seo_title_over_60_chars"
+    if field_key == "meta_description" and len(proposed_value) > 160:
+        return "blocked_seo_description_over_160_chars"
+    if _locked_execution_forbidden_phrase_matches(proposed_value):
+        return "blocked_forbidden_phrase_detected"
+    if "forbidden" in _safe_write_issue_text(entry):
+        return "blocked_forbidden_phrase_detected"
+    if entry.get("product_identity_mismatch"):
+        return "blocked_identity_review_required"
+    if entry.get("draft_blocked"):
+        return "blocked_draft_status"
+    if entry.get("validation_status") not in {"", "draft_ready_for_manual_review"}:
+        return "blocked_draft_manual_review_required"
+    if (
+        field_key in {"meta_title", "meta_description"}
+        and entry.get("seo_validation_status")
+        and entry.get("seo_validation_status") != "seo_ready"
+    ):
+        return "blocked_seo_manual_review_required"
+    return ""
+
+
+def _selected_apply_state_blocking_conditions(
+    *,
+    report: dict,
+    product_gid: str,
+    report_product_gid: str,
+    locale: str,
+    locale_rows: list[dict],
+    eligible_entries: list[dict],
+):
+    conditions = []
+    if not (report.get("exists") or report.get("job_id")):
+        conditions.append("blocked_missing_background_draft_report")
+    if report.get("status") not in SAFE_WRITE_READINESS_READY_JOB_STATUSES:
+        conditions.append("blocked_background_draft_report_not_completed_or_partial")
+    if not product_gid:
+        conditions.append("blocked_missing_selected_product")
+    if report_product_gid and product_gid and report_product_gid != product_gid:
+        conditions.append("blocked_selected_product_report_mismatch")
+    if not locale:
+        conditions.append("blocked_missing_selected_locale")
+    if locale and locale not in LOCKED_EXECUTION_SUPPORTED_LOCALES:
+        conditions.append("blocked_target_locale_unsupported")
+    if locale and not locale_rows:
+        conditions.append("blocked_no_report_rows_for_selected_locale")
+    if locale_rows and not eligible_entries:
+        conditions.append("blocked_no_selected_apply_eligible_entries")
+    return _unique_strings(conditions)
+
+
+def _selected_apply_request_blocking_conditions(
+    *,
+    selected_entry_ids: list[str],
+    selected_entries: list[dict],
+    eligible_by_id: dict,
+    ack_matched: bool,
+    installation,
+):
+    conditions = []
+    if not selected_entry_ids:
+        conditions.append("blocked_selected_entry_count_less_than_1")
+    if len(selected_entry_ids) > SAFE_WRITE_READINESS_MAX_ENTRY_COUNT:
+        conditions.append("blocked_selected_entry_count_exceeds_3")
+    unknown_entry_ids = [
+        entry_id for entry_id in selected_entry_ids if entry_id not in eligible_by_id
+    ]
+    if unknown_entry_ids:
+        conditions.append("blocked_selected_entries_not_eligible")
+    if not selected_entries and selected_entry_ids:
+        conditions.append("blocked_no_eligible_selected_entries")
+    if not ack_matched:
+        conditions.append("blocked_manual_ack_phrase_not_exact")
+    if installation is None:
+        conditions.append("blocked_shopify_installation_missing")
+    elif not getattr(installation, "shop", "") or not getattr(
+        installation,
+        "access_token",
+        "",
+    ):
+        conditions.append("blocked_shopify_installation_incomplete")
+    return _unique_strings(conditions)
+
+
+def _selected_apply_report_entry(entry: dict):
+    return {
+        "entry_id": entry.get("entry_id", ""),
+        "locale": entry.get("locale", ""),
+        "resource_id": entry.get("resource_id", ""),
+        "key": entry.get("key", ""),
+        "digest": entry.get("digest", ""),
+        "source_value": entry.get("source_value", ""),
+        "previous_translation_value": entry.get("existing_translation_value", ""),
+        "previous_translation_existed": bool(
+            str(entry.get("existing_translation_value") or "").strip()
+        ),
+        "previous_translation_outdated": entry.get("existing_translation_outdated"),
+        "proposed_translation_value": entry.get("proposed_translation_value", ""),
+        "manual_edit_used": bool(entry.get("using_manual_edit")),
+        "manual_edit_value": entry.get("manual_edit_value", ""),
+        "openai_original_proposed_translation": entry.get(
+            "openai_original_proposed_translation",
+            "",
+        ),
+        "restore_candidate": entry.get("existing_translation_value", ""),
+        "field_group": entry.get("field_group", ""),
+        "context_label": entry.get("context_label", ""),
+        "eligibility_status": entry.get("eligibility_status", ""),
+        "readback_verified": False,
+        "rollback_needed": False,
+    }
+
+
+def _selected_apply_payload_preview(selected_entries: list[dict]):
+    grouped = {}
+    for entry in selected_entries:
+        resource_id = entry.get("resource_id", "")
+        grouped.setdefault(resource_id, []).append(
+            {
+                "locale": entry.get("locale", ""),
+                "key": entry.get("key", ""),
+                "value": entry.get("proposed_translation_value", ""),
+                "translatableContentDigest": entry.get("digest", ""),
+            }
+        )
+    return [
+        {"resource_id": resource_id, "translations": translations}
+        for resource_id, translations in grouped.items()
+    ]
+
+
 def _safe_write_issue_text(entry: dict):
     return " ".join(
         str(entry.get(key) or "").lower()
@@ -1689,7 +2197,7 @@ def _real_write_blocking_conditions(
     return _unique_strings(conditions)
 
 
-def _real_write_translations_register(installation, resource_id: str, translation_input: dict):
+def _real_write_translations_register(installation, resource_id: str, translation_input):
     query = """
     mutation translationsRegister($resourceId: ID!, $translations: [TranslationInput!]!) {
       translationsRegister(resourceId: $resourceId, translations: $translations) {
@@ -1716,6 +2224,11 @@ def _real_write_translations_register(installation, resource_id: str, translatio
         "user_errors": [],
         "sanitized_errors": [],
     }
+    translation_inputs = (
+        [item for item in translation_input if isinstance(item, dict)]
+        if isinstance(translation_input, list)
+        else [translation_input]
+    )
     try:
         response = requests.post(
             url,
@@ -1727,7 +2240,7 @@ def _real_write_translations_register(installation, resource_id: str, translatio
                 "query": query,
                 "variables": {
                     "resourceId": resource_id,
-                    "translations": [translation_input],
+                    "translations": translation_inputs,
                 },
             },
             timeout=45,
@@ -1925,11 +2438,47 @@ def _finalize_real_write_payload(
     return payload
 
 
+def _finalize_selected_translations_payload(
+    payload: dict,
+    json_path: Path,
+    html_path: Path,
+    write_reports: bool,
+):
+    payload["blocking_conditions"] = _unique_strings(
+        payload.get("blocking_conditions") or []
+    )
+    payload["sanitized_errors"] = _real_write_unique_errors(
+        payload.get("sanitized_errors") or []
+    )
+    mutation_called = bool(payload.get("mutation_called"))
+    payload["shopify_read_only"] = not mutation_called
+    payload["no_new_shopify_writes_performed"] = not mutation_called
+    payload["all_new_actions_no_write_confirmed"] = not mutation_called
+    if write_reports:
+        _write_selected_translations_reports(payload, json_path, html_path)
+    return payload
+
+
 def _real_write_report_paths(product_gid: str, locale: str, generated_at: str):
     product_token = _safe_write_product_token(product_gid)
     locale_token = _safe_write_filename_token(locale or "locale")
     stamp = _safe_write_timestamp_token(generated_at)
     base = f"translation_real_write_{product_token}_{locale_token}_{stamp}"
+    return (
+        REAL_WRITE_REPORT_DIR / f"{base}.json",
+        REAL_WRITE_REPORT_DIR / f"{base}.html",
+    )
+
+
+def _selected_translations_report_paths(
+    product_gid: str,
+    locale: str,
+    generated_at: str,
+):
+    product_token = _safe_write_product_token(product_gid)
+    locale_token = _safe_write_filename_token(locale or "locale")
+    stamp = _safe_write_timestamp_token(generated_at)
+    base = f"selected_translation_real_write_{product_token}_{locale_token}_{stamp}"
     return (
         REAL_WRITE_REPORT_DIR / f"{base}.json",
         REAL_WRITE_REPORT_DIR / f"{base}.html",
@@ -1942,6 +2491,14 @@ def _write_real_write_reports(payload: dict, json_path: Path, html_path: Path):
     json.loads(text)
     json_path.write_text(text, encoding="utf-8")
     html_path.write_text(_render_real_write_html(payload), encoding="utf-8")
+
+
+def _write_selected_translations_reports(payload: dict, json_path: Path, html_path: Path):
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
+    json.loads(text)
+    json_path.write_text(text, encoding="utf-8")
+    html_path.write_text(_render_selected_translations_html(payload), encoding="utf-8")
 
 
 def _render_real_write_html(payload: dict):
@@ -1997,6 +2554,77 @@ def _render_real_write_html(payload: dict):
 </body>
 </html>
 """
+
+
+def _render_selected_translations_html(payload: dict):
+    summary_rows = "\n".join(
+        _row(label, payload.get(key))
+        for label, key in [
+            ("Status", "status"),
+            ("Audit Status", "audit_status"),
+            ("Product GID", "product_gid"),
+            ("Product Title", "product_title"),
+            ("Locale", "locale"),
+            ("Selected Entry Count", "selected_entry_count"),
+            ("Selected Fields", "selected_fields"),
+            ("ACK Matched", "ack_matched"),
+            ("Mutation Called", "mutation_called"),
+            ("translationsRegister Called", "translations_register_called"),
+            ("Shopify Write Performed", "shopify_write_performed"),
+            ("Readback Performed", "readback_performed"),
+            ("Readback Verified Count", "readback_verified_count"),
+            ("Readback Failed Count", "readback_failed_count"),
+            ("Rollback Needed", "rollback_needed"),
+            ("Blocking Conditions", "blocking_conditions"),
+            ("JSON Report Path", "json_report_path"),
+            ("HTML Report Path", "html_report_path"),
+        ]
+    )
+    entry_rows = "\n".join(
+        _selected_translations_entry_row(entry)
+        for entry in payload.get("selected_entries", [])
+    ) or "<tr><td colspan='9'>No selected entries</td></tr>"
+    error_rows = "\n".join(
+        _real_write_error_row(error)
+        for error in payload.get("sanitized_errors", [])
+    ) or "<tr><td colspan='3'>No sanitized errors recorded</td></tr>"
+    return f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Selected Translation Shopify Update Audit</title></head>
+<body>
+  <h1>Selected Translation Shopify Update Audit</h1>
+  <p><strong>No automatic rollback is performed. Restore candidates are included for manual rollback planning if needed.</strong></p>
+  <h2>Summary</h2>
+  <table border="1" cellspacing="0" cellpadding="6"><tbody>{summary_rows}</tbody></table>
+  <h2>Selected Entries</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Resource ID</th><th>Key</th><th>Digest</th><th>Previous translation</th><th>Proposed translation</th><th>Manual edit used</th><th>Readback verified</th><th>Rollback needed</th><th>Restore candidate</th></tr></thead>
+    <tbody>{entry_rows}</tbody>
+  </table>
+  <h2>Sanitized Errors</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Stage</th><th>Type</th><th>Message</th></tr></thead>
+    <tbody>{error_rows}</tbody>
+  </table>
+</body>
+</html>
+"""
+
+
+def _selected_translations_entry_row(entry):
+    return (
+        "<tr>"
+        f"<td>{escape(str(entry.get('resource_id', '')))}</td>"
+        f"<td>{escape(str(entry.get('key', '')))}</td>"
+        f"<td>{escape(str(entry.get('digest', '')))}</td>"
+        f"<td>{escape(str(entry.get('previous_translation_value', '')))}</td>"
+        f"<td>{escape(str(entry.get('proposed_translation_value', '')))}</td>"
+        f"<td>{escape(str(entry.get('manual_edit_used', '')))}</td>"
+        f"<td>{escape(str(entry.get('readback_verified', '')))}</td>"
+        f"<td>{escape(str(entry.get('rollback_needed', '')))}</td>"
+        f"<td>{escape(str(entry.get('restore_candidate', '')))}</td>"
+        "</tr>"
+    )
 
 
 def _real_write_error(stage: str, message: str, error_type: str):

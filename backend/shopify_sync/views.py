@@ -58,7 +58,11 @@ from .translation_apply_plan import (
     LOCKED_EXECUTION_ACK_PHRASE,
     LOCKED_EXECUTION_ACTION_NAME,
     REAL_WRITE_ACTION_NAME,
+    SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE,
+    SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME,
     SAFE_WRITE_READINESS_ACTION_NAME,
+    apply_selected_translations_to_shopify,
+    build_translation_workspace_selected_apply_state,
     build_translation_workspace_locked_execution_package,
     build_translation_workspace_safe_write_readiness_package,
     build_translation_workspace_safe_write_readiness_state,
@@ -1118,6 +1122,9 @@ def translation_console(request):
     is_safe_write_readiness_package_post = post_action == SAFE_WRITE_READINESS_ACTION_NAME
     is_workspace_locked_execution_post = post_action == LOCKED_EXECUTION_ACTION_NAME
     is_workspace_real_write_post = post_action == REAL_WRITE_ACTION_NAME
+    is_selected_translations_real_write_post = (
+        post_action == SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME
+    )
     is_manual_translation_edit_post = (
         post_action == TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME
     )
@@ -1166,6 +1173,7 @@ def translation_console(request):
         or is_safe_write_readiness_package_post
         or is_workspace_locked_execution_post
         or is_workspace_real_write_post
+        or is_selected_translations_real_write_post
         or is_manual_translation_edit_post
         or is_status_only_safe_action_post
         or is_locked_package_preview_post
@@ -1207,7 +1215,8 @@ def translation_console(request):
     raw_locale = (
         request_params.get("target_locale", "") or request_params.get("locale", "ja")
     )
-    locale = ((raw_locale or "ja") or "ja").strip()
+    requested_action_locale = ((raw_locale or "ja") or "ja").strip()
+    locale = requested_action_locale
     if locale not in SUPPORTED_TRANSLATION_LOCALES:
         translation_console_warnings.append(
             f"Unsupported locale '{locale}' was ignored; using {SUPPORTED_TRANSLATION_LOCALES[0]}."
@@ -1332,6 +1341,9 @@ def translation_console(request):
     safe_write_readiness_state = {}
     safe_write_readiness_result = None
     safe_write_readiness_error_message = ""
+    selected_translations_apply_state = {}
+    selected_translations_apply_result = None
+    selected_translations_apply_error_message = ""
     workspace_locked_execution_result = None
     workspace_locked_execution_error_message = ""
     workspace_real_write_result = None
@@ -1349,6 +1361,7 @@ def translation_console(request):
             and not is_status_only_safe_action_post
             and not is_translate_all_post
             and not is_workspace_real_write_post
+            and not is_selected_translations_real_write_post
         )
         or request.GET.get("fetch_read_only") == "1"
         or (request.method == "GET" and ui_mode == "editor")
@@ -1836,9 +1849,20 @@ def translation_console(request):
         selected_product_gid=translation_job_product_id,
         selected_locale=locale,
     )
+    selected_apply_locale = (
+        requested_action_locale
+        if is_selected_translations_real_write_post
+        else locale
+    )
+    selected_translations_apply_state = build_translation_workspace_selected_apply_state(
+        translation_background_job,
+        selected_product_gid=translation_job_product_id,
+        selected_locale=selected_apply_locale,
+    )
     _attach_translation_workspace_safe_write_ui(
         translation_background_job,
         safe_write_readiness_state,
+        selected_translations_apply_state,
     )
     if is_manual_translation_edit_post:
         blocking_conditions = list(
@@ -2124,6 +2148,142 @@ def translation_console(request):
                 ),
             }
         )
+    elif is_selected_translations_real_write_post:
+        selected_entry_ids = (
+            request.POST.getlist("selected_shopify_entry_ids")
+            + request.POST.getlist("safe_write_entry_ids")
+        )
+        installation = ShopifyInstallation.objects.first()
+        selected_translations_apply_result = apply_selected_translations_to_shopify(
+            translation_background_job,
+            installation=installation,
+            selected_product_gid=translation_job_product_id,
+            selected_locale=selected_apply_locale,
+            selected_entry_ids=selected_entry_ids,
+            manual_ack_text=request.POST.get("selected_shopify_apply_ack", ""),
+        )
+        if selected_translations_apply_result.get("blocking_conditions"):
+            selected_translations_apply_error_message = (
+                "Selected Shopify translation update blocked: "
+                + ", ".join(
+                    selected_translations_apply_result.get("blocking_conditions") or []
+                )
+            )
+        selected_translations_apply_state = selected_translations_apply_result
+        apply_status = selected_translations_apply_result.get("status", "")
+        if apply_status == "selected_shopify_translations_written_and_verified":
+            apply_message = (
+                "Shopify update completed. Selected translations were written and verified."
+            )
+        elif apply_status == "selected_shopify_translations_write_partial":
+            apply_message = (
+                "Shopify was updated, but one or more selected translations failed readback verification."
+            )
+        elif apply_status == "selected_shopify_translations_write_failed":
+            apply_message = (
+                "Selected Shopify translation update failed. No automatic rollback was run."
+            )
+        else:
+            apply_message = (
+                "Selected Shopify translation update blocked before any mutation. No Shopify write was performed."
+            )
+        mutation_called = selected_translations_apply_result.get(
+            "mutation_called",
+            False,
+        )
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status=apply_status,
+            message=apply_message,
+            summary={
+                "product_gid": selected_translations_apply_result.get(
+                    "product_gid",
+                    "",
+                ),
+                "product_title": selected_translations_apply_result.get(
+                    "product_title",
+                    "",
+                ),
+                "locale": selected_translations_apply_result.get("locale", ""),
+                "selected_entry_count": selected_translations_apply_result.get(
+                    "selected_entry_count",
+                    0,
+                ),
+                "selected_fields": selected_translations_apply_result.get(
+                    "selected_fields",
+                    [],
+                ),
+                "ack_matched": selected_translations_apply_result.get(
+                    "ack_matched",
+                    False,
+                ),
+                "mutation_called": selected_translations_apply_result.get(
+                    "mutation_called",
+                    False,
+                ),
+                "translations_register_called": selected_translations_apply_result.get(
+                    "translations_register_called",
+                    False,
+                ),
+                "shopify_write_performed": selected_translations_apply_result.get(
+                    "shopify_write_performed",
+                    False,
+                ),
+                "readback_performed": selected_translations_apply_result.get(
+                    "readback_performed",
+                    False,
+                ),
+                "readback_verified_count": selected_translations_apply_result.get(
+                    "readback_verified_count",
+                    0,
+                ),
+                "readback_failed_count": selected_translations_apply_result.get(
+                    "readback_failed_count",
+                    0,
+                ),
+                "rollback_needed": selected_translations_apply_result.get(
+                    "rollback_needed",
+                    False,
+                ),
+                "json_report_path": selected_translations_apply_result.get(
+                    "json_report_path",
+                    "",
+                ),
+                "html_report_path": selected_translations_apply_result.get(
+                    "html_report_path",
+                    "",
+                ),
+                "blocking_conditions": selected_translations_apply_result.get(
+                    "blocking_conditions",
+                    [],
+                ),
+            },
+        )
+        safe_action_result.update(
+            {
+                "read_only": not mutation_called,
+                "no_write_from_page": not mutation_called,
+                "shopify_write_performed": selected_translations_apply_result.get(
+                    "shopify_write_performed",
+                    False,
+                ),
+                "mutation_performed": selected_translations_apply_result.get(
+                    "mutation_performed",
+                    False,
+                ),
+                "translations_register_called": selected_translations_apply_result.get(
+                    "translations_register_called",
+                    False,
+                ),
+                "rollback_performed": False,
+                "publish_performed": False,
+                "apply_performed": False,
+                "real_apply_performed": selected_translations_apply_result.get(
+                    "real_apply_performed",
+                    False,
+                ),
+            }
+        )
     elif is_locked_package_preview_post and safe_action_result is None:
         apply_plan_preview_result = _empty_apply_plan_preview_result(
             "generate_draft_dry_run_first"
@@ -2301,6 +2461,9 @@ def translation_console(request):
     safe_write_readiness_display = (
         safe_write_readiness_result or safe_write_readiness_state
     )
+    selected_translations_apply_display = (
+        selected_translations_apply_result or selected_translations_apply_state
+    )
     workspace_locked_execution_display = workspace_locked_execution_result or {}
     workspace_real_write_display = workspace_real_write_result or {}
     workspace_real_write_can_submit = (
@@ -2374,6 +2537,10 @@ def translation_console(request):
             "safe_write_readiness_result": safe_write_readiness_result,
             "safe_write_readiness_display": safe_write_readiness_display,
             "safe_write_readiness_error_message": safe_write_readiness_error_message,
+            "selected_translations_apply_state": selected_translations_apply_state,
+            "selected_translations_apply_result": selected_translations_apply_result,
+            "selected_translations_apply_display": selected_translations_apply_display,
+            "selected_translations_apply_error_message": selected_translations_apply_error_message,
             "workspace_locked_execution_result": workspace_locked_execution_result,
             "workspace_locked_execution_display": workspace_locked_execution_display,
             "workspace_locked_execution_error_message": workspace_locked_execution_error_message,
@@ -2383,6 +2550,8 @@ def translation_console(request):
             "workspace_real_write_can_submit": workspace_real_write_can_submit,
             "locked_execution_ack_phrase": LOCKED_EXECUTION_ACK_PHRASE,
             "translation_single_locked_write_action_name": REAL_WRITE_ACTION_NAME,
+            "selected_translations_real_write_action_name": SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME,
+            "selected_translations_real_write_ack_phrase": SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE,
             "manual_translation_edit_action_name": TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
             "draft_fields": TRANSLATION_DRAFT_FIELDS,
@@ -5320,6 +5489,7 @@ def _translation_workspace_reason_label(reason: str, row: dict):
 def _attach_translation_workspace_safe_write_ui(
     translation_background_job: dict,
     safe_write_readiness_state: dict,
+    selected_translations_apply_state: dict | None = None,
 ):
     if not isinstance(translation_background_job, dict):
         return
@@ -5331,19 +5501,53 @@ def _attach_translation_workspace_safe_write_ui(
         )
         if entry.get("entry_id")
     }
+    selected_apply_entries_by_id = {
+        entry.get("entry_id"): entry
+        for entry in (
+            list((selected_translations_apply_state or {}).get("eligible_entries") or [])
+            + list((selected_translations_apply_state or {}).get("blocked_entries") or [])
+        )
+        if entry.get("entry_id")
+    }
     for row in translation_background_job.get("review_rows") or []:
         entry_id = row.get("safe_write_entry_id") or row.get("entry_id")
         entry = entries_by_id.get(entry_id)
+        selected_apply_entry = selected_apply_entries_by_id.get(entry_id)
         if not entry:
             row["safe_write_entry_id"] = ""
             row["safe_write_selectable"] = False
             row["safe_write_eligibility_status"] = "not_in_selected_locale"
             row["safe_write_block_reason"] = "not_in_selected_locale"
+            row["shopify_apply_selectable"] = bool(
+                selected_apply_entry and selected_apply_entry.get("selectable")
+            )
+            row["shopify_apply_eligibility_status"] = (
+                (selected_apply_entry or {}).get("eligibility_status")
+                or "not_in_selected_locale"
+            )
+            row["shopify_apply_block_reason"] = (
+                (selected_apply_entry or {}).get("blocked_reason")
+                or "not_in_selected_locale"
+            )
             continue
         row["safe_write_entry_id"] = entry.get("entry_id", "")
         row["safe_write_selectable"] = bool(entry.get("selectable"))
         row["safe_write_eligibility_status"] = entry.get("eligibility_status", "")
         row["safe_write_block_reason"] = entry.get("blocked_reason", "")
+        if not selected_apply_entry:
+            row["shopify_apply_selectable"] = False
+            row["shopify_apply_eligibility_status"] = "not_in_selected_locale"
+            row["shopify_apply_block_reason"] = "not_in_selected_locale"
+            continue
+        row["shopify_apply_selectable"] = bool(selected_apply_entry.get("selectable"))
+        row["shopify_apply_eligibility_status"] = selected_apply_entry.get(
+            "eligibility_status",
+            "",
+        )
+        row["shopify_apply_block_reason"] = selected_apply_entry.get(
+            "blocked_reason",
+            "",
+        )
 
 
 def _translation_workspace_report_detail_summary(status: dict):

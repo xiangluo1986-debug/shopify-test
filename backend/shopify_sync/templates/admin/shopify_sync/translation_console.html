@@ -522,6 +522,50 @@
     color: #374151;
     font-size: 12px;
   }
+  .tw-shopify-select-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 8px 0;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .tw-shopify-select-row label {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin: 0;
+  }
+  .tw-shopify-selected-preview {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .tw-shopify-preview-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.35fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 8px;
+  }
+  .tw-shopify-preview-row[hidden] {
+    display: none !important;
+  }
+  .tw-shopify-preview-label {
+    color: #4b5563;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .tw-shopify-preview-value {
+    margin-top: 3px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
   @media (max-width: 1100px) {
     .tw-workspace-header {
       position: static;
@@ -2584,6 +2628,21 @@
                         </div>
                         <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
                       </div>
+                      <div class="tw-shopify-select-row">
+                        {% if row.shopify_apply_selectable %}
+                          <label>
+                            <input type="checkbox" name="selected_shopify_entry_ids" value="{{ row.safe_write_entry_id|default:row.entry_id }}" form="id_selected_translations_apply_form" data-shopify-apply-checkbox data-field="{{ row.key }}" data-locale="{{ row.language }}" data-current-value="{{ row.existing_translation_summary|default:row.existing_translation_display|default:'-' }}" data-new-value="{{ row.generated_draft_summary|default:row.generated_draft_display|default:'Translation result ready' }}" data-manual-edit="{% if row.using_manual_edit %}true{% else %}false{% endif %}">
+                            <span>Select for Shopify update</span>
+                          </label>
+                          {% if row.using_manual_edit %}<span class="tw-reason-chip">Manual edit will be used</span>{% endif %}
+                        {% else %}
+                          <label>
+                            <input type="checkbox" disabled>
+                            <span>Not eligible for Shopify update</span>
+                          </label>
+                          <span class="tw-muted">{{ row.shopify_apply_block_reason|default:"not_in_selected_locale" }}</span>
+                        {% endif %}
+                      </div>
                       <div class="tw-result-compare-grid">
                         <div class="tw-compare-column">
                           <div class="tw-result-detail-label">Original</div>
@@ -3076,6 +3135,75 @@
               </form>
             {% else %}
               <p>No row-level translation result data was recorded in the local report.</p>
+            {% endif %}
+            <h3>Shopify update</h3>
+            <form id="id_selected_translations_apply_form" method="post" action="{% url 'shopify_translation_console' %}" data-shopify-apply-form data-required-ack="{{ selected_translations_real_write_ack_phrase }}" data-max-selected="{{ selected_translations_apply_display.max_entry_count|default:3 }}">
+              {% csrf_token %}
+              <input type="hidden" name="ui_mode" value="editor">
+              <input type="hidden" name="action" value="{{ selected_translations_real_write_action_name }}">
+              <input type="hidden" name="product_search" value="{{ product_search_text }}">
+              <input type="hidden" name="selected_product_gid" value="{{ translation_background_job.product_gid|default:selected_product_gid }}">
+              <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+              <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+              <div class="tw-job-actions" style="margin-bottom: 10px;">
+                <div>
+                  <label for="id_selected_apply_locale">Selected locale</label><br>
+                  <select id="id_selected_apply_locale" name="target_locale" data-shopify-apply-locale>
+                    {% if selected_translations_apply_display.locale_options %}
+                      {% for option in selected_translations_apply_display.locale_options %}
+                        <option value="{{ option.value }}"{% if option.value == selected_translations_apply_display.locale %} selected{% endif %}>{{ option.label }} ({{ option.value }})</option>
+                      {% endfor %}
+                    {% else %}
+                      <option value="{{ selected_locale }}">{{ selected_locale }}</option>
+                    {% endif %}
+                  </select>
+                </div>
+                <div>
+                  <div class="tw-header-status-label">Selected entry count</div>
+                  <div class="tw-header-status-value"><span data-shopify-selected-count>0</span> / {{ selected_translations_apply_display.max_entry_count|default:3 }}</div>
+                </div>
+                <div>
+                  <div class="tw-header-status-label">Selected fields</div>
+                  <div class="tw-header-status-value" data-shopify-selected-fields>-</div>
+                </div>
+              </div>
+              <p class="tw-real-write-warning">This will update selected Shopify translations.</p>
+              <div class="tw-shopify-selected-preview" data-shopify-selected-preview>
+                <div class="tw-muted" data-shopify-selected-empty>Select 1 to 3 eligible title/meta_title/meta_description rows above.</div>
+              </div>
+              <div class="tw-job-actions" style="align-items: flex-end; margin-top: 10px;">
+                <div>
+                  <label for="id_selected_apply_ack_phrase">Required ACK phrase</label><br>
+                  <input id="id_selected_apply_ack_phrase" type="text" readonly value="{{ selected_translations_real_write_ack_phrase }}" style="min-width: 520px;">
+                </div>
+                <div>
+                  <label for="id_selected_apply_ack">ACK input</label><br>
+                  <input id="id_selected_apply_ack" type="text" name="selected_shopify_apply_ack" value="" autocomplete="off" style="min-width: 520px;" data-shopify-apply-ack>
+                </div>
+                <button type="submit" class="button tw-danger-button" data-shopify-apply-submit disabled>Apply selected translations to Shopify</button>
+              </div>
+              <p class="tw-muted">Allowed fields: title, meta_title, meta_description. Blocked: body_html, options, variants, metafields, media alt text, technical fields, and all-language bulk sync.</p>
+            </form>
+            {% if selected_translations_apply_result %}
+              <h4>Shopify update result</h4>
+              <table class="tw-results-table">
+                <tbody>
+                  <tr><th>Status</th><td>{{ selected_translations_apply_display.status }}</td></tr>
+                  <tr><th>Selected locale</th><td>{{ selected_translations_apply_display.locale }}</td></tr>
+                  <tr><th>Selected entry count</th><td>{{ selected_translations_apply_display.selected_entry_count }}</td></tr>
+                  <tr><th>Selected fields</th><td>{{ selected_translations_apply_display.selected_fields|join:", " }}</td></tr>
+                  <tr><th>Shopify was updated</th><td>{{ selected_translations_apply_display.shopify_write_performed }}</td></tr>
+                  <tr><th>Verified</th><td>{{ selected_translations_apply_display.readback_verified_count }} / {{ selected_translations_apply_display.selected_entry_count }}</td></tr>
+                  <tr><th>Readback failed</th><td>{{ selected_translations_apply_display.readback_failed_count }}</td></tr>
+                  <tr><th>Rollback needed</th><td>{{ selected_translations_apply_display.rollback_needed }}</td></tr>
+                  <tr><th>JSON report path</th><td>{{ selected_translations_apply_display.json_report_path }}</td></tr>
+                  <tr><th>HTML report path</th><td>{{ selected_translations_apply_display.html_report_path }}</td></tr>
+                  <tr><th>blocking_conditions</th><td>{{ selected_translations_apply_display.blocking_conditions|join:", " }}</td></tr>
+                </tbody>
+              </table>
+              {% if selected_translations_apply_display.rollback_needed %}
+                <p class="warning">Readback did not verify every selected value. Do not retry blindly; use the previous translation values in the audit report as restore candidates.</p>
+              {% endif %}
             {% endif %}
             <h3>Prepare safe write package</h3>
             <p><strong>This package does not write Shopify.</strong> It only prepares a locked review for future ACK.</p>
@@ -4465,6 +4593,9 @@
   {% endif %}
   {% if workspace_locked_execution_error_message %}
     <p class="errornote">{{ workspace_locked_execution_error_message }}</p>
+  {% endif %}
+  {% if selected_translations_apply_error_message %}
+    <p class="errornote">{{ selected_translations_apply_error_message }}</p>
   {% endif %}
 
   <div class="module" style="padding: 12px; margin-bottom: 16px;">
@@ -6351,6 +6482,138 @@
       if (isActiveStatus(lastStatus)) {
         pollStatus();
       }
+    }());
+    (function () {
+      var form = document.querySelector("[data-shopify-apply-form]");
+      if (!form) {
+        return;
+      }
+      var requiredAck = form.getAttribute("data-required-ack") || "";
+      var maxSelected = parseInt(form.getAttribute("data-max-selected") || "3", 10);
+      var checkboxes = Array.prototype.slice.call(document.querySelectorAll("[data-shopify-apply-checkbox]"));
+      var ackInput = form.querySelector("[data-shopify-apply-ack]");
+      var submitButton = form.querySelector("[data-shopify-apply-submit]");
+      var countTarget = form.querySelector("[data-shopify-selected-count]");
+      var fieldsTarget = form.querySelector("[data-shopify-selected-fields]");
+      var preview = form.querySelector("[data-shopify-selected-preview]");
+      var empty = form.querySelector("[data-shopify-selected-empty]");
+      var localeSelect = form.querySelector("[data-shopify-apply-locale]");
+      var productInput = form.querySelector("input[name='selected_product_gid']");
+
+      function selectedBoxes() {
+        return checkboxes.filter(function (box) {
+          return box.checked && !box.disabled;
+        });
+      }
+
+      function unique(values) {
+        var seen = {};
+        return values.filter(function (value) {
+          if (!value || seen[value]) {
+            return false;
+          }
+          seen[value] = true;
+          return true;
+        });
+      }
+
+      function clearPreviewRows() {
+        Array.prototype.slice.call(preview.querySelectorAll("[data-shopify-preview-row]"))
+          .forEach(function (row) {
+            row.parentNode.removeChild(row);
+          });
+      }
+
+      function appendPreviewRow(box) {
+        var row = document.createElement("div");
+        row.className = "tw-shopify-preview-row";
+        row.setAttribute("data-shopify-preview-row", "");
+
+        var fieldCell = document.createElement("div");
+        var fieldLabel = document.createElement("div");
+        fieldLabel.className = "tw-shopify-preview-label";
+        fieldLabel.textContent = "Field";
+        var fieldValue = document.createElement("div");
+        fieldValue.className = "tw-shopify-preview-value";
+        fieldValue.textContent = (box.getAttribute("data-locale") || "") + " / " + (box.getAttribute("data-field") || "");
+        if (box.getAttribute("data-manual-edit") === "true") {
+          fieldValue.textContent += " / manual edit";
+        }
+        fieldCell.appendChild(fieldLabel);
+        fieldCell.appendChild(fieldValue);
+
+        var currentCell = document.createElement("div");
+        var currentLabel = document.createElement("div");
+        currentLabel.className = "tw-shopify-preview-label";
+        currentLabel.textContent = "Current value";
+        var currentValue = document.createElement("div");
+        currentValue.className = "tw-shopify-preview-value";
+        currentValue.textContent = box.getAttribute("data-current-value") || "-";
+        currentCell.appendChild(currentLabel);
+        currentCell.appendChild(currentValue);
+
+        var newCell = document.createElement("div");
+        var newLabel = document.createElement("div");
+        newLabel.className = "tw-shopify-preview-label";
+        newLabel.textContent = "New value";
+        var newValue = document.createElement("div");
+        newValue.className = "tw-shopify-preview-value";
+        newValue.textContent = box.getAttribute("data-new-value") || "-";
+        newCell.appendChild(newLabel);
+        newCell.appendChild(newValue);
+
+        row.appendChild(fieldCell);
+        row.appendChild(currentCell);
+        row.appendChild(newCell);
+        preview.appendChild(row);
+      }
+
+      function updateApplyPanel() {
+        var selected = selectedBoxes();
+        var selectedLocale = localeSelect ? localeSelect.value : "";
+        var selectedFields = unique(selected.map(function (box) {
+          return box.getAttribute("data-field") || "";
+        }));
+        var localeMatches = selected.every(function (box) {
+          return !selectedLocale || box.getAttribute("data-locale") === selectedLocale;
+        });
+        var productGid = productInput ? productInput.value : "";
+        if (countTarget) {
+          countTarget.textContent = String(selected.length);
+        }
+        if (fieldsTarget) {
+          fieldsTarget.textContent = selectedFields.length ? selectedFields.join(", ") : "-";
+        }
+        if (preview) {
+          clearPreviewRows();
+          if (empty) {
+            empty.hidden = selected.length !== 0;
+          }
+          selected.forEach(appendPreviewRow);
+        }
+        if (submitButton) {
+          submitButton.disabled = !(
+            selected.length >= 1 &&
+            selected.length <= maxSelected &&
+            localeMatches &&
+            Boolean(selectedLocale) &&
+            productGid.indexOf("gid://shopify/Product/") === 0 &&
+            ackInput &&
+            ackInput.value === requiredAck
+          );
+        }
+      }
+
+      checkboxes.forEach(function (box) {
+        box.addEventListener("change", updateApplyPanel);
+      });
+      if (ackInput) {
+        ackInput.addEventListener("input", updateApplyPanel);
+      }
+      if (localeSelect) {
+        localeSelect.addEventListener("change", updateApplyPanel);
+      }
+      updateApplyPanel();
     }());
     (function () {
       function setEditing(card, isEditing) {
