@@ -63,6 +63,9 @@ python remote_approval_runner.py --task shopify_translation_single_field_real_wr
 python remote_approval_runner.py --task shopify_translation_single_field_real_write_one_shot_locked_shell --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_ali_reviews_capability_discovery --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_candidate_scan --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_last_60_days_candidate_scan --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_shopify_order_sync_coverage --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -99,6 +102,41 @@ python remote_approval_runner.py --task demo --mode dry-run --summary-only
 Console replies are fixed options only. They are never treated as PowerShell commands.
 
 ## Review Request Trustpilot Auto Queue Refresh
+
+## Review Request Shopify Order Sync Coverage
+
+`shopify_review_request_shopify_order_sync_coverage` is a Phase 5.28B
+local-only coverage check. It checks whether local ShopifyOrder data covers the
+last 60 days, checks #22530 and #22562, runs the local candidate scan, and
+prepares exact manual sync commands. It does not call Shopify APIs, write
+Shopify tags, call Gmail APIs, create drafts, send emails, or call external
+review APIs.
+
+Initial setup command prepared by the task:
+
+```powershell
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --apply-local --skip-fulfillment-orders
+```
+
+Daily refresh command:
+
+```powershell
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --apply-local --skip-fulfillment-orders
+```
+
+Run the dry-run preview first when validating credentials or coverage:
+
+```powershell
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --dry-run --skip-fulfillment-orders
+```
+
+Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
+sync. The default and recommended path skips those detail reads so the local
+candidate scan can use Shopify order tags, `fulfillment_status`, notes, and
+existing local report evidence first without creating one extra Shopify API call
+per order. Use `--include-fulfillment-orders` only for a small deeper test, with
+`--fulfillment-request-delay 2.0` or higher and optionally
+`--fulfillment-max-orders`.
 
 `shopify_review_request_trustpilot_auto_queue_refresh` is a Phase 5.8 dry-run
 dashboard refresh task. It recomputes the Trustpilot readiness queue from local
@@ -208,7 +246,7 @@ is present. The preflight never calls Gmail APIs, creates/updates/deletes
 drafts, sends email, calls Shopify APIs, writes Shopify tags, calls
 Trustpilot/Kudosi/Ali Reviews APIs, or creates tracking tokens. Current
 production state should remain `blocked_no_eligible_candidate` until a real
-eligible delivered order with canonical `1: review request` passes all duplicate
+eligible delivered order with a review-request tag alias passes all duplicate
 and risk checks.
 
 ## Review Request Trustpilot Real Send Execute Skeleton
@@ -375,6 +413,57 @@ This lets local Review Request Gmail tasks such as the scope resolver,
 draft-only preflight, and one-draft locked runner see the existing Gmail
 scope/config already present in `.env` while preserving the local approval
 safety boundary.
+
+## Review Request Approval Queue
+
+Phase 5.24A adds the Django admin `Review Requests` approval queue. The main
+page shows `Needs review email` and `Already sent`; eligible rows expose a
+single `Review & Send` POST action.
+
+Phase 5.25 enriches that queue with customer/order context: customer display
+name, masked customer identifier, customer order count/sequence, order tags,
+delivered status, review-request tag alias status, previous Trustpilot
+history, eligibility status, and a plain-language blocker reason.
+
+Phase 5.26 adds the merged order group guard. Related order numbers found in
+local notes or local report references are treated as one shipment group, shown
+with a `Merged order group` badge, and counted as one send candidate. The group
+must be fully ready before any `Review & Send` action can appear, and prior
+Trustpilot evidence for any order blocks the whole group.
+
+Phase 5.27 changes the main queue to show only candidates from the last 60 days
+that are actually ready for admin review/send under the current rules. Blocked
+or not-ready rows move to the collapsed `Blocked / Not ready` section. Merged
+groups such as `#22582/#22581` remain blocked until the whole group is ready,
+so `#22582` must not appear in the main `Needs review email` table.
+
+`shopify_review_request_last_60_days_candidate_scan` is the local audit task
+for this queue. It scans synced local Shopify order rows plus existing local
+review-request reports, reports eligible/already-sent/blocked counts, and does
+not call Gmail, create drafts, send email, call Shopify, write tags, call
+Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
+Phase 5.28A updates review-request tag reads to accept canonical
+`1: review request` and legacy typo `1: reveiw request`, including spacing and
+case variants. Future writes still use canonical `1: review request`. It also
+prevents repeat-customer orders from being treated as merged shipments unless
+explicit merge evidence exists.
+
+`shopify_review_request_tag_alias_and_candidate_correction_audit` is the local
+audit task for this correction. It reports `#22562` tag loading, matched review
+request tag value, delivered detection, merge evidence source, explicit merge
+evidence, final eligibility, blockers, and eligible candidate count after the
+fix. It does not call Gmail, create drafts, send email, call Shopify, write
+tags, call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
+The `Review & Send` admin POST remains locked in Phase 5.27. It verifies the
+selected order against the current eligible queue and returns a no-send blocker;
+no Gmail API call, draft creation, email send, Shopify write, or external
+review API call is performed by this phase.
+
+If the selected order is not eligible, no Gmail call occurs. Shopify tag writes
+remain disabled until a later post-send audit and separate approved tag-write
+phase.
 
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 

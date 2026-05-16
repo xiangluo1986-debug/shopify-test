@@ -26,6 +26,19 @@ REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = [
     "orders_review_request_manual",
 ]
 
+REVIEW_REQUEST_TAG_ALIASES = {
+    "1: review request",
+    "1: reveiw request",
+    "1:review request",
+    "1:reveiw request",
+    "1 : review request",
+    "1 : reveiw request",
+}
+DELIVERED_TAG_ALIASES = {
+    "Delivered",
+    "delivered",
+}
+
 
 class Command(BaseCommand):
     help = (
@@ -79,6 +92,40 @@ class Command(BaseCommand):
             help="Also store local ShopifyOrderItem snapshots using the existing order-item model.",
         )
         parser.add_argument(
+            "--skip-fulfillment-orders",
+            action="store_true",
+            help=(
+                "Skip per-order fulfillment-order detail reads. This is the default "
+                "for Review Request sync to avoid Shopify 429 rate limits."
+            ),
+        )
+        parser.add_argument(
+            "--include-fulfillment-orders",
+            action="store_true",
+            help=(
+                "Fetch per-order fulfillment-order details for deeper local sync. "
+                "Use with --fulfillment-request-delay and optionally --fulfillment-max-orders."
+            ),
+        )
+        parser.add_argument(
+            "--fulfillment-request-delay",
+            type=float,
+            default=2.0,
+            help=(
+                "Seconds to wait after successful fulfillment-order detail reads "
+                "when --include-fulfillment-orders is used (default: 2.0)."
+            ),
+        )
+        parser.add_argument(
+            "--fulfillment-max-orders",
+            type=int,
+            default=None,
+            help=(
+                "Maximum number of orders to fetch fulfillment details for when "
+                "--include-fulfillment-orders is used. Base order sync continues after this limit."
+            ),
+        )
+        parser.add_argument(
             "--skip-auto-refresh",
             action="store_true",
             help="Do not run the local Trustpilot queue refresh after a successful local apply.",
@@ -98,6 +145,23 @@ class Command(BaseCommand):
         request_delay = float(options["request_delay"])
         if request_delay < 0:
             raise CommandError("--request-delay must be zero or greater")
+        include_fulfillment_orders = options["include_fulfillment_orders"]
+        skip_fulfillment_orders = options["skip_fulfillment_orders"]
+        if include_fulfillment_orders and skip_fulfillment_orders:
+            raise CommandError(
+                "Use either --skip-fulfillment-orders or --include-fulfillment-orders, not both."
+            )
+        fulfillment_request_delay = float(options["fulfillment_request_delay"])
+        if fulfillment_request_delay < 0:
+            raise CommandError("--fulfillment-request-delay must be zero or greater")
+        if include_fulfillment_orders and fulfillment_request_delay < 2.0:
+            raise CommandError(
+                "--fulfillment-request-delay must be at least 2.0 when "
+                "--include-fulfillment-orders is used."
+            )
+        fulfillment_max_orders = options["fulfillment_max_orders"]
+        if fulfillment_max_orders is not None and fulfillment_max_orders <= 0:
+            raise CommandError("--fulfillment-max-orders must be greater than 0 when provided")
         max_pages = options["max_pages"]
         if max_pages is not None and max_pages <= 0:
             raise CommandError("--max-pages must be greater than 0 when provided")
@@ -118,6 +182,9 @@ class Command(BaseCommand):
                 request_delay=request_delay,
                 max_pages=max_pages,
                 stop_on_429=options["stop_on_429"],
+                include_fulfillment_orders=include_fulfillment_orders,
+                fulfillment_request_delay=fulfillment_request_delay,
+                fulfillment_max_orders=fulfillment_max_orders,
                 progress_callback=self.stdout.write,
             )
 
@@ -153,7 +220,13 @@ class Command(BaseCommand):
         self.stdout.write(f"Pages fetched: {result['pages_fetched']}")
         self.stdout.write(f"Max pages: {result['max_pages'] or 'none'}")
         self.stdout.write(f"Stopped by max pages: {result['stopped_by_max_pages']}")
+        self.stdout.write(f"Base orders fetched: {result['base_orders_fetched']}")
         self.stdout.write(f"Request delay seconds: {result['request_delay_seconds']:.1f}")
+        self.stdout.write(f"Fulfillment details: {result['fulfillment_detail_mode']}")
+        self.stdout.write(
+            f"Fulfillment request delay seconds: {result['fulfillment_request_delay_seconds']:.1f}"
+        )
+        self.stdout.write(f"Fulfillment max orders: {result['fulfillment_max_orders'] or 'none'}")
         self.stdout.write(f"Rate-limit retry events: {result['rate_limit_retry_events']}")
         self.stdout.write(f"Temporary error retry events: {result['temporary_error_retry_events']}")
         self.stdout.write(f"Backoff sleep seconds: {result['backoff_sleep_seconds']:.1f}")
@@ -165,6 +238,11 @@ class Command(BaseCommand):
         self.stdout.write(f"Updated orders: {result['updated_orders']}")
         self.stdout.write(f"Total saved/updated: {result['created_orders'] + result['updated_orders']}")
         self.stdout.write(f"Fulfillment orders checked: {result['fulfillment_orders_checked']}")
+        self.stdout.write(f"Fulfillment orders skipped: {result['fulfillment_orders_skipped']}")
+        self.stdout.write(
+            f"Fulfillment max orders reached: {result['fulfillment_max_orders_reached']}"
+        )
+        self.stdout.write(_format_candidate_field_summary(result["candidate_relevant_fields_captured"]))
         self.stdout.write(f"Line items seen: {result['line_items_seen']}")
         self.stdout.write(f"Created items: {result['created_items']}")
         self.stdout.write(f"Updated items: {result['updated_items']}")
@@ -197,11 +275,15 @@ def sync_review_request_orders_for_installation(
     request_delay=1.0,
     max_pages=None,
     stop_on_429=False,
+    include_fulfillment_orders=False,
+    fulfillment_request_delay=2.0,
+    fulfillment_max_orders=None,
     progress_callback=None,
 ):
     shop_domain = installation.shop
     access_token = installation.access_token
     request_delay = max(float(request_delay or 0), 0)
+    fulfillment_request_delay = max(float(fulfillment_request_delay or 0), 0)
     window_end = timezone.now()
     window_start = window_end - timedelta(days=days)
     start_date = window_start.strftime("%Y-%m-%d")
@@ -214,6 +296,7 @@ def sync_review_request_orders_for_installation(
         "pages_fetched": 0,
         "max_pages": max_pages,
         "stopped_by_max_pages": False,
+        "base_orders_fetched": 0,
         "request_delay_seconds": request_delay,
         "stop_on_429": stop_on_429,
         "rate_limit_stopped": False,
@@ -225,10 +308,25 @@ def sync_review_request_orders_for_installation(
         "would_update_orders": 0,
         "created_orders": 0,
         "updated_orders": 0,
+        "include_fulfillment_orders": include_fulfillment_orders,
+        "fulfillment_detail_mode": "included" if include_fulfillment_orders else "skipped",
+        "fulfillment_request_delay_seconds": fulfillment_request_delay,
+        "fulfillment_max_orders": fulfillment_max_orders,
+        "fulfillment_max_orders_reached": False,
         "fulfillment_orders_checked": 0,
+        "fulfillment_orders_skipped": 0,
         "line_items_seen": 0,
         "created_items": 0,
         "updated_items": 0,
+        "candidate_relevant_fields_captured": {
+            "orders_with_tags": 0,
+            "orders_with_delivered_tag": 0,
+            "orders_with_review_request_tag_alias": 0,
+            "orders_with_fulfillment_status": 0,
+            "orders_with_financial_status": 0,
+            "orders_with_note": 0,
+            "orders_with_note_attributes": 0,
+        },
         "shopify_api_read_only": True,
         "shopify_write_performed": False,
         "gmail_action_performed": False,
@@ -252,6 +350,17 @@ def sync_review_request_orders_for_installation(
         f"request_delay={request_delay:.1f}s; max_pages={max_pages or 'none'}; "
         f"mode={'dry-run' if dry_run else 'apply-local'}."
     )
+    if include_fulfillment_orders:
+        emit_progress(
+            "Including per-order fulfillment details for Review Request sync; "
+            f"fulfillment_request_delay={fulfillment_request_delay:.1f}s; "
+            f"fulfillment_max_orders={fulfillment_max_orders or 'none'}."
+        )
+    else:
+        emit_progress(
+            "Skipping per-order fulfillment details for Review Request sync. "
+            "Delivered/tag-based candidate scan will use order tags/status first."
+        )
 
     stop_requested = False
     try:
@@ -270,6 +379,7 @@ def sync_review_request_orders_for_installation(
             result["stopped_by_max_pages"] = (
                 result["stopped_by_max_pages"] or page_meta["stopped_by_max_pages"]
             )
+            result["base_orders_fetched"] += page_meta["orders_fetched"]
             emit_progress(
                 f"Page {page_number}: fetched {page_meta['orders_fetched']} orders; "
                 f"total fetched {page_meta['total_fetched']}; "
@@ -283,28 +393,41 @@ def sync_review_request_orders_for_installation(
                     continue
                 line_items = order.get("line_items") or []
                 result["line_items_seen"] += len(line_items)
-                try:
-                    fulfillment_orders = fetch_order_fulfillment_orders(
-                        shop_domain,
-                        order_id,
-                        access_token,
-                        request_delay=request_delay,
-                        stop_on_429=stop_on_429,
-                        retry_callback=record_retry,
-                    )
-                    result["fulfillment_orders_checked"] += 1
-                except ShopifyRateLimitError:
-                    fulfillment_orders = []
-                    result["success"] = False
-                    result["rate_limit_stopped"] = True
-                    result["errors"].append(f"rate_limit_stopped_order_{order_id}")
-                    stop_requested = True
-                    break
-                except requests.exceptions.RequestException as exc:
-                    fulfillment_orders = []
-                    result["errors"].append(
-                        f"fulfillment_orders_failed_{order_id}: {exc.__class__.__name__}"
-                    )
+                _record_candidate_relevant_fields(result, order)
+                fulfillment_orders = []
+                fulfillment_details_available = False
+                if _should_fetch_fulfillment_orders(
+                    include_fulfillment_orders,
+                    result["fulfillment_orders_checked"],
+                    fulfillment_max_orders,
+                ):
+                    try:
+                        fulfillment_orders = fetch_order_fulfillment_orders(
+                            shop_domain,
+                            order_id,
+                            access_token,
+                            request_delay=fulfillment_request_delay,
+                            stop_on_429=stop_on_429,
+                            retry_callback=record_retry,
+                        )
+                        result["fulfillment_orders_checked"] += 1
+                        fulfillment_details_available = True
+                    except ShopifyRateLimitError:
+                        fulfillment_orders = []
+                        result["success"] = False
+                        result["rate_limit_stopped"] = True
+                        result["errors"].append(f"rate_limit_stopped_order_{order_id}")
+                        stop_requested = True
+                        break
+                    except requests.exceptions.RequestException as exc:
+                        fulfillment_orders = []
+                        result["errors"].append(
+                            f"fulfillment_orders_failed_{order_id}: {exc.__class__.__name__}"
+                        )
+                else:
+                    result["fulfillment_orders_skipped"] += 1
+                    if include_fulfillment_orders and fulfillment_max_orders is not None:
+                        result["fulfillment_max_orders_reached"] = True
 
                 current_location_normalized, current_location_raw = summarize_current_locations(fulfillment_orders)
                 existing_order = ShopifyOrder.objects.filter(
@@ -323,6 +446,7 @@ def sync_review_request_orders_for_installation(
                     order,
                     current_location_normalized,
                     current_location_raw,
+                    update_fulfillment_location=fulfillment_details_available,
                 )
                 if created:
                     result["created_orders"] += 1
@@ -356,6 +480,7 @@ def _upsert_review_request_order(
     order_data,
     current_location_normalized,
     current_location_raw,
+    update_fulfillment_location=True,
 ):
     now = timezone.now()
     order_id = order_data["id"]
@@ -364,6 +489,7 @@ def _upsert_review_request_order(
         current_location_normalized,
         current_location_raw,
         now,
+        update_fulfillment_location=update_fulfillment_location,
     )
     order_obj, created = ShopifyOrder.objects.get_or_create(
         installation=installation,
@@ -398,13 +524,14 @@ def _review_request_order_defaults(
     current_location_normalized,
     current_location_raw,
     synced_at,
+    update_fulfillment_location=True,
 ):
     customer = order_data.get("customer") or {}
     customer_name = " ".join(
         filter(None, [customer.get("first_name", ""), customer.get("last_name", "")])
     ).strip() or customer.get("name", "")
     shipping_address = order_data.get("shipping_address") or {}
-    return {
+    defaults = {
         "order_number": order_data.get("order_number", ""),
         "order_name": order_data.get("name", ""),
         "financial_status": order_data.get("financial_status", ""),
@@ -425,13 +552,19 @@ def _review_request_order_defaults(
         "order_created_at": _parse_shopify_datetime(order_data.get("created_at")) or synced_at,
         "shopify_note": order_data.get("note"),
         "shopify_note_attributes": order_data.get("note_attributes") or [],
-        "original_location_raw": current_location_raw,
-        "current_location_raw": current_location_raw,
-        "original_location": None,
-        "current_location": current_location_normalized,
-        "is_shenzhen_order": False,
         "last_order_synced_at": synced_at,
     }
+    if update_fulfillment_location:
+        defaults.update(
+            {
+                "original_location_raw": current_location_raw,
+                "current_location_raw": current_location_raw,
+                "original_location": None,
+                "current_location": current_location_normalized,
+                "is_shenzhen_order": False,
+            }
+        )
+    return defaults
 
 
 def _parse_shopify_datetime(value):
@@ -444,3 +577,58 @@ def _parse_shopify_datetime(value):
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=datetime_timezone.utc)
     return parsed
+
+
+def _should_fetch_fulfillment_orders(include_fulfillment_orders, checked_count, max_orders):
+    if not include_fulfillment_orders:
+        return False
+    if max_orders is None:
+        return True
+    return checked_count < max_orders
+
+
+def _record_candidate_relevant_fields(result, order):
+    counters = result["candidate_relevant_fields_captured"]
+    tags = _split_shopify_tags(order.get("tags"))
+    if tags:
+        counters["orders_with_tags"] += 1
+    if _has_alias_tag(tags, DELIVERED_TAG_ALIASES):
+        counters["orders_with_delivered_tag"] += 1
+    if _has_alias_tag(tags, REVIEW_REQUEST_TAG_ALIASES):
+        counters["orders_with_review_request_tag_alias"] += 1
+    if order.get("fulfillment_status"):
+        counters["orders_with_fulfillment_status"] += 1
+    if order.get("financial_status"):
+        counters["orders_with_financial_status"] += 1
+    if order.get("note"):
+        counters["orders_with_note"] += 1
+    if order.get("note_attributes"):
+        counters["orders_with_note_attributes"] += 1
+
+
+def _split_shopify_tags(value):
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [part.strip() for part in str(value or "").split(",") if part.strip()]
+
+
+def _has_alias_tag(tags, aliases):
+    normalized_aliases = {_normalize_tag_for_alias(alias) for alias in aliases}
+    return any(_normalize_tag_for_alias(tag) in normalized_aliases for tag in tags)
+
+
+def _normalize_tag_for_alias(value):
+    return "".join(str(value or "").strip().lower().split())
+
+
+def _format_candidate_field_summary(counters):
+    return (
+        "Candidate-relevant fields captured: "
+        f"tags on {counters['orders_with_tags']} orders; "
+        f"Delivered tag on {counters['orders_with_delivered_tag']} orders; "
+        f"review-request tag alias on {counters['orders_with_review_request_tag_alias']} orders; "
+        f"fulfillment_status on {counters['orders_with_fulfillment_status']} orders; "
+        f"financial_status on {counters['orders_with_financial_status']} orders; "
+        f"notes on {counters['orders_with_note']} orders; "
+        f"note attributes on {counters['orders_with_note_attributes']} orders."
+    )

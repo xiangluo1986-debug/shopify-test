@@ -31,7 +31,9 @@ that could contact external services.
 - [x] Confirm `Delivered` also exists as an exact order tag.
 - [x] Preserve the exact colon, spelling, spacing, and character width returned
   by Shopify; do not normalize, correct, trim, translate, or rewrite tag values.
-- [x] Treat `1: reveiw request` and `1: review request` as separate tags.
+- [x] Treat `1: reveiw request` and `1: review request` as separate raw Shopify
+  tag values, but Phase 5.28A read checks accept both as review-request trigger
+  aliases. Future writes must use canonical `1: review request`.
 - [x] Treat half-width colon `:` / U+003A and full-width colon `：` / U+FF1A
   as separate characters.
 - [x] Include Unicode code points for candidate tags, especially tags containing
@@ -51,9 +53,9 @@ Confirmed Phase 0.1 report facts:
 - Safety confirmed: read-only Shopify query only; no Shopify writes, no
   `tagsAdd`, no `tagsRemove`, no Ali Reviews / Kudosi API call, no Gmail API
   call, and no email sending.
-- Future automation must use exact string matching and the exact Shopify API
-  tag value `1: reveiw request` unless a later read-only discovery report proves
-  the merchant changed the tag.
+- Future automation must preserve exact Shopify API tag values. Read checks may
+  match the approved aliases `1: review request` and `1: reveiw request`; future
+  writes must use canonical `1: review request`.
 
 ### Ali Reviews / Kudosi API
 
@@ -896,3 +898,170 @@ Future tracking design note:
   `gmail_send_scope_available_in_runner_env`,
   `gmail_scope_loaded_but_unrecognized`, or
   `env_file_loaded_but_scope_still_missing`.
+
+## Phase 5.24A Review Request Approval Queue
+
+- [x] Add a simple Review Requests approval queue in the Django admin
+  workbench.
+- [x] Main page shows only `Needs review email` and `Already sent`.
+- [x] Eligible rows expose one admin action named `Review & Send`.
+- [x] The action is POST-only, admin-only, CSRF protected, and verifies the
+  selected order against the current eligible queue before any Gmail call.
+- [x] With `gmail.compose`, the system uses Gmail draft creation plus
+  `drafts.send` internally after admin approval.
+- [x] No direct automatic send is enabled without admin approval yet.
+- [x] If no eligible candidate exists, no Gmail call occurs and the admin sees
+  `No email was sent. This order is not eligible.`
+- [x] Preserve known blockers: `#22620` is already sent to this customer via
+  `#22621`, and `#22582` is not ready because it is not delivered, is missing
+  `1: review request`, and related `#22582/#22581` are not ready.
+- [x] No Shopify tag write happens in this phase; after send, the page reports
+  that Shopify tag write waits for post-send audit.
+- [x] Later automation path: after the algorithm is trusted, remove the manual
+  approval step; after send audit, write `1: trustpilot` in a separate
+  approved phase.
+
+## Phase 5.25 Approval Queue Customer Context And Review & Send
+
+- [x] Approval queue rows now show business context for non-technical admins:
+  order number, customer display name, masked customer identifier when
+  available, customer order count/sequence, current tag chips, delivered
+  status, canonical `1: review request` status, previous Trustpilot history,
+  eligibility status, and a plain-language reason.
+- [x] The `Needs review email` table uses the columns `Order`, `Customer`,
+  `Orders`, `Tags`, `Trustpilot history`, `Status`, `Reason`, and `Action`.
+- [x] The `Already sent` table uses the columns `Order`, `Customer`, `Orders`,
+  `Trustpilot email`, `Evidence`, and `Tags`.
+- [x] Previous Trustpilot status is detected from the local history ledger,
+  Trustpilot tag aliases such as `1: trustpilot` and `1: trustpoilt`, and
+  customer-level duplicate evidence such as `#22620` already sent via `#22621`.
+- [x] `Review & Send` is shown only for currently eligible rows. The server
+  still revalidates the selected order on POST before any Gmail draft/send
+  path can run.
+- [x] With the current no-eligible state, no active `Review & Send` button is
+  shown, no Gmail API call happens, and no email is sent.
+- [x] `#22582` remains not ready because it is not delivered, is missing
+  `1: review request`, and related `#22582/#22581` are not ready.
+- [x] `#22620` remains already sent / duplicate because the customer already
+  received a Trustpilot email via `#22621`; `#22621` remains already sent and
+  recorded.
+- [x] Shopify tag writes remain disabled in this phase. Any future
+  post-send Shopify tag write must be a separate audit and approval step.
+
+## Phase 5.26 Merged Order Group Guard
+
+- [x] Add an explicit merged/related order group guard to the Review Requests
+  workbench.
+- [x] Related order numbers extracted from local order notes and local report
+  references are treated as one shipment group without exposing raw notes.
+- [x] Merged groups receive at most one Trustpilot email; the UI must never show
+  separate `Review & Send` buttons for multiple orders in the same group.
+- [x] A merged group is eligible only when every order in the group is delivered,
+  has the canonical `1: review request` tag, has no refund/return/cancel/ticket
+  risk, and has no prior Trustpilot send evidence.
+- [x] If any order in the group already received Trustpilot, the whole group is
+  already sent or blocked as a duplicate with evidence naming the order that
+  received Trustpilot.
+- [x] `#22582/#22581` should remain blocked until the whole merged group is
+  ready; no Trustpilot email should be sent for only one order in that group.
+- [x] Phase 5.26 does not call Gmail APIs, send emails, create drafts, call
+  Shopify APIs, write Shopify tags, call external review APIs, or call
+  `translationsRegister`.
+
+## Phase 5.27 Last 60 Days Reviewable Candidate Queue
+
+- [x] Main `Needs review email` now shows only candidates from the current
+  last-60-days scan that are actually eligible for admin review/send.
+- [x] Blocked and not-ready orders are moved out of the main queue into the
+  collapsed `Blocked / Not ready` section or advanced technical details.
+- [x] Added `shopify_review_request_last_60_days_candidate_scan` to scan synced
+  local Shopify order rows and existing local review-request reports without
+  Shopify, Gmail, or external review API calls.
+- [x] The scan reports `scanned_order_count`, `delivered_order_count`,
+  `eligible_candidate_count`, `already_sent_count`, `blocked_count`,
+  merged-group blocks, duplicate-customer blocks, missing review-request tag
+  blocks, not-delivered blocks, and eligible/blocked/already-sent summaries.
+- [x] Merged groups such as `#22582/#22581` remain blocked until the whole
+  group is delivered, has canonical `1: review request`, has no risk, and has
+  no prior Trustpilot send evidence.
+- [x] `#22582` must not be presented for admin send review and must not show a
+  `Review & Send` button while its merged group is not ready.
+- [x] `#22621` remains visible as already sent; `#22620` remains visible as
+  already sent / duplicate via `#22621`; neither can show `Review & Send`.
+- [x] Phase 5.27 is scan/UI only. The admin POST path is locked and performs no
+  Gmail API call, draft create/update/delete, send, Shopify write/tag mutation,
+  Trustpilot/Kudosi/Ali Reviews API call, or `translationsRegister`.
+
+## Phase 5.28A Tag Alias And #22562 Candidate Correction
+
+- [x] Read checks treat `1: review request` and legacy typo
+  `1: reveiw request` as equivalent review-request trigger tags, including
+  spacing/case variants such as `1:review request` and `1 : reveiw request`.
+- [x] Future Shopify writes still use canonical `1: review request`; this phase
+  performs no Shopify writes.
+- [x] Delivered evidence accepts `Delivered` and case-normalized `delivered`.
+- [x] Trustpilot sent aliases remain `1: trustpilot` and legacy typo
+  `1: trustpoilt`, including spacing variants.
+- [x] Repeat-customer orders are not grouped into a merged shipment unless
+  explicit merge evidence exists in local notes, staff/report evidence, or a
+  verified related-order field.
+- [x] `#22562` must not be blocked for missing `1: review request` when the
+  loaded tag is `1: reveiw request`.
+- [x] `#22562` must not be grouped with other same-customer orders unless an
+  explicit merge note/evidence connects them.
+- [x] Added
+  `shopify_review_request_tag_alias_and_candidate_correction_audit` to report
+  `#22562` tag detection, delivered detection, merge evidence source, final
+  eligibility, blockers, and eligible count after the fix.
+- [x] Phase 5.28A is scan/UI/report only. It performs no Gmail API call, email
+  send, Shopify API call/write/mutation/tag write, Trustpilot/Kudosi/Ali Reviews
+  API call, or `translationsRegister`.
+
+## Phase 5.28B Shopify Order Sync Coverage
+
+- [x] Review Requests requires full local Shopify order coverage, not
+  Shenzhen-only settlement data, before the candidate list can be trusted.
+- [x] The initial setup path should sync the last 60 days of Shopify orders into
+  local `ShopifyOrder` rows using
+  `docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --apply-local --skip-fulfillment-orders`.
+- [x] The daily refresh path should sync the latest 3 days with
+  `docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --apply-local --skip-fulfillment-orders`.
+- [x] The candidate scan now reports `scan_source` as `full_shopify_orders`,
+  `shenzhen_only_orders`, `fallback_report_only`, or `sqlite_report_fallback`.
+- [x] Coverage warnings include `incomplete_local_order_source`,
+  `order_not_found_in_local_data`, and `delivered_order_data_missing`.
+- [x] `#22530` missing from the scan is treated as a local data coverage
+  problem: if it is not in `ShopifyOrder`, the report says to run the Review
+  Request 60-day Shopify sync.
+- [x] The dashboard shows an `Order data coverage` section with the last sync
+  window, local data source, `#22530` presence, candidate scan freshness, and
+  coverage warnings.
+- [x] `Needs review email` must show only truly eligible candidates; blocked,
+  incomplete, or not-ready orders remain secondary.
+- [x] Phase 5.28B does not call Gmail APIs, send email, create drafts, write
+  Shopify data, call Shopify mutations, run `tagsAdd` / `tagsRemove`, call
+  Trustpilot/Kudosi/Ali Reviews APIs, or call `translationsRegister`.
+
+## Phase 5.28D Fulfillment Detail Rate Limit Guard
+
+- [x] Review Request Shopify order sync skips per-order fulfillment-order detail
+  reads by default to avoid Shopify 429 rate limits during broad candidate
+  coverage syncs.
+- [x] The sync command supports `--skip-fulfillment-orders` for explicit safe
+  mode and `--include-fulfillment-orders` for a later deeper sync when
+  fulfillment details are truly needed.
+- [x] Deeper fulfillment detail sync must use `--fulfillment-request-delay 2.0`
+  or higher and may be limited with `--fulfillment-max-orders`.
+- [x] When fulfillment details are skipped, the sync still reads base order
+  fields from the Shopify orders page, including tags, `fulfillment_status`,
+  financial status, notes, note attributes, customer, shipping, and line-item
+  snapshots available in the order payload.
+- [x] Skipping fulfillment details must not overwrite existing local
+  fulfillment-derived location fields with `unknown`.
+- [x] Candidate scanning should use delivered/review-request tag evidence,
+  `fulfillment_status`, and local report evidence first. Missing fulfillment
+  detail evidence is treated as uncertain local coverage, not as a fatal sync
+  error.
+- [x] Phase 5.28D performs no Shopify writes, tag mutations, Gmail API calls,
+  email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
+  `translationsRegister` calls.
