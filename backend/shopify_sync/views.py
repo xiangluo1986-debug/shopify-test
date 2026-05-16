@@ -70,6 +70,7 @@ from .translation_drafts import (
     ALL_ELIGIBLE_DRAFT_SCOPES,
     DEFAULT_FIELDS as TRANSLATION_DRAFT_FIELDS,
     DEFAULT_TARGET_LOCALES as TRANSLATION_DRAFT_TARGET_LOCALES,
+    FORBIDDEN_OUTPUT_RE,
     TRANSLATE_ALL_ACTION_NAME,
     build_product_identity_context,
     generate_selected_product_missing_translation_draft_package,
@@ -300,7 +301,7 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "missing_part_type": "SEO may be missing the part type",
     "missing_use_case": "SEO may be missing the use case",
     "missing_value_point": "SEO may be missing a value point",
-    "future_write_needs_resource_mapping": "Can review now, Shopify update support needs extra mapping",
+    "future_write_needs_resource_mapping": "Can review now; Shopify update support needs extra mapping",
     "source_empty": "Original source is empty",
     "not_eligible_technical_field": "Technical field, not translated automatically",
     "not_draft_eligible": "Technical field, not translated automatically",
@@ -308,6 +309,8 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "existing_translation_current": "Already up to date",
     "manual_review_required": "Needs manual review",
     "no_generated_draft": "No automatic translation was generated",
+    "body_html_structure_broken": "Product description HTML structure needs review",
+    "draft_equals_source": "Translation is unchanged from the source",
     "missing_translation_not_requested": "Not translated automatically in this run",
     "child_resource_query_failed": "Some Shopify content could not be read",
     "skipped_child_resource_query_failed": "Some Shopify content could not be read",
@@ -316,6 +319,52 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "not_eligible_for_apply_plan": "Not ready for Shopify update preparation",
     "current_translation_outdated": "Existing translation is outdated",
     "draft_over_max_chars": "Translation is too long",
+    "forbidden_marketing_or_origin_phrase": "Forbidden CTA, shipping, or origin phrase",
+    "forbidden_marketing_or_shipping_phrase": "Forbidden CTA, shipping, or origin phrase",
+    "html_media_or_link_tag_broken": "HTML, video, link, or image tag needs review",
+    "keyword_stuffing_or_duplicate": "SEO text needs review",
+    "product_title_over_80_chars": "Product title is over 80 characters",
+    "seo_title_over_60_chars": "SEO title is over 60 characters",
+    "seo_description_over_160_chars": "SEO description is over 160 characters",
+}
+TRANSLATION_WORKSPACE_REVIEW_REASON_CODES = {
+    "body_html_structure_broken",
+    "blocked",
+    "draft_blocked",
+    "draft_empty",
+    "draft_equals_source",
+    "draft_needs_manual_review",
+    "draft_needs_manual_review_empty",
+    "draft_over_max_chars",
+    "existing_translation_outdated",
+    "existing_translation_outdated_manual_review_required",
+    "forbidden_marketing_or_origin_phrase",
+    "forbidden_marketing_or_shipping_phrase",
+    "html_media_or_link_tag_broken",
+    "keyword_stuffing_or_duplicate",
+    "manual_review_required",
+    "missing_core_keyword",
+    "missing_model",
+    "missing_part_type",
+    "missing_replacement_part_meaning",
+    "missing_use_case",
+    "needs_review",
+    "product_identity_mismatch",
+    "product_title_over_80_chars",
+    "seo_description_over_160_chars",
+    "seo_needs_manual_review",
+    "seo_not_ready",
+    "seo_title_over_60_chars",
+}
+TRANSLATION_WORKSPACE_MAPPING_NOTICE_REASONS = {
+    "future_write_needs_resource_mapping",
+}
+TRANSLATION_WORKSPACE_NON_BLOCKING_REASON_CODES = {
+    "missing_translation",
+    "missing_translation_draft_ready",
+    "missing_value_point",
+    "outdated_translation_update_draft_ready",
+    "too_short_for_seo",
 }
 TRANSLATION_WORKSPACE_RESULT_FIELD_LABELS = {
     "title": "Product title",
@@ -359,6 +408,7 @@ TRANSLATION_WORKSPACE_JOB_TERMINAL_STATUSES = {
 TRANSLATION_WORKSPACE_JOB_ID_RE = re.compile(
     r"^translation_workspace_job_[a-f0-9]{16}_\d{8}T\d{6}Z_[a-f0-9]{8}$"
 )
+TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME = "save_translation_manual_edit"
 TRANSLATION_WORKSPACE_JOB_DETAIL_PREVIEW_LIMIT = 60
 TRANSLATION_WORKSPACE_JOB_REVIEW_ROW_LIMIT = 1000
 TRANSLATION_WORKSPACE_JOB_ERROR_LIMIT = 20
@@ -433,7 +483,7 @@ TRANSLATION_CONSOLE_EDITOR_SECTIONS = [
     },
 ]
 TRANSLATION_CONSOLE_EDITOR_SEO_LIMITS = {
-    "title": 70,
+    "title": 80,
     "meta_title": 60,
     "meta_description": 160,
 }
@@ -1068,6 +1118,9 @@ def translation_console(request):
     is_safe_write_readiness_package_post = post_action == SAFE_WRITE_READINESS_ACTION_NAME
     is_workspace_locked_execution_post = post_action == LOCKED_EXECUTION_ACTION_NAME
     is_workspace_real_write_post = post_action == REAL_WRITE_ACTION_NAME
+    is_manual_translation_edit_post = (
+        post_action == TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME
+    )
     is_locked_package_preview_post = post_action in {
         "generate_locked_package_dry_run_placeholder",
         "generate_locked_package_dry_run_preview",
@@ -1077,6 +1130,7 @@ def translation_console(request):
     is_status_only_safe_action_post = (
         is_refresh_status_post
         or is_translation_job_refresh_post
+        or is_manual_translation_edit_post
         or is_safe_write_readiness_package_post
         or is_workspace_locked_execution_post
     )
@@ -1112,6 +1166,7 @@ def translation_console(request):
         or is_safe_write_readiness_package_post
         or is_workspace_locked_execution_post
         or is_workspace_real_write_post
+        or is_manual_translation_edit_post
         or is_status_only_safe_action_post
         or is_locked_package_preview_post
     )
@@ -1281,6 +1336,7 @@ def translation_console(request):
     workspace_locked_execution_error_message = ""
     workspace_real_write_result = None
     workspace_real_write_error_message = ""
+    manual_translation_edit_result = None
     workflow_product_id = (
         selected_product_gid
         if selected_product_gid.startswith("gid://shopify/Product/")
@@ -1765,6 +1821,16 @@ def translation_console(request):
     translation_background_job = load_translation_workspace_background_job_status(
         translation_job_product_id
     )
+    if is_manual_translation_edit_post:
+        manual_translation_edit_result = save_translation_workspace_manual_edit(
+            product_gid=translation_job_product_id,
+            job_id=request.POST.get("translation_job_id", ""),
+            entry_id=request.POST.get("manual_edit_entry_id", ""),
+            edited_value=request.POST.get("manual_edit_value", ""),
+        )
+        translation_background_job = load_translation_workspace_background_job_status(
+            translation_job_product_id
+        )
     safe_write_readiness_state = build_translation_workspace_safe_write_readiness_state(
         translation_background_job,
         selected_product_gid=translation_job_product_id,
@@ -1774,7 +1840,50 @@ def translation_console(request):
         translation_background_job,
         safe_write_readiness_state,
     )
-    if is_refresh_status_post:
+    if is_manual_translation_edit_post:
+        blocking_conditions = list(
+            (manual_translation_edit_result or {}).get("blocking_conditions") or []
+        )
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status=(
+                (manual_translation_edit_result or {}).get("edit_status")
+                or "manual_translation_edit_blocked"
+            ),
+            message=(
+                "Manual translation edit saved locally. Shopify was not updated."
+                if not blocking_conditions
+                else "Manual translation edit was not saved. No Shopify write performed."
+            ),
+            summary={
+                "product_gid": (manual_translation_edit_result or {}).get(
+                    "product_gid", ""
+                ),
+                "job_id": (manual_translation_edit_result or {}).get("job_id", ""),
+                "entry_id": (manual_translation_edit_result or {}).get(
+                    "entry_id", ""
+                ),
+                "locale": (manual_translation_edit_result or {}).get("locale", ""),
+                "field": (manual_translation_edit_result or {}).get("field", ""),
+                "using_manual_edit": (manual_translation_edit_result or {}).get(
+                    "using_manual_edit", False
+                ),
+                "validation_status": (manual_translation_edit_result or {}).get(
+                    "validation_status", ""
+                ),
+                "seo_validation_status": (manual_translation_edit_result or {}).get(
+                    "seo_validation_status", ""
+                ),
+                "blocking_conditions": blocking_conditions,
+                "report_path": (manual_translation_edit_result or {}).get(
+                    "report_path", ""
+                ),
+                "shopify_write_performed": False,
+                "mutation_performed": False,
+                "translations_register_called": False,
+            },
+        )
+    elif is_refresh_status_post:
         safe_action_result = _translation_console_safe_action_result(
             action=post_action,
             action_status="workflow_status_refreshed",
@@ -2274,6 +2383,7 @@ def translation_console(request):
             "workspace_real_write_can_submit": workspace_real_write_can_submit,
             "locked_execution_ack_phrase": LOCKED_EXECUTION_ACK_PHRASE,
             "translation_single_locked_write_action_name": REAL_WRITE_ACTION_NAME,
+            "manual_translation_edit_action_name": TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
             "draft_fields": TRANSLATION_DRAFT_FIELDS,
             "draft_json_report_path": "logs/shopify_translation_selected_product_missing_translation_draft_package.json",
@@ -3477,6 +3587,245 @@ def load_translation_workspace_background_job_status(product_gid: str):
     return _translation_workspace_job_status_for_view(status)
 
 
+def save_translation_workspace_manual_edit(
+    *,
+    product_gid: str,
+    job_id: str,
+    entry_id: str,
+    edited_value: str,
+):
+    normalized_gid = normalize_product_gid(product_gid or "") or ""
+    job_id = str(job_id or "").strip()
+    entry_id = str(entry_id or "").strip()
+    edited_value = str(edited_value or "").strip()
+    result = {
+        "edit_status": "manual_translation_edit_blocked",
+        "product_gid": normalized_gid,
+        "job_id": job_id,
+        "entry_id": entry_id,
+        "locale": "",
+        "field": "",
+        "using_manual_edit": False,
+        "validation_status": "",
+        "seo_validation_status": "",
+        "blocking_conditions": [],
+        "manual_validation_reasons": [],
+        "report_path": "",
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+    }
+    if not normalized_gid:
+        result["blocking_conditions"].append("blocked_missing_selected_product")
+    if not job_id or not _translation_workspace_valid_job_id(job_id):
+        result["blocking_conditions"].append("blocked_invalid_translation_job_id")
+    if not entry_id:
+        result["blocking_conditions"].append("blocked_missing_manual_edit_entry_id")
+    if not edited_value:
+        result["blocking_conditions"].append("blocked_manual_edit_empty")
+    if result["blocking_conditions"]:
+        return result
+
+    latest_status = _translation_workspace_latest_job_status(normalized_gid)
+    if not latest_status:
+        result["blocking_conditions"].append("blocked_missing_latest_translation_report")
+        return result
+    if latest_status.get("job_id") != job_id:
+        result["blocking_conditions"].append("blocked_manual_edit_not_latest_report")
+        result["job_id"] = latest_status.get("job_id", job_id)
+        result["report_path"] = latest_status.get("report_path", "")
+        return result
+
+    status = latest_status
+    if normalize_product_gid(status.get("product_gid") or "") != normalized_gid:
+        result["blocking_conditions"].append("blocked_selected_product_report_mismatch")
+        return result
+
+    row = _translation_workspace_find_review_row(status, entry_id)
+    if not row:
+        result["blocking_conditions"].append("blocked_manual_edit_entry_not_found")
+        result["report_path"] = status.get("report_path", "")
+        return result
+
+    validation = _translation_workspace_validate_manual_edit(row, edited_value)
+    now = _translation_workspace_now_iso()
+    original_openai_value = (
+        row.get("openai_original_proposed_translation")
+        or row.get("original_openai_translation")
+        or row.get("proposed_translation")
+        or row.get("generated_draft_display")
+        or row.get("proposed_translation_preview")
+        or ""
+    )
+    row.update(
+        {
+            "manual_edit_value": edited_value,
+            "manual_translation_override_value": edited_value,
+            "manual_edit_saved_at": now,
+            "manual_edit_source": "local_translation_workspace_report",
+            "manual_edit_status": "edited_manually",
+            "manual_edit_label": "Edited manually",
+            "manual_edit_usage_label": "Using manual edit",
+            "manual_edit_original_label": "OpenAI original available in Technical details",
+            "has_manual_edit": True,
+            "using_manual_edit": True,
+            "openai_original_proposed_translation": original_openai_value,
+            "original_openai_translation": original_openai_value,
+            "proposed_translation": edited_value,
+            "proposed_translation_preview": _preview_text(edited_value),
+            "proposed_translation_display": edited_value,
+            "generated_draft_display": edited_value,
+            "generated_draft_summary": _preview_text(edited_value),
+            "has_generated_draft": True,
+            "proposed_chars": len(edited_value),
+            "validation_status": validation["validation_status"],
+            "seo_validation_status": validation["seo_validation_status"],
+            "validation_reasons": ", ".join(validation["reasons"]),
+            "seo_warning": ", ".join(validation["seo_reasons"]),
+            "blocking_reasons": ", ".join(validation["reasons"]),
+            "draft_blocked": validation["draft_blocked"],
+            "product_identity_mismatch": validation["product_identity_mismatch"],
+            "manual_edit_validation_reasons": validation["reasons"],
+            "manual_edit_validation_message": validation["message"],
+        }
+    )
+    overrides = status.setdefault("manual_translation_overrides", {})
+    overrides[entry_id] = {
+        "entry_id": entry_id,
+        "locale": row.get("locale") or row.get("language", ""),
+        "field": row.get("field") or row.get("key", ""),
+        "resource_id": row.get("resource_id", ""),
+        "digest": row.get("digest") or row.get("source_digest", ""),
+        "edited_value": edited_value,
+        "openai_original_proposed_translation": original_openai_value,
+        "saved_at": now,
+        "validation_status": validation["validation_status"],
+        "seo_validation_status": validation["seo_validation_status"],
+        "validation_reasons": validation["reasons"],
+        "source": "local_translation_workspace_report",
+    }
+    status["manual_translation_override_count"] = len(overrides)
+    status["updated_at"] = now
+    _translation_workspace_recalculate_manual_edit_counts(status)
+    _translation_workspace_save_job_status(status)
+
+    result.update(
+        {
+            "edit_status": "manual_translation_edit_saved",
+            "locale": row.get("locale") or row.get("language", ""),
+            "field": row.get("field") or row.get("key", ""),
+            "using_manual_edit": True,
+            "validation_status": validation["validation_status"],
+            "seo_validation_status": validation["seo_validation_status"],
+            "manual_validation_reasons": validation["reasons"],
+            "report_path": status.get("report_path", ""),
+        }
+    )
+    return result
+
+
+def _translation_workspace_find_review_row(status: dict, entry_id: str):
+    for row in status.get("review_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        row_entry_id = (
+            row.get("safe_write_entry_id")
+            or row.get("entry_id")
+            or _translation_workspace_safe_write_entry_id(
+                row.get("resource_id", ""),
+                row.get("field") or row.get("key", ""),
+                row.get("locale") or row.get("language", ""),
+                row.get("digest") or row.get("source_digest", ""),
+            )
+        )
+        if row_entry_id == entry_id:
+            return row
+    return None
+
+
+def _translation_workspace_validate_manual_edit(row: dict, edited_value: str):
+    edited_value = str(edited_value or "").strip()
+    field = _translation_editor_normalize_field_key(
+        (row or {}).get("field") or (row or {}).get("key") or ""
+    )
+    reasons = []
+    seo_reasons = []
+    draft_blocked = False
+    product_identity_mismatch = False
+    if not edited_value:
+        reasons.append("draft_empty")
+        draft_blocked = True
+    if field == "title" and len(edited_value) > 80:
+        reasons.append("product_title_over_80_chars")
+    if field == "meta_title" and len(edited_value) > 60:
+        reasons.append("seo_title_over_60_chars")
+        seo_reasons.append("seo_title_over_60_chars")
+    if field == "meta_description" and len(edited_value) > 160:
+        reasons.append("seo_description_over_160_chars")
+        seo_reasons.append("seo_description_over_160_chars")
+    if FORBIDDEN_OUTPUT_RE.search(edited_value):
+        reasons.append("forbidden_marketing_or_origin_phrase")
+        seo_reasons.append("forbidden_marketing_or_shipping_phrase")
+        draft_blocked = True
+
+    identity_context = (row or {}).get("source_identity_context") or build_product_identity_context(
+        source_values=[
+            (row or {}).get("source_value")
+            or (row or {}).get("source_value_display")
+            or "",
+        ]
+    )
+    identity = validate_product_identity_draft(identity_context, edited_value, field)
+    if identity.get("draft_blocked"):
+        reasons.append("product_identity_mismatch")
+        product_identity_mismatch = True
+        draft_blocked = True
+
+    reasons = _translation_editor_unique_list(reasons)
+    seo_reasons = _translation_editor_unique_list(seo_reasons)
+    validation_status = (
+        "draft_ready_for_manual_review"
+        if not reasons and not draft_blocked
+        else "draft_needs_manual_review"
+    )
+    seo_validation_status = "seo_needs_manual_review" if seo_reasons else "seo_ready"
+    if draft_blocked:
+        seo_validation_status = "seo_needs_manual_review"
+    labels = _translation_workspace_human_reason_labels(reasons, row=row)
+    return {
+        "validation_status": validation_status,
+        "seo_validation_status": seo_validation_status,
+        "reasons": reasons,
+        "seo_reasons": seo_reasons,
+        "draft_blocked": draft_blocked,
+        "product_identity_mismatch": product_identity_mismatch,
+        "message": ", ".join(labels) if labels else "Manual edit is ready for review.",
+    }
+
+
+def _translation_workspace_recalculate_manual_edit_counts(status: dict):
+    rows = [
+        _translation_workspace_job_review_row(row)
+        for row in (status.get("review_rows") or [])
+        if isinstance(row, dict)
+    ]
+    blocked_by_locale = {}
+    for row in rows:
+        status_key, _status_label = _translation_workspace_result_row_status(row)
+        if status_key == "needs_review":
+            locale = row.get("locale") or row.get("language") or ""
+            blocked_by_locale[locale] = blocked_by_locale.get(locale, 0) + 1
+    counts = status.setdefault(
+        "counts",
+        _translation_workspace_empty_job_counts(status.get("selected_locales") or []),
+    )
+    counts["blocked_count"] = sum(blocked_by_locale.values())
+    for locale_row in status.get("per_locale_status") or []:
+        locale = locale_row.get("locale", "")
+        if locale in blocked_by_locale:
+            locale_row["blocked_count"] = blocked_by_locale[locale]
+
+
 def start_translation_workspace_background_job(
     *,
     installation_id,
@@ -3753,6 +4102,13 @@ def _translation_workspace_empty_job_counts(selected_locales):
         "blocked_count": 0,
         "generated_draft_count": 0,
         "skipped_count": 0,
+        "openai_call_count": 0,
+        "reused_cache_count": 0,
+        "skipped_existing_count": 0,
+        "skipped_technical_count": 0,
+        "deduplicated_input_count": 0,
+        "estimated_input_chars_saved": 0,
+        "per_locale_openai_call_count": {},
     }
 
 
@@ -3860,6 +4216,36 @@ def _translation_workspace_apply_locale_job_result(
     missing_count = int(summary.get("missing_drafts_generated") or 0)
     outdated_count = int(summary.get("outdated_update_drafts_generated") or 0)
     blocked_count = int(summary.get("needs_review_blocked") or 0)
+    openai_call_count = int(
+        summary.get("openai_call_count")
+        or (draft_result or {}).get("openai_call_count")
+        or 0
+    )
+    reused_cache_count = int(
+        summary.get("reused_cache_count")
+        or (draft_result or {}).get("reused_cache_count")
+        or 0
+    )
+    skipped_existing_count = int(
+        summary.get("skipped_existing_count")
+        or (draft_result or {}).get("skipped_existing_count")
+        or 0
+    )
+    skipped_technical_count = int(
+        summary.get("skipped_technical_count")
+        or (draft_result or {}).get("skipped_technical_count")
+        or 0
+    )
+    deduplicated_input_count = int(
+        summary.get("deduplicated_input_count")
+        or (draft_result or {}).get("deduplicated_input_count")
+        or 0
+    )
+    estimated_input_chars_saved = int(
+        summary.get("estimated_input_chars_saved")
+        or (draft_result or {}).get("estimated_input_chars_saved")
+        or 0
+    )
     locale_status = (
         "failed"
         if locale_failed
@@ -3892,6 +4278,12 @@ def _translation_workspace_apply_locale_job_result(
             ),
             "blocked_count": blocked_count,
             "generated_draft_count": missing_count + outdated_count,
+            "openai_call_count": openai_call_count,
+            "reused_cache_count": reused_cache_count,
+            "skipped_existing_count": skipped_existing_count,
+            "skipped_technical_count": skipped_technical_count,
+            "deduplicated_input_count": deduplicated_input_count,
+            "estimated_input_chars_saved": estimated_input_chars_saved,
             "blocking_conditions": blocking_conditions,
             "message": _translation_workspace_locale_status_message(
                 locale_status,
@@ -3971,6 +4363,24 @@ def _translation_workspace_add_counts(status: dict, locale_row: dict):
         counts["already_translated_skipped_count"]
         + counts["not_eligible_skipped_count"]
     )
+    counts["openai_call_count"] += int(locale_row.get("openai_call_count") or 0)
+    counts["reused_cache_count"] += int(locale_row.get("reused_cache_count") or 0)
+    counts["skipped_existing_count"] += int(
+        locale_row.get("skipped_existing_count") or 0
+    )
+    counts["skipped_technical_count"] += int(
+        locale_row.get("skipped_technical_count") or 0
+    )
+    counts["deduplicated_input_count"] += int(
+        locale_row.get("deduplicated_input_count") or 0
+    )
+    counts["estimated_input_chars_saved"] += int(
+        locale_row.get("estimated_input_chars_saved") or 0
+    )
+    per_locale_openai = counts.setdefault("per_locale_openai_call_count", {})
+    locale = locale_row.get("locale", "")
+    if locale:
+        per_locale_openai[locale] = int(locale_row.get("openai_call_count") or 0)
 
 
 def _translation_workspace_apply_group_counts(status: dict, summary: dict):
@@ -4553,23 +4963,20 @@ def _translation_workspace_translation_result_groups(
         language_group["skipped_count"] += 1 if is_skipped else 0
     for language_group in language_groups:
         status_counts = language_group.pop("_status_counts", {})
-        language_group["translated_count"] = max(
-            int(language_group.get("translated_count") or 0),
-            int(status_counts.get("translated_count") or 0),
-        )
-        language_group["needs_review_count"] = max(
-            int(language_group.get("needs_review_count") or 0),
-            int(status_counts.get("needs_review_count") or 0),
-        )
-        language_group["skipped_count"] = max(
-            int(language_group.get("skipped_count") or 0),
-            int(status_counts.get("skipped_count") or 0),
-        )
+        if int(language_group.get("count") or 0) == 0:
+            language_group["translated_count"] = int(
+                status_counts.get("translated_count") or 0
+            )
+            language_group["needs_review_count"] = int(
+                status_counts.get("needs_review_count") or 0
+            )
+            language_group["skipped_count"] = int(
+                status_counts.get("skipped_count") or 0
+            )
         language_group.pop("_group_lookup", None)
-        if (
-            int(language_group.get("count") or 0) > 0
-            and language_group.get("lifecycle_status") == "pending"
-        ):
+        if int(language_group.get("count") or 0) > 0 and language_group.get(
+            "lifecycle_status"
+        ) not in {"failed", "stale", "running"}:
             language_group.update(
                 _translation_workspace_language_group_status(language_group)
             )
@@ -4622,6 +5029,8 @@ def _translation_workspace_result_row_order_key(row: dict):
 
 
 def _translation_workspace_language_group_status(group: dict):
+    if int(group.get("needs_review_count") or 0):
+        return {"status_key": "needs_review", "status_label": "Needs review"}
     if int(group.get("count") or 0) or int(group.get("translated_count") or 0):
         return {"status_key": "completed", "status_label": "Completed"}
     if int(group.get("skipped_count") or 0):
@@ -4690,9 +5099,31 @@ def _translation_workspace_result_card_row(row: dict):
     display_row = dict(row)
     status_key, status_label = _translation_workspace_result_row_status(row)
     raw_reasons = _translation_workspace_result_raw_reason_codes(row)
-    reason_labels = _translation_workspace_human_reason_labels(raw_reasons)
+    reason_labels = _translation_workspace_human_reason_labels(raw_reasons, row=row)
+    visible_raw_reasons = [
+        reason
+        for reason in raw_reasons
+        if reason not in TRANSLATION_WORKSPACE_NON_BLOCKING_REASON_CODES
+    ]
+    visible_reason_label_candidates = _translation_workspace_human_reason_labels(
+        visible_raw_reasons,
+        row=row,
+    )
     visible_reason_labels = (
-        [] if status_key in {"ready", "already_up_to_date"} else reason_labels
+        [
+            label
+            for label in reason_labels
+            if label
+            == TRANSLATION_WORKSPACE_RESULT_REASON_LABELS[
+                "future_write_needs_resource_mapping"
+            ]
+        ]
+        if status_key == "ready" and row.get("needs_mapping")
+        else (
+            []
+            if status_key in {"ready", "already_up_to_date"}
+            else visible_reason_label_candidates
+        )
     )
     main_value = _translation_workspace_result_main_value(
         row,
@@ -4717,15 +5148,19 @@ def _translation_workspace_result_card_row(row: dict):
             "main_value_is_long": main_value["is_long"],
             "main_value_is_reason": main_value["is_reason"],
             "comparison_translation_label": (
-                "Translation result"
-                if row.get("has_generated_draft")
+                "Using manual edit"
+                if row.get("using_manual_edit")
                 else (
-                    "Current Shopify translation"
-                    if (
-                        row.get("existing_translation_present")
-                        or row.get("current_translation_present")
+                    "Translation result"
+                    if row.get("has_generated_draft")
+                    else (
+                        "Current Shopify translation"
+                        if (
+                            row.get("existing_translation_present")
+                            or row.get("current_translation_present")
+                        )
+                        else "Translation"
                     )
-                    else "Translation"
                 )
             ),
             "comparison_translation_display": (
@@ -4746,22 +5181,7 @@ def _translation_workspace_result_card_row(row: dict):
 
 def _translation_workspace_result_row_status(row: dict):
     raw_reasons = set(_translation_workspace_result_raw_reason_codes(row))
-    review_reasons = {
-        "existing_translation_outdated",
-        "existing_translation_outdated_manual_review_required",
-        "seo_needs_manual_review",
-        "seo_not_ready",
-        "missing_part_type",
-        "missing_use_case",
-        "missing_value_point",
-        "future_write_needs_resource_mapping",
-        "manual_review_required",
-        "product_identity_mismatch",
-        "draft_blocked",
-        "draft_over_max_chars",
-        "needs_review",
-        "blocked",
-    }
+    review_reasons = TRANSLATION_WORKSPACE_REVIEW_REASON_CODES
     has_review_issue = bool(
         (raw_reasons & review_reasons)
         or row.get("draft_blocked")
@@ -4769,7 +5189,7 @@ def _translation_workspace_result_row_status(row: dict):
         or row.get("existing_translation_outdated")
     )
     if row.get("has_generated_draft"):
-        if has_review_issue or not row.get("apply_eligible"):
+        if has_review_issue:
             return "needs_review", "Needs review"
         return "ready", "Ready"
     if row.get("existing_translation_present") or row.get("current_translation_present"):
@@ -4866,19 +5286,35 @@ def _translation_workspace_result_raw_reason_codes(row: dict):
     return list(dict.fromkeys(normalized_reasons))
 
 
-def _translation_workspace_human_reason_labels(raw_reasons: list[str]):
+def _translation_workspace_human_reason_labels(raw_reasons: list[str], row: dict | None = None):
     labels = []
     for reason in raw_reasons or []:
         normalized = _translation_workspace_normalized_reason(reason)
         if not normalized:
             continue
-        label = TRANSLATION_WORKSPACE_RESULT_REASON_LABELS.get(
-            normalized,
-            _translation_workspace_title_status(normalized),
-        )
+        label = _translation_workspace_reason_label(normalized, row or {})
         if label not in labels:
             labels.append(label)
     return labels
+
+
+def _translation_workspace_reason_label(reason: str, row: dict):
+    field = _translation_editor_normalize_field_key(
+        (row or {}).get("field") or (row or {}).get("key") or ""
+    )
+    if reason == "draft_over_max_chars":
+        if field == "title":
+            return TRANSLATION_WORKSPACE_RESULT_REASON_LABELS["product_title_over_80_chars"]
+        if field == "meta_title":
+            return TRANSLATION_WORKSPACE_RESULT_REASON_LABELS["seo_title_over_60_chars"]
+        if field == "meta_description":
+            return TRANSLATION_WORKSPACE_RESULT_REASON_LABELS[
+                "seo_description_over_160_chars"
+            ]
+    return TRANSLATION_WORKSPACE_RESULT_REASON_LABELS.get(
+        reason,
+        _translation_workspace_title_status(reason),
+    )
 
 
 def _attach_translation_workspace_safe_write_ui(
@@ -4920,6 +5356,18 @@ def _translation_workspace_report_detail_summary(status: dict):
         "generated_draft_count": int(counts.get("generated_draft_count") or 0),
         "skipped_count": int(counts.get("skipped_count") or 0),
         "blocked_count": int(counts.get("blocked_count") or 0),
+        "openai_call_count": int(counts.get("openai_call_count") or 0),
+        "reused_cache_count": int(counts.get("reused_cache_count") or 0),
+        "skipped_existing_count": int(counts.get("skipped_existing_count") or 0),
+        "skipped_technical_count": int(counts.get("skipped_technical_count") or 0),
+        "deduplicated_input_count": int(counts.get("deduplicated_input_count") or 0),
+        "estimated_input_chars_saved": int(
+            counts.get("estimated_input_chars_saved") or 0
+        ),
+        "per_locale_openai_call_count": counts.get("per_locale_openai_call_count") or {},
+        "manual_translation_override_count": int(
+            status.get("manual_translation_override_count") or 0
+        ),
         "no_shopify_write_performed": not bool(status.get("shopify_write_performed")),
         "report_path": status.get("report_path", ""),
         "job_started_by": status.get("job_started_by", "user_action"),
@@ -4994,6 +5442,13 @@ def _translation_workspace_job_review_row(row: dict):
         has_generated_draft
         and row.get("eligible_for_apply_plan") is True
         and field in TRANSLATION_WORKSPACE_APPLY_SUPPORTED_FIELDS
+        and row.get("validation_status") in {"", "draft_ready_for_manual_review"}
+        and (
+            not row.get("seo_validation_status")
+            or row.get("seo_validation_status") == "seo_ready"
+        )
+        and not row.get("draft_blocked")
+        and not row.get("product_identity_mismatch")
         and not needs_mapping
     )
     write_eligibility = _translation_workspace_review_write_eligibility(
@@ -5009,13 +5464,16 @@ def _translation_workspace_job_review_row(row: dict):
         needs_mapping=needs_mapping,
         apply_eligible=apply_eligible,
     )
+    review_block_reasons = _translation_workspace_review_reason_codes_from_text(
+        block_reason,
+        row,
+    )
     is_blocked = bool(
         has_generated_draft
         and (
-            block_reason
+            review_block_reasons
             or row.get("draft_blocked")
             or row.get("product_identity_mismatch")
-            or not apply_eligible
         )
     )
     source_value_raw = row.get("source_value") or row.get("source_value_display") or ""
@@ -5025,11 +5483,27 @@ def _translation_workspace_job_review_row(row: dict):
         or row.get("existing_translation_display")
         or ""
     )
+    original_openai_translation = (
+        row.get("openai_original_proposed_translation")
+        or row.get("original_openai_translation")
+        or ""
+    )
+    manual_edit_value = str(
+        row.get("manual_edit_value")
+        or row.get("manual_translation_override_value")
+        or ""
+    ).strip()
+    using_manual_edit = bool(row.get("using_manual_edit") or manual_edit_value)
     proposed_translation_raw = (
         row.get("proposed_translation")
         or row.get("proposed_translation_display")
         or ""
     )
+    if using_manual_edit:
+        if not original_openai_translation:
+            original_openai_translation = proposed_translation_raw
+        proposed_translation_raw = manual_edit_value
+        has_generated_draft = True
     is_html_field = normalized_field == "body_html"
     generated_differs_from_existing = bool(
         str(existing_translation_raw or "").strip()
@@ -5049,11 +5523,11 @@ def _translation_workspace_job_review_row(row: dict):
         row.get("existing_translation_preview", ""),
         field,
     )
-    draft_fields = _translation_workspace_existing_or_review_text_fields(
-        row,
+    draft_fields = _translation_workspace_review_text_fields(
         "proposed_translation",
-        row.get("proposed_translation_preview", ""),
+        proposed_translation_raw,
         field,
+        unprefixed=True,
     )
     return {
         "language": row.get("language") or row.get("locale", ""),
@@ -5072,6 +5546,7 @@ def _translation_workspace_job_review_row(row: dict):
         "safe_write_entry_id": safe_write_entry_id,
         "context_label": row.get("context_label", ""),
         "source_value": source_value_raw,
+        "source_identity_context": row.get("source_identity_context") or {},
         "source_value_summary": source_fields["summary"],
         "source_value_display": source_fields["display"],
         "source_value_is_long": source_fields["is_long"],
@@ -5106,6 +5581,23 @@ def _translation_workspace_job_review_row(row: dict):
         "generated_differs_from_existing": generated_differs_from_existing,
         "outdated": row.get("outdated"),
         "proposed_translation": proposed_translation_raw,
+        "manual_edit_value": manual_edit_value,
+        "manual_translation_override_value": manual_edit_value,
+        "has_manual_edit": using_manual_edit,
+        "using_manual_edit": using_manual_edit,
+        "manual_edit_saved_at": row.get("manual_edit_saved_at", ""),
+        "manual_edit_label": "Edited manually" if using_manual_edit else "",
+        "manual_edit_usage_label": "Using manual edit" if using_manual_edit else "",
+        "manual_edit_original_label": (
+            "OpenAI original available in Technical details"
+            if using_manual_edit
+            else ""
+        ),
+        "manual_edit_validation_message": row.get(
+            "manual_edit_validation_message", ""
+        ),
+        "openai_original_proposed_translation": original_openai_translation,
+        "original_openai_translation": original_openai_translation,
         "generated_draft_summary": draft_fields["summary"],
         "generated_draft_display": draft_fields["display"],
         "generated_draft_is_long": draft_fields["is_long"],
@@ -5138,6 +5630,17 @@ def _translation_workspace_job_review_row(row: dict):
         "apply_eligible_flag": _translation_workspace_bool_flag(apply_eligible),
         "needs_mapping_flag": _translation_workspace_bool_flag(needs_mapping),
     }
+
+
+def _translation_workspace_review_reason_codes_from_text(value: str, row: dict | None = None):
+    reasons = set()
+    for reason in _translation_workspace_split_reasons(value):
+        normalized = _translation_workspace_normalized_reason(reason)
+        if normalized in TRANSLATION_WORKSPACE_REVIEW_REASON_CODES:
+            reasons.add(normalized)
+    if row and row.get("existing_translation_outdated"):
+        reasons.add("existing_translation_outdated")
+    return reasons
 
 
 def _translation_workspace_review_group_key(row: dict):
@@ -5204,8 +5707,6 @@ def _translation_workspace_review_block_reason(
     reasons.extend(_translation_workspace_split_reasons(row.get("blocking_reasons")))
     if row.get("reason"):
         reasons.append(_translation_workspace_normalized_reason(row.get("reason")))
-    if has_generated_draft and not apply_eligible and not reasons:
-        reasons.append("manual_review_required")
     if not has_generated_draft and not reasons:
         reasons.append("no_generated_draft")
     return ", ".join(list(dict.fromkeys(reason for reason in reasons if reason)))
@@ -7283,6 +7784,11 @@ def _build_translation_editor_row(
     )
     target_value = existing_value or draft_value
     seo_notes = _list_from_value(draft_entry.get("seo_notes"))
+    seo_review_notes = _list_from_value(draft_entry.get("seo_review_notes")) or [
+        note
+        for note in seo_notes
+        if note in TRANSLATION_WORKSPACE_REVIEW_REASON_CODES
+    ]
     quality_notes = _list_from_value(draft_entry.get("quality_notes"))
     target_identity = {}
     if target_value:
@@ -7330,20 +7836,25 @@ def _build_translation_editor_row(
     seo_status = draft_entry.get("seo_validation_status", "")
     blocking_reasons = _translation_editor_unique_list(
         (
-            _draft_entry_blocking_reasons(draft_entry, seo_notes, quality_notes)
+            _draft_entry_blocking_reasons(draft_entry, seo_review_notes, quality_notes)
             if draft_entry
             else []
         )
         + validation_reasons
         + (["product_identity_mismatch"] if product_identity_mismatch else [])
     )
+    review_blocking_reasons = [
+        reason
+        for reason in blocking_reasons
+        if reason in TRANSLATION_WORKSPACE_REVIEW_REASON_CODES
+    ]
     needs_review = bool(
         draft_blocked
         or product_identity_mismatch
-        or seo_notes
+        or seo_review_notes
         or quality_notes
         or validation_reasons
-        or blocking_reasons
+        or review_blocking_reasons
         or (
             draft_value
             and validation_status
@@ -7388,13 +7899,13 @@ def _build_translation_editor_row(
         badges.append("not eligible")
     if draft_entry.get("future_write_needs_mapping") or source_row.get("future_write_needs_mapping"):
         badges.append("future write blocked")
-    if seo_notes:
+    if seo_review_notes:
         badges.append("SEO warning")
     if product_identity_mismatch:
         badges.append("wrong product")
     if draft_blocked:
         badges.append("needs review")
-    if blocking_reasons:
+    if review_blocking_reasons:
         badges.append("blocked")
     if not target_value:
         badges.append("untranslated")
@@ -7483,6 +7994,7 @@ def _build_translation_editor_row(
         "char_count_display": f"{target_chars}/{char_limit}" if char_limit else str(target_chars),
         "exceeds_limit": exceeds_limit,
         "seo_warning": ", ".join(seo_notes),
+        "seo_review_notes": ", ".join(seo_review_notes),
         "identity_warning": identity_warning,
         "suspicious_terms": ", ".join(suspicious_terms),
         "validation_reasons": ", ".join(validation_reasons),
@@ -7524,8 +8036,8 @@ def _translation_editor_status_label(status: str) -> str:
         "outdated": "Needs review",
         "needs_review": "Needs review",
         "draft_only": "Preview only",
-        "skipped": "Needs review",
-        "not_eligible": "Not eligible",
+        "skipped": "Not translated automatically",
+        "not_eligible": "Not translated automatically",
         "untranslated": "Needs translation",
     }
     return labels.get(str(status or ""), _translation_editor_humanize_key(status))
@@ -7543,8 +8055,8 @@ def _translation_editor_badge_label(badge: str) -> str:
         "blocked": "Needs review",
         "untranslated": "Needs translation",
         "exceeds limit": "Too long",
-        "not eligible": "Not eligible",
-        "future write blocked": "Future write blocked",
+        "not eligible": "Not translated automatically",
+        "future write blocked": "Can review now; Shopify update support needs extra mapping",
     }
     return labels.get(str(badge or ""), _translation_editor_humanize_key(badge))
 
@@ -7590,8 +8102,6 @@ def _translation_editor_row_matches_filter(row: dict, editor_filter: str) -> boo
         return bool(row.get("needs_review")) or status in {
             "outdated",
             "needs_review",
-            "skipped",
-            "not_eligible",
         }
     if editor_filter == "seo":
         return row.get("section_key") == "seo"
@@ -7972,8 +8482,17 @@ def _empty_locked_package_report_result(reason: str):
 
 def _normalize_apply_plan_preview_entry(entry: dict):
     seo_notes = _list_from_value(entry.get("seo_notes"))
+    seo_review_notes = _list_from_value(entry.get("seo_review_notes")) or [
+        note
+        for note in seo_notes
+        if note in TRANSLATION_WORKSPACE_REVIEW_REASON_CODES
+    ]
     quality_notes = _list_from_value(entry.get("quality_notes"))
-    blocking_reasons = _draft_entry_blocking_reasons(entry, seo_notes, quality_notes)
+    blocking_reasons = _draft_entry_blocking_reasons(
+        entry,
+        seo_review_notes,
+        quality_notes,
+    )
     proposed_value = str(entry.get("draft_value") or "").strip()
     current_translation_present = bool(entry.get("existing_translation_present"))
     outdated = entry.get("existing_translation_outdated") is True
@@ -8252,8 +8771,17 @@ def _translation_console_draft_entry_identity(entry: dict):
 
 def _normalize_translation_console_draft_entry(entry: dict):
     seo_notes = _list_from_value(entry.get("seo_notes"))
+    seo_review_notes = _list_from_value(entry.get("seo_review_notes")) or [
+        note
+        for note in seo_notes
+        if note in TRANSLATION_WORKSPACE_REVIEW_REASON_CODES
+    ]
     quality_notes = _list_from_value(entry.get("quality_notes"))
-    blocking_reasons = _draft_entry_blocking_reasons(entry, seo_notes, quality_notes)
+    blocking_reasons = _draft_entry_blocking_reasons(
+        entry,
+        seo_review_notes,
+        quality_notes,
+    )
     return {
         "locale": entry.get("locale", ""),
         "language": entry.get("locale", ""),
@@ -8273,6 +8801,7 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "write_eligibility": _translation_workspace_entry_write_eligibility(entry),
         "write_eligibility_key": _translation_workspace_entry_write_eligibility_key(entry),
         "source_value": entry.get("source_value", ""),
+        "source_identity_context": entry.get("source_identity_context") or {},
         "source_value_preview": _preview_text(entry.get("source_value")),
         **_translation_workspace_review_text_fields(
             "source_value", entry.get("source_value"), entry.get("field", "")
@@ -8295,6 +8824,7 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "draft_blocked": bool(entry.get("draft_blocked")),
         "seo_validation_status": entry.get("seo_validation_status", ""),
         "seo_notes": seo_notes,
+        "seo_review_notes": seo_review_notes,
         "quality_notes": quality_notes,
         "seo_warning": ", ".join(seo_notes),
         "eligible_for_apply_plan": bool(entry.get("eligible_for_apply_plan")),
@@ -8370,7 +8900,11 @@ def _draft_entry_blocking_reasons(entry: dict, seo_notes: list[str], quality_not
         reasons.append(str(entry.get("skip_reason")))
     reasons.extend(_list_from_value(entry.get("validation_reasons")))
     reasons.extend(quality_notes)
-    reasons.extend(seo_notes)
+    reasons.extend(
+        reason
+        for reason in seo_notes
+        if reason in TRANSLATION_WORKSPACE_REVIEW_REASON_CODES
+    )
     if entry.get("draft_blocked"):
         reasons.append("draft_blocked")
     if entry.get("future_write_needs_mapping"):

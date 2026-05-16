@@ -1,11 +1,19 @@
+import hashlib
 import json
 import os
 import re
 import urllib.error
 import urllib.request
+from html import escape as html_escape
+from html.parser import HTMLParser
+from pathlib import Path
 
 from .models import ShopifyInstallation
-from .translation_console import fetch_translation_console_data
+from .translation_console import (
+    fetch_translation_console_data,
+    safe_translation_console_error_message,
+    translation_console_error_details,
+)
 
 
 DEFAULT_PRODUCT_ID = "gid://shopify/Product/7655686799427"
@@ -13,6 +21,9 @@ DEFAULT_TARGET_LOCALES = ["ja", "de", "fr", "es", "it"]
 DEFAULT_FIELDS = ["title", "meta_title", "meta_description"]
 SUPPORTED_LOCALES = ["ja", "de", "fr", "es", "it"]
 ALLOWED_FIELDS = ["title", "body_html", "meta_title", "meta_description", "handle"]
+TRANSLATE_ALL_ACTION_NAME = "translate_all_languages_all_content"
+TRANSLATE_ALL_DRAFT_STATUS = "selected_product_all_content_translation_draft_ready_for_manual_review"
+MISSING_ONLY_DRAFT_STATUS = "selected_product_missing_translation_draft_ready_for_manual_review"
 ALLOWED_DRAFT_GROUP_SCOPES = [
     "product_basics",
     "seo",
@@ -22,6 +33,43 @@ ALLOWED_DRAFT_GROUP_SCOPES = [
     "media",
 ]
 ALLOWED_DRAFT_SCOPES = set(ALLOWED_FIELDS) | set(ALLOWED_DRAFT_GROUP_SCOPES)
+ALL_ELIGIBLE_DRAFT_SCOPES = [
+    "product_basics",
+    "seo",
+    "options",
+    "variants",
+    "important_metafields",
+    "media",
+]
+SECTION_LABELS = {
+    "product_basics": "Product basics",
+    "seo": "SEO",
+    "options": "Options",
+    "variants": "Variants",
+    "important_metafields": "Important metafields",
+    "media": "Media alt text",
+    "technical_fields": "Technical skipped",
+    "technical_metafields": "Technical skipped",
+}
+DISCOVERY_GROUP_DISPLAY_ORDER = [
+    "product_basics",
+    "seo",
+    "options",
+    "variants",
+    "important_metafields",
+    "media_alt_text",
+]
+DISCOVERY_GROUP_LABELS = {
+    "product_basics": "Product basics",
+    "seo": "SEO",
+    "options": "Options",
+    "variants": "Variants",
+    "important_metafields": "Important metafields",
+    "technical_metafields": "Technical metafields",
+    "media": "Media",
+    "media_alt_text": "Media alt text",
+}
+DRAFT_GENERATION_REASONS = {"missing_translation", "outdated_translation"}
 DRAFT_COVERAGE_GROUP_CONFIGS = [
     {
         "group_key": "product_basics",
@@ -135,11 +183,54 @@ TECHNICAL_METAFIELD_HINTS = (
     "token",
     "updated",
 )
-FIELD_MAX_CHARS = {"title": 65, "meta_title": 60, "meta_description": 155, "handle": 80, "media.alt": 125}
+PRODUCT_TITLE_MAX_CHARS = 80
+SEO_TITLE_MAX_CHARS = 60
+SEO_DESCRIPTION_MAX_CHARS = 160
+FIELD_MAX_CHARS = {
+    "title": PRODUCT_TITLE_MAX_CHARS,
+    "meta_title": SEO_TITLE_MAX_CHARS,
+    "meta_description": SEO_DESCRIPTION_MAX_CHARS,
+    "handle": 80,
+    "media.alt": 125,
+}
 FIELD_RECOMMENDED_MIN_CHARS = {"title": 25, "meta_title": 30, "meta_description": 80}
 FIELD_RECOMMENDED_MAX_CHARS = dict(FIELD_MAX_CHARS)
+SEO_REVIEW_NOTE_CODES = {
+    "body_html_structure_broken",
+    "draft_equals_source",
+    "draft_over_max_chars",
+    "forbidden_marketing_or_shipping_phrase",
+    "html_media_or_link_tag_broken",
+    "keyword_stuffing_or_duplicate",
+    "missing_core_keyword",
+    "missing_model",
+    "missing_part_type",
+    "missing_replacement_part_meaning",
+    "missing_use_case",
+}
+NON_BLOCKING_SEO_NOTE_CODES = {
+    "missing_value_point",
+    "too_short_for_seo",
+}
+DEFAULT_OPTION_SOURCE_VALUES = {"default title", "title"}
+HTML_TAG_RE = re.compile(r"<\s*/?\s*([a-zA-Z][a-zA-Z0-9:-]*)\b[^>]*>")
+HTML_REVIEW_TAGS = {"a", "iframe", "img", "source", "video"}
 MAX_REWRITE_ATTEMPTS = 2
 OPENAI_MODEL = "gpt-4.1-mini"
+TRANSLATION_CACHE_PATH = Path("logs/shopify_translation_cache/translation_memory.json")
+TRANSLATION_CACHE_MAX_BYTES = 2_000_000
+TRANSLATION_CACHE_MAX_ENTRIES = 2000
+OPENAI_PROMPT_COMPACT = "compact"
+OPENAI_PROMPT_RICH = "rich"
+OPENAI_PROMPT_HTML_TEXT_NODES = "html_text_nodes"
+HTML_UNCHANGED_TEXT_TAGS = {"script", "style", "iframe", "video", "source"}
+TECHNICAL_SKIP_REASONS = {
+    "technical_or_internal_field",
+    "technical_code_or_identifier",
+    "json_or_schema_value",
+    "sku_numeric_id_barcode_or_code",
+    "variant_sku_or_barcode_context_only",
+}
 
 PRODUCT_GID_RE = re.compile(r"^gid://shopify/Product/\d+$")
 FORBIDDEN_OUTPUT_RE = re.compile(
@@ -267,10 +358,27 @@ def generate_selected_product_missing_translation_draft_package(
     target_locales=None,
     fields=None,
     installation=None,
+    include_missing=True,
+    include_outdated=False,
+    include_all_eligible_groups=False,
+    action_name="",
 ):
     target_locales = list(target_locales or DEFAULT_TARGET_LOCALES)
-    fields = _normalize_requested_scopes(fields or DEFAULT_FIELDS)
+    if include_all_eligible_groups:
+        fields = _normalize_requested_scopes(fields or ALL_ELIGIBLE_DRAFT_SCOPES)
+        for scope in ALL_ELIGIBLE_DRAFT_SCOPES:
+            if scope not in fields:
+                fields.append(scope)
+    else:
+        fields = _normalize_requested_scopes(fields or DEFAULT_FIELDS)
     result = _empty_result(product_id, target_locales, fields)
+    result["include_missing"] = bool(include_missing)
+    result["include_outdated"] = bool(include_outdated)
+    result["include_all_eligible_groups"] = bool(include_all_eligible_groups)
+    result["action_name"] = action_name or ""
+    result["draft_generation_mode"] = (
+        "missing_and_outdated" if include_outdated else "missing_only"
+    )
     validation_errors = _validate_scope(product_id, target_locales, fields)
     if validation_errors:
         result["blocking_conditions"] = validation_errors
@@ -285,19 +393,31 @@ def generate_selected_product_missing_translation_draft_package(
         result["blocking_conditions"].append("blocked_missing_shopify_installation")
         return result
 
-    missing_by_locale = {}
+    draft_targets_by_locale = {}
     for locale in target_locales:
         try:
             data = fetch_translation_console_data(installation, product_id, locale)
         except Exception as exc:
+            failure_details = translation_console_error_details(
+                exc,
+                stage="product_base_translatable_resource_query",
+                resource_group="product",
+            )
             result["draft_status"] = "blocked_shopify_read_query_failed"
             result["failure_type"] = "shopify_read_query_failed"
-            result["query_failure_type"] = "helper_returned_error"
-            result["error"] = f"{type(exc).__name__}: read-only Shopify query failed"
+            result["query_failure_type"] = failure_details["query_failure_type"]
+            result["error"] = safe_translation_console_error_message(exc)
+            for failed_group in ("product_basics", "seo"):
+                result["per_group_discovery_status"][failed_group] = "failed"
+                result["per_group_discovery_reasons"][failed_group] = (
+                    failure_details["query_failure_type"]
+                )
             result["blocking_conditions"].append("blocked_shopify_read_query_failed")
+            _attach_draft_batch_summary(result)
             return result
 
         result["shopify_api_call_performed"] = True
+        _attach_child_discovery_metadata(result, locale, data)
         product = data.get("product") or {}
         result["product_title"] = result["product_title"] or product.get("title", "")
         translatable_rows = data.get("translatable_rows", [])
@@ -316,9 +436,19 @@ def generate_selected_product_missing_translation_draft_package(
             translatable_rows,
             fields,
         )
+        _apply_discovery_status_to_coverage_groups(
+            result["per_locale_draft_coverage"][locale],
+            data.get("per_group_discovery_status") or {},
+            data.get("per_group_discovery_reasons") or {},
+        )
         _refresh_draft_coverage_summary(result)
 
-        for row in _requested_draft_rows(translatable_rows, fields):
+        rows_to_check = (
+            _all_translatable_rows(translatable_rows)
+            if include_all_eligible_groups
+            else _requested_draft_rows(translatable_rows, fields)
+        )
+        for row in rows_to_check:
             field = _entry_field_from_row(row)
             source_value = str(row.get("source_value") or "")
             existing_present = bool(row.get("has_translation"))
@@ -333,35 +463,49 @@ def generate_selected_product_missing_translation_draft_package(
                     row.get("draft_ineligible_reason") or "not_draft_eligible",
                 )
             elif existing_present and existing_outdated:
-                entry = _entry_template(locale, field, row, "existing_translation_outdated_manual_review_required")
+                if include_outdated:
+                    entry = _entry_template(locale, field, row, "outdated_translation")
+                    draft_targets_by_locale.setdefault(locale, []).append(entry)
+                else:
+                    entry = _entry_template(locale, field, row, "existing_translation_outdated_manual_review_required")
             elif existing_present:
                 entry = _entry_template(locale, field, row, "already_translated")
-            else:
+            elif include_missing:
                 entry = _entry_template(locale, field, row, "missing_translation")
-                missing_by_locale.setdefault(locale, []).append(entry)
+                draft_targets_by_locale.setdefault(locale, []).append(entry)
+            else:
+                entry = _entry_template(locale, field, row, "missing_translation_not_requested")
             _attach_source_identity_context(entry, source_identity_context)
             if existing_present:
                 _attach_existing_translation_identity_validation(entry)
+            _refresh_entry_status(entry)
             result["entries"].append(entry)
             _count_entry(result, entry)
 
         for field in _missing_requested_static_fields(translatable_rows, fields):
             entry = _entry_template(locale, field, {}, "source_empty")
             _attach_source_identity_context(entry, source_identity_context)
+            _refresh_entry_status(entry)
             result["entries"].append(entry)
             _count_entry(result, entry)
 
-    if not missing_by_locale:
-        result["draft_status"] = "no_missing_translations_found"
+    if not draft_targets_by_locale:
+        result["draft_status"] = (
+            "no_missing_or_outdated_translations_found"
+            if include_outdated
+            else "no_missing_translations_found"
+        )
         result["success"] = True
+        _attach_draft_batch_summary(result)
         return result
 
-    for locale, missing_entries in missing_by_locale.items():
-        translations = _request_openai(locale, missing_entries, result)
+    for locale, draft_target_entries in draft_targets_by_locale.items():
+        translations = _request_openai(locale, draft_target_entries, result)
         if translations is None:
             result["success"] = False
+            _attach_draft_batch_summary(result)
             return result
-        for entry in missing_entries:
+        for entry in draft_target_entries:
             draft = str(
                 translations.get(entry.get("draft_key"))
                 or translations.get(entry["field"])
@@ -370,6 +514,7 @@ def generate_selected_product_missing_translation_draft_package(
             draft, rewrite_attempts = _rewrite_over_length_draft(locale, entry, draft, result)
             if draft is None:
                 result["success"] = False
+                _attach_draft_batch_summary(result)
                 return result
             _attach_draft_quality(entry, draft, rewrite_attempts)
             result["draft_entries"].append(entry)
@@ -377,7 +522,10 @@ def generate_selected_product_missing_translation_draft_package(
 
     _apply_cross_field_seo_checks(result, target_locales)
     _recalculate_quality_stats(result)
-    result["draft_status"] = "selected_product_missing_translation_draft_ready_for_manual_review"
+    _attach_draft_batch_summary(result)
+    result["draft_status"] = (
+        TRANSLATE_ALL_DRAFT_STATUS if include_outdated else MISSING_ONLY_DRAFT_STATUS
+    )
     result["success"] = True
     return result
 
@@ -410,6 +558,20 @@ def _requested_draft_rows(rows, requested_scopes):
         if not isinstance(row, dict):
             continue
         if not _row_matches_requested_scopes(row, requested_scopes):
+            continue
+        entry_key = row.get("entry_key") or row.get("key") or id(row)
+        if entry_key in seen:
+            continue
+        seen.add(entry_key)
+        output.append(row)
+    return output
+
+
+def _all_translatable_rows(rows):
+    output = []
+    seen = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
             continue
         entry_key = row.get("entry_key") or row.get("key") or id(row)
         if entry_key in seen:
@@ -462,6 +624,23 @@ def _missing_requested_static_fields(rows, requested_scopes):
     ]
 
 
+def _empty_discovery_status():
+    return {
+        "product_basics": "not_loaded",
+        "seo": "not_loaded",
+        "options": "not_loaded",
+        "variants": "not_loaded",
+        "important_metafields": "not_loaded",
+        "technical_metafields": "not_loaded",
+        "media": "not_loaded",
+        "media_alt_text": "not_loaded",
+    }
+
+
+def _empty_discovery_reasons():
+    return {key: "" for key in _empty_discovery_status()}
+
+
 def _empty_result(product_id, target_locales, fields):
     return {
         "success": False,
@@ -473,8 +652,32 @@ def _empty_result(product_id, target_locales, fields):
         "shopify_read_only": True,
         "shopify_api_call_performed": False,
         "openai_call_performed": False,
+        "openai_call_count": 0,
+        "reused_cache_count": 0,
+        "skipped_existing_count": 0,
+        "skipped_technical_count": 0,
+        "deduplicated_input_count": 0,
+        "estimated_input_chars_saved": 0,
+        "per_locale_openai_call_count": {
+            locale: 0 for locale in target_locales
+        },
+        "translation_cache_enabled": True,
+        "translation_cache_path": TRANSLATION_CACHE_PATH.as_posix(),
+        "translation_cache_entry_count": 0,
         "translation_generated": False,
+        "include_missing": True,
+        "include_outdated": False,
+        "include_all_eligible_groups": False,
+        "action_name": "",
+        "draft_generation_mode": "missing_only",
         "generated_draft_count": 0,
+        "missing_translation_draft_generated_count": 0,
+        "outdated_translation_update_draft_generated_count": 0,
+        "already_translated_skipped_count": 0,
+        "not_eligible_skipped_count": 0,
+        "needs_review_or_blocked_count": 0,
+        "total_languages_checked": 0,
+        "total_source_rows_checked": 0,
         "draft_ready_count": 0,
         "draft_needs_manual_review_count": 0,
         "draft_blocked_count": 0,
@@ -493,12 +696,18 @@ def _empty_result(product_id, target_locales, fields):
         "skipped_not_draft_eligible_count": 0,
         "per_locale_results": {},
         "per_field_results": {},
+        "per_section_results": {},
         "entries": [],
         "draft_entries": [],
         "product_identity_context": {},
         "source_read_summary": {},
+        "child_resource_discovery_errors": [],
+        "per_group_discovery_status": _empty_discovery_status(),
+        "per_group_discovery_reasons": _empty_discovery_reasons(),
+        "per_locale_discovery_status": {},
         "per_locale_draft_coverage": {},
         "draft_coverage_summary": _empty_draft_coverage_summary(fields),
+        "translate_all_summary": _empty_translate_all_summary(),
         "blocking_conditions": [],
         "failure_type": "",
         "query_failure_type": "",
@@ -515,6 +724,84 @@ def _empty_result(product_id, target_locales, fields):
         "no_new_shopify_writes_performed": True,
         "all_new_actions_no_write_confirmed": True,
     }
+
+
+def _attach_child_discovery_metadata(result, locale, data):
+    statuses = dict((data or {}).get("per_group_discovery_status") or {})
+    reasons = dict((data or {}).get("per_group_discovery_reasons") or {})
+    if statuses:
+        result.setdefault("per_locale_discovery_status", {})[locale] = statuses
+        _merge_per_group_discovery_status(result, statuses, reasons)
+    for error in (data or {}).get("child_resource_discovery_errors") or []:
+        if isinstance(error, dict):
+            _append_child_discovery_error(result, locale, error)
+
+
+def _merge_per_group_discovery_status(result, statuses, reasons):
+    merged_statuses = result.setdefault("per_group_discovery_status", _empty_discovery_status())
+    merged_reasons = result.setdefault("per_group_discovery_reasons", _empty_discovery_reasons())
+    rank = {"not_loaded": 0, "ok": 1, "skipped": 2, "failed": 3}
+    for key, status in (statuses or {}).items():
+        if key not in merged_statuses:
+            continue
+        current = merged_statuses.get(key, "not_loaded")
+        if rank.get(status, 0) >= rank.get(current, 0):
+            merged_statuses[key] = status
+            if status != "ok":
+                merged_reasons[key] = reasons.get(key) or merged_reasons.get(key) or ""
+
+
+def _append_child_discovery_error(result, locale, error):
+    normalized = {
+        "stage": str(error.get("stage") or ""),
+        "resource_group": str(error.get("resource_group") or ""),
+        "group_label": str(error.get("group_label") or ""),
+        "skipped_groups": list(error.get("skipped_groups") or []),
+        "skipped_group_labels": list(error.get("skipped_group_labels") or []),
+        "status": str(error.get("status") or "skipped"),
+        "reason": str(error.get("reason") or "skipped_child_resource_query_failed"),
+        "query_failure_type": str(error.get("query_failure_type") or "shopify_read_query_failed"),
+        "message": str(error.get("message") or "Optional child resource query failed."),
+    }
+    key = (
+        normalized["stage"],
+        normalized["resource_group"],
+        tuple(normalized["skipped_groups"]),
+        normalized["reason"],
+        normalized["query_failure_type"],
+        normalized["message"],
+    )
+    errors = result.setdefault("child_resource_discovery_errors", [])
+    for existing in errors:
+        existing_key = (
+            existing.get("stage"),
+            existing.get("resource_group"),
+            tuple(existing.get("skipped_groups") or []),
+            existing.get("reason"),
+            existing.get("query_failure_type"),
+            existing.get("message"),
+        )
+        if existing_key == key:
+            locales = existing.setdefault("locales", [])
+            if locale not in locales:
+                locales.append(locale)
+            return
+    normalized["locales"] = [locale]
+    errors.append(normalized)
+
+
+def _discovery_status_rows(statuses, reasons):
+    statuses = statuses or {}
+    reasons = reasons or {}
+    return [
+        {
+            "group_key": key,
+            "label": DISCOVERY_GROUP_LABELS.get(key, key),
+            "status": statuses.get(key, "not_loaded"),
+            "reason": reasons.get(key, ""),
+        }
+        for key in DISCOVERY_GROUP_DISPLAY_ORDER
+    ]
 
 
 def _empty_draft_coverage_summary(fields):
@@ -659,6 +946,11 @@ def _refresh_draft_coverage_summary(result):
 
     for config in DRAFT_COVERAGE_GROUP_CONFIGS:
         _update_draft_coverage_group_status(groups[config["group_key"]], config)
+    _apply_discovery_status_to_coverage_groups(
+        groups.values(),
+        result.get("per_group_discovery_status") or {},
+        result.get("per_group_discovery_reasons") or {},
+    )
     result["draft_coverage_summary"] = {
         "summary_status": "source_rows_classified",
         "requested_fields": requested_fields,
@@ -668,6 +960,29 @@ def _refresh_draft_coverage_summary(result):
         "target_locale_count": len(per_locale),
         "groups": [groups[config["group_key"]] for config in DRAFT_COVERAGE_GROUP_CONFIGS],
     }
+
+
+def _apply_discovery_status_to_coverage_groups(groups, discovery_status, discovery_reasons):
+    status_map = dict(discovery_status or {})
+    reason_map = dict(discovery_reasons or {})
+    for group in groups or []:
+        if not isinstance(group, dict):
+            continue
+        group_key = group.get("group_key")
+        status_key = "media_alt_text" if group_key == "media" else group_key
+        status = status_map.get(status_key)
+        if status == "skipped":
+            group["coverage_status"] = "skipped_child_resource_query_failed"
+            group["draft_generation_status"] = "skipped"
+            group["skip_reason"] = reason_map.get(status_key) or "skipped_child_resource_query_failed"
+            group["notes"] = (
+                "Optional child resource discovery failed. "
+                "Product basics and SEO can still be drafted if available."
+            )
+        elif status == "failed":
+            group["coverage_status"] = "failed"
+            group["draft_generation_status"] = "failed"
+            group["skip_reason"] = reason_map.get(status_key) or "child_resource_query_failed"
 
 
 def _update_draft_coverage_group_status(group, config):
@@ -827,6 +1142,8 @@ def _entry_template(locale, field, row, reason):
     apply_plan_blocked_reason = str(row.get("apply_plan_blocked_reason") or "")
     if future_write_needs_mapping and not apply_plan_blocked_reason:
         apply_plan_blocked_reason = "future_write_needs_resource_mapping"
+    section_key = _section_summary_key(resource_group)
+    draft_generation_reason = reason if reason in DRAFT_GENERATION_REASONS else ""
     return {
         "locale": locale,
         "field": field_key,
@@ -838,6 +1155,7 @@ def _entry_template(locale, field, row, reason):
         "resource_type": row.get("resource_type", ""),
         "resource_group": resource_group,
         "section_key": row.get("section_key", ""),
+        "section_label": SECTION_LABELS.get(section_key, SECTION_LABELS["technical_fields"]),
         "context_label": row.get("context_label", ""),
         "resource_note": row.get("resource_note", ""),
         "field_label": row.get("field_label", ""),
@@ -884,6 +1202,10 @@ def _entry_template(locale, field, row, reason):
         "source_identity_context": {},
         "seo_validation_status": "skipped",
         "skip_reason": reason,
+        "draft_generation_reason": draft_generation_reason,
+        "row_status": _entry_status_from_reason(reason),
+        "status": _entry_status_from_reason(reason),
+        "status_reason": reason,
         "draft_eligible": bool(row.get("draft_eligible")),
         "draft_ineligible_reason": row.get("draft_ineligible_reason", ""),
         "draft_requires_manual_review": bool(row.get("draft_requires_manual_review")),
@@ -1049,6 +1371,7 @@ def _attach_existing_translation_identity_validation(entry):
     entry["validation_status"] = "existing_translation_needs_review_identity_mismatch"
     if entry.get("skip_reason") == "already_translated":
         entry["skip_reason"] = "existing_translation_identity_mismatch_manual_review_required"
+        _refresh_entry_status(entry)
     notes = entry.setdefault("quality_notes", [])
     for reason in identity["validation_reasons"]:
         if reason not in notes:
@@ -1176,6 +1499,13 @@ def _summary_bucket(result, key, value):
             "skipped_source_empty_count": 0,
             "skipped_not_draft_eligible_count": 0,
             "missing_translation_count": 0,
+            "outdated_translation_count": 0,
+            "missing_translation_draft_generated_count": 0,
+            "outdated_translation_update_draft_generated_count": 0,
+            "already_translated_skipped_count": 0,
+            "not_eligible_skipped_count": 0,
+            "needs_review_or_blocked_count": 0,
+            "source_row_count": 0,
         },
     )
 
@@ -1183,35 +1513,60 @@ def _summary_bucket(result, key, value):
 def _count_entry(result, entry):
     per_locale = _summary_bucket(result, "per_locale_results", entry["locale"])
     per_field = _summary_bucket(result, "per_field_results", entry["field"])
+    per_section = _summary_bucket(
+        result,
+        "per_section_results",
+        _section_summary_key(entry.get("resource_group")),
+    )
     reason = entry.get("skip_reason")
+    for bucket in (per_locale, per_field, per_section):
+        bucket["source_row_count"] += 1
     if entry.get("product_identity_mismatch"):
-        per_locale["product_identity_mismatch_count"] += 1
-        per_field["product_identity_mismatch_count"] += 1
+        for bucket in (per_locale, per_field, per_section):
+            bucket["product_identity_mismatch_count"] += 1
+            bucket["draft_needs_manual_review_count"] += 1
+            bucket["needs_review_or_blocked_count"] += 1
         result["product_identity_mismatch_count"] += 1
-        per_locale["draft_needs_manual_review_count"] += 1
-        per_field["draft_needs_manual_review_count"] += 1
         result["draft_needs_manual_review_count"] += 1
+        result["needs_review_or_blocked_count"] += 1
     if reason == "already_translated":
-        per_locale["skipped_existing_translation_count"] += 1
-        per_field["skipped_existing_translation_count"] += 1
+        for bucket in (per_locale, per_field, per_section):
+            bucket["skipped_existing_translation_count"] += 1
+            bucket["already_translated_skipped_count"] += 1
         result["skipped_existing_translation_count"] += 1
+        result["skipped_existing_count"] += 1
+        result["already_translated_skipped_count"] += 1
     elif reason == "existing_translation_outdated_manual_review_required":
-        per_locale["skipped_outdated_translation_count"] += 1
-        per_field["skipped_outdated_translation_count"] += 1
+        for bucket in (per_locale, per_field, per_section):
+            bucket["skipped_outdated_translation_count"] += 1
+            bucket["not_eligible_skipped_count"] += 1
         result["skipped_outdated_translation_count"] += 1
+        result["not_eligible_skipped_count"] += 1
+    elif reason == "outdated_translation":
+        for bucket in (per_locale, per_field, per_section):
+            bucket["outdated_translation_count"] += 1
     elif reason == "existing_translation_identity_mismatch_manual_review_required":
+        for bucket in (per_locale, per_field, per_section):
+            bucket["not_eligible_skipped_count"] += 1
+        result["not_eligible_skipped_count"] += 1
         return
     elif reason == "source_empty":
-        per_locale["skipped_source_empty_count"] += 1
-        per_field["skipped_source_empty_count"] += 1
+        for bucket in (per_locale, per_field, per_section):
+            bucket["skipped_source_empty_count"] += 1
+            bucket["not_eligible_skipped_count"] += 1
         result["skipped_source_empty_count"] += 1
+        result["not_eligible_skipped_count"] += 1
     elif reason and reason != "missing_translation":
-        per_locale["skipped_not_draft_eligible_count"] += 1
-        per_field["skipped_not_draft_eligible_count"] += 1
+        for bucket in (per_locale, per_field, per_section):
+            bucket["skipped_not_draft_eligible_count"] += 1
+            bucket["not_eligible_skipped_count"] += 1
         result["skipped_not_draft_eligible_count"] += 1
+        result["not_eligible_skipped_count"] += 1
+        if reason in TECHNICAL_SKIP_REASONS:
+            result["skipped_technical_count"] += 1
     elif reason == "missing_translation":
-        per_locale["missing_translation_count"] += 1
-        per_field["missing_translation_count"] += 1
+        for bucket in (per_locale, per_field, per_section):
+            bucket["missing_translation_count"] += 1
 
 
 def _request_openai(locale, missing_entries, result):
@@ -1222,16 +1577,104 @@ def _request_openai(locale, missing_entries, result):
         result["error"] = "OPENAI_API_KEY is not configured."
         result["blocking_conditions"].append("blocked_missing_openai_api_key")
         return None
-    prompt = _openai_prompt(locale, missing_entries)
+
+    cache = _load_translation_cache()
+    result["translation_cache_entry_count"] = len(cache)
+    translations = {}
+    pending_entries = []
+    entries_by_cache_key = {}
+    cache_dirty = False
+
+    for entry in missing_entries:
+        draft_key = entry.get("draft_key") or entry.get("field")
+        cache_key = _translation_cache_key(locale, entry)
+        entry["translation_cache_key"] = cache_key
+        cached_value = _translation_cache_value(cache, cache_key)
+        if cached_value:
+            translations[draft_key] = cached_value
+            entry["translation_source"] = "cache"
+            result["reused_cache_count"] += 1
+            result["estimated_input_chars_saved"] += len(
+                str(entry.get("source_value") or "")
+            )
+            continue
+        if cache_key in entries_by_cache_key:
+            entries_by_cache_key[cache_key].append(entry)
+            entry["translation_source"] = "deduplicated_input"
+            result["deduplicated_input_count"] += 1
+            result["estimated_input_chars_saved"] += len(
+                str(entry.get("source_value") or "")
+            )
+            continue
+        entries_by_cache_key[cache_key] = [entry]
+        pending_entries.append(entry)
+
+    for prompt_profile, profile_entries in _openai_entries_by_prompt_profile(
+        pending_entries
+    ).items():
+        if not profile_entries:
+            continue
+        parsed = _request_openai_profile(
+            locale,
+            profile_entries,
+            result,
+            api_key,
+            prompt_profile,
+        )
+        if parsed is None:
+            return None
+        profile_translations = _translations_from_openai_response(
+            parsed,
+            profile_entries,
+            prompt_profile,
+            result,
+        )
+        if profile_translations is None:
+            return None
+        for entry in profile_entries:
+            draft_key = entry.get("draft_key") or entry.get("field")
+            value = str(profile_translations.get(draft_key) or "").strip()
+            cache_key = entry.get("translation_cache_key") or _translation_cache_key(
+                locale,
+                entry,
+            )
+            if value:
+                cache[cache_key] = _translation_cache_record(locale, entry, value)
+                cache_dirty = True
+            for duplicate_entry in entries_by_cache_key.get(cache_key) or [entry]:
+                duplicate_key = duplicate_entry.get("draft_key") or duplicate_entry.get(
+                    "field"
+                )
+                translations[duplicate_key] = value
+
+    if cache_dirty:
+        _save_translation_cache(cache)
+        result["translation_cache_entry_count"] = len(cache)
+    return translations
+
+
+def _request_openai_profile(locale, entries, result, api_key, prompt_profile):
+    prompt = _openai_prompt(locale, entries, prompt_profile=prompt_profile)
+    system_content = (
+        "You are a careful ecommerce localization translator. Return valid JSON only."
+        if prompt_profile != OPENAI_PROMPT_HTML_TEXT_NODES
+        else "You translate only visible ecommerce HTML text nodes and return valid JSON only."
+    )
     payload = {
         "model": OPENAI_MODEL,
         "input": [
-            {"role": "system", "content": "You are a careful ecommerce localization translator. Return valid JSON only."},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ],
         "text": {"format": {"type": "json_object"}},
     }
-    data = _post_openai_payload(payload, api_key, result, "draft generation")
+    data = _post_openai_payload(
+        payload,
+        api_key,
+        result,
+        f"draft generation ({prompt_profile})",
+        locale=locale,
+    )
     if data is None:
         return None
     try:
@@ -1249,60 +1692,406 @@ def _request_openai(locale, missing_entries, result):
         result["error"] = "OpenAI response did not include a translations object."
         result["blocking_conditions"].append("blocked_openai_draft_generation_failed")
         return None
-    return translations
+    return parsed
 
 
-def _openai_prompt(locale, missing_entries):
+def _openai_prompt(locale, missing_entries, prompt_profile=OPENAI_PROMPT_RICH):
     identity_context = _identity_context_from_entries(missing_entries)
     identity_terms = identity_context.get("expected_terms") or []
     model_terms = identity_context.get("source_model_terms") or []
     identity_term_text = _format_identity_terms_for_prompt(identity_terms)
-    return {
-        "task": "Translate selected Shopify product fields into draft translations for manual review only.",
+    prompt = {
+        "task": _openai_prompt_task(prompt_profile),
         "target_locale": locale,
         "target_language": LANGUAGE_NAMES.get(locale, locale),
         "draft_only": True,
+        "prompt_profile": prompt_profile,
         "product_identity": {
             "expected_terms": identity_terms,
             "model_terms": model_terms,
         },
         "fields": [
-            {
-                "draft_key": item["draft_key"],
-                "field": item["field"],
-                "source_key": item.get("source_key", ""),
-                "resource_group": item.get("resource_group", ""),
-                "resource_id": item.get("resource_id", ""),
-                "context": item.get("context_label", ""),
-                "source_value": item["source_value"],
-                "max_chars": item["max_chars"],
-                "recommended_min_chars": FIELD_RECOMMENDED_MIN_CHARS.get(item["field"]),
-                "recommended_max_chars": FIELD_RECOMMENDED_MAX_CHARS.get(item["field"]),
-                "style_guidance": _field_style_guidance(item),
-            }
+            _openai_prompt_field(item, prompt_profile)
             for item in missing_entries
         ],
         "locale_term_guidance": LOCALE_TERM_GUIDANCE.get(locale, ""),
-        "rules": [
+        "rules": _openai_prompt_rules(prompt_profile, identity_term_text),
+        "output_contract": _openai_output_contract(prompt_profile),
+    }
+    if prompt_profile != OPENAI_PROMPT_COMPACT:
+        prompt["seo_rules"] = [
+            "Product title must be 25-80 characters where possible, and never over 80 characters.",
+            "SEO meta_title must be 30-60 characters where possible, and never over 60 characters.",
+            "SEO meta_description must be 80-160 characters where possible, and never over 160 characters.",
+            "meta_title must naturally include the source product model when the source SEO title includes it, one localized core part keyword, and RC spare/replacement meaning.",
+            "meta_description must include use, source product compatibility, localized part type, and one value point such as durable, precise, reliable, or control.",
+            "Do not repeat the same model name more than once in the same field.",
+            "Do not make title and meta_title exactly the same.",
+        ]
+    return prompt
+
+
+def _openai_prompt_task(prompt_profile):
+    if prompt_profile == OPENAI_PROMPT_COMPACT:
+        return "Translate short Shopify product fields into draft translations for manual review only."
+    if prompt_profile == OPENAI_PROMPT_HTML_TEXT_NODES:
+        return "Translate only visible text nodes from Shopify body_html while preserving the original HTML structure locally."
+    return "Translate selected Shopify product fields into draft translations for manual review only."
+
+
+def _openai_prompt_field(item, prompt_profile):
+    base = {
+        "draft_key": item["draft_key"],
+        "field": item["field"],
+        "source_key": item.get("source_key", ""),
+        "resource_group": item.get("resource_group", ""),
+        "context": item.get("context_label", ""),
+        "max_chars": item["max_chars"],
+        "style_guidance": _field_style_guidance(item),
+    }
+    if prompt_profile == OPENAI_PROMPT_COMPACT:
+        base["source_value"] = item["source_value"]
+        return base
+    if prompt_profile == OPENAI_PROMPT_HTML_TEXT_NODES:
+        base["html_text_nodes"] = _html_text_nodes_for_entry(item)
+        base["html_preservation"] = (
+            "Only translate node text values. The application will put them back into the original HTML. "
+            "Do not return or modify tags, attributes, iframe, link, image, video, script, or style markup."
+        )
+        return base
+    base.update(
+        {
+            "draft_generation_reason": item.get(
+                "draft_generation_reason", "missing_translation"
+            ),
+            "existing_translation_value": item.get("existing_translation_value", ""),
+            "existing_translation_outdated": item.get("existing_translation_outdated"),
+            "resource_id": item.get("resource_id", ""),
+            "source_value": item["source_value"],
+            "recommended_min_chars": FIELD_RECOMMENDED_MIN_CHARS.get(item["field"]),
+            "recommended_max_chars": FIELD_RECOMMENDED_MAX_CHARS.get(item["field"]),
+        }
+    )
+    return base
+
+
+def _openai_prompt_rules(prompt_profile, identity_term_text):
+    base_rules = [
             "Return JSON only with a translations object keyed by draft_key exactly.",
             f"Preserve these source product identity terms when they appear in the source: {identity_term_text}.",
             "Do not introduce a different product brand, product line, aircraft name, vehicle name, or model number.",
             "Preserve brand names, model names, SKU-like codes, dimensions, battery specs, and option structure.",
+            "Preserve RC terminology and product facts. Do not invent specifications.",
+            "Do not add CTA, shipping-origin, Made in China, Best, Cheap, guaranteed, official, or original OEM claims.",
+        ]
+    if prompt_profile == OPENAI_PROMPT_COMPACT:
+        return base_rules + [
+            "Use concise natural wording for short titles, option names, option values, variant values, and media alt text.",
+            "Return each translation as a string value.",
+        ]
+    if prompt_profile == OPENAI_PROMPT_HTML_TEXT_NODES:
+        return base_rules + [
+            "For each field, return an object with html_text_nodes keyed by node_key.",
+            "Translate visible customer-facing text only.",
+            "Do not translate URL-like visible text.",
+            "Do not return HTML tags in node translations.",
+            "Keep video iframe/link/image tags unchanged by leaving markup out of the response.",
+        ]
+    return base_rules + [
+            "If draft_generation_reason is outdated_translation, create a replacement draft from the source value; do not copy the outdated translation unless it is already accurate.",
             "Do not translate product model numbers such as P-51D, F-16, C184, MD530, or similar model codes.",
             "Localize part names naturally; do not mechanically keep English phrases such as RC Plane Clevis.",
-            "Do not add Buy now, Shop now, Free shipping, Worldwide shipping, Made in China, Best, Cheap, guaranteed, official, original OEM, Herkunft, or Provenance.",
             "Do not invent variants, options, metafields, media, product facts, compatibility, or package contents.",
-            "Product title must be 25-65 characters where possible, and never over 65 characters.",
+            "Product title must be 25-80 characters where possible, and never over 80 characters.",
             "SEO meta_title must be 30-60 characters where possible, and never over 60 characters.",
-            "SEO meta_description must be 80-155 characters where possible, and never over 155 characters.",
+            "SEO meta_description must be 80-160 characters where possible, and never over 160 characters.",
             "meta_title must naturally include the source product model when the source SEO title includes it, one localized core part keyword, and RC spare/replacement meaning.",
             "meta_description must include use, source product compatibility, localized part type, and one value point such as durable, precise, reliable, or control.",
             "Do not repeat the same model name more than once in the same field.",
             "Do not make title and meta_title exactly the same.",
             "For body_html, preserve the original HTML structure and translate only customer-facing text.",
-        ],
-        "output_contract": {"type": "JSON object", "shape": {"translations": {"draft_key": "draft translated value"}}},
+    ]
+
+
+def _openai_output_contract(prompt_profile):
+    if prompt_profile == OPENAI_PROMPT_HTML_TEXT_NODES:
+        return {
+            "type": "JSON object",
+            "shape": {
+                "translations": {
+                    "draft_key": {
+                        "html_text_nodes": {
+                            "node_key": "translated visible text without HTML"
+                        }
+                    }
+                }
+            },
+        }
+    return {
+        "type": "JSON object",
+        "shape": {"translations": {"draft_key": "draft translated value"}},
     }
+
+
+def _openai_entries_by_prompt_profile(entries):
+    groups = {
+        OPENAI_PROMPT_COMPACT: [],
+        OPENAI_PROMPT_RICH: [],
+        OPENAI_PROMPT_HTML_TEXT_NODES: [],
+    }
+    for entry in entries or []:
+        groups[_openai_prompt_profile_for_entry(entry)].append(entry)
+    return groups
+
+
+def _openai_prompt_profile_for_entry(entry):
+    field = str((entry or {}).get("field") or "")
+    resource_group = str((entry or {}).get("resource_group") or "")
+    if field == "body_html":
+        return OPENAI_PROMPT_HTML_TEXT_NODES
+    if field in {"meta_title", "meta_description"}:
+        return OPENAI_PROMPT_RICH
+    if resource_group == "important_metafields":
+        return OPENAI_PROMPT_RICH
+    return OPENAI_PROMPT_COMPACT
+
+
+def _translations_from_openai_response(parsed, entries, prompt_profile, result):
+    raw_translations = parsed.get("translations")
+    if not isinstance(raw_translations, dict):
+        result["draft_status"] = "blocked_openai_draft_generation_failed"
+        result["failure_type"] = "openai_response_invalid"
+        result["error"] = "OpenAI response did not include a translations object."
+        result["blocking_conditions"].append("blocked_openai_draft_generation_failed")
+        return None
+    if prompt_profile != OPENAI_PROMPT_HTML_TEXT_NODES:
+        return {
+            entry.get("draft_key") or entry.get("field"): str(
+                raw_translations.get(entry.get("draft_key") or entry.get("field"))
+                or ""
+            ).strip()
+            for entry in entries or []
+        }
+    translations = {}
+    for entry in entries or []:
+        draft_key = entry.get("draft_key") or entry.get("field")
+        raw_value = raw_translations.get(draft_key)
+        if isinstance(raw_value, str):
+            translations[draft_key] = raw_value.strip()
+            continue
+        if not isinstance(raw_value, dict):
+            translations[draft_key] = ""
+            continue
+        node_translations = raw_value.get("html_text_nodes") or raw_value.get("nodes")
+        if not isinstance(node_translations, dict):
+            translations[draft_key] = ""
+            continue
+        translations[draft_key] = _rebuild_html_from_node_translations(
+            entry,
+            node_translations,
+        )
+    return translations
+
+
+def _load_translation_cache():
+    try:
+        if (
+            not TRANSLATION_CACHE_PATH.exists()
+            or TRANSLATION_CACHE_PATH.stat().st_size > TRANSLATION_CACHE_MAX_BYTES
+        ):
+            return {}
+        with TRANSLATION_CACHE_PATH.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return {}
+    entries = data.get("entries") if isinstance(data, dict) else {}
+    return entries if isinstance(entries, dict) else {}
+
+
+def _save_translation_cache(cache):
+    if not isinstance(cache, dict):
+        return
+    trimmed_items = list(cache.items())[-TRANSLATION_CACHE_MAX_ENTRIES:]
+    payload = {
+        "cache_version": 1,
+        "entry_count": len(trimmed_items),
+        "entries": dict(trimmed_items),
+    }
+    TRANSLATION_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = TRANSLATION_CACHE_PATH.with_name(
+        f".{TRANSLATION_CACHE_PATH.name}.{os.getpid()}.tmp"
+    )
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=True, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(tmp_path, TRANSLATION_CACHE_PATH)
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+
+
+def _translation_cache_value(cache, cache_key):
+    record = (cache or {}).get(cache_key)
+    if isinstance(record, dict):
+        return str(record.get("value") or "").strip()
+    return ""
+
+
+def _translation_cache_record(locale, entry, value):
+    field = str((entry or {}).get("field") or "")
+    resource_group = str((entry or {}).get("resource_group") or "")
+    return {
+        "value": str(value or "").strip(),
+        "locale": locale,
+        "field": field,
+        "resource_group": resource_group,
+        "source_text_hash": _source_text_hash(entry.get("source_value") or ""),
+        "product_identity_context_hash": _product_identity_context_hash_for_cache(
+            entry
+        ),
+        "prompt_profile": _openai_prompt_profile_for_entry(entry),
+    }
+
+
+def _translation_cache_key(locale, entry):
+    field = str((entry or {}).get("field") or "")
+    resource_group = str((entry or {}).get("resource_group") or "")
+    parts = [
+        "v1",
+        str(locale or ""),
+        field,
+        resource_group,
+        _source_text_hash((entry or {}).get("source_value") or ""),
+    ]
+    identity_hash = _product_identity_context_hash_for_cache(entry)
+    if identity_hash:
+        parts.append(identity_hash)
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _product_identity_context_hash_for_cache(entry):
+    field = str((entry or {}).get("field") or "")
+    resource_group = str((entry or {}).get("resource_group") or "")
+    if resource_group not in {"product_basics", "seo", "important_metafields", "media"} and field not in {
+        "title",
+        "body_html",
+        "meta_title",
+        "meta_description",
+    }:
+        return ""
+    context = _normalize_product_identity_context(
+        (entry or {}).get("source_identity_context") or {}
+    )
+    if not context.get("expected_terms") and not context.get("source_model_terms"):
+        return ""
+    text = json.dumps(context, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _source_text_hash(value):
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:24]
+
+
+class _VisibleHtmlTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.parts = []
+        self.nodes = []
+        self._skip_stack = []
+
+    def handle_starttag(self, tag, attrs):
+        self.parts.append(("raw", self.get_starttag_text() or f"<{tag}>"))
+        if tag.lower() in HTML_UNCHANGED_TEXT_TAGS:
+            self._skip_stack.append(tag.lower())
+
+    def handle_startendtag(self, tag, attrs):
+        self.parts.append(("raw", self.get_starttag_text() or f"<{tag} />"))
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        self.parts.append(("raw", f"</{tag}>"))
+        if tag in self._skip_stack:
+            while self._skip_stack:
+                skipped = self._skip_stack.pop()
+                if skipped == tag:
+                    break
+
+    def handle_data(self, data):
+        if self._skip_stack or not str(data or "").strip() or _html_text_node_should_preserve(data):
+            self.parts.append(("raw", data))
+            return
+        node_key = f"n{len(self.nodes) + 1}"
+        self.nodes.append({"node_key": node_key, "text": data.strip()})
+        self.parts.append(("node", node_key, data))
+
+    def handle_entityref(self, name):
+        self.parts.append(("raw", f"&{name};"))
+
+    def handle_charref(self, name):
+        self.parts.append(("raw", f"&#{name};"))
+
+    def handle_comment(self, data):
+        self.parts.append(("raw", f"<!--{data}-->"))
+
+    def handle_decl(self, decl):
+        self.parts.append(("raw", f"<!{decl}>"))
+
+
+def _html_text_nodes_for_entry(entry):
+    extractor = _html_extractor_for_entry(entry)
+    return list(extractor.nodes)
+
+
+def _html_extractor_for_entry(entry):
+    extractor = (entry or {}).get("_html_text_extractor")
+    if extractor is not None:
+        return extractor
+    extractor = _VisibleHtmlTextExtractor()
+    try:
+        extractor.feed(str((entry or {}).get("source_value") or ""))
+        extractor.close()
+    except Exception:
+        extractor = _VisibleHtmlTextExtractor()
+        extractor.parts = [("raw", str((entry or {}).get("source_value") or ""))]
+        extractor.nodes = []
+    entry["_html_text_extractor"] = extractor
+    return extractor
+
+
+def _rebuild_html_from_node_translations(entry, node_translations):
+    extractor = _html_extractor_for_entry(entry)
+    if not extractor.nodes:
+        return str((entry or {}).get("source_value") or "")
+    translated = {
+        str(key): str(value or "").strip()
+        for key, value in (node_translations or {}).items()
+        if str(value or "").strip()
+    }
+    output = []
+    for part in extractor.parts:
+        if part[0] == "raw":
+            output.append(part[1])
+            continue
+        _kind, node_key, original = part
+        replacement = translated.get(node_key)
+        if not replacement:
+            output.append(original)
+            continue
+        leading = re.match(r"^\s*", original).group(0)
+        trailing = re.search(r"\s*$", original).group(0)
+        output.append(f"{leading}{html_escape(replacement, quote=False)}{trailing}")
+    return "".join(output).strip()
+
+
+def _html_text_node_should_preserve(value):
+    text = str(value or "").strip()
+    if not text:
+        return True
+    return bool(re.fullmatch(r"https?://\S+|www\.\S+|[\w.-]+@[\w.-]+", text))
 
 
 def _field_style_guidance(entry):
@@ -1376,7 +2165,7 @@ def _request_openai_rewrite(locale, entry, current_value, attempt, result):
         ],
         "text": {"format": {"type": "json_object"}},
     }
-    data = _post_openai_payload(payload, api_key, result, "rewrite")
+    data = _post_openai_payload(payload, api_key, result, "rewrite", locale=locale)
     if data is None:
         return None
     try:
@@ -1397,7 +2186,7 @@ def _request_openai_rewrite(locale, entry, current_value, attempt, result):
     return value
 
 
-def _post_openai_payload(payload, api_key, result, action_label):
+def _post_openai_payload(payload, api_key, result, action_label, locale=""):
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
@@ -1409,11 +2198,10 @@ def _post_openai_payload(payload, api_key, result, action_label):
         method="POST",
     )
     try:
+        _record_openai_call(result, locale)
         with urllib.request.urlopen(request, timeout=120) as response:
-            result["openai_call_performed"] = True
             return json.loads(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
-        result["openai_call_performed"] = True
         result["draft_status"] = "blocked_openai_draft_generation_failed"
         result["failure_type"] = "openai_request_failed"
         result["error"] = f"OpenAI {action_label} failed with HTTP status {exc.code}"
@@ -1424,6 +2212,14 @@ def _post_openai_payload(payload, api_key, result, action_label):
         result["error"] = f"OpenAI {action_label} request failed: {type(exc).__name__}"
         result["blocking_conditions"].append("blocked_openai_draft_generation_failed")
     return None
+
+
+def _record_openai_call(result, locale=""):
+    result["openai_call_performed"] = True
+    result["openai_call_count"] = int(result.get("openai_call_count") or 0) + 1
+    if locale:
+        per_locale = result.setdefault("per_locale_openai_call_count", {})
+        per_locale[locale] = int(per_locale.get(locale) or 0) + 1
 
 
 def _output_text_from_openai(data):
@@ -1462,6 +2258,7 @@ def _rewrite_over_length_draft(locale, entry, draft, result):
 
 
 def _attach_draft_quality(entry, draft, rewrite_attempts):
+    generation_reason = entry.get("draft_generation_reason") or entry.get("skip_reason")
     draft = str(draft or "").strip()
     entry["draft_value"] = draft
     entry["draft_value_chars"] = len(draft)
@@ -1470,6 +2267,14 @@ def _attach_draft_quality(entry, draft, rewrite_attempts):
     entry["quality_notes"] = _quality_notes_for_draft(entry, draft)
     entry["validation_status"] = _validate_draft(entry, draft)
     entry["skip_reason"] = ""
+    entry["draft_generation_reason"] = generation_reason
+    entry["row_status"] = _entry_status_from_reason(generation_reason, generated=True)
+    entry["status"] = entry["row_status"]
+    entry["status_reason"] = (
+        "existing_translation_outdated"
+        if generation_reason == "outdated_translation"
+        else generation_reason
+    )
     _attach_product_identity_validation(entry, draft)
     _attach_seo_quality(entry)
 
@@ -1485,15 +2290,16 @@ def _quality_notes_for_draft(entry, draft):
     max_chars = int(entry_data.get("max_chars") or FIELD_MAX_CHARS.get(field) or 0)
     if max_chars and len(draft) > max_chars:
         notes.append("draft_over_max_chars")
+    if _draft_equals_source_needs_review(entry_data, draft):
+        notes.append("draft_equals_source")
+    notes.extend(_html_structure_notes_for_draft(entry_data, draft))
     if FORBIDDEN_OUTPUT_RE.search(draft):
         notes.append("forbidden_marketing_or_origin_phrase")
     if UNNATURAL_PHRASE_RE.search(draft):
         notes.append("unnatural_english_phrase")
     if entry_data.get("draft_requires_manual_review"):
         notes.append(entry_data.get("draft_manual_review_reason") or "manual_review_required")
-    if entry_data.get("future_write_needs_mapping"):
-        notes.append(entry_data.get("apply_plan_blocked_reason") or "future_write_needs_resource_mapping")
-    return notes
+    return _unique(notes)
 
 
 def _validate_draft(entry, draft):
@@ -1505,13 +2311,79 @@ def _validate_draft(entry, draft):
     return "draft_ready_for_manual_review"
 
 
+def _draft_equals_source_needs_review(entry, draft):
+    source = str((entry or {}).get("source_value") or "").strip()
+    if not source or not draft or draft.strip() != source:
+        return False
+    resource_group = str((entry or {}).get("resource_group") or "")
+    if resource_group in {"options", "variants"} and source.lower() in DEFAULT_OPTION_SOURCE_VALUES:
+        return False
+    if resource_group == "technical_metafields":
+        return False
+    if _identifier_like(source):
+        return False
+    return bool(re.search(r"[A-Za-z]{3,}", source))
+
+
+def _identifier_like(value):
+    text = str(value or "").strip()
+    if not text:
+        return True
+    if len(text) <= 2:
+        return True
+    if re.fullmatch(r"[\d\s._:/#-]+", text):
+        return True
+    if re.fullmatch(r"[A-Z0-9][A-Z0-9._:/#-]{1,}", text):
+        return True
+    return False
+
+
+def _html_structure_notes_for_draft(entry, draft):
+    if str((entry or {}).get("field") or "") != "body_html":
+        return []
+    source = str((entry or {}).get("source_value") or "")
+    source_tags = _html_tag_counts(source)
+    if not source_tags:
+        return []
+    draft_tags = _html_tag_counts(draft)
+    notes = []
+    if not draft_tags:
+        notes.append("body_html_structure_broken")
+        return notes
+    missing_structural_tags = [
+        tag
+        for tag, source_count in source_tags.items()
+        if tag not in HTML_REVIEW_TAGS and draft_tags.get(tag, 0) < source_count
+    ]
+    if missing_structural_tags:
+        notes.append("body_html_structure_broken")
+    missing_media_or_link_tags = [
+        tag
+        for tag in HTML_REVIEW_TAGS
+        if draft_tags.get(tag, 0) < source_tags.get(tag, 0)
+    ]
+    if missing_media_or_link_tags:
+        notes.append("html_media_or_link_tag_broken")
+    return notes
+
+
+def _html_tag_counts(value):
+    counts = {}
+    for match in HTML_TAG_RE.finditer(str(value or "")):
+        tag = match.group(1).lower()
+        counts[tag] = counts.get(tag, 0) + 1
+    return counts
+
+
 def _attach_seo_quality(entry):
     draft = str(entry.get("draft_value") or "").strip()
     field = entry["field"]
     locale = entry["locale"]
     terms = SEO_TERMS.get(locale, {})
     seo_notes = _seo_notes_for_draft(entry, draft)
+    seo_review_notes = _seo_review_notes(seo_notes)
     entry["seo_notes"] = seo_notes
+    entry["seo_review_notes"] = seo_review_notes
     entry["contains_model"] = _contains_model(
         draft,
         entry.get("source_identity_context"),
@@ -1523,7 +2395,7 @@ def _attach_seo_quality(entry):
     else:
         entry["contains_core_keyword"] = _text_contains_any(draft, terms.get("core", []))
     entry["contains_forbidden_phrase"] = bool(FORBIDDEN_OUTPUT_RE.search(draft))
-    entry["seo_validation_status"] = "seo_ready" if not seo_notes else "seo_needs_manual_review"
+    entry["seo_validation_status"] = "seo_ready" if not seo_review_notes else "seo_needs_manual_review"
     if entry.get("draft_blocked"):
         entry["seo_validation_status"] = "seo_needs_manual_review"
     entry["seo_eligible_for_apply_plan"] = (
@@ -1549,6 +2421,14 @@ def _attach_seo_quality(entry):
         or entry["validation_status"] != "draft_ready_for_manual_review"
         or entry["seo_validation_status"] != "seo_ready"
     )
+
+
+def _seo_review_notes(seo_notes):
+    return [
+        note
+        for note in _unique(seo_notes or [])
+        if note in SEO_REVIEW_NOTE_CODES and note not in NON_BLOCKING_SEO_NOTE_CODES
+    ]
 
 
 def _seo_notes_for_draft(entry, draft):
@@ -1598,9 +2478,13 @@ def _apply_cross_field_seo_checks(result, target_locales):
                 notes = entry.setdefault("seo_notes", [])
                 if "keyword_stuffing_or_duplicate" not in notes:
                     notes.append("keyword_stuffing_or_duplicate")
+                review_notes = entry.setdefault("seo_review_notes", [])
+                if "keyword_stuffing_or_duplicate" not in review_notes:
+                    review_notes.append("keyword_stuffing_or_duplicate")
                 entry["seo_validation_status"] = "seo_needs_manual_review"
                 entry["seo_eligible_for_apply_plan"] = False
                 entry["eligible_for_apply_plan"] = False
+                entry["needs_review"] = True
 
 
 def _recalculate_quality_stats(result):
@@ -1621,42 +2505,122 @@ def _recalculate_quality_stats(result):
     ]
     for key in stat_keys:
         result[key] = 0
-    for summary in list(result["per_locale_results"].values()) + list(result["per_field_results"].values()):
+    generated_stat_keys = [
+        "missing_translation_draft_generated_count",
+        "outdated_translation_update_draft_generated_count",
+        "needs_review_or_blocked_count",
+    ]
+    for key in generated_stat_keys:
+        result[key] = 0
+    for summary in (
+        list(result["per_locale_results"].values())
+        + list(result["per_field_results"].values())
+        + list(result["per_section_results"].values())
+    ):
         for key in stat_keys:
+            summary[key] = 0
+        for key in generated_stat_keys:
             summary[key] = 0
 
     for entry in result["draft_entries"]:
         per_locale = result["per_locale_results"][entry["locale"]]
         per_field = result["per_field_results"][entry["field"]]
-        _increment(result, per_locale, per_field, "generated_draft_count")
-        if (
+        per_section = result["per_section_results"][
+            _section_summary_key(entry.get("resource_group"))
+        ]
+        _increment(result, per_locale, per_field, "generated_draft_count", per_section)
+        if entry.get("draft_generation_reason") == "outdated_translation":
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "outdated_translation_update_draft_generated_count",
+                per_section,
+            )
+        else:
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "missing_translation_draft_generated_count",
+                per_section,
+            )
+        draft_ready = (
             entry.get("validation_status") == "draft_ready_for_manual_review"
             and not entry.get("draft_blocked")
-        ):
-            _increment(result, per_locale, per_field, "draft_ready_count")
+        )
+        entry_needs_review = bool(
+            entry.get("needs_review")
+            or not draft_ready
+            or entry.get("seo_validation_status") != "seo_ready"
+        )
+        if draft_ready:
+            _increment(result, per_locale, per_field, "draft_ready_count", per_section)
         else:
-            _increment(result, per_locale, per_field, "draft_needs_manual_review_count")
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "draft_needs_manual_review_count",
+                per_section,
+            )
+        if entry_needs_review:
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "needs_review_or_blocked_count",
+                per_section,
+            )
         if entry.get("draft_blocked"):
-            _increment(result, per_locale, per_field, "draft_blocked_count")
+            _increment(result, per_locale, per_field, "draft_blocked_count", per_section)
         if entry.get("product_identity_mismatch"):
-            _increment(result, per_locale, per_field, "product_identity_mismatch_count")
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "product_identity_mismatch_count",
+                per_section,
+            )
         if entry.get("eligible_for_apply_plan"):
-            _increment(result, per_locale, per_field, "eligible_apply_plan_count")
+            _increment(
+                result, per_locale, per_field, "eligible_apply_plan_count", per_section
+            )
         if "draft_over_max_chars" in (entry.get("quality_notes") or []):
-            _increment(result, per_locale, per_field, "over_length_after_rewrite_count")
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "over_length_after_rewrite_count",
+                per_section,
+            )
         if entry.get("seo_validation_status") == "seo_ready":
-            _increment(result, per_locale, per_field, "seo_ready_count")
+            _increment(result, per_locale, per_field, "seo_ready_count", per_section)
         else:
-            _increment(result, per_locale, per_field, "seo_needs_manual_review_count")
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "seo_needs_manual_review_count",
+                per_section,
+            )
         if entry.get("seo_eligible_for_apply_plan"):
-            _increment(result, per_locale, per_field, "seo_eligible_apply_plan_count")
+            _increment(
+                result,
+                per_locale,
+                per_field,
+                "seo_eligible_apply_plan_count",
+                per_section,
+            )
         seo_notes = entry.get("seo_notes") or []
         if "forbidden_marketing_or_shipping_phrase" in seo_notes:
-            _increment(result, per_locale, per_field, "forbidden_phrase_count")
+            _increment(result, per_locale, per_field, "forbidden_phrase_count", per_section)
         if "missing_core_keyword" in seo_notes:
-            _increment(result, per_locale, per_field, "missing_core_keyword_count")
+            _increment(
+                result, per_locale, per_field, "missing_core_keyword_count", per_section
+            )
         if "too_short_for_seo" in seo_notes:
-            _increment(result, per_locale, per_field, "too_short_for_seo_count")
+            _increment(result, per_locale, per_field, "too_short_for_seo_count", per_section)
 
     draft_entry_ids = {id(entry) for entry in result["draft_entries"]}
     for entry in result["entries"]:
@@ -1664,14 +2628,221 @@ def _recalculate_quality_stats(result):
             continue
         per_locale = result["per_locale_results"][entry["locale"]]
         per_field = result["per_field_results"][entry["field"]]
-        _increment(result, per_locale, per_field, "product_identity_mismatch_count")
-        _increment(result, per_locale, per_field, "draft_needs_manual_review_count")
+        per_section = result["per_section_results"][
+            _section_summary_key(entry.get("resource_group"))
+        ]
+        _increment(
+            result, per_locale, per_field, "product_identity_mismatch_count", per_section
+        )
+        _increment(
+            result, per_locale, per_field, "draft_needs_manual_review_count", per_section
+        )
+        _increment(
+            result, per_locale, per_field, "needs_review_or_blocked_count", per_section
+        )
 
 
-def _increment(result, per_locale, per_field, key):
+def _increment(result, per_locale, per_field, key, per_section=None):
     result[key] += 1
     per_locale[key] += 1
     per_field[key] += 1
+    if per_section is not None:
+        per_section[key] += 1
+
+
+def _section_summary_key(resource_group):
+    group = str(resource_group or "").strip()
+    if group == "technical_metafields":
+        return "technical_fields"
+    if group in SECTION_LABELS and group != "technical_metafields":
+        return group
+    return "technical_fields"
+
+
+def _entry_status_from_reason(reason, generated=False):
+    reason = str(reason or "")
+    if generated and reason == "outdated_translation":
+        return "outdated_translation_update_draft_ready"
+    if generated and reason == "missing_translation":
+        return "missing_translation_draft_ready"
+    if reason == "already_translated":
+        return "already_translated_skipped"
+    if reason in DRAFT_GENERATION_REASONS:
+        return "draft_generation_pending"
+    return "not_eligible_skipped"
+
+
+def _refresh_entry_status(entry):
+    if not isinstance(entry, dict):
+        return
+    generated = bool(entry.get("draft_value"))
+    reason = entry.get("draft_generation_reason") or entry.get("skip_reason")
+    entry["row_status"] = _entry_status_from_reason(reason, generated=generated)
+    entry["status"] = entry["row_status"]
+    entry["status_reason"] = (
+        "existing_translation_outdated"
+        if reason == "outdated_translation"
+        else str(reason or "")
+    )
+
+
+def _empty_translate_all_summary():
+    return {
+        "summary_status": "not_loaded",
+        "total_languages_checked": 0,
+        "total_source_rows_checked": 0,
+        "missing_drafts_generated": 0,
+        "outdated_update_drafts_generated": 0,
+        "already_translated_skipped": 0,
+        "not_eligible_skipped": 0,
+        "needs_review_blocked": 0,
+        "per_language_counts": [],
+        "per_section_counts": [],
+        "child_resource_discovery_errors": [],
+        "per_group_discovery_status": _empty_discovery_status(),
+        "per_group_discovery_reasons": _empty_discovery_reasons(),
+        "per_group_discovery_rows": _discovery_status_rows(
+            _empty_discovery_status(),
+            _empty_discovery_reasons(),
+        ),
+        "shopify_read_only": True,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "rollback_performed": False,
+        "no_new_shopify_writes_performed": True,
+    }
+
+
+def _attach_draft_batch_summary(result):
+    summary = _empty_translate_all_summary()
+    entries = [entry for entry in result.get("entries") or [] if isinstance(entry, dict)]
+    source_read_summary = result.get("source_read_summary") or {}
+    summary["summary_status"] = "source_rows_classified"
+    if result.get("blocking_conditions"):
+        summary["summary_status"] = "blocked"
+    summary["total_languages_checked"] = len(source_read_summary)
+    summary["total_source_rows_checked"] = sum(
+        int((locale_summary or {}).get("translatable_content_count") or 0)
+        for locale_summary in source_read_summary.values()
+    )
+    summary["missing_drafts_generated"] = sum(
+        1
+        for entry in entries
+        if entry.get("row_status") == "missing_translation_draft_ready"
+    )
+    summary["outdated_update_drafts_generated"] = sum(
+        1
+        for entry in entries
+        if entry.get("row_status") == "outdated_translation_update_draft_ready"
+    )
+    summary["already_translated_skipped"] = sum(
+        1 for entry in entries if entry.get("row_status") == "already_translated_skipped"
+    )
+    summary["not_eligible_skipped"] = sum(
+        1 for entry in entries if entry.get("row_status") == "not_eligible_skipped"
+    )
+    summary["needs_review_blocked"] = sum(
+        1
+        for entry in entries
+        if entry.get("needs_review")
+        or entry.get("draft_blocked")
+        or entry.get("product_identity_mismatch")
+    )
+    summary["per_language_counts"] = [
+        _summary_row(locale, bucket, "locale", locale)
+        for locale, bucket in (result.get("per_locale_results") or {}).items()
+    ]
+    section_order = [
+        "product_basics",
+        "seo",
+        "options",
+        "variants",
+        "important_metafields",
+        "media",
+        "technical_fields",
+    ]
+    summary["per_section_counts"] = [
+        _summary_row(
+            section,
+            (result.get("per_section_results") or {}).get(section, {}),
+            "section",
+            SECTION_LABELS.get(section, section),
+        )
+        for section in section_order
+    ]
+    summary["child_resource_discovery_errors"] = list(
+        result.get("child_resource_discovery_errors") or []
+    )
+    summary["per_group_discovery_status"] = dict(
+        result.get("per_group_discovery_status") or {}
+    )
+    summary["per_group_discovery_reasons"] = dict(
+        result.get("per_group_discovery_reasons") or {}
+    )
+    summary["per_group_discovery_rows"] = _discovery_status_rows(
+        summary["per_group_discovery_status"],
+        summary["per_group_discovery_reasons"],
+    )
+    summary["openai_call_count"] = int(result.get("openai_call_count") or 0)
+    summary["reused_cache_count"] = int(result.get("reused_cache_count") or 0)
+    summary["skipped_existing_count"] = int(
+        result.get("skipped_existing_count")
+        or result.get("skipped_existing_translation_count")
+        or 0
+    )
+    summary["skipped_technical_count"] = int(result.get("skipped_technical_count") or 0)
+    summary["deduplicated_input_count"] = int(
+        result.get("deduplicated_input_count") or 0
+    )
+    summary["estimated_input_chars_saved"] = int(
+        result.get("estimated_input_chars_saved") or 0
+    )
+    summary["per_locale_openai_call_count"] = dict(
+        result.get("per_locale_openai_call_count") or {}
+    )
+    for key in (
+        "total_languages_checked",
+        "total_source_rows_checked",
+        "missing_drafts_generated",
+        "outdated_update_drafts_generated",
+        "already_translated_skipped",
+        "not_eligible_skipped",
+        "needs_review_blocked",
+    ):
+        result[key if key != "needs_review_blocked" else "needs_review_or_blocked_count"] = summary[key]
+    result["missing_translation_draft_generated_count"] = summary["missing_drafts_generated"]
+    result["outdated_translation_update_draft_generated_count"] = summary[
+        "outdated_update_drafts_generated"
+    ]
+    result["already_translated_skipped_count"] = summary["already_translated_skipped"]
+    result["not_eligible_skipped_count"] = summary["not_eligible_skipped"]
+    result["skipped_existing_count"] = summary["skipped_existing_count"]
+    result["translate_all_summary"] = summary
+
+
+def _summary_row(key, bucket, label_key, label):
+    bucket = bucket or {}
+    return {
+        label_key: key,
+        "label": label,
+        "source_rows_checked": int(bucket.get("source_row_count") or 0),
+        "missing_drafts_generated": int(
+            bucket.get("missing_translation_draft_generated_count") or 0
+        ),
+        "outdated_update_drafts_generated": int(
+            bucket.get("outdated_translation_update_draft_generated_count") or 0
+        ),
+        "already_translated_skipped": int(
+            bucket.get("already_translated_skipped_count")
+            or bucket.get("skipped_existing_translation_count")
+            or 0
+        ),
+        "not_eligible_skipped": int(bucket.get("not_eligible_skipped_count") or 0),
+        "needs_review_blocked": int(bucket.get("needs_review_or_blocked_count") or 0),
+    }
 
 
 def _text_contains_any(text, terms):

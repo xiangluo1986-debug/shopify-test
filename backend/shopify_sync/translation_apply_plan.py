@@ -866,6 +866,8 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
     )
     proposed_value = _safe_write_text_value(
         row,
+        "manual_edit_value",
+        "manual_translation_override_value",
         "proposed_translation",
         "proposed_translation_display",
         "generated_draft_display",
@@ -904,6 +906,15 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
         "existing_translation_present": existing_present,
         "existing_translation_outdated": existing_outdated,
         "proposed_translation_value": proposed_value,
+        "using_manual_edit": _safe_write_bool(row.get("using_manual_edit"))
+        or bool(str(row.get("manual_edit_value") or "").strip()),
+        "manual_edit_value": row.get("manual_edit_value")
+        or row.get("manual_translation_override_value")
+        or "",
+        "openai_original_proposed_translation": row.get(
+            "openai_original_proposed_translation"
+        )
+        or row.get("original_openai_translation", ""),
         "field_group": group_key,
         "context_label": row.get("context_label", ""),
         "validation_status": row.get("validation_status", ""),
@@ -1114,6 +1125,11 @@ def _safe_write_package_entry(entry: dict):
         "existing_translation_value": entry.get("existing_translation_value", ""),
         "existing_translation_outdated": entry.get("existing_translation_outdated"),
         "proposed_translation_value": entry.get("proposed_translation_value", ""),
+        "using_manual_edit": entry.get("using_manual_edit", False),
+        "manual_edit_value": entry.get("manual_edit_value", ""),
+        "openai_original_proposed_translation": entry.get(
+            "openai_original_proposed_translation", ""
+        ),
         "field_group": entry.get("field_group", ""),
         "context_label": entry.get("context_label", ""),
         "validation_status": entry.get("validation_status", ""),
@@ -1440,6 +1456,11 @@ def _locked_execution_entry_snapshot(entry: dict, *, product_gid: str, locale: s
         "existing_translation_value": entry.get("existing_translation_value", ""),
         "existing_translation_outdated": entry.get("existing_translation_outdated"),
         "proposed_translation_value": entry.get("proposed_translation_value", ""),
+        "using_manual_edit": entry.get("using_manual_edit", False),
+        "manual_edit_value": entry.get("manual_edit_value", ""),
+        "openai_original_proposed_translation": entry.get(
+            "openai_original_proposed_translation", ""
+        ),
         "field_group": entry.get("field_group", ""),
         "context_label": entry.get("context_label", ""),
     }
