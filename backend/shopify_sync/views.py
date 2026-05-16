@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 import requests
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.core.exceptions import FieldDoesNotExist
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
@@ -35,6 +35,7 @@ from django.utils.safestring import mark_safe
 from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem, ShopifySyncState
 from .review_request_workbench import (
     build_review_request_workbench_context,
+    review_request_review_and_send,
     run_trustpilot_auto_queue_refresh_after_shopify_order_sync,
 )
 from .sync_helpers import (
@@ -271,6 +272,26 @@ TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS = [
 ]
 TRANSLATION_WORKSPACE_RESULT_VISIBLE_STATUSES = {"completed", "partial"}
 TRANSLATION_WORKSPACE_RESULT_PRIMARY_GROUPS = {"product_basics", "seo"}
+TRANSLATION_WORKSPACE_RESULT_GROUP_ORDER = {
+    "product_basics": 0,
+    "seo": 1,
+    "options": 2,
+    "variants": 3,
+    "important_metafields": 4,
+    "media": 5,
+}
+TRANSLATION_WORKSPACE_RESULT_FIELD_ORDER = {
+    "title": 0,
+    "body_html": 1,
+    "description": 1,
+    "meta_title": 2,
+    "meta_description": 3,
+    "option.name": 4,
+    "option.value": 4,
+    "variant.title": 5,
+    "media.alt": 7,
+    "alt": 7,
+}
 TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "existing_translation_outdated": "Existing translation is outdated",
     "existing_translation_outdated_manual_review_required": "Existing translation is outdated",
@@ -320,8 +341,14 @@ TRANSLATION_WORKSPACE_MAPPING_REQUIRED_GROUPS = {
     "media",
 }
 TRANSLATION_WORKSPACE_JOB_DIR = Path("logs/shopify_translation_workspace_jobs")
-TRANSLATION_WORKSPACE_JOB_STALE_SECONDS = 30 * 60
+TRANSLATION_WORKSPACE_JOB_STALE_SECONDS = 15 * 60
 TRANSLATION_WORKSPACE_JOB_ACTIVE_STATUSES = {"pending", "running"}
+TRANSLATION_WORKSPACE_LOCALE_TERMINAL_STATUSES = {
+    "completed",
+    "failed",
+    "skipped",
+    "stale",
+}
 TRANSLATION_WORKSPACE_JOB_TERMINAL_STATUSES = {
     "completed",
     "partial",
@@ -980,12 +1007,52 @@ def _user_has_review_request_admin_access(request):
     return request.user.groups.filter(name="Admin").exists()
 
 
+def _translation_console_editor_redirect_url(
+    request,
+    *,
+    selected_product_gid: str = "",
+    product_search_text: str = "",
+    locale: str = "",
+    editor_filter: str = "",
+    editor_search_query: str = "",
+):
+    params = {
+        "ui_mode": "editor",
+        "selected_product_gid": selected_product_gid or "",
+        "product_search": product_search_text or "",
+        "target_locale": locale or "",
+        "editor_filter": editor_filter or "",
+        "editor_search": editor_search_query or "",
+    }
+    return f"{request.path}?{urllib.parse.urlencode(params)}"
+
+
 @staff_member_required
 def review_request_workbench(request):
     if not _user_has_review_request_admin_access(request):
         return HttpResponseForbidden("Only admins can view Review Requests.")
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        if action != "review_send":
+            return HttpResponseBadRequest("Unknown Review Request action.")
+        result = review_request_review_and_send(
+            request.POST.get("candidate_id"),
+            admin_username=request.user.get_username(),
+        )
+        if result.get("email_sent") is True:
+            messages.success(
+                request,
+                "Email sent. Shopify tag write will happen after post-send audit.",
+            )
+        else:
+            messages.warning(
+                request,
+                result.get("blocking_detail")
+                or "No email was sent. This order is not eligible.",
+            )
+        return HttpResponseRedirect(request.path)
     if request.method not in {"GET", "HEAD"}:
-        return HttpResponseNotAllowed(["GET", "HEAD"])
+        return HttpResponseNotAllowed(["GET", "HEAD", "POST"])
 
     context = admin.site.each_context(request)
     context.update(build_review_request_workbench_context(request.GET))
@@ -2030,6 +2097,16 @@ def translation_console(request):
                     summary=_translation_workspace_job_safe_summary(
                         translation_background_job
                     ),
+                )
+                return HttpResponseRedirect(
+                    _translation_console_editor_redirect_url(
+                        request,
+                        selected_product_gid=selected_background_product_gid,
+                        product_search_text=product_search_text,
+                        locale=locale,
+                        editor_filter=editor_filter,
+                        editor_search_query=editor_search_query,
+                    )
                 )
     elif post_action == "generate_multi_locale_drafts" and safe_action_result is None:
         blocked_message = _translation_workspace_multi_locale_blocked_message(
@@ -3665,6 +3742,9 @@ def _translation_workspace_empty_job_counts(selected_locales):
         "total_locales": len(selected_locales or []),
         "completed_locales": 0,
         "failed_locales": 0,
+        "skipped_locales": 0,
+        "stale_locales": 0,
+        "processed_locales": 0,
         "total_rows_checked": 0,
         "missing_draft_count": 0,
         "outdated_update_draft_count": 0,
@@ -3681,11 +3761,12 @@ def _translation_workspace_empty_locale_status(locale: str):
         "locale": locale,
         "locale_label": _translation_editor_locale_label(locale),
         "status": "pending",
-        "status_label": "Pending",
+        "status_label": "Waiting",
         "current_step": "",
         "started_at": "",
         "updated_at": "",
         "finished_at": "",
+        "heartbeat_at": "",
         "source_rows_checked": 0,
         "missing_draft_count": 0,
         "outdated_update_draft_count": 0,
@@ -3693,7 +3774,8 @@ def _translation_workspace_empty_locale_status(locale: str):
         "not_eligible_skipped_count": 0,
         "blocked_count": 0,
         "generated_draft_count": 0,
-        "message": "",
+        "message": "Waiting to start.",
+        "error_message": "",
         "blocking_conditions": [],
     }
 
@@ -3717,6 +3799,9 @@ def _translation_workspace_empty_group_status(group_key: str):
 
 def _translation_workspace_job_safety_flags():
     return {
+        "job_started_by": "user_action",
+        "polling_read_only": True,
+        "auto_start_blocked": True,
         "shopify_read_only": True,
         "shopify_write_performed": False,
         "mutation_performed": False,
@@ -3739,11 +3824,13 @@ def _translation_workspace_mark_locale_running(status: dict, locale: str):
     locale_row.update(
         {
             "status": "running",
-            "status_label": "Running",
+            "status_label": "Translating now",
             "current_step": status["current_step"],
             "started_at": locale_row.get("started_at") or now,
             "updated_at": now,
-            "message": "Reading source rows and preparing translation results.",
+            "heartbeat_at": now,
+            "message": "Translation is still running for this language.",
+            "error_message": "",
         }
     )
     for group_row in status.get("per_group_status") or []:
@@ -3768,17 +3855,33 @@ def _translation_workspace_apply_locale_job_result(
         (draft_result or {}).get("success")
     )
     locale_row = _translation_workspace_locale_row(status, locale)
+    locale_label = _translation_editor_locale_label(locale)
+    source_rows_checked = int(summary.get("total_source_rows_checked") or 0)
     missing_count = int(summary.get("missing_drafts_generated") or 0)
     outdated_count = int(summary.get("outdated_update_drafts_generated") or 0)
     blocked_count = int(summary.get("needs_review_blocked") or 0)
+    locale_status = (
+        "failed"
+        if locale_failed
+        else ("skipped" if source_rows_checked == 0 else "completed")
+    )
+    locale_error_message = ""
+    if locale_status == "failed":
+        locale_error_message = _translation_workspace_safe_text(
+            (draft_result or {}).get("error")
+            or ", ".join(blocking_conditions)
+            or f"Translation failed for {locale_label}.",
+            500,
+        )
     locale_row.update(
         {
-            "status": "failed" if locale_failed else "completed",
-            "status_label": "Failed" if locale_failed else "Completed",
-            "current_step": "completed" if not locale_failed else "failed",
+            "status": locale_status,
+            "status_label": _translation_workspace_locale_status_label(locale_status),
+            "current_step": locale_status,
             "updated_at": now,
             "finished_at": now,
-            "source_rows_checked": int(summary.get("total_source_rows_checked") or 0),
+            "heartbeat_at": now,
+            "source_rows_checked": source_rows_checked,
             "missing_draft_count": missing_count,
             "outdated_update_draft_count": outdated_count,
             "already_translated_skipped_count": int(
@@ -3790,11 +3893,11 @@ def _translation_workspace_apply_locale_job_result(
             "blocked_count": blocked_count,
             "generated_draft_count": missing_count + outdated_count,
             "blocking_conditions": blocking_conditions,
-            "message": (
-                "Locale completed with translation results."
-                if not locale_failed
-                else "Locale failed without Shopify writes."
+            "message": _translation_workspace_locale_status_message(
+                locale_status,
+                locale_label=locale_label,
             ),
+            "error_message": locale_error_message,
         }
     )
     if (draft_result or {}).get("product_title") and not status.get("product_title"):
@@ -3809,9 +3912,7 @@ def _translation_workspace_apply_locale_job_result(
         _translation_workspace_append_job_error(
             status,
             f"locale_{locale}",
-            (draft_result or {}).get("error")
-            or ", ".join(blocking_conditions)
-            or "Locale draft generation failed.",
+            locale_error_message or "Locale draft generation failed.",
         )
     _translation_workspace_touch_job(status)
 
@@ -3819,15 +3920,21 @@ def _translation_workspace_apply_locale_job_result(
 def _translation_workspace_apply_locale_job_exception(status: dict, locale: str, exc):
     now = _translation_workspace_now_iso()
     message = _translation_workspace_safe_error_message(exc)
+    locale_label = _translation_editor_locale_label(locale)
     locale_row = _translation_workspace_locale_row(status, locale)
     locale_row.update(
         {
             "status": "failed",
-            "status_label": "Failed",
+            "status_label": _translation_workspace_locale_status_label("failed"),
             "current_step": "failed",
             "updated_at": now,
             "finished_at": now,
-            "message": "Locale failed without Shopify writes.",
+            "heartbeat_at": now,
+            "message": _translation_workspace_locale_status_message(
+                "failed",
+                locale_label=locale_label,
+            ),
+            "error_message": message,
             "blocking_conditions": [type(exc).__name__],
         }
     )
@@ -3968,18 +4075,20 @@ def _translation_workspace_finalize_job_status(status: dict):
     counts = status.get("counts") or {}
     failed = int(counts.get("failed_locales") or 0)
     completed = int(counts.get("completed_locales") or 0)
+    skipped = int(counts.get("skipped_locales") or 0)
+    stale = int(counts.get("stale_locales") or 0)
     total = int(counts.get("total_locales") or 0)
     has_errors = bool(status.get("errors"))
     has_blocked = int(counts.get("blocked_count") or 0) > 0
-    if failed and completed == 0:
+    if total and failed == total:
         final_status = "failed"
-        message = "Translation failed. Preview only — Shopify has not been updated yet."
-    elif failed or has_errors or has_blocked:
+        message = "Translation failed. Preview only - Shopify has not been updated yet."
+    elif failed or skipped or stale or has_errors or has_blocked:
         final_status = "partial"
-        message = "Translation completed with warnings. Preview only — Shopify has not been updated yet."
+        message = "Translation completed with warnings. Preview only - Shopify has not been updated yet."
     else:
         final_status = "completed"
-        message = "Translation completed. Preview only — Shopify has not been updated yet."
+        message = "Translation completed. Preview only - Shopify has not been updated yet."
     status["status"] = final_status
     status["finished_at"] = _translation_workspace_now_iso()
     status["current_locale"] = ""
@@ -3988,9 +4097,13 @@ def _translation_workspace_finalize_job_status(status: dict):
     status["status_message"] = message
     for group_row in status.get("per_group_status") or []:
         if group_row.get("status") in TRANSLATION_WORKSPACE_JOB_ACTIVE_STATUSES:
-            group_row["status"] = "failed" if final_status == "failed" else "completed"
+            group_row["status"] = (
+                "completed" if final_status == "completed" else final_status
+            )
             group_row["status_label"] = (
-                "Failed" if final_status == "failed" else "Completed"
+                "Completed"
+                if final_status == "completed"
+                else _translation_workspace_job_status_label(final_status)
             )
     counts["completed_locales"] = min(completed, total)
 
@@ -4008,6 +4121,35 @@ def _translation_workspace_refresh_job_progress(status: dict):
     counts["failed_locales"] = sum(
         1 for row in locale_rows if row.get("status") == "failed"
     )
+    counts["skipped_locales"] = sum(
+        1 for row in locale_rows if row.get("status") == "skipped"
+    )
+    counts["stale_locales"] = sum(
+        1 for row in locale_rows if row.get("status") == "stale"
+    )
+    counts["processed_locales"] = sum(
+        1
+        for row in locale_rows
+        if row.get("status") in TRANSLATION_WORKSPACE_LOCALE_TERMINAL_STATUSES
+    )
+    counts["total_rows_checked"] = sum(
+        int(row.get("source_rows_checked") or 0) for row in locale_rows
+    )
+    counts["missing_draft_count"] = sum(
+        int(row.get("missing_draft_count") or 0) for row in locale_rows
+    )
+    counts["outdated_update_draft_count"] = sum(
+        int(row.get("outdated_update_draft_count") or 0) for row in locale_rows
+    )
+    counts["already_translated_skipped_count"] = sum(
+        int(row.get("already_translated_skipped_count") or 0) for row in locale_rows
+    )
+    counts["not_eligible_skipped_count"] = sum(
+        int(row.get("not_eligible_skipped_count") or 0) for row in locale_rows
+    )
+    counts["blocked_count"] = sum(
+        int(row.get("blocked_count") or 0) for row in locale_rows
+    )
     counts["generated_draft_count"] = (
         int(counts.get("missing_draft_count") or 0)
         + int(counts.get("outdated_update_draft_count") or 0)
@@ -4016,7 +4158,7 @@ def _translation_workspace_refresh_job_progress(status: dict):
         int(counts.get("already_translated_skipped_count") or 0)
         + int(counts.get("not_eligible_skipped_count") or 0)
     )
-    processed = counts["completed_locales"] + counts["failed_locales"]
+    processed = counts["processed_locales"]
     total = counts["total_locales"] or 0
     status["progress_percent"] = int((processed / total) * 100) if total else 0
     status.update(_translation_workspace_job_safety_flags())
@@ -4054,9 +4196,14 @@ def _translation_workspace_job_safe_summary(job_status: dict | None):
         "progress_percent": status.get("progress_percent", 0),
         "completed_locales": counts.get("completed_locales", 0),
         "failed_locales": counts.get("failed_locales", 0),
+        "skipped_locales": counts.get("skipped_locales", 0),
+        "stale_locales": counts.get("stale_locales", 0),
         "generated_draft_count": counts.get("generated_draft_count", 0),
         "skipped_count": counts.get("skipped_count", 0),
         "report_path": status.get("report_path", ""),
+        "job_started_by": status.get("job_started_by", "user_action"),
+        "polling_read_only": bool(status.get("polling_read_only", True)),
+        "auto_start_blocked": bool(status.get("auto_start_blocked", True)),
         "shopify_read_only": True,
         "shopify_write_performed": False,
         "mutation_performed": False,
@@ -4077,13 +4224,25 @@ def _translation_workspace_job_status_for_view(status: dict):
     view["status_label"] = _translation_workspace_job_status_label(status.get("status"))
     view["status_key"] = str(status.get("status") or "unknown").replace(" ", "_")
     view["detail_anchor"] = "translation-background-job-details"
-    for row in view.get("per_locale_status") or []:
-        row["status_label"] = _translation_workspace_title_status(row.get("status"))
-        row["status_key"] = str(row.get("status") or "unknown").replace(" ", "_")
+    view["current_locale_label"] = (
+        _translation_editor_locale_label(view.get("current_locale", ""))
+        if view.get("current_locale")
+        else ""
+    )
+    view["current_group_label"] = (
+        _translation_workspace_group_label(view.get("current_group", ""))
+        if view.get("current_group")
+        else ""
+    )
+    for index, row in enumerate(view.get("per_locale_status") or []):
+        view["per_locale_status"][index] = _translation_workspace_locale_status_view(row)
     for row in view.get("per_group_status") or []:
         row["status_label"] = _translation_workspace_title_status(row.get("status"))
         row["status_key"] = str(row.get("status") or "unknown").replace(" ", "_")
     _translation_workspace_attach_report_detail_view(view)
+    compact_status = _translation_workspace_compact_job_status(view)
+    view["compact_status_key"] = compact_status["key"]
+    view["compact_status_label"] = compact_status["label"]
     return view
 
 
@@ -4110,6 +4269,11 @@ def _translation_workspace_job_status_for_json(status: dict):
         **dict(view.get("safety_flags") or {}),
     }
     status_value = view.get("status") or "not_started"
+    translation_result_count = _translation_workspace_translation_result_count(
+        _translation_workspace_job_review_rows(view)
+    )
+    view["translation_result_count"] = translation_result_count
+    compact_status = _translation_workspace_compact_job_status(view)
     return {
         "exists": bool(view.get("exists")),
         "job_id": view.get("job_id", ""),
@@ -4120,17 +4284,36 @@ def _translation_workspace_job_status_for_json(status: dict):
         or _translation_workspace_job_status_label(status_value),
         "status_key": view.get("status_key")
         or str(status_value).replace(" ", "_"),
+        "compact_status_label": compact_status["label"],
+        "compact_status_key": compact_status["key"],
         "status_message": view.get("status_message", ""),
         "progress_percent": _translation_workspace_int(
             view.get("progress_percent"), 0
         ),
         "current_locale": view.get("current_locale", ""),
+        "current_locale_label": _translation_editor_locale_label(
+            view.get("current_locale", "")
+        )
+        if view.get("current_locale")
+        else "",
         "current_group": view.get("current_group", ""),
+        "current_group_label": _translation_workspace_group_label(
+            view.get("current_group", "")
+        )
+        if view.get("current_group")
+        else "",
         "completed_locales": _translation_workspace_int(
             counts.get("completed_locales"), 0
         ),
         "total_locales": _translation_workspace_int(counts.get("total_locales"), 0),
         "failed_locales": _translation_workspace_int(counts.get("failed_locales"), 0),
+        "skipped_locales": _translation_workspace_int(
+            counts.get("skipped_locales"), 0
+        ),
+        "stale_locales": _translation_workspace_int(counts.get("stale_locales"), 0),
+        "processed_locales": _translation_workspace_int(
+            counts.get("processed_locales"), 0
+        ),
         "generated_draft_count": _translation_workspace_int(
             counts.get("generated_draft_count"), 0
         ),
@@ -4145,6 +4328,9 @@ def _translation_workspace_job_status_for_json(status: dict):
         "per_locale_status": locale_rows,
         "per_group_status": group_rows,
         "safety_flags": safety_flags,
+        "job_started_by": safety_flags["job_started_by"],
+        "polling_read_only": safety_flags["polling_read_only"],
+        "auto_start_blocked": safety_flags["auto_start_blocked"],
         "shopify_read_only": safety_flags["shopify_read_only"],
         "shopify_write_performed": safety_flags["shopify_write_performed"],
         "mutation_performed": safety_flags["mutation_performed"],
@@ -4156,9 +4342,7 @@ def _translation_workspace_job_status_for_json(status: dict):
         in TRANSLATION_WORKSPACE_JOB_ACTIVE_STATUSES,
         "terminal": status_value in TRANSLATION_WORKSPACE_JOB_TERMINAL_STATUSES,
         "local_report_read_only": True,
-        "translation_result_count": _translation_workspace_translation_result_count(
-            _translation_workspace_job_review_rows(view)
-        ),
+        "translation_result_count": translation_result_count,
     }
 
 
@@ -4178,9 +4362,7 @@ def _translation_workspace_progress_rows(rows: list[dict], *, row_type: str):
         ) + _translation_workspace_int(item.get("not_eligible_skipped_count"), 0)
         item["skipped_count"] = skipped_count
         if row_type == "locale":
-            item["locale_label"] = item.get("locale_label") or _translation_editor_locale_label(
-                item.get("locale", "")
-            )
+            item = _translation_workspace_locale_status_view(item)
         elif row_type == "group":
             item["label"] = item.get("label") or _translation_workspace_group_label(
                 item.get("group_key", "")
@@ -4218,19 +4400,19 @@ def _translation_workspace_int(value, default: int = 0):
 
 def _translation_workspace_attach_report_detail_view(view: dict):
     review_rows = _translation_workspace_job_review_rows(view)
-    translation_result_groups = _translation_workspace_translation_result_groups(
+    translation_result_count = _translation_workspace_translation_result_count(
         review_rows
+    )
+    translation_result_groups = _translation_workspace_translation_result_groups(
+        review_rows,
+        SUPPORTED_TRANSLATION_LOCALES,
+        view.get("per_locale_status") or [],
     )
     view["review_rows"] = review_rows
     view["review_row_count"] = len(review_rows)
     view["translation_result_groups"] = translation_result_groups
-    view["translation_result_count"] = _translation_workspace_translation_result_count(
-        review_rows
-    )
-    view["show_translation_results"] = (
-        view.get("status") in TRANSLATION_WORKSPACE_RESULT_VISIBLE_STATUSES
-        and bool(translation_result_groups)
-    )
+    view["translation_result_count"] = translation_result_count
+    view["show_translation_results"] = bool(view.get("exists")) or translation_result_count > 0
     view["translation_result_status_label"] = _translation_workspace_job_status_label(
         view.get("status")
     )
@@ -4254,24 +4436,86 @@ def _translation_workspace_translation_result_count(review_rows: list[dict]):
     )
 
 
-def _translation_workspace_translation_result_groups(review_rows: list[dict]):
+def _translation_workspace_translation_result_groups(
+    review_rows: list[dict],
+    locales: list[str] | tuple[str, ...] | None = None,
+    locale_status_rows: list[dict] | tuple[dict, ...] | None = None,
+):
     language_groups = []
     language_lookup = {}
+    locale_status_lookup = {
+        row.get("locale"): _translation_workspace_locale_status_view(row)
+        for row in (locale_status_rows or [])
+        if isinstance(row, dict) and row.get("locale")
+    }
+
+    def language_group_for(language: str):
+        language = str(language or "").strip() or "-"
+        language_group = language_lookup.get(language)
+        if language_group:
+            return language_group
+        locale_status = locale_status_lookup.get(language) or _translation_workspace_locale_status_view(
+            {"locale": language}
+        )
+        locale_skipped_count = _translation_workspace_int(
+            locale_status.get("skipped_count"), 0
+        ) or (
+            _translation_workspace_int(
+                locale_status.get("already_translated_skipped_count"), 0
+            )
+            + _translation_workspace_int(
+                locale_status.get("not_eligible_skipped_count"), 0
+            )
+        )
+        language_group = {
+            "language": language,
+            "language_label": _translation_editor_locale_label(language),
+            "count": 0,
+            "translated_count": 0,
+            "needs_review_count": 0,
+            "skipped_count": 0,
+            "source_rows_checked": int(locale_status.get("source_rows_checked") or 0),
+            "status_key": locale_status.get("status_key") or "pending",
+            "status_label": locale_status.get("status_label") or "Waiting",
+            "lifecycle_status": locale_status.get("status") or "pending",
+            "is_default": False,
+            "empty_message": _translation_workspace_language_empty_message(
+                locale_status
+            ),
+            "error_message": locale_status.get("error_message", ""),
+            "retry_allowed": bool(locale_status.get("retry_allowed")),
+            "groups": [],
+            "_status_counts": {
+                "translated_count": _translation_workspace_int(
+                    locale_status.get("generated_draft_count"), 0
+                )
+                or (
+                    _translation_workspace_int(
+                        locale_status.get("missing_draft_count"), 0
+                    )
+                    + _translation_workspace_int(
+                        locale_status.get("outdated_update_draft_count"), 0
+                    )
+                ),
+                "needs_review_count": _translation_workspace_int(
+                    locale_status.get("blocked_count"), 0
+                ),
+                "skipped_count": locale_skipped_count,
+            },
+            "_group_lookup": {},
+        }
+        language_lookup[language] = language_group
+        language_groups.append(language_group)
+        return language_group
+
+    for locale in locales or []:
+        language_group_for(locale)
+
     for row in review_rows or []:
         if not _translation_workspace_should_show_result_row(row):
             continue
         language = str(row.get("language") or row.get("locale") or "").strip() or "-"
-        language_group = language_lookup.get(language)
-        if not language_group:
-            language_group = {
-                "language": language,
-                "language_label": _translation_editor_locale_label(language),
-                "count": 0,
-                "groups": [],
-                "_group_lookup": {},
-            }
-            language_lookup[language] = language_group
-            language_groups.append(language_group)
+        language_group = language_group_for(language)
         group_key = str(row.get("group_key") or "").strip() or "other"
         group_lookup = language_group["_group_lookup"]
         content_group = group_lookup.get(group_key)
@@ -4280,28 +4524,154 @@ def _translation_workspace_translation_result_groups(review_rows: list[dict]):
                 "group_key": group_key,
                 "group_label": row.get("group_label")
                 or _translation_workspace_group_label(group_key),
+                "tab_label": _translation_workspace_result_group_tab_label(group_key),
                 "is_primary": group_key in TRANSLATION_WORKSPACE_RESULT_PRIMARY_GROUPS,
                 "count": 0,
+                "translated_count": 0,
+                "needs_review_count": 0,
+                "skipped_count": 0,
                 "rows": [],
             }
             group_lookup[group_key] = content_group
             language_group["groups"].append(content_group)
         display_row = _translation_workspace_result_card_row(row)
+        is_translated = bool(display_row.get("has_generated_draft"))
+        is_needs_review = display_row.get("result_status_key") == "needs_review"
+        is_skipped = (
+            not is_translated
+            or display_row.get("result_status_key")
+            in {"already_up_to_date", "not_translated_automatically"}
+        )
         content_group["rows"].append(display_row)
         content_group["count"] += 1
+        content_group["translated_count"] += 1 if is_translated else 0
+        content_group["needs_review_count"] += 1 if is_needs_review else 0
+        content_group["skipped_count"] += 1 if is_skipped else 0
         language_group["count"] += 1
+        language_group["translated_count"] += 1 if is_translated else 0
+        language_group["needs_review_count"] += 1 if is_needs_review else 0
+        language_group["skipped_count"] += 1 if is_skipped else 0
     for language_group in language_groups:
+        status_counts = language_group.pop("_status_counts", {})
+        language_group["translated_count"] = max(
+            int(language_group.get("translated_count") or 0),
+            int(status_counts.get("translated_count") or 0),
+        )
+        language_group["needs_review_count"] = max(
+            int(language_group.get("needs_review_count") or 0),
+            int(status_counts.get("needs_review_count") or 0),
+        )
+        language_group["skipped_count"] = max(
+            int(language_group.get("skipped_count") or 0),
+            int(status_counts.get("skipped_count") or 0),
+        )
         language_group.pop("_group_lookup", None)
+        if (
+            int(language_group.get("count") or 0) > 0
+            and language_group.get("lifecycle_status") == "pending"
+        ):
+            language_group.update(
+                _translation_workspace_language_group_status(language_group)
+            )
+        language_group["tab_summary"] = _translation_workspace_language_tab_summary(
+            language_group
+        )
         language_group["groups"].sort(
             key=lambda group: (
-                0 if group["group_key"] in TRANSLATION_WORKSPACE_RESULT_PRIMARY_GROUPS else 1,
-                TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS.index(group["group_key"])
-                if group["group_key"] in TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS
-                else 999,
+                TRANSLATION_WORKSPACE_RESULT_GROUP_ORDER.get(
+                    group["group_key"],
+                    999,
+                ),
                 group["group_label"],
             )
         )
+        for group in language_group["groups"]:
+            group["rows"].sort(key=_translation_workspace_result_row_order_key)
+            group.update(_translation_workspace_language_group_status(group))
+    default_language_group = next(
+        (
+            language_group
+            for language_group in language_groups
+            if int(language_group.get("count") or 0) > 0
+        ),
+        language_groups[0] if language_groups else None,
+    )
+    if default_language_group:
+        default_language_group["is_default"] = True
     return language_groups
+
+
+def _translation_workspace_result_row_order_key(row: dict):
+    field = str(row.get("field") or row.get("key") or "").strip()
+    normalized_field = _translation_editor_normalize_field_key(field)
+    field_order = TRANSLATION_WORKSPACE_RESULT_FIELD_ORDER.get(
+        normalized_field,
+        TRANSLATION_WORKSPACE_RESULT_FIELD_ORDER.get(field, 999),
+    )
+    group_order = TRANSLATION_WORKSPACE_RESULT_GROUP_ORDER.get(
+        row.get("group_key", ""),
+        999,
+    )
+    return (
+        group_order,
+        field_order,
+        row.get("field_label", ""),
+        row.get("context_label", ""),
+        row.get("key", ""),
+    )
+
+
+def _translation_workspace_language_group_status(group: dict):
+    if int(group.get("count") or 0) or int(group.get("translated_count") or 0):
+        return {"status_key": "completed", "status_label": "Completed"}
+    if int(group.get("skipped_count") or 0):
+        return {
+            "status_key": "skipped",
+            "status_label": "No translatable content found",
+        }
+    return {"status_key": "pending", "status_label": "Waiting"}
+
+
+def _translation_workspace_language_empty_message(locale_status: dict):
+    status_value = str((locale_status or {}).get("status") or "pending")
+    locale_label = (locale_status or {}).get("locale_label") or _translation_editor_locale_label(
+        (locale_status or {}).get("locale", "")
+    )
+    if status_value == "running":
+        return "Translation is still running for this language."
+    if status_value == "failed":
+        return f"Translation failed for {locale_label}. Retry this language."
+    if status_value == "stale":
+        return (
+            f"Translation timed out for {locale_label} after 15 minutes without an update."
+        )
+    if status_value == "skipped":
+        return "No translatable content found."
+    if status_value == "completed":
+        if int((locale_status or {}).get("source_rows_checked") or 0) == 0:
+            return "No translatable content found."
+        return "Completed. No translation comparison cards were recorded for this language."
+    return "Translation is waiting for this language."
+
+
+def _translation_workspace_language_tab_summary(language_group: dict):
+    return (
+        f"{int(language_group.get('translated_count') or 0)} translated"
+        f" / {int(language_group.get('needs_review_count') or 0)} needs review"
+        f" / {int(language_group.get('skipped_count') or 0)} skipped"
+    )
+
+
+def _translation_workspace_result_group_tab_label(group_key: str):
+    labels = {
+        "product_basics": "Product basics",
+        "seo": "SEO",
+        "options": "Options",
+        "variants": "Variants",
+        "important_metafields": "Important metafields",
+        "media": "Media alt text",
+    }
+    return labels.get(group_key, _translation_workspace_group_label(group_key))
 
 
 def _translation_workspace_should_show_result_row(row: dict):
@@ -4346,6 +4716,29 @@ def _translation_workspace_result_card_row(row: dict):
             "main_value_summary": main_value["summary"],
             "main_value_is_long": main_value["is_long"],
             "main_value_is_reason": main_value["is_reason"],
+            "comparison_translation_label": (
+                "Translation result"
+                if row.get("has_generated_draft")
+                else (
+                    "Current Shopify translation"
+                    if (
+                        row.get("existing_translation_present")
+                        or row.get("current_translation_present")
+                    )
+                    else "Translation"
+                )
+            ),
+            "comparison_translation_display": (
+                row.get("generated_draft_display")
+                or row.get("existing_translation_display")
+                or row.get("main_value_display")
+                or ""
+            ),
+            "comparison_translation_html_preview": (
+                row.get("generated_draft_html_preview")
+                or row.get("existing_translation_html_preview")
+                or ""
+            ),
         }
     )
     return display_row
@@ -4529,6 +4922,9 @@ def _translation_workspace_report_detail_summary(status: dict):
         "blocked_count": int(counts.get("blocked_count") or 0),
         "no_shopify_write_performed": not bool(status.get("shopify_write_performed")),
         "report_path": status.get("report_path", ""),
+        "job_started_by": status.get("job_started_by", "user_action"),
+        "polling_read_only": bool(status.get("polling_read_only", True)),
+        "auto_start_blocked": bool(status.get("auto_start_blocked", True)),
     }
 
 
@@ -4553,7 +4949,14 @@ def _translation_workspace_job_review_rows(status: dict):
     rows.sort(
         key=lambda row: (
             locale_order.get(row.get("language", ""), 999),
-            group_order.get(row.get("group_key", ""), 999),
+            TRANSLATION_WORKSPACE_RESULT_GROUP_ORDER.get(
+                row.get("group_key", ""),
+                group_order.get(row.get("group_key", ""), 999),
+            ),
+            TRANSLATION_WORKSPACE_RESULT_FIELD_ORDER.get(
+                _translation_editor_normalize_field_key(row.get("field", "")),
+                TRANSLATION_WORKSPACE_RESULT_FIELD_ORDER.get(row.get("field", ""), 999),
+            ),
             row.get("key", ""),
             row.get("context_label", ""),
         )
@@ -4566,6 +4969,7 @@ def _translation_workspace_job_review_rows(status: dict):
 def _translation_workspace_job_review_row(row: dict):
     group_key = _translation_workspace_review_group_key(row)
     field = str(row.get("field") or row.get("key") or "").strip()
+    normalized_field = _translation_editor_normalize_field_key(field)
     resource_key = str(row.get("key") or row.get("resource_key") or field).strip()
     locale = str(row.get("locale") or row.get("language") or "").strip()
     resource_id = str(row.get("resource_id") or "").strip()
@@ -4614,6 +5018,25 @@ def _translation_workspace_job_review_row(row: dict):
             or not apply_eligible
         )
     )
+    source_value_raw = row.get("source_value") or row.get("source_value_display") or ""
+    existing_translation_raw = (
+        row.get("existing_translation_value")
+        or row.get("existing_translation")
+        or row.get("existing_translation_display")
+        or ""
+    )
+    proposed_translation_raw = (
+        row.get("proposed_translation")
+        or row.get("proposed_translation_display")
+        or ""
+    )
+    is_html_field = normalized_field == "body_html"
+    generated_differs_from_existing = bool(
+        str(existing_translation_raw or "").strip()
+        and str(proposed_translation_raw or "").strip()
+        and str(existing_translation_raw or "").strip()
+        != str(proposed_translation_raw or "").strip()
+    )
     source_fields = _translation_workspace_existing_or_review_text_fields(
         row,
         "source_value",
@@ -4648,15 +5071,17 @@ def _translation_workspace_job_review_row(row: dict):
         "entry_id": safe_write_entry_id,
         "safe_write_entry_id": safe_write_entry_id,
         "context_label": row.get("context_label", ""),
-        "source_value": row.get("source_value") or row.get("source_value_display") or "",
+        "source_value": source_value_raw,
         "source_value_summary": source_fields["summary"],
         "source_value_display": source_fields["display"],
         "source_value_is_long": source_fields["is_long"],
         "source_value_truncated": source_fields["truncated"],
-        "existing_translation_value": row.get("existing_translation_value")
-        or row.get("existing_translation")
-        or row.get("existing_translation_display")
-        or "",
+        "source_value_html_preview": (
+            _translation_editor_sanitize_html_preview(source_value_raw)
+            if is_html_field
+            else ""
+        ),
+        "existing_translation_value": existing_translation_raw,
         "existing_translation_present": row.get(
             "current_translation_present",
             row.get("existing_translation_present"),
@@ -4673,14 +5098,24 @@ def _translation_workspace_job_review_row(row: dict):
         "existing_translation_display": existing_fields["display"],
         "existing_translation_is_long": existing_fields["is_long"],
         "existing_translation_truncated": existing_fields["truncated"],
+        "existing_translation_html_preview": (
+            _translation_editor_sanitize_html_preview(existing_translation_raw)
+            if is_html_field and existing_translation_raw
+            else ""
+        ),
+        "generated_differs_from_existing": generated_differs_from_existing,
         "outdated": row.get("outdated"),
-        "proposed_translation": row.get("proposed_translation")
-        or row.get("proposed_translation_display")
-        or "",
+        "proposed_translation": proposed_translation_raw,
         "generated_draft_summary": draft_fields["summary"],
         "generated_draft_display": draft_fields["display"],
         "generated_draft_is_long": draft_fields["is_long"],
         "generated_draft_truncated": draft_fields["truncated"],
+        "generated_draft_html_preview": (
+            _translation_editor_sanitize_html_preview(proposed_translation_raw)
+            if is_html_field and proposed_translation_raw
+            else ""
+        ),
+        "is_html_field": is_html_field,
         "status": row.get("status", ""),
         "validation_status": row.get("validation_status", ""),
         "seo_validation_status": row.get("seo_validation_status")
@@ -4966,6 +5401,74 @@ def _translation_workspace_title_status(value):
     return text[:1].upper() + text[1:] if text else "Unknown"
 
 
+def _translation_workspace_locale_status_label(value):
+    labels = {
+        "pending": "Waiting",
+        "running": "Translating",
+        "completed": "Completed",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "stale": "Stale",
+        "cancelled": "Cancelled",
+    }
+    return labels.get(str(value or ""), _translation_workspace_title_status(value))
+
+
+def _translation_workspace_locale_status_message(value, *, locale_label: str = ""):
+    label = locale_label or "this language"
+    messages = {
+        "pending": "Waiting to start.",
+        "running": "Translation is still running for this language.",
+        "completed": "Completed. Translation results are ready for review.",
+        "failed": f"Translation failed for {label}. Retry this language.",
+        "skipped": "No translatable content found.",
+        "stale": f"Translation timed out for {label} after 15 minutes without an update.",
+    }
+    return messages.get(str(value or ""), _translation_workspace_title_status(value))
+
+
+def _translation_workspace_locale_status_view(row: dict):
+    item = dict(row or {})
+    locale = item.get("locale", "")
+    locale_label = item.get("locale_label") or _translation_editor_locale_label(locale)
+    status_value = str(item.get("status") or "pending")
+    error_message = _translation_workspace_safe_text(
+        item.get("error_message") or item.get("message") or "",
+        500,
+    )
+    if status_value not in {
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "skipped",
+        "stale",
+        "cancelled",
+    }:
+        status_value = "pending"
+    message = (
+        error_message
+        if status_value in {"failed", "stale"} and error_message
+        else item.get("message")
+    )
+    item.update(
+        {
+            "locale_label": locale_label,
+            "status": status_value,
+            "status_label": _translation_workspace_locale_status_label(status_value),
+            "status_key": status_value.replace(" ", "_"),
+            "message": message
+            or _translation_workspace_locale_status_message(
+                status_value,
+                locale_label=locale_label,
+            ),
+            "error_message": error_message if status_value in {"failed", "stale"} else "",
+            "retry_allowed": status_value in {"failed", "stale"},
+        }
+    )
+    return item
+
+
 def _translation_workspace_job_status_label(value):
     labels = {
         "completed": "Translation completed",
@@ -4978,6 +5481,22 @@ def _translation_workspace_job_status_label(value):
         "cancelled": "Cancelled",
     }
     return labels.get(str(value or ""), _translation_workspace_title_status(value))
+
+
+def _translation_workspace_compact_job_status(status: dict):
+    status_value = str((status or {}).get("status") or "not_started")
+    counts = (status or {}).get("counts") or {}
+    blocked_count = _translation_workspace_int(counts.get("blocked_count"), 0)
+    result_count = _translation_workspace_int(
+        (status or {}).get("translation_result_count"), 0
+    )
+    if status_value in TRANSLATION_WORKSPACE_JOB_ACTIVE_STATUSES:
+        return {"key": "running", "label": "Running"}
+    if blocked_count > 0 or status_value in {"partial", "failed", "stale", "cancelled"}:
+        return {"key": "needs_review", "label": "Needs review"}
+    if result_count > 0 or status_value == "completed":
+        return {"key": "completed", "label": "Completed"}
+    return {"key": "not_started", "label": "Not started"}
 
 
 def _translation_workspace_active_job_status(product_gid: str):
@@ -5025,19 +5544,48 @@ def _translation_workspace_mark_stale_if_needed(status: dict, *, persist: bool =
     age_seconds = (datetime.utcnow() - updated_at).total_seconds()
     if age_seconds <= TRANSLATION_WORKSPACE_JOB_STALE_SECONDS:
         return status
+    now = _translation_workspace_now_iso()
+    current_locale = str(status.get("current_locale") or "").strip()
+    locale_label = _translation_editor_locale_label(current_locale) if current_locale else ""
+    stale_message = (
+        f"Translation timed out for {locale_label} after 15 minutes without an update."
+        if locale_label
+        else "Translation status is stale because it has not updated for 15 minutes."
+    )
+    if current_locale:
+        locale_row = _translation_workspace_locale_row(status, current_locale)
+        if locale_row.get("status") in TRANSLATION_WORKSPACE_JOB_ACTIVE_STATUSES:
+            locale_row.update(
+                {
+                    "status": "stale",
+                    "status_label": _translation_workspace_locale_status_label("stale"),
+                    "current_step": "stale timeout",
+                    "updated_at": now,
+                    "finished_at": now,
+                    "message": stale_message,
+                    "error_message": stale_message,
+                    "blocking_conditions": list(
+                        dict.fromkeys(
+                            list(locale_row.get("blocking_conditions") or [])
+                            + ["locale_stale_timeout"]
+                        )
+                    ),
+                }
+            )
     status["status"] = "stale"
-    status["finished_at"] = _translation_workspace_now_iso()
+    status["finished_at"] = now
     status["current_locale"] = ""
     status["current_group"] = ""
     status["current_step"] = "stale timeout"
-    status["status_message"] = (
-        "Translation status is stale because it has not updated for 30 minutes."
-    )
+    status["status_message"] = stale_message
     _translation_workspace_append_job_error(
         status,
         "stale_timeout",
-        "Job status did not update within 30 minutes.",
+        stale_message,
+        locale=current_locale,
+        reason="locale_stale_timeout" if current_locale else "job_stale_timeout",
     )
+    _translation_workspace_refresh_job_progress(status)
     if persist:
         _translation_workspace_save_job_status(status)
         _translation_workspace_release_job_lock(

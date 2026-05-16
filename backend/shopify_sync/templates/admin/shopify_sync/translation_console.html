@@ -210,11 +210,105 @@
     position: sticky;
     top: 0;
     z-index: 20;
-    padding: 12px;
-    margin-bottom: 12px;
-  }
-  .tw-workspace-header h2 {
+    padding: 8px 10px;
     margin-bottom: 8px;
+  }
+  .tw-compact-topbar {
+    border-color: #cfd8e3;
+    background: #ffffff;
+  }
+  .tw-topbar {
+    display: grid;
+    grid-template-columns: minmax(360px, 1fr) minmax(260px, auto);
+    gap: 10px;
+    align-items: stretch;
+  }
+  .tw-top-product-picker {
+    min-width: 0;
+    margin: 0;
+  }
+  .tw-top-product-picker .tw-picker-controls {
+    grid-template-columns: minmax(240px, 1fr) auto auto;
+    gap: 6px;
+  }
+  .tw-top-product-picker .tw-product-selected {
+    min-height: 54px;
+    margin-top: 6px;
+    padding: 6px 8px;
+  }
+  .tw-top-product-picker .tw-product-thumb,
+  .tw-top-product-picker .tw-product-thumb-placeholder {
+    width: 42px;
+    height: 42px;
+  }
+  .tw-top-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: stretch;
+    justify-content: flex-end;
+  }
+  .tw-top-action-button {
+    display: flex;
+    min-width: 190px;
+    flex-direction: column;
+    gap: 4px;
+    justify-content: center;
+  }
+  .tw-top-action-button form {
+    margin: 0;
+  }
+  .tw-compact-safe-text,
+  .tw-product-search-status {
+    color: #4b5563;
+    font-size: 12px;
+  }
+  .tw-product-search-status {
+    margin: 5px 0 0;
+  }
+  .tw-job-pill {
+    display: flex;
+    min-width: 230px;
+    max-width: 560px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid #cfd8e3;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 8px 10px;
+  }
+  .tw-job-pill-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .tw-job-pill-progress {
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  .tw-job-pill-progress[hidden] {
+    display: none !important;
+  }
+  .tw-job-pill-line {
+    color: #374151;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+  .tw-job-pill-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    color: #4b5563;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .tw-job-pill-metrics span {
+    white-space: nowrap;
   }
   .tw-workspace-header-grid {
     display: grid;
@@ -239,6 +333,30 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     margin-top: 8px;
+  }
+  .tw-simple-action-grid {
+    display: grid;
+    grid-template-columns: minmax(220px, 0.7fr) minmax(320px, 1.3fr);
+    gap: 10px;
+    align-items: stretch;
+  }
+  .tw-main-action-button {
+    width: 100%;
+    min-height: 38px;
+    font-size: 15px;
+  }
+  .tw-progress-compact .tw-progress {
+    margin: 8px 0 10px;
+  }
+  .tw-progress-compact .tw-header-status-grid {
+    grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  }
+  .tw-progress-compact-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
   }
   .tw-header-status-item {
     border: 1px solid #e5e7eb;
@@ -316,10 +434,10 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin: 12px 0;
+    margin: 8px 0 10px;
   }
   .tw-language-tab {
-    align-items: flex-start;
+    align-items: center;
     border-radius: 8px;
     text-align: left;
   }
@@ -328,9 +446,16 @@
     display: block;
   }
   .tw-language-tab-counts {
+    color: #4b5563;
     font-size: 12px;
-    font-weight: 600;
-    opacity: 0.86;
+    font-weight: 700;
+    line-height: 1.3;
+    opacity: 0.92;
+  }
+  .tw-language-tab.is-active .tw-language-tab-main,
+  .tw-language-tab.is-active .tw-language-tab-counts {
+    color: #ffffff !important;
+    opacity: 1;
   }
   .tw-update-entry-grid {
     display: grid;
@@ -369,10 +494,24 @@
     .tw-workspace-header {
       position: static;
     }
+    .tw-topbar {
+      grid-template-columns: 1fr;
+    }
+    .tw-top-actions {
+      justify-content: stretch;
+    }
+    .tw-job-pill,
+    .tw-top-action-button {
+      flex: 1 1 220px;
+      max-width: none;
+    }
     .tw-workspace-nav {
       position: static;
     }
     .tw-workspace-header-grid {
+      grid-template-columns: 1fr;
+    }
+    .tw-simple-action-grid {
       grid-template-columns: 1fr;
     }
   }
@@ -925,7 +1064,95 @@
     font-weight: 600;
   }
   .tw-translation-results {
-    margin-top: 16px;
+    margin-top: 0;
+  }
+  .tw-translation-comparison {
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .tw-results-heading {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .tw-results-heading h2 {
+    margin: 0;
+    font-size: 18px;
+  }
+  .tw-results-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tw-completion-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .tw-completion-title {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .tw-completion-counts,
+  .tw-progress-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tw-translation-status-line {
+    margin: 8px 0 0;
+    color: #374151;
+    font-weight: 700;
+  }
+  .tw-result-group {
+    margin-top: 14px;
+  }
+  .tw-result-group-heading {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .tw-result-group-heading h4 {
+    margin: 0;
+    font-size: 15px;
+  }
+  .tw-result-compare-grid {
+    align-items: stretch;
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+  }
+  .tw-compare-column {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+  }
+  .tw-result-card.is-description .tw-result-text,
+  .tw-result-card.is-description .tw-html-preview,
+  .tw-result-card.is-description .tw-text-block {
+    min-height: 360px;
+    max-height: 720px;
+  }
+  .tw-current-translation-details {
+    margin-top: 10px;
+  }
+  .tw-current-translation-details summary,
+  .tw-technical-card-details summary {
+    cursor: pointer;
+  }
+  .tw-technical-card-details {
+    margin-top: 8px;
   }
   .tw-result-list {
     display: grid;
@@ -1010,7 +1237,7 @@
   }
   .tw-result-compare-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
     gap: 10px;
     margin-top: 6px;
   }
@@ -1020,6 +1247,11 @@
     border-radius: 6px;
     background: #ffffff;
     padding: 8px;
+  }
+  .tw-result-text.is-reason {
+    border-color: #facc15;
+    background: #fffbeb;
+    color: #713f12;
   }
   .tw-technical-list {
     display: grid;
@@ -1047,6 +1279,24 @@
   .tw-compact-field {
     flex: 1 1 180px;
     min-width: 180px;
+  }
+  .tw-empty-result-panel {
+    border: 1px dashed #cfd8e3;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #374151;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 18px;
+    text-align: center;
+  }
+  .tw-help-details {
+    margin-bottom: 12px;
+  }
+  @media (max-width: 900px) {
+    .tw-result-compare-grid {
+      grid-template-columns: 1fr;
+    }
   }
   .tw-compact-field.tw-product-field {
     flex-basis: 360px;
@@ -1581,6 +1831,16 @@
     background: #f3f4f6;
     color: #374151;
   }
+  .translation-workspace .tw-language-tab.is-active,
+  .translation-workspace .tw-language-tab.is-active .tw-language-tab-main,
+  .translation-workspace .tw-language-tab.is-active .tw-language-tab-counts {
+    color: #ffffff !important;
+  }
+  .translation-workspace .tw-language-tab.is-active .tw-status-badge {
+    border-color: rgba(255, 255, 255, 0.72);
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff !important;
+  }
   .translation-workspace .tw-result-card,
   .translation-workspace .tw-result-main,
   .translation-workspace .tw-result-text {
@@ -1669,13 +1929,15 @@
   }
 </style>
 <div id="content-main" class="translation-workspace">
+  {% if ui_mode == "workbench" %}
   <div class="tw-hero">
     <div class="tw-hero-header">
-      <h1>Translate this product</h1>
-      <span class="tw-safety">READ ONLY / NO WRITE</span>
+      <h1>Translation Workspace</h1>
+      <span class="tw-safety">Preview only</span>
     </div>
-    <p>Compare the original product text with the translated text. This page is for review only and cannot apply changes.</p>
+    <p>Select one product, translate all supported languages, then review the original and translated content. Shopify has not been updated yet.</p>
   </div>
+  {% endif %}
 
   {% if translation_console_warnings %}
     <div class="messagelist" style="margin-bottom: 16px;">
@@ -1685,16 +1947,18 @@
     </div>
   {% endif %}
 
-  <div class="tw-mode-bar">
-    <div class="tw-tabs">
-      <a class="tw-tab{% if ui_mode == 'editor' %} is-active{% endif %}" href="?ui_mode=editor&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Simple editor</a>
-      <a class="tw-tab{% if ui_mode == 'workbench' %} is-active{% endif %}" href="?ui_mode=workbench&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Advanced workflow</a>
+  {% if ui_mode == "workbench" %}
+    <div class="tw-mode-bar">
+      <div class="tw-tabs">
+        <a class="tw-tab" href="?ui_mode=editor&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Translation Workspace</a>
+        <a class="tw-tab is-active" href="?ui_mode=workbench&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Advanced workflow</a>
+      </div>
+      <span class="tw-muted">Technical translation workflow</span>
     </div>
-    <span class="tw-muted">{% if ui_mode == "editor" %}Original vs translation review{% else %}Technical draft workflow{% endif %}</span>
-  </div>
+  {% endif %}
 
-  {% if single_product_mvp %}
-  <details class="module tw-advanced-details" style="padding: 12px; margin-bottom: 16px;">
+  {% if ui_mode == "workbench" and single_product_mvp %}
+  <details class="module tw-advanced-details" data-workspace-section="technical" style="padding: 12px; margin-bottom: 16px;">
     <summary>Advanced details for technical review</summary>
     <h2>Translation coverage details</h2>
     <div class="tw-editor-summary">
@@ -1990,242 +2254,237 @@
   </div>
 
   {% elif ui_mode == "editor" %}
-  <div class="module tw-workspace-header" data-workspace-header>
-    <h2>Translation workspace</h2>
-    <form method="get" action="{% url 'shopify_translation_console' %}" class="tw-product-picker" data-product-picker data-product-search-url="{% url 'shopify_translation_console_product_search' %}" data-selected-product-gid="{{ selected_product_gid }}" style="margin-bottom: 12px;">
-      <input type="hidden" name="ui_mode" value="editor">
-      <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}" data-selected-product-input>
-      <input type="hidden" name="locale" value="{{ selected_locale }}" data-product-locale-hidden>
-      <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-      <div class="tw-picker-controls">
-        <div class="tw-compact-field tw-product-field">
-          <label for="id_editor_product_search">Choose product</label><br>
-          <div class="tw-product-combobox">
-            <input id="id_editor_product_search" type="search" name="product_search" value="{{ product_search_text }}" placeholder="Search title, SKU, model, handle, vendor, type, or ID" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tw-product-picker-dropdown" data-product-filter-input>
-            <div id="tw-product-picker-dropdown" class="tw-product-results" role="listbox" data-product-dropdown hidden>
-              <div class="tw-product-dropdown-status">
-                <span data-product-picker-summary>{% if product_search_text %}Showing matching products{% else %}Search products{% endif %}</span>: <span data-product-picker-count>{% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}0{% endif %}</span>
-              </div>
-              {% if product_selector.product_options %}
-                {% for product in product_selector.product_options %}
-                  <button type="button" value="{{ product.gid }}" class="tw-product-option{% if product.gid == selected_product_gid %} is-selected{% endif %}" data-product-option data-product-gid="{{ product.gid }}" data-search="{{ product.searchable_text }}" data-search-normalized="{{ product.searchable_normalized }}" role="option" aria-selected="{% if product.gid == selected_product_gid %}true{% else %}false{% endif %}">
-                    {% if product.thumbnail_url %}
-                      <img class="tw-product-thumb" src="{{ product.thumbnail_url }}" alt="" loading="lazy">
-                    {% else %}
-                      <span class="tw-product-thumb-placeholder">No image</span>
-                    {% endif %}
-                    <span>
-                      <span class="tw-product-title">{{ product.title }}</span>
-                      <span class="tw-product-meta">
-                        {% if product.gid == selected_product_gid %}<span class="tw-selected-badge">Selected</span>{% endif %}
-                        {% if product.sku %}<span>SKU {{ product.sku }}</span>{% endif %}
-                        {% if product.variant_title %}<span>Model {{ product.variant_title }}</span>{% endif %}
-                        {% if product.handle %}<span>{{ product.handle }}</span>{% endif %}
-                        {% if product.numeric_id %}<span>Product ID {{ product.numeric_id }}</span>{% endif %}
-                        {% if product.variant_numeric_id %}<span>Variant ID {{ product.variant_numeric_id }}</span>{% endif %}
+  <div class="module tw-workspace-header tw-compact-topbar" data-workspace-header>
+    <div class="tw-topbar">
+      <form method="get" action="{% url 'shopify_translation_console' %}" class="tw-product-picker tw-top-product-picker" data-product-picker data-product-search-url="{% url 'shopify_translation_console_product_search' %}" data-selected-product-gid="{{ selected_product_gid }}">
+        <input type="hidden" name="ui_mode" value="editor">
+        <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}" data-selected-product-input>
+        <input type="hidden" name="locale" value="{{ selected_locale }}" data-product-locale-hidden>
+        <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+        <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+        <div class="tw-picker-controls">
+          <div class="tw-compact-field tw-product-field">
+            <label for="id_editor_product_search">Product</label><br>
+            <div class="tw-product-combobox">
+              <input id="id_editor_product_search" type="search" name="product_search" value="{{ product_search_text }}" placeholder="Search title, SKU, model, handle, vendor, type, or ID" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tw-product-picker-dropdown" data-product-filter-input>
+              <div id="tw-product-picker-dropdown" class="tw-product-results" role="listbox" data-product-dropdown hidden>
+                <div class="tw-product-dropdown-status">
+                  <span data-product-picker-summary>{% if product_search_text %}Showing matching products{% else %}Search products{% endif %}</span>: <span data-product-picker-count>{% if product_search_text %}{{ product_selector.matching_result_count }}{% else %}0{% endif %}</span>
+                </div>
+                {% if product_selector.product_options %}
+                  {% for product in product_selector.product_options %}
+                    <button type="button" value="{{ product.gid }}" class="tw-product-option{% if product.gid == selected_product_gid %} is-selected{% endif %}" data-product-option data-product-gid="{{ product.gid }}" data-search="{{ product.searchable_text }}" data-search-normalized="{{ product.searchable_normalized }}" role="option" aria-selected="{% if product.gid == selected_product_gid %}true{% else %}false{% endif %}">
+                      {% if product.thumbnail_url %}
+                        <img class="tw-product-thumb" src="{{ product.thumbnail_url }}" alt="" loading="lazy">
+                      {% else %}
+                        <span class="tw-product-thumb-placeholder">No image</span>
+                      {% endif %}
+                      <span>
+                        <span class="tw-product-title">{{ product.title }}</span>
+                        <span class="tw-product-meta">
+                          {% if product.gid == selected_product_gid %}<span class="tw-selected-badge">Selected</span>{% endif %}
+                          {% if product.sku %}<span>SKU {{ product.sku }}</span>{% endif %}
+                          {% if product.variant_title %}<span>Model {{ product.variant_title }}</span>{% endif %}
+                          {% if product.handle %}<span>{{ product.handle }}</span>{% endif %}
+                          {% if product.numeric_id %}<span>Product ID {{ product.numeric_id }}</span>{% endif %}
+                          {% if product.variant_numeric_id %}<span>Variant ID {{ product.variant_numeric_id }}</span>{% endif %}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                {% endfor %}
-              {% endif %}
-              <div class="tw-empty-state tw-product-dropdown-empty" data-product-picker-empty hidden>
-                No matching products
+                    </button>
+                  {% endfor %}
+                {% endif %}
+                <div class="tw-empty-state tw-product-dropdown-empty" data-product-picker-empty hidden>
+                  No matching products
+                </div>
               </div>
             </div>
           </div>
+          <button type="submit" class="button">Select</button>
+          <a class="button" href="?ui_mode=editor&product_gid={{ selected_product_gid|urlencode }}&target_locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Clear</a>
         </div>
-        <div class="tw-compact-field">
-          <label for="id_editor_locale">Choose language</label><br>
-          <select id="id_editor_locale" name="target_locale" data-product-locale-select>
-            {% for locale_option in supported_locale_options %}
-              <option value="{{ locale_option.value }}"{% if locale_option.value == selected_locale %} selected{% endif %}>{{ locale_option.label }} ({{ locale_option.value }})</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="tw-compact-field">
-          <label for="id_editor_q">Search text</label><br>
-          <input id="id_editor_q" type="text" name="editor_search" value="{{ editor_search_query }}" placeholder="word, field, or status">
-        </div>
-        <button type="submit" class="button">Show translation</button>
-        <a class="button" href="?ui_mode=editor&product_gid={{ selected_product_gid|urlencode }}&target_locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Clear search</a>
-      </div>
-      <div class="tw-product-selected" data-product-selected-toggle role="button" tabindex="0" aria-controls="tw-product-picker-dropdown">
-        {% if product_selector.selected_product %}
-          {% if product_selector.selected_product.thumbnail_url %}
-            <img class="tw-product-thumb" src="{{ product_selector.selected_product.thumbnail_url }}" alt="" loading="lazy">
+        <div class="tw-product-selected" data-product-selected-toggle role="button" tabindex="0" aria-controls="tw-product-picker-dropdown">
+          {% if product_selector.selected_product %}
+            {% if product_selector.selected_product.thumbnail_url %}
+              <img class="tw-product-thumb" src="{{ product_selector.selected_product.thumbnail_url }}" alt="" loading="lazy">
+            {% else %}
+              <div class="tw-product-thumb-placeholder">No image</div>
+            {% endif %}
+            <div>
+              <div class="tw-selected-label">Selected product</div>
+              <div class="tw-product-title">{{ product_selector.selected_product.title }}</div>
+              <div class="tw-product-meta">
+                <span class="tw-selected-badge">Selected</span>
+                {% if product_selector.selected_product.sku %}<span>SKU {{ product_selector.selected_product.sku }}</span>{% endif %}
+                {% if product_selector.selected_product.variant_title %}<span>Model {{ product_selector.selected_product.variant_title }}</span>{% endif %}
+                {% if product_selector.selected_product.handle %}<span>{{ product_selector.selected_product.handle }}</span>{% endif %}
+                {% if product_selector.selected_product.numeric_id %}<span>Product ID {{ product_selector.selected_product.numeric_id }}</span>{% endif %}
+                {% if product_selector.selected_product.variant_numeric_id %}<span>Variant ID {{ product_selector.selected_product.variant_numeric_id }}</span>{% endif %}
+              </div>
+            </div>
           {% else %}
             <div class="tw-product-thumb-placeholder">No image</div>
-          {% endif %}
-          <div>
-            <div class="tw-selected-label">Selected product</div>
-            <div class="tw-product-title">{{ product_selector.selected_product.title }}</div>
-            <div class="tw-product-meta">
-              <span class="tw-selected-badge">Selected</span>
-              {% if product_selector.selected_product.sku %}<span>SKU {{ product_selector.selected_product.sku }}</span>{% endif %}
-              {% if product_selector.selected_product.variant_title %}<span>Model {{ product_selector.selected_product.variant_title }}</span>{% endif %}
-              {% if product_selector.selected_product.handle %}<span>{{ product_selector.selected_product.handle }}</span>{% endif %}
-              {% if product_selector.selected_product.numeric_id %}<span>Product ID {{ product_selector.selected_product.numeric_id }}</span>{% endif %}
-              {% if product_selector.selected_product.variant_numeric_id %}<span>Variant ID {{ product_selector.selected_product.variant_numeric_id }}</span>{% endif %}
+            <div>
+              <div class="tw-selected-label">Selected product</div>
+              <div class="tw-product-title">No product selected</div>
+              <div class="tw-muted">Search products, then choose one.</div>
             </div>
-          </div>
-        {% else %}
-          <div class="tw-product-thumb-placeholder">No image</div>
-          <div>
-            <div class="tw-selected-label">Selected product</div>
-            <div class="tw-product-title">No product selected</div>
-            <div class="tw-muted">Search products, then choose one.</div>
-          </div>
-        {% endif %}
-      </div>
-      <details class="tw-library-note tw-advanced-details">
-        <summary>Product library status</summary>
-        <div class="tw-library-note-title">Product library source</div>
-        <div class="tw-muted">Source: {{ product_library_status.source }}.</div>
-        <div class="tw-muted">Sync: {{ product_library_status.sync }}.</div>
-        <div class="tw-muted">{{ product_library_status.search_note }}</div>
-        <div class="tw-library-chips">
-          <span class="tw-library-chip">Products {{ product_library_status.distinct_product_count }}</span>
-          <span class="tw-library-chip">Variant rows {{ product_library_status.product_variant_count }}</span>
-          <span class="tw-library-chip">Latest Shopify update {{ product_library_status.latest_shopify_product_updated_at|default:"-" }}</span>
-          <span class="tw-library-chip">Latest local update {{ product_library_status.latest_local_updated_at|default:"-" }}</span>
-          <span class="tw-library-chip">Sync task {{ product_library_status.sync_task_name }}</span>
-          <span class="tw-library-chip">Last success {{ product_library_status.sync_last_success_at|default:"-" }}</span>
-          <span class="tw-library-chip">Last error {{ product_library_status.sync_last_error|default:"-" }}</span>
+          {% endif %}
         </div>
-      </details>
-      <p class="tw-muted" style="margin: 12px 0 0;" data-product-search-status>
-        <span data-product-search-status-text>{% if product_search_text %}Matching local products: {{ product_selector.matching_result_count }}.{% else %}Search the local product library to show product matches.{% endif %}</span>
-        <span data-product-search-query-line{% if not product_search_text %} hidden{% endif %}>Search results for: <strong data-product-current-query>{{ product_search_text }}</strong>.</span>
-        <span data-product-selected-note{% if not product_search_text or not product_selector.selected_product %} hidden{% endif %}>Current selected product is shown separately and is not added to nonmatching search results.</span>
-      </p>
-    </form>
-    <div class="tw-workspace-header-grid">
-      <div class="tw-header-card tw-header-action">
-        <h3>Main action</h3>
-        <p class="tw-draft-note">Preview only - Shopify has not been updated yet.</p>
-        {% if selected_product_gid %}
-          <form method="post" action="{% url 'shopify_translation_console' %}">
-            {% csrf_token %}
-            <input type="hidden" name="ui_mode" value="editor">
-            <input type="hidden" name="action" value="translate_all_languages_all_content">
-            <input type="hidden" name="product_search" value="{{ product_search_text }}">
-            <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
-            <input type="hidden" name="target_locale" value="{{ selected_locale }}">
-            <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-            <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-            <button type="submit" class="button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Translate all in background</button>
-          </form>
-        {% else %}
-          <p class="tw-muted">Select a product before starting translation.</p>
-        {% endif %}
-      </div>
-      <div class="tw-header-card">
-        <h3>Status</h3>
-        <span class="tw-status-badge is-{{ translation_background_job.status_key|default:'pending' }}" data-job-status-badge>{{ translation_background_job.status_label|default:"Not started" }}</span>
-        <div class="tw-progress" aria-label="Translation job progress">
-          <span class="tw-progress-bar" data-job-progress-bar style="width: {{ translation_background_job.progress_percent|default:0 }}%;"></span>
+        <p class="tw-product-search-status" data-product-search-status>
+          <span data-product-search-status-text>{% if product_search_text %}Matching local products: {{ product_selector.matching_result_count }}.{% else %}Search the local product library to show product matches.{% endif %}</span>
+          <span data-product-search-query-line{% if not product_search_text %} hidden{% endif %}>Search results for: <strong data-product-current-query>{{ product_search_text }}</strong>.</span>
+          <span data-product-selected-note{% if not product_search_text or not product_selector.selected_product %} hidden{% endif %}>Current selected product is shown separately and is not added to nonmatching search results.</span>
+        </p>
+      </form>
+      <div class="tw-top-actions">
+        <div class="tw-top-action-button">
+          {% if selected_product_gid %}
+            <form method="post" action="{% url 'shopify_translation_console' %}" data-job-start-form>
+              {% csrf_token %}
+              <input type="hidden" name="ui_mode" value="editor">
+              <input type="hidden" name="action" value="translate_all_languages_all_content">
+              <input type="hidden" name="product_search" value="{{ product_search_text }}">
+              <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
+              <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+              <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+              <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+              <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>{% if translation_background_job.exists and not translation_background_job.is_active %}Translate all languages again{% else %}Translate all languages{% endif %}</button>
+            </form>
+          {% else %}
+            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate all languages</button>
+          {% endif %}
+          <span class="tw-compact-safe-text">Preview only. No Shopify update.</span>
+          <span class="tw-compact-safe-text">Translations are preview results. Since Shopify is not updated yet, running again may find the same missing items.</span>
         </div>
-        <div class="tw-header-status-grid">
-          <div class="tw-header-status-item">
-            <div class="tw-header-status-label">Progress</div>
-            <div class="tw-header-status-value" data-job-field="progress_percent">{{ translation_background_job.progress_percent|default:0 }}%</div>
+        <div class="tw-job-pill is-{{ translation_background_job.compact_status_key|default:'not_started' }}" data-job-status-pill>
+          <div class="tw-job-pill-head">
+            <span class="tw-status-badge is-{{ translation_background_job.compact_status_key|default:'not_started' }}" data-job-status-badge>{{ translation_background_job.compact_status_label|default:"Not started" }}</span>
+            <span class="tw-job-pill-progress" data-job-running-progress{% if not translation_background_job.is_active %} hidden{% endif %}><span data-job-field="progress_percent">{{ translation_background_job.progress_percent|default:0 }}%</span></span>
           </div>
-          <div class="tw-header-status-item">
-            <div class="tw-header-status-label">Last updated</div>
-            <div class="tw-header-status-value" data-job-field="updated_at">{{ translation_background_job.updated_at|default:"-" }}</div>
+          <div class="tw-job-pill-line" data-job-current-line>
+            {% if translation_background_job.current_locale or translation_background_job.current_group %}
+              Translating {{ translation_background_job.current_locale_label|default:translation_background_job.current_locale|default:"-" }} - {{ translation_background_job.current_group_label|default:translation_background_job.current_group|default:"-" }}{% if translation_background_job.is_active %}, {{ translation_background_job.progress_percent|default:0 }}%{% endif %}
+            {% elif translation_background_job.show_translation_results %}
+              Translation results are ready for review.
+            {% else %}
+              Select a product and click Translate all languages.
+            {% endif %}
+          </div>
+          <div class="tw-job-pill-metrics" aria-label="Translation progress summary">
+            <span>Completed <span data-job-field="completed_locales">{{ translation_background_job.counts.completed_locales|default:0 }} / {{ translation_background_job.counts.total_locales|default:5 }}</span></span>
+            <span>Failed <span data-job-field="failed_locales">{{ translation_background_job.counts.failed_locales|default:0 }}</span></span>
+            <span>Translated <span data-job-field="generated_draft_count">{{ translation_background_job.counts.generated_draft_count|default:0 }}</span></span>
+            <span>Needs review <span data-job-field="blocked_count">{{ translation_background_job.counts.blocked_count|default:0 }}</span></span>
+            <span>Skipped <span data-job-field="skipped_count">{{ translation_background_job.counts.skipped_count|default:0 }}</span></span>
+            <span>Updated <span data-job-field="updated_at">{{ translation_background_job.updated_at|default:"-" }}</span></span>
           </div>
         </div>
-      </div>
-      <div class="tw-header-card">
-        <h3>Result summary</h3>
-        <div class="tw-header-status-grid">
-          <div class="tw-header-status-item">
-            <div class="tw-header-status-label">Generated</div>
-            <div class="tw-header-status-value" data-job-field="generated_draft_count">{{ translation_background_job.counts.generated_draft_count|default:0 }}</div>
-          </div>
-          <div class="tw-header-status-item">
-            <div class="tw-header-status-label">Needs review</div>
-            <div class="tw-header-status-value" data-job-field="blocked_count">{{ translation_background_job.counts.blocked_count|default:0 }}</div>
-          </div>
-          <div class="tw-header-status-item">
-            <div class="tw-header-status-label">Skipped</div>
-            <div class="tw-header-status-value" data-job-field="skipped_count">{{ translation_background_job.counts.skipped_count|default:0 }}</div>
-          </div>
-          <div class="tw-header-status-item">
-            <div class="tw-header-status-label">Current locale</div>
-            <div class="tw-header-status-value" data-job-field="current_locale">{{ translation_background_job.current_locale|default:"-" }}</div>
-          </div>
-        </div>
-        <span class="tw-safety">Preview only - Shopify has not been updated yet</span>
       </div>
     </div>
-  </div>
-
-  <div class="tw-workspace-shell" data-workspace-shell data-initial-tab="{% if translation_background_job.show_translation_results %}results{% else %}overview{% endif %}">
-    <div class="tw-workspace-nav" role="tablist" aria-label="Translation workspace sections">
-      <button type="button" class="tw-workspace-tab" data-workspace-tab="overview" role="tab">Overview</button>
-      <button type="button" class="tw-workspace-tab" data-workspace-tab="results" role="tab">Translation results</button>
-      <button type="button" class="tw-workspace-tab" data-workspace-tab="update" role="tab">Shopify update preparation</button>
-      <button type="button" class="tw-workspace-tab" data-workspace-tab="technical" role="tab">Technical details</button>
-    </div>
-    <section class="tw-workspace-tab-panel" data-workspace-panel="overview" role="tabpanel" aria-label="Overview"></section>
-    <section class="tw-workspace-tab-panel" data-workspace-panel="results" role="tabpanel" aria-label="Translation results"></section>
-    <section class="tw-workspace-tab-panel" data-workspace-panel="update" role="tabpanel" aria-label="Shopify update preparation"></section>
-    <section class="tw-workspace-tab-panel" data-workspace-panel="technical" role="tabpanel" aria-label="Technical details"></section>
   </div>
 
   {% if translation_background_job.show_translation_results %}
-    <div id="translation-results" class="module tw-translation-results" data-workspace-section="results" data-translation-results-section data-language-switcher>
-      <div class="tw-run-header">
-        <div>
-          <h3>Translation results</h3>
-          <p><strong>{{ translation_background_job.translation_result_status_label }}</strong></p>
-          <p class="tw-draft-note">Preview only - Shopify has not been updated yet. Nothing has been written to Shopify.</p>
+    <div id="translation-results" class="module tw-translation-results tw-translation-comparison" data-workspace-section="results" data-translation-results-section data-result-count="{{ translation_background_job.translation_result_count|default:0 }}" data-locale-terminal-count="{{ translation_background_job.counts.processed_locales|default:0 }}" data-language-switcher>
+      <div class="tw-results-heading">
+        <h2>Translation results</h2>
+        <div class="tw-results-meta-row">
+          <span class="tw-status-badge is-{{ translation_background_job.compact_status_key|default:'completed' }}">{{ translation_background_job.compact_status_label|default:"Completed" }}</span>
+          <span class="tw-count-badge">{{ translation_background_job.counts.completed_locales|default:0 }} / {{ translation_background_job.counts.total_locales|default:5 }} languages completed</span>
+          <span class="tw-count-badge">{{ translation_background_job.counts.failed_locales|default:0 }} failed</span>
+          <span class="tw-count-badge">{{ translation_background_job.counts.generated_draft_count|default:0 }} translated</span>
+          <span class="tw-count-badge">{{ translation_background_job.counts.blocked_count|default:0 }} needs review</span>
+          <span class="tw-count-badge">{{ translation_background_job.counts.skipped_count|default:0 }} skipped</span>
+          <span class="tw-count-badge">Last updated {{ translation_background_job.updated_at|default:"-" }}</span>
+          <span class="tw-count-badge">Source read: Shopify read-only</span>
+          <span class="tw-count-badge">Translation generated by: OpenAI API</span>
+          <span class="tw-count-badge">Shopify update: not performed</span>
+          <span class="tw-count-badge">Preview only</span>
         </div>
-        <span class="tw-count-badge">{{ translation_background_job.translation_result_count }} result item{{ translation_background_job.translation_result_count|pluralize }}</span>
       </div>
       <div class="tw-language-tabs" role="tablist" aria-label="Translation result languages">
         {% for language_group in translation_background_job.translation_result_groups %}
           <button type="button" class="tw-language-tab{% if language_group.is_default %} is-active{% endif %}" data-language-tab="{{ language_group.language }}" data-language-default="{% if language_group.is_default %}true{% else %}false{% endif %}" role="tab">
             <span>
               <span class="tw-language-tab-main">{{ language_group.language_label }} ({{ language_group.language }})</span>
-              <span class="tw-language-tab-counts">{{ language_group.translated_count }} translated / {{ language_group.needs_review_count }} needs review / {{ language_group.skipped_count }} skipped</span>
+              <span class="tw-language-tab-counts" data-language-tab-counts>{{ language_group.tab_summary }}</span>
             </span>
-            <span class="tw-status-badge is-{{ language_group.status_key }}">{{ language_group.status_label }}</span>
+            <span class="tw-status-badge is-{{ language_group.status_key }}" data-language-tab-status-badge>{{ language_group.status_label }}</span>
           </button>
         {% endfor %}
       </div>
       {% for language_group in translation_background_job.translation_result_groups %}
         <section class="tw-language-panel" data-language-panel="{{ language_group.language }}"{% if not language_group.is_default %} hidden{% endif %}>
           {% if language_group.count == 0 %}
-            <div class="tw-empty-state">{{ language_group.empty_message }}</div>
+            <div class="tw-empty-result-panel">
+              {{ language_group.empty_message }}
+              {% if language_group.error_message %}
+                <div class="tw-muted">{{ language_group.error_message }}</div>
+              {% endif %}
+            </div>
           {% else %}
             {% for content_group in language_group.groups %}
-              <details class="tw-section-panel tw-group-panel"{% if content_group.is_primary %} open{% endif %} data-group-panel="{{ content_group.group_key }}">
-                <summary>
-                  <span class="tw-section-heading">
-                    <span class="tw-section-title">
-                      <strong>{{ content_group.tab_label }}</strong>
-                      <span class="tw-section-hint">{{ content_group.group_key }}</span>
-                    </span>
-                    <span class="tw-count-badge">{{ content_group.count }} item{{ content_group.count|pluralize }}</span>
-                  </span>
-                </summary>
+              <section class="tw-result-group tw-group-panel" data-group-panel="{{ content_group.group_key }}">
+                <div class="tw-result-group-heading">
+                  <h4>{{ content_group.tab_label }}</h4>
+                  <span class="tw-count-badge">{{ content_group.count }} item{{ content_group.count|pluralize }}</span>
+                </div>
                 <div class="tw-result-list">
                   {% for row in content_group.rows %}
-                    <article class="tw-result-card" data-result-card data-locale="{{ language_group.language }}" data-group="{{ content_group.group_key }}">
+                    <article class="tw-result-card{% if row.is_html_field %} is-description{% endif %}" data-result-card data-locale="{{ language_group.language }}" data-group="{{ content_group.group_key }}">
                       <div class="tw-result-card-header">
                         <div>
-                          <div class="tw-result-eyebrow">{{ row.group_label }} / {{ row.language_label }} ({{ row.language }})</div>
+                          <div class="tw-result-eyebrow">{{ row.language_label }} ({{ row.language }})</div>
                           <h4 class="tw-result-title">{{ row.field_label }}</h4>
                           {% if row.context_label %}<div class="tw-muted">{{ row.context_label }}</div>{% endif %}
                         </div>
                         <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
                       </div>
-                      <div class="tw-result-main{% if row.main_value_is_reason %} is-reason{% endif %}">
-                        <div class="tw-result-main-label">{{ row.main_value_label }}</div>
-                        <div class="tw-result-main-value">{{ row.main_value_display|default:"-" }}</div>
+                      <div class="tw-result-compare-grid">
+                        <div class="tw-compare-column">
+                          <div class="tw-result-detail-label">Original</div>
+                          {% if row.is_html_field %}
+                            <div class="tw-html-display">
+                              <input class="tw-html-mode-input tw-html-preview-mode" type="radio" id="tw-result-source-preview-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}" name="tw-result-source-mode-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}" checked>
+                              <label class="tw-html-mode-tab" for="tw-result-source-preview-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}">Normal preview</label>
+                              <input class="tw-html-mode-input tw-html-code-mode" type="radio" id="tw-result-source-code-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}" name="tw-result-source-mode-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}">
+                              <label class="tw-html-mode-tab" for="tw-result-source-code-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}">Code</label>
+                              <div class="tw-html-pane tw-html-preview-pane">
+                                <div class="tw-html-preview">{{ row.source_value_html_preview }}</div>
+                              </div>
+                              <div class="tw-html-pane tw-html-code-pane">
+                                <div class="tw-text-block tw-code-block">{{ row.source_value|default:"-" }}</div>
+                              </div>
+                            </div>
+                          {% else %}
+                            <div class="tw-result-text">{{ row.source_value_display|default:"-" }}</div>
+                          {% endif %}
+                        </div>
+                        <div class="tw-compare-column">
+                          <div class="tw-result-detail-label">{{ row.comparison_translation_label }}</div>
+                          {% if row.is_html_field and row.comparison_translation_html_preview %}
+                            <div class="tw-html-display">
+                              <input class="tw-html-mode-input tw-html-preview-mode" type="radio" id="tw-result-target-preview-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}" name="tw-result-target-mode-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}" checked>
+                              <label class="tw-html-mode-tab" for="tw-result-target-preview-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}">Normal preview</label>
+                              <input class="tw-html-mode-input tw-html-code-mode" type="radio" id="tw-result-target-code-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}" name="tw-result-target-mode-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}">
+                              <label class="tw-html-mode-tab" for="tw-result-target-code-{{ language_group.language }}-{{ content_group.group_key }}-{{ forloop.counter }}">Code</label>
+                              <div class="tw-html-pane tw-html-preview-pane">
+                                <div class="tw-html-preview is-target">{{ row.comparison_translation_html_preview }}</div>
+                              </div>
+                              <div class="tw-html-pane tw-html-code-pane">
+                                <div class="tw-text-block is-target tw-code-block">{{ row.proposed_translation|default:row.existing_translation_value|default:"-" }}</div>
+                              </div>
+                            </div>
+                          {% else %}
+                            <div class="tw-result-text{% if row.main_value_is_reason %} is-reason{% endif %}">{{ row.comparison_translation_display|default:row.main_value_display|default:"-" }}</div>
+                          {% endif %}
+                        </div>
                       </div>
+                      {% if row.generated_differs_from_existing %}
+                        <details class="tw-current-translation-details">
+                          <summary>Current Shopify translation</summary>
+                          <div class="tw-result-text">{{ row.existing_translation_display|default:"-" }}</div>
+                        </details>
+                      {% endif %}
                       {% if row.result_reason_labels %}
                         <div class="tw-result-reasons">
                           {% for reason_label in row.result_reason_labels %}
@@ -2233,20 +2492,7 @@
                           {% endfor %}
                         </div>
                       {% endif %}
-                      <details class="tw-result-details">
-                        <summary>Compare original/current translation</summary>
-                        <div class="tw-result-compare-grid">
-                          <div>
-                            <div class="tw-result-detail-label">Original text</div>
-                            <div class="tw-result-text">{{ row.source_value_display|default:"-" }}</div>
-                          </div>
-                          <div>
-                            <div class="tw-result-detail-label">Existing translation</div>
-                            <div class="tw-result-text">{{ row.existing_translation_display|default:"-" }}</div>
-                          </div>
-                        </div>
-                      </details>
-                      <details class="tw-result-details">
+                      <details class="tw-result-details tw-technical-card-details">
                         <summary>Technical details</summary>
                         <dl class="tw-technical-list">
                           <dt>Field key</dt><dd>{{ row.key|default:"-" }}</dd>
@@ -2261,16 +2507,25 @@
                     </article>
                   {% endfor %}
                 </div>
-              </details>
+              </section>
             {% endfor %}
           {% endif %}
         </section>
       {% endfor %}
     </div>
+  {% else %}
+    <div id="translation-results" class="module tw-translation-results tw-translation-comparison tw-empty-results" data-workspace-section="results">
+      <div class="tw-results-heading">
+        <h2>Translation results</h2>
+        <span class="tw-count-badge">Preview only</span>
+      </div>
+      <div class="tw-empty-result-panel">Select a product and click Translate all languages.</div>
+    </div>
   {% endif %}
 
-  <div class="module" data-workspace-section="overview" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Overview</h2>
+  <details class="module tw-draft-card tw-advanced-details tw-help-details" data-workspace-section="technical">
+    <summary>Help, fallback controls, and product library status</summary>
+    <p><a class="button" href="?ui_mode=workbench&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Open advanced workflow</a></p>
     <details class="tw-advanced-details" style="margin-bottom: 12px;">
       <summary>Fallback product dropdown</summary>
       <form method="get" class="tw-toolbar tw-compact-form" style="margin-top: 8px;">
@@ -2304,6 +2559,22 @@
         <button type="submit" class="button">Show translation</button>
       </form>
     </details>
+    <details class="tw-library-note tw-advanced-details">
+      <summary>Product library status</summary>
+      <div class="tw-library-note-title">Product library source</div>
+      <div class="tw-muted">Source: {{ product_library_status.source }}.</div>
+      <div class="tw-muted">Sync: {{ product_library_status.sync }}.</div>
+      <div class="tw-muted">{{ product_library_status.search_note }}</div>
+      <div class="tw-library-chips">
+        <span class="tw-library-chip">Products {{ product_library_status.distinct_product_count }}</span>
+        <span class="tw-library-chip">Variant rows {{ product_library_status.product_variant_count }}</span>
+        <span class="tw-library-chip">Latest Shopify update {{ product_library_status.latest_shopify_product_updated_at|default:"-" }}</span>
+        <span class="tw-library-chip">Latest local update {{ product_library_status.latest_local_updated_at|default:"-" }}</span>
+        <span class="tw-library-chip">Sync task {{ product_library_status.sync_task_name }}</span>
+        <span class="tw-library-chip">Last success {{ product_library_status.sync_last_success_at|default:"-" }}</span>
+        <span class="tw-library-chip">Last error {{ product_library_status.sync_last_error|default:"-" }}</span>
+      </div>
+    </details>
     <div class="tw-filter-tabs" style="margin-bottom: 12px;">
       {% for tab in editor_view.filter_tabs %}
         <a class="tw-filter-tab{% if tab.active %} is-active{% endif %}" href="?ui_mode=editor&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&target_locale={{ selected_locale|urlencode }}&editor_filter={{ tab.value|urlencode }}&editor_search={{ editor_search_query|urlencode }}">{{ tab.label }} ({{ tab.count }})</a>
@@ -2335,14 +2606,15 @@
       <h3>What to do next</h3>
       <ol>
         <li>Choose product and language.</li>
-        <li>Click Translate all in background.</li>
+        <li>Click Translate all languages.</li>
         <li>Review original vs translation results on this page.</li>
         <li>Keep this page for review only. It cannot update Shopify.</li>
       </ol>
     </div>
-  </div>
+  </details>
 
-  <div class="module tw-draft-card" data-workspace-section="overview">
+  <details class="module tw-draft-card tw-advanced-details" data-workspace-section="technical">
+    <summary>More progress details</summary>
     <h2>Progress</h2>
     <p class="tw-draft-note">Preview only - Shopify has not been updated yet. Nothing has been written to Shopify.</p>
     {% if selected_product_gid %}
@@ -2429,6 +2701,7 @@
                 <tr>
                   <th class="translation-job-progress-header translation-job-progress-cell">Language</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Status</th>
+                  <th class="translation-job-progress-header translation-job-progress-cell">Status detail</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Rows checked</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">New translations</th>
                   <th class="translation-job-progress-header translation-job-progress-cell">Updated translations</th>
@@ -2441,6 +2714,7 @@
                   <tr class="translation-job-progress-row">
                     <td class="translation-job-progress-cell"><strong>{{ row.locale_label }}</strong> ({{ row.locale }})</td>
                     <td class="translation-job-progress-cell"><span class="tw-status-badge is-{{ row.status_key }}">{{ row.status_label }}</span></td>
+                    <td class="translation-job-progress-cell">{{ row.error_message|default:row.message|default:"-" }}</td>
                     <td class="translation-job-progress-cell">{{ row.source_rows_checked }}</td>
                     <td class="translation-job-progress-cell">{{ row.missing_draft_count }}</td>
                     <td class="translation-job-progress-cell">{{ row.outdated_update_draft_count }}</td>
@@ -2496,6 +2770,9 @@
                 <tr><th>blocked count</th><td>{{ translation_background_job.report_detail_summary.blocked_count }}</td></tr>
                 <tr><th>no Shopify write performed</th><td>{{ translation_background_job.report_detail_summary.no_shopify_write_performed }}</td></tr>
                 <tr><th>report path</th><td>{{ translation_background_job.report_detail_summary.report_path }}</td></tr>
+                <tr><th>job_started_by</th><td>{{ translation_background_job.report_detail_summary.job_started_by }}</td></tr>
+                <tr><th>polling_read_only</th><td>{{ translation_background_job.report_detail_summary.polling_read_only }}</td></tr>
+                <tr><th>auto_start_blocked</th><td>{{ translation_background_job.report_detail_summary.auto_start_blocked }}</td></tr>
                 <tr><th>shopify_read_only</th><td>{{ translation_background_job.shopify_read_only }}</td></tr>
                 <tr><th>shopify_write_performed</th><td>{{ translation_background_job.shopify_write_performed }}</td></tr>
                 <tr><th>mutation_performed</th><td>{{ translation_background_job.mutation_performed }}</td></tr>
@@ -2505,8 +2782,8 @@
                 <tr><th>rollback_performed</th><td>{{ translation_background_job.rollback_performed }}</td></tr>
               </tbody>
             </table>
-            <div class="module tw-update-prep" data-workspace-section="update" style="padding: 12px; margin-bottom: 16px;">
-            <h2>Shopify update preparation</h2>
+            <details class="module tw-update-prep" data-workspace-section="update" style="padding: 12px; margin-bottom: 16px;">
+            <summary><strong>Shopify update preparation</strong></summary>
             <h3>Eligible fields</h3>
             <div class="tw-run-grid">
               <div class="tw-run-item">
@@ -2729,7 +3006,7 @@
                 </table>
               {% endif %}
             </details>
-            </div>
+            </details>
             <h3>Needs review and skipped reasons</h3>
             {% if translation_background_job.blocked_reason_summary %}
               <div class="tw-editor-table-wrap">
@@ -3311,7 +3588,7 @@
       </details>
     {% endif %}
     </div>
-  </div>
+  </details>
 
   <div class="module" data-workspace-section="technical" style="padding: 12px; margin-bottom: 16px;">
     <h2>Original vs translation</h2>
@@ -5411,6 +5688,38 @@
     }());
 
     (function () {
+      Array.prototype.slice.call(document.querySelectorAll("[data-job-start-form]"))
+        .forEach(function (form) {
+          var userRequestedStart = false;
+          var buttons = Array.prototype.slice.call(form.querySelectorAll("[data-job-start-button]"));
+          buttons.forEach(function (button) {
+            button.addEventListener("click", function (event) {
+              if (event.isTrusted === false) {
+                return;
+              }
+              userRequestedStart = true;
+              form.setAttribute("data-user-start-requested", "true");
+            });
+          });
+          form.addEventListener("submit", function (event) {
+            var submitter = event.submitter || document.activeElement;
+            var startButtonSubmitted = !submitter || (
+              submitter.matches &&
+              submitter.matches("[data-job-start-button]")
+            );
+            var allowed = userRequestedStart &&
+              form.getAttribute("data-user-start-requested") === "true" &&
+              startButtonSubmitted;
+            userRequestedStart = false;
+            form.setAttribute("data-user-start-requested", "false");
+            if (!allowed) {
+              event.preventDefault();
+            }
+          });
+        });
+    }());
+
+    (function () {
       var panel = document.querySelector("[data-translation-job-panel]");
       if (!panel) {
         return;
@@ -5452,25 +5761,61 @@
         return text || "-";
       }
 
+      function humanizeArea(value) {
+        var text = String(value || "").trim();
+        if (!text) {
+          return "-";
+        }
+        return text.replace(/_/g, " ");
+      }
+
       function isActiveStatus(status) {
         return status === "pending" || status === "running";
       }
 
-      function shouldShowResults(status) {
-        return status === "completed" || status === "partial";
+      function localeStatusLabel(status) {
+        var labels = {
+          "pending": "Waiting",
+          "running": "Translating",
+          "completed": "Completed",
+          "failed": "Failed",
+          "skipped": "Skipped",
+          "stale": "Stale",
+          "cancelled": "Cancelled"
+        };
+        return labels[status] || titleStatus(status);
       }
 
-      function refreshForResultsOnce(status, resultCount) {
-        if (!shouldShowResults(status) || numberOrZero(resultCount) <= 0) {
-          return;
+      function shouldShowResults(status) {
+        return isActiveStatus(status) || status === "completed" || status === "partial" || status === "failed" || status === "stale";
+      }
+
+      function renderedResultCount() {
+        var section = document.querySelector("[data-translation-results-section]");
+        if (!section) {
+          return 0;
         }
-        if (document.querySelector("[data-translation-results-section]")) {
+        return numberOrZero(section.getAttribute("data-result-count"));
+      }
+
+      function renderedTerminalLocaleCount() {
+        var section = document.querySelector("[data-translation-results-section]");
+        if (!section) {
+          return 0;
+        }
+        return numberOrZero(section.getAttribute("data-locale-terminal-count"));
+      }
+
+      function refreshForResultsOnce(status, resultCount, terminalCount) {
+        var nextCount = numberOrZero(resultCount);
+        var terminalLocaleCount = numberOrZero(terminalCount);
+        if (!shouldShowResults(status) || (nextCount <= renderedResultCount() && terminalLocaleCount <= renderedTerminalLocaleCount())) {
           return;
         }
         if (!jobId || !window.sessionStorage) {
           return;
         }
-        var key = "translation-workspace-results-reloaded:" + jobId + ":" + status;
+        var key = "translation-workspace-results-reloaded:" + jobId + ":" + status + ":" + String(nextCount) + ":" + String(terminalLocaleCount);
         try {
           if (window.sessionStorage.getItem(key)) {
             return;
@@ -5504,6 +5849,29 @@
           });
       }
 
+      function setGlobalText(selector, value) {
+        Array.prototype.slice.call(document.querySelectorAll(selector))
+          .forEach(function (element) {
+            element.textContent = value;
+          });
+      }
+
+      function buildCurrentLine(data, status) {
+        var locale = textOrDash(data.current_locale_label || data.current_locale);
+        var group = humanizeArea(data.current_group_label || data.current_group);
+        var progress = percentValue(data.progress_percent);
+        if (isActiveStatus(status) && (locale !== "-" || group !== "-")) {
+          return "Translating " + locale + " - " + group + ", " + String(progress) + "%";
+        }
+        if (status === "completed" || status === "partial") {
+          return "Translation results are ready for review.";
+        }
+        if (status === "failed" || status === "stale" || status === "cancelled") {
+          return "Translation stopped. Open technical details for the local report.";
+        }
+        return "Select a product, then start translation.";
+      }
+
       function clearChildren(element) {
         while (element.firstChild) {
           element.removeChild(element.firstChild);
@@ -5534,7 +5902,7 @@
         var cell = document.createElement("td");
         row.className = "translation-job-progress-row";
         cell.className = "translation-job-progress-cell";
-        cell.colSpan = 7;
+        cell.colSpan = 8;
         cell.textContent = message;
         row.appendChild(cell);
         body.appendChild(row);
@@ -5561,6 +5929,7 @@
           languageCell.appendChild(document.createTextNode(" (" + textOrDash(item.locale) + ")"));
           row.appendChild(languageCell);
           appendStatusCell(row, item);
+          appendTextCell(row, item.error_message || item.message || "-");
           appendTextCell(row, numberOrZero(item.source_rows_checked));
           appendTextCell(row, numberOrZero(item.missing_draft_count));
           appendTextCell(row, numberOrZero(item.outdated_update_draft_count));
@@ -5594,6 +5963,46 @@
         });
       }
 
+      function translatedCount(item) {
+        return numberOrZero(item.generated_draft_count) ||
+          numberOrZero(item.missing_draft_count) + numberOrZero(item.outdated_update_draft_count);
+      }
+
+      function skippedCount(item) {
+        return numberOrZero(item.skipped_count) ||
+          numberOrZero(item.already_translated_skipped_count) + numberOrZero(item.not_eligible_skipped_count);
+      }
+
+      function syncLanguageTabs(rows) {
+        var byLocale = {};
+        (rows || []).forEach(function (item) {
+          var locale = String(item.locale || "").trim();
+          if (locale) {
+            byLocale[locale] = item;
+          }
+        });
+        Array.prototype.slice.call(document.querySelectorAll("[data-language-tab]"))
+          .forEach(function (button) {
+            var locale = button.getAttribute("data-language-tab") || "";
+            var item = byLocale[locale];
+            if (!item) {
+              return;
+            }
+            var status = String(item.status || "pending");
+            var badge = button.querySelector("[data-language-tab-status-badge]");
+            var counts = button.querySelector("[data-language-tab-counts]");
+            if (badge) {
+              badge.className = "tw-status-badge is-" + safeStatusKey(item.status_key || status);
+              badge.textContent = item.status_label || localeStatusLabel(status);
+            }
+            if (counts) {
+              counts.textContent = String(translatedCount(item)) + " translated / " +
+                String(numberOrZero(item.blocked_count)) + " needs review / " +
+                String(skippedCount(item)) + " skipped";
+            }
+          });
+      }
+
       function setPollingMessage(shouldContinue, statusLabel, failed) {
         var message = "Updating automatically every few seconds. Refresh status remains available as a manual fallback.";
         if (failed) {
@@ -5608,8 +6017,10 @@
         var status = String(data.status || "not_started");
         var statusKey = data.status_key || status;
         var statusLabel = data.status_label || titleStatus(status);
+        var compactStatusKey = data.compact_status_key || statusKey;
+        var compactStatusLabel = data.compact_status_label || statusLabel;
         var progress = percentValue(data.progress_percent);
-        var shouldContinue = data.polling_should_continue === true || isActiveStatus(status);
+        var shouldContinue = data.polling_should_continue === true && isActiveStatus(status);
         lastStatus = status;
         if (data.job_id) {
           jobId = data.job_id;
@@ -5622,10 +6033,18 @@
         panel.setAttribute("data-job-initial-status", status);
         setClassWithStatus(panel, "tw-run-banner", statusKey);
         setText("[data-job-status-message]", data.status_message || "No background translation has been recorded for this product.");
+        Array.prototype.slice.call(document.querySelectorAll("[data-job-status-pill]"))
+          .forEach(function (pill) {
+          setClassWithStatus(pill, "tw-job-pill", compactStatusKey);
+          });
         Array.prototype.slice.call(document.querySelectorAll("[data-job-status-badge]"))
           .forEach(function (badge) {
-          setClassWithStatus(badge, "tw-status-badge", statusKey);
-          badge.textContent = statusLabel;
+          setClassWithStatus(badge, "tw-status-badge", compactStatusKey);
+          badge.textContent = compactStatusLabel;
+          });
+        Array.prototype.slice.call(document.querySelectorAll("[data-job-running-progress]"))
+          .forEach(function (item) {
+          item.hidden = !shouldContinue;
           });
         Array.prototype.slice.call(document.querySelectorAll("[data-job-progress-bar]"))
           .forEach(function (progressBar) {
@@ -5641,7 +6060,9 @@
         setJobField("blocked_count", String(numberOrZero(data.blocked_count)));
         setJobField("updated_at", textOrDash(data.updated_at));
         setJobField("report_path", textOrDash(data.report_path));
+        setGlobalText("[data-job-current-line]", buildCurrentLine(data, status));
         renderLocaleRows(data.per_locale_progress || data.per_locale_status || []);
+        syncLanguageTabs(data.per_locale_progress || data.per_locale_status || []);
         renderGroupRows(data.per_group_progress || data.per_group_status || []);
         setPollingMessage(shouldContinue, statusLabel, false);
         Array.prototype.slice.call(document.querySelectorAll("[data-job-start-button]"))
@@ -5652,7 +6073,7 @@
           schedulePoll();
         } else {
           stopPoll();
-          refreshForResultsOnce(status, data.translation_result_count);
+          refreshForResultsOnce(status, data.translation_result_count, data.processed_locales);
         }
       }
 
