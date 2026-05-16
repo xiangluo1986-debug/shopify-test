@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
@@ -9,12 +9,24 @@ from django.db.models import Q
 from django.urls import NoReverseMatch, reverse
 
 from .review_request_history_ledger import build_review_request_history_ledger
-from .models import ShopifyOrder
+from .models import ShopifyOrder, ShopifySyncState
 
 
 CANONICAL_REVIEW_REQUEST_TAG = "1: review request"
 TYPO_REVIEW_REQUEST_TAG = "1: reveiw request"
+REVIEW_REQUEST_TAG_ALIASES = (
+    CANONICAL_REVIEW_REQUEST_TAG,
+    TYPO_REVIEW_REQUEST_TAG,
+    "1:review request",
+    "1 : review request",
+    "1:reveiw request",
+    "1 : reveiw request",
+)
 DELIVERED_TAG = "Delivered"
+DELIVERED_TAG_ALIASES = (
+    "Delivered",
+    "delivered",
+)
 TRUSTPILOT_TAG_ALIASES = (
     "1: trustpilot",
     "1: trustpoilt",
@@ -23,6 +35,25 @@ TRUSTPILOT_TAG_ALIASES = (
     "1:trustpoilt",
     "1 : trustpoilt",
 )
+MANUAL_CONFIRMED_ORDER_EVIDENCE = {
+    "#22562": {
+        "order_name": "#22562",
+        "source": "User-confirmed Shopify UI evidence",
+        "source_section": "manual_confirmed_shopify_ui_evidence",
+        "tags": [TYPO_REVIEW_REQUEST_TAG, DELIVERED_TAG, "express"],
+        "delivered_tag_present": True,
+        "canonical_review_request_tag_present": True,
+        "review_request_tag_present": True,
+        "matched_review_request_tag_value": TYPO_REVIEW_REQUEST_TAG,
+        "eligible_for_trustpilot": True,
+        "repeat_customer_detected": True,
+        "customer_order_count": 2,
+        "explicit_merge_evidence": False,
+        "explicit_related_order_names": [],
+        "related_order_names": [],
+        "reason": "User confirmed Shopify UI tags for #22562; no explicit merge evidence was provided.",
+    },
+}
 FUTURE_TRACKING_STATUSES = (
     "invitation_draft_prepared",
     "invitation_sent",
@@ -53,6 +84,40 @@ TAG_FILTER_OPTIONS = (
 )
 LIMIT_OPTIONS = (25, 50, 100)
 DEFAULT_LIMIT = 25
+TRUSTPILOT_AUTO_REFRESH_REPORT_FILENAME = "shopify_review_request_trustpilot_auto_queue_refresh.json"
+TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME = "shopify_review_request_trustpilot_auto_queue_refresh.html"
+REVIEW_AND_SEND_REPORT_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.json"
+REVIEW_AND_SEND_HTML_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.html"
+TRUSTPILOT_EMAIL_SUBJECT = "How was your Kidstoylover order?"
+GMAIL_SEND_FROM = "info@kidstoylover.com"
+GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_BROAD_SCOPE = "https://mail.google.com/"
+LAST_60_DAY_SCAN_WINDOW_DAYS = 60
+LAST_60_DAY_SCAN_TASK_NAME = "shopify_review_request_last_60_days_candidate_scan"
+REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
+    "orders_review_request_3",
+    "orders_review_request_60",
+    "orders_review_request_manual",
+)
+REVIEW_REQUEST_FOCUS_ORDER_NAMES = ("#22530", "#22562", "#22581", "#22582", "#22620", "#22621")
+SHOPIFY_ORDER_TAGS_MISSING_SOURCE = "Shopify tags not stored in local ShopifyOrder model"
+SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION = (
+    "Update sync/model/report source to persist tags, or derive tags from an available local report source."
+)
+MERGED_ORDER_REFERENCE_RE = re.compile(r"#?\d{3,}")
+MERGED_ORDER_KEYWORDS = (
+    "combined",
+    "merged",
+    "same shipment",
+    "shipped together",
+    "ship together",
+    "combined shipment",
+    "\u5408\u5e76",
+    "\u5408\u5e76\u53d1\u8d27",
+    "合并",
+    "合并发货",
+)
 BLOCKED_REASON_DEFINITIONS = (
     (
         "missing_delivered_tag",
@@ -129,6 +194,24 @@ REPORT_DEFINITIONS = (
         "candidate_scan",
         "Candidate scan",
         "shopify_review_request_candidate_scan.json",
+        ("report_status", "status"),
+    ),
+    (
+        "last_60_days_candidate_scan",
+        "Last 60 days candidate scan",
+        "shopify_review_request_last_60_days_candidate_scan.json",
+        ("report_status", "status"),
+    ),
+    (
+        "shopify_order_sync_coverage",
+        "Shopify order sync coverage",
+        "shopify_review_request_shopify_order_sync_coverage.json",
+        ("report_status", "coverage_status", "status"),
+    ),
+    (
+        "tag_alias_and_candidate_correction_audit",
+        "Review-request tag alias and #22562 correction audit",
+        "shopify_review_request_tag_alias_and_candidate_correction_audit.json",
         ("report_status", "status"),
     ),
     (
@@ -276,6 +359,12 @@ REPORT_DEFINITIONS = (
         ("one_candidate_gmail_draft_send_execute_status", "report_status", "status"),
     ),
     (
+        "trustpilot_review_and_send_execute",
+        "Trustpilot Review & Send execute",
+        REVIEW_AND_SEND_REPORT_FILENAME,
+        ("execution_status", "report_status", "status"),
+    ),
+    (
         "trustpilot_gmail_draft_package",
         "Trustpilot Gmail draft package",
         "shopify_review_request_trustpilot_gmail_draft_package.json",
@@ -388,8 +477,6 @@ CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 MAX_REPORT_BYTES = 4_000_000
 MAX_SOURCE_ROWS = 500
 MAX_TABLE_ROWS = DEFAULT_LIMIT
-TRUSTPILOT_AUTO_REFRESH_REPORT_FILENAME = "shopify_review_request_trustpilot_auto_queue_refresh.json"
-TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME = "shopify_review_request_trustpilot_auto_queue_refresh.html"
 
 
 def build_review_request_workbench_context(params=None):
@@ -528,6 +615,7 @@ def build_review_request_workbench_context(params=None):
         candidate_queue=candidate_queue,
         invitation_history=invitation_history,
         blocked_orders=blocked_orders,
+        all_rows=all_rows,
         history_ledger=history_ledger,
         trustpilot_email_records=trustpilot_email_records,
         ali_reviews_status=ali_reviews_status,
@@ -614,6 +702,8 @@ def build_review_request_workbench_context(params=None):
             "trustpilot_email_records": trustpilot_email_records,
             "ali_reviews_status": ali_reviews_status,
             "trustpilot_aliases": TRUSTPILOT_TAG_ALIASES,
+            "review_request_tag_aliases": REVIEW_REQUEST_TAG_ALIASES,
+            "delivered_tag_aliases": DELIVERED_TAG_ALIASES,
             "canonical_review_request_tag": CANONICAL_REVIEW_REQUEST_TAG,
             "typo_review_request_tag": TYPO_REVIEW_REQUEST_TAG,
             "delivered_tag": DELIVERED_TAG,
@@ -626,6 +716,72 @@ def build_review_request_workbench_context(params=None):
             "safety_confirmations": _current_page_safety_confirmations(),
         }
     }
+
+
+def review_request_review_and_send(order_identifier, admin_username=""):
+    state = _build_review_send_state()
+    selected_order = _safe_text(order_identifier, max_length=80)
+    result = _base_review_and_send_result(selected_order, admin_username, state)
+    selected_rows = _review_send_selected_rows(state["approval_queue"], selected_order)
+    matches = [
+        row
+        for row in state["approval_queue"]["needs_review_rows"]
+        if row.get("candidate_id") == selected_order and row.get("action_state") == "review_send"
+    ]
+    if len(matches) != 1:
+        blocker = _review_send_selection_blocker(selected_order, selected_rows)
+        result["execution_status"] = blocker["status"]
+        result["blocking_detail"] = blocker["detail"]
+        result["blocking_conditions"].append(blocker)
+        return _finalize_review_and_send_result(result)
+
+    candidate = matches[0]
+    result["candidate_verified"] = True
+    result["selected_order"] = candidate["order"]
+    result["selected_customer"] = candidate["customer"]
+    result["selected_merged_group_order_names"] = candidate.get("group_order_names") or []
+    result["selected_merged_group_size"] = _int_or_zero(candidate.get("group_size"))
+    result["selected_merged_group_eligible_for_review_send"] = (
+        candidate.get("group_eligible_for_review_send") is True
+    )
+    result["selected_merged_group_block_reasons"] = candidate.get("group_block_reasons") or []
+    result["selected_merged_group_prior_trustpilot_sent"] = (
+        candidate.get("group_prior_trustpilot_sent") is True
+    )
+    result["gmail_scope_status"] = state["gmail_setup"]["scope_status"]
+    result["gmail_compose_send_supported"] = bool(
+        state["gmail_setup"]["gmail_compose_send_supported"]
+    )
+    result["template_status"] = "approved_trustpilot_template"
+    result["template_subject"] = TRUSTPILOT_EMAIL_SUBJECT
+
+    group_blockers = _runtime_review_send_group_blockers(candidate)
+    if group_blockers:
+        result["execution_status"] = group_blockers[0]["status"]
+        result["blocking_detail"] = group_blockers[0]["detail"]
+        result["blocking_conditions"].extend(group_blockers)
+        return _finalize_review_and_send_result(result)
+
+    runtime_blockers = _runtime_review_send_blockers(candidate, state["gmail_setup"])
+    if runtime_blockers:
+        result["execution_status"] = runtime_blockers[0]["status"]
+        result["blocking_detail"] = runtime_blockers[0]["detail"]
+        result["blocking_conditions"].extend(runtime_blockers)
+        return _finalize_review_and_send_result(result)
+
+    result["execution_status"] = "blocked_phase_5_28a_scan_ui_report_only"
+    result["blocking_status"] = "blocked_phase_5_28a_scan_ui_report_only"
+    result["blocking_detail"] = (
+        "No email was sent. Phase 5.28A is scan/UI/report only; Gmail draft and send paths are disabled."
+    )
+    result["blocking_conditions"].append(
+        {
+            "status": "blocked_phase_5_28a_scan_ui_report_only",
+            "detail": result["blocking_detail"],
+        }
+    )
+    result["next_admin_action"] = "Review the candidate on the page; sending remains locked."
+    return _finalize_review_and_send_result(result)
 
 
 def mask_email(email):
@@ -1000,7 +1156,7 @@ def _auto_refresh_hook_next_admin_action(next_real_step):
     if next_real_step == "blocked_safety_issue":
         return "Stop automation and review safety flags before preparing any future locked send package."
     return (
-        "Wait until an order is delivered, has canonical `1: review request`, and passes "
+        "Wait until an order is delivered, has a review-request tag alias, and passes "
         "duplicate/related-order/ticket/refund checks."
     )
 
@@ -1355,6 +1511,7 @@ def _row_from_top_level_report(data, source_label, source_path):
         "typo_review_request_tag_present": False,
         "review_request_tag_present": False,
         "merged_or_related_order_guard_status": "",
+        "explicit_related_order_names": [],
         "eligible_for_trustpilot": False,
         "blocking_reasons": [],
         "blocking_summary": "",
@@ -1380,6 +1537,8 @@ def _row_from_mapping(item, source_label, source_path, source_section):
     )
     tags = _collect_tags(item)
     trustpilot_tags = _matched_trustpilot_tags(item, tags)
+    review_request_tags = _matched_review_request_tags(tags)
+    delivered_tags = _matched_delivered_tags(tags)
     blocking_reasons = _collect_string_list(item, "blocking_reasons")
     if not blocking_reasons:
         blocking_reasons = _collect_string_list(item, "classification_reasons")
@@ -1401,10 +1560,16 @@ def _row_from_mapping(item, source_label, source_path, source_section):
     if not any((order_name, order_id, masked_email, tags, trustpilot_tags, status)):
         return None
 
+    explicit_related_order_names = _explicit_related_order_names_from_mapping(item)
+    related_order_names = _related_order_names_from_mapping(item)
     return {
         "order_name": order_name or order_id,
         "order_id": order_id,
         "masked_email": mask_email(masked_email),
+        "customer_display_name": _safe_text(
+            _first_text(item, ("customer_display_name", "customer_name", "shipping_name")),
+            max_length=120,
+        ),
         "created_at": _first_text(
             item,
             ("createdAt", "created_at", "order_created_at", "processed_at", "timestamp"),
@@ -1417,13 +1582,21 @@ def _row_from_mapping(item, source_label, source_path, source_section):
         "tags_summary": ", ".join(tags) if tags else "No tag data in row",
         "trustpilot_tags": trustpilot_tags,
         "trustpilot_invitation_present": bool(trustpilot_tags),
-        "delivered_tag_present": item.get("delivered_tag_present") is True or DELIVERED_TAG in tags or "妥投" in tags,
+        "delivered_tag_present": item.get("delivered_tag_present") is True or bool(delivered_tags) or "妥投" in tags,
         "canonical_review_request_tag_present": (
-            item.get("canonical_review_request_tag_present") is True or CANONICAL_REVIEW_REQUEST_TAG in tags
+            item.get("canonical_review_request_tag_present") is True or bool(review_request_tags)
         ),
-        "typo_review_request_tag_present": TYPO_REVIEW_REQUEST_TAG in tags,
-        "review_request_tag_present": item.get("canonical_review_request_tag_present") is True or CANONICAL_REVIEW_REQUEST_TAG in tags,
+        "matched_review_request_tag_value": review_request_tags[0] if review_request_tags else "",
+        "typo_review_request_tag_present": bool(
+            _matched_tag_alias_values(tags, (TYPO_REVIEW_REQUEST_TAG, "1:reveiw request", "1 : reveiw request"))
+        ),
+        "review_request_tag_present": item.get("review_request_tag_present") is True
+        or item.get("canonical_review_request_tag_present") is True
+        or bool(review_request_tags),
         "merged_or_related_order_guard_status": _safe_text(item.get("merged_or_related_order_guard_status")),
+        "explicit_related_order_names": explicit_related_order_names,
+        "related_order_names": related_order_names,
+        "related_order_count": _int_or_zero(item.get("related_order_count")),
         "eligible_for_trustpilot": (
             item.get("eligible_for_trustpilot") is True
             or item.get("safe_to_prepare_send") is True
@@ -1435,10 +1608,167 @@ def _row_from_mapping(item, source_label, source_path, source_section):
         "prior_trustpilot_order_name": _safe_text(item.get("prior_trustpilot_order_name")),
         "same_customer_detected": item.get("same_customer_detected") is True,
         "same_email_detected": item.get("same_email_detected") is True,
+        "customer_order_count": _source_customer_order_count(item),
         "existing_unsent_gmail_draft_should_not_be_sent": (
             item.get("existing_unsent_gmail_draft_should_not_be_sent") is True
         ),
     }
+
+
+def _explicit_related_order_names_from_mapping(item):
+    names = []
+    for key in (
+        "verified_related_order_names",
+        "verified_merged_order_names",
+        "explicit_merged_order_names",
+    ):
+        names.extend(_collect_order_name_values(item.get(key)))
+    if not _row_has_explicit_merge_evidence(item):
+        return _dedupe_order_names(names)
+    for key in (
+        "related_order_names",
+        "related_orders",
+        "merged_order_names",
+        "merged_order_group_order_names",
+        "merged_group_order_names",
+        "group_order_names",
+        "explicit_related_order_names",
+    ):
+        names.extend(_collect_order_name_values(item.get(key)))
+    for key in _MERGE_EVIDENCE_TEXT_KEYS:
+        names.extend(_merged_order_names_from_text(item.get(key)))
+    return _dedupe_order_names(names)
+
+
+def _related_order_names_from_mapping(item):
+    names = []
+    for key in (
+        "related_order_names",
+        "related_orders",
+        "merged_order_names",
+        "merged_order_group_order_names",
+        "merged_group_order_names",
+        "group_order_names",
+        "customer_order_names",
+    ):
+        names.extend(_collect_order_name_values(item.get(key)))
+    return _dedupe_order_names(names)
+
+
+def _collect_order_name_values(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        names = []
+        for item in value:
+            names.extend(_collect_order_name_values(item))
+        return names
+    text = _safe_text(value, max_length=500)
+    if not text:
+        return []
+    numeric_names = re.findall(r"#?\d{3,}", text)
+    if numeric_names:
+        return [
+            _canonical_order_name(name)
+            for name in numeric_names
+        ]
+    return [_safe_text(part, max_length=80) for part in re.split(r"[,/|]+", text) if _safe_text(part, max_length=80)]
+
+
+def _merged_order_names_from_text(value):
+    text = _safe_text(value, max_length=1000)
+    if not text or not _has_merged_order_keyword(text):
+        return []
+    return [_canonical_order_name(match) for match in MERGED_ORDER_REFERENCE_RE.findall(text)]
+
+
+def _has_merged_order_keyword(value):
+    text = _safe_text(value, max_length=1000).lower()
+    return any(keyword in text for keyword in MERGED_ORDER_KEYWORDS)
+
+
+_MERGE_EVIDENCE_TEXT_KEYS = (
+    "evidence",
+    "merge_evidence",
+    "merged_group_evidence",
+    "merged_order_evidence",
+    "related_order_evidence",
+    "order_note",
+    "staff_note",
+    "shopify_note",
+    "warehouse_note",
+    "transfer_note",
+)
+
+
+def _row_has_explicit_merge_evidence(row):
+    if not isinstance(row, dict):
+        return False
+    for key in (
+        "explicit_merge_evidence",
+        "explicit_merge_evidence_present",
+        "verified_related_order_evidence",
+        "verified_merged_order_evidence",
+    ):
+        if row.get(key) is True:
+            return True
+    for key in (
+        "verified_related_order_names",
+        "verified_merged_order_names",
+        "explicit_merged_order_names",
+    ):
+        names = _collect_order_name_values(row.get(key))
+        own_order = _canonical_order_name(
+            row.get("order")
+            or row.get("order_name")
+            or row.get("selected_order")
+            or row.get("selected_order_name")
+        )
+        if own_order and names:
+            names.append(own_order)
+        if len(_dedupe_order_names(names)) >= 2:
+            return True
+    own_order = _canonical_order_name(
+        row.get("order")
+        or row.get("order_name")
+        or row.get("selected_order")
+        or row.get("selected_order_name")
+    )
+    for key in _MERGE_EVIDENCE_TEXT_KEYS:
+        names = _merged_order_names_from_text(row.get(key))
+        if own_order and own_order not in names and names:
+            names.append(own_order)
+        if len(_dedupe_order_names(names)) >= 2:
+            return True
+    return False
+
+
+def _canonical_order_name(value):
+    text = _safe_text(value, max_length=80).strip()
+    if not text:
+        return ""
+    match = re.fullmatch(r"#?(\d{3,})", text)
+    if match:
+        return f"#{match.group(1)}"
+    return text
+
+
+def _dedupe_order_names(values):
+    return _dedupe_text(_canonical_order_name(value) for value in values or [])
+
+
+def _source_customer_order_count(item):
+    for key in (
+        "customer_order_count",
+        "repeat_customer_count",
+        "customer_repeat_count",
+        "valid_order_count_for_customer",
+        "matched_order_count_for_customer",
+    ):
+        count = _int_or_zero(item.get(key))
+        if count > 0:
+            return count
+    return 0
 
 
 def _candidate_queue(reports):
@@ -1826,10 +2156,13 @@ def _local_order_link_map(rows, latest_scan):
 def _collect_order_lookup_values(order_name, order_id, order_names, order_numbers, shopify_order_ids):
     name = _safe_text(order_name, max_length=120)
     if name:
-        order_names.add(name)
-        stripped = name.lstrip("#")
-        if stripped and stripped != name:
-            order_numbers.add(stripped)
+        canonical = _canonical_order_name(name)
+        for candidate in _dedupe_text((name, canonical)):
+            order_names.add(candidate)
+            stripped = candidate.lstrip("#")
+            if stripped and stripped.isdigit():
+                order_numbers.add(stripped)
+                order_names.add(f"#{stripped}")
     shopify_order_id = _extract_shopify_order_id(order_id)
     if shopify_order_id:
         shopify_order_ids.add(shopify_order_id)
@@ -1840,17 +2173,23 @@ def _order_lookup_keys(order_name, order_number="", shopify_order_id=""):
     name = _safe_text(order_name, max_length=120)
     number = _safe_text(order_number, max_length=120)
     if name:
-        keys.append(f"name:{name}")
-        stripped = name.lstrip("#")
-        if stripped and stripped != name:
-            keys.append(f"number:{stripped}")
+        canonical = _canonical_order_name(name)
+        for candidate in _dedupe_text((name, canonical)):
+            keys.append(f"name:{candidate}")
+            stripped = candidate.lstrip("#")
+            if stripped and stripped.isdigit():
+                keys.append(f"number:{stripped}")
+                keys.append(f"name:#{stripped}")
     if number:
         keys.append(f"number:{number}")
-        if not number.startswith("#"):
-            keys.append(f"name:#{number}")
+        stripped = number.lstrip("#")
+        if stripped and stripped.isdigit():
+            keys.append(f"number:{stripped}")
+            keys.append(f"name:#{stripped}")
+            keys.append(f"name:{stripped}")
     if shopify_order_id:
         keys.append(f"shopify_id:{shopify_order_id}")
-    return keys
+    return _dedupe_text(keys)
 
 
 def _extract_shopify_order_id(value):
@@ -1913,11 +2252,12 @@ def _attach_status_badges(rows, latest_scan):
         elif _row_text_contains(row, ("blocked_missing_delivered_tag", "missing delivered")):
             badges.append(_badge("Blocked: missing delivered", "rrw-badge-bad"))
         if row.get("canonical_review_request_tag_present"):
-            badges.append(_badge("In review request queue", "rrw-badge-ok"))
+            badges.append(_badge("Review request tag found", "rrw-badge-ok"))
         elif _row_text_contains(row, ("blocked_missing_review_request_tag", "canonical review")):
             badges.append(_badge("Blocked: missing review tag", "rrw-badge-bad"))
         if row.get("typo_review_request_tag_present"):
-            badges.append(_badge("Typo tag: not canonical", "rrw-badge-warn"))
+            matched = row.get("matched_review_request_tag_value") or TYPO_REVIEW_REQUEST_TAG
+            badges.append(_badge(f"Matched legacy typo tag: {matched}", "rrw-badge-info"))
         if _row_text_contains(row, ("blocked_merged_order_group_not_ready", "merged", "related order group")):
             badges.append(_badge("Blocked: related group", "rrw-badge-bad"))
         if row.get("trustpilot_invitation_present"):
@@ -2122,7 +2462,7 @@ def _candidate_queue_status(latest_scan, candidate_queue, history_focus):
         "reason": blocked_reason,
         "requirements": [
             f"Delivered tag present ({DELIVERED_TAG})",
-            f"Exact canonical review-request tag present ({CANONICAL_REVIEW_REQUEST_TAG})",
+            "Review-request tag alias present",
             "Merged or related order group ready",
             "No duplicate Trustpilot invitation at order or customer level",
             "No unresolved ticket, refund, return, shipping, dispute, or chargeback risk",
@@ -2599,7 +2939,7 @@ def _trustpilot_gmail_send_gate_status(report, trustpilot_auto_refresh):
         "next_admin_action": _safe_text(
             data.get("next_admin_action")
             or trustpilot_auto_refresh.get("next_admin_action")
-            or "Wait until an eligible delivered order with canonical `1: review request` appears and passes all duplicate/risk checks.",
+            or "Wait until an eligible delivered order with a review-request tag alias appears and passes all duplicate/risk checks.",
             max_length=500,
         ),
         "required_ack_for_future_real_send": _safe_text(
@@ -2717,7 +3057,7 @@ def _trustpilot_gmail_send_executor_shell_status(report, trustpilot_gmail_send_g
         ),
         "next_admin_action": _safe_text(
             data.get("next_admin_action")
-            or "Wait until exactly one eligible delivered order with canonical `1: review request` passes all duplicate/risk checks and gate is ready.",
+            or "Wait until exactly one eligible delivered order with a review-request tag alias passes all duplicate/risk checks and gate is ready.",
             max_length=500,
         ),
         "required_ack": _safe_text(
@@ -2817,8 +3157,8 @@ def _trustpilot_real_send_final_preflight_status(report, trustpilot_gmail_send_e
         "next_admin_action": _safe_text(
             data.get("next_admin_action")
             or (
-                "Wait until auto refresh finds exactly one real eligible delivered order with canonical "
-                "`1: review request`, no duplicate/risk blockers, then re-run final preflight."
+                "Wait until auto refresh finds exactly one real eligible delivered order with a "
+                "review-request tag alias, no duplicate/risk blockers, then re-run final preflight."
             ),
             max_length=500,
         ),
@@ -3896,6 +4236,7 @@ def _operating_dashboard(
     candidate_queue,
     invitation_history,
     blocked_orders,
+    all_rows,
     history_ledger,
     trustpilot_email_records,
     ali_reviews_status,
@@ -3937,6 +4278,18 @@ def _operating_dashboard(
         trustpilot_gmail_scope_compatibility_resolver,
         trustpilot_gmail_env_loading_audit,
     )
+    last_60_days_scan = _last_60_days_candidate_scan(
+        candidate_queue=candidate_queue,
+        blocked_orders=blocked_orders,
+        invitation_history=invitation_history,
+        trustpilot_email_records=trustpilot_email_records,
+        all_rows=all_rows,
+        focus=focus,
+        gmail_setup=gmail_setup,
+    )
+    ready_count = last_60_days_scan["eligible_candidate_count"]
+    blocked_count = last_60_days_scan["blocked_count"]
+    sent_count = last_60_days_scan["already_sent_count"]
     setup_checklist = _setup_checklist(
         ready_count=ready_count,
         trustpilot_send_readiness=trustpilot_send_readiness,
@@ -3945,10 +4298,23 @@ def _operating_dashboard(
         trustpilot_gmail_draft_only_preflight=trustpilot_gmail_draft_only_preflight,
         trustpilot_gmail_one_draft_create_locked_runner=trustpilot_gmail_one_draft_create_locked_runner,
     )
+    approval_queue = _approval_queue(
+        candidate_queue=candidate_queue,
+        blocked_orders=blocked_orders,
+        invitation_history=invitation_history,
+        trustpilot_email_records=trustpilot_email_records,
+        focus=focus,
+        gmail_setup=gmail_setup,
+        last_60_days_scan=last_60_days_scan,
+    )
+    order_data_coverage = _dashboard_order_data_coverage(last_60_days_scan)
     return {
         "ready_to_send_count": ready_count,
         "blocked_count": blocked_count,
         "sent_trustpilot_count": sent_count,
+        "approval_queue": approval_queue,
+        "last_60_days_candidate_scan": last_60_days_scan,
+        "order_data_coverage": order_data_coverage,
         "setup_checklist": setup_checklist,
         "current_state_label": (
             "Waiting for eligible orders" if ready_count == 0 else "Ready for final review"
@@ -4034,6 +4400,38 @@ def _operating_dashboard(
     }
 
 
+def _dashboard_order_data_coverage(scan):
+    coverage = scan.get("order_data_coverage") or {}
+    scan_source = _safe_text(scan.get("scan_source") or coverage.get("scan_source"), max_length=80)
+    source_label = {
+        "full_shopify_orders": "Full Shopify orders",
+        "shenzhen_only_orders": "Shenzhen only",
+        "fallback_report_only": "Fallback report only",
+        "sqlite_report_fallback": "SQLite/report fallback",
+    }.get(scan_source, "Unknown")
+    warnings = _dedupe_text(scan.get("coverage_warnings") or coverage.get("coverage_warnings") or [])
+    incomplete = scan_source != "full_shopify_orders"
+    latest_sync = _safe_text(coverage.get("latest_review_request_sync_finished_at"), max_length=120)
+    sync_window = _safe_text(coverage.get("last_shopify_order_sync_window"), max_length=120)
+    freshness = _safe_text(scan.get("timestamp") or scan.get("scan_window_ended_at"), max_length=120)
+    return {
+        "scan_source": scan_source or "unknown",
+        "local_data_source_label": source_label,
+        "last_shopify_order_sync_window": sync_window or "Unknown",
+        "latest_review_request_sync_finished_at": latest_sync or "Unknown",
+        "order_22530_found_label": "Yes" if coverage.get("order_22530_found") is True else "No",
+        "candidate_scan_freshness": freshness or "Unknown",
+        "coverage_warnings": warnings,
+        "warning_label": ", ".join(warnings) if warnings else "None",
+        "incomplete": incomplete,
+        "incomplete_message": (
+            "Order data is incomplete. Run the 60-day Shopify sync before trusting the candidate list."
+            if incomplete
+            else ""
+        ),
+    }
+
+
 def _ready_to_send_value(count):
     if count == 0:
         return "0 orders"
@@ -4099,6 +4497,3158 @@ def _trustpilot_sent_count(events, invitation_history, focus):
     return max(len(sent_orders), len(invitation_history))
 
 
+def _build_review_send_state():
+    reports = _load_known_reports()
+    history_ledger = build_review_request_history_ledger(_log_dir(), {})
+    all_rows = _dedupe_rows(_collect_report_rows(reports))
+    candidate_queue = _candidate_queue(reports)
+    invitation_history = _rows_with_trustpilot_tags(all_rows)
+    blocked_orders = _blocked_rows(reports, all_rows)
+    trustpilot_email_records = _trustpilot_email_records(
+        history_ledger["all_events"],
+        history_ledger["filters"],
+    )
+    gmail_setup = _gmail_setup_from_reports(reports)
+    last_60_days_scan = _last_60_days_candidate_scan(
+        candidate_queue=candidate_queue,
+        blocked_orders=blocked_orders,
+        invitation_history=invitation_history,
+        trustpilot_email_records=trustpilot_email_records,
+        all_rows=all_rows,
+        focus=history_ledger.get("focus") or {},
+        gmail_setup=gmail_setup,
+    )
+    approval_queue = _approval_queue(
+        candidate_queue=candidate_queue,
+        blocked_orders=blocked_orders,
+        invitation_history=invitation_history,
+        trustpilot_email_records=trustpilot_email_records,
+        focus=history_ledger.get("focus") or {},
+        gmail_setup=gmail_setup,
+        last_60_days_scan=last_60_days_scan,
+    )
+    return {
+        "reports": reports,
+        "history_ledger": history_ledger,
+        "candidate_queue": candidate_queue,
+        "invitation_history": invitation_history,
+        "blocked_orders": blocked_orders,
+        "trustpilot_email_records": trustpilot_email_records,
+        "gmail_setup": gmail_setup,
+        "last_60_days_scan": last_60_days_scan,
+        "approval_queue": approval_queue,
+    }
+
+
+def build_review_request_last_60_days_candidate_scan_report(params=None):
+    reports = _load_known_reports()
+    history_ledger = build_review_request_history_ledger(_log_dir(), params or {})
+    all_rows = _dedupe_rows(_collect_report_rows(reports))
+    candidate_queue = _candidate_queue(reports)
+    invitation_history = _rows_with_trustpilot_tags(all_rows)
+    blocked_orders = _blocked_rows(reports, all_rows)
+    trustpilot_email_records = _trustpilot_email_records(
+        history_ledger["all_events"],
+        history_ledger["filters"],
+    )
+    gmail_setup = _gmail_setup_from_reports(reports)
+    scan = _last_60_days_candidate_scan(
+        candidate_queue=candidate_queue,
+        blocked_orders=blocked_orders,
+        invitation_history=invitation_history,
+        trustpilot_email_records=trustpilot_email_records,
+        all_rows=all_rows,
+        focus=history_ledger.get("focus") or {},
+        gmail_setup=gmail_setup,
+    )
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": LAST_60_DAY_SCAN_TASK_NAME,
+        "task_name": LAST_60_DAY_SCAN_TASK_NAME,
+        "phase": "5.28E",
+        "mode": "dry-run-local-synced-order-scan",
+        "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
+        "report_status": "last_60_days_candidate_scan_ready",
+        "success": True,
+        "scan_source": scan["scan_source"],
+        "coverage_warnings": scan["coverage_warnings"],
+        "order_data_coverage": scan["order_data_coverage"],
+        "order_22530_diagnosis": scan["order_22530_diagnosis"],
+        "scanned_order_count": scan["scanned_order_count"],
+        "delivered_order_count": scan["delivered_order_count"],
+        "eligible_candidate_count": scan["eligible_candidate_count"],
+        "already_sent_count": scan["already_sent_count"],
+        "blocked_count": scan["blocked_count"],
+        "blocked_merged_group_count": scan["blocked_merged_group_count"],
+        "blocked_duplicate_customer_count": scan["blocked_duplicate_customer_count"],
+        "blocked_missing_review_request_tag_count": scan["blocked_missing_review_request_tag_count"],
+        "blocked_not_delivered_count": scan["blocked_not_delivered_count"],
+        "eligible_candidates_summary": scan["eligible_candidates_summary"],
+        "blocked_candidates_summary": scan["blocked_candidates_summary"],
+        "already_sent_summary": scan["already_sent_summary"],
+        "scan_window_started_at": scan["scan_window_started_at"],
+        "scan_window_ended_at": scan["scan_window_ended_at"],
+        "date_fallback_order_count": scan["date_fallback_order_count"],
+        "date_fallback_summary": scan["date_fallback_summary"],
+        "candidate_22562_audit": _candidate_22562_alias_audit_from_scan(scan),
+        "gmail_permission_status": scan["gmail_permission_status"],
+        "template_available": scan["template_available"],
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+        "detected_issue_summary": _last_60_days_issue_summary(scan),
+    }
+
+
+def build_review_request_tag_alias_and_candidate_correction_audit_report(params=None):
+    state = _build_review_send_state()
+    scan = state["last_60_days_scan"]
+    candidate_audit = _candidate_22562_alias_audit_from_scan(scan)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_tag_alias_and_candidate_correction_audit",
+        "task_name": "shopify_review_request_tag_alias_and_candidate_correction_audit",
+        "phase": "5.28A",
+        "mode": "dry-run-local-audit",
+        "report_status": "tag_alias_and_candidate_correction_audit_ready",
+        "success": True,
+        "review_request_tag_aliases": list(REVIEW_REQUEST_TAG_ALIASES),
+        "canonical_review_request_tag_for_future_writes": CANONICAL_REVIEW_REQUEST_TAG,
+        "delivered_tag_aliases": list(DELIVERED_TAG_ALIASES),
+        "trustpilot_sent_tag_aliases": list(TRUSTPILOT_TAG_ALIASES),
+        "order_22562_tags_loaded": candidate_audit["tags_loaded"],
+        "order_22562_review_request_tag_detected": candidate_audit["review_request_tag_detected"],
+        "order_22562_matched_review_request_tag_value": candidate_audit["matched_review_request_tag_value"],
+        "order_22562_delivered_detected": candidate_audit["delivered_detected"],
+        "order_22562_merged_group_evidence_source": candidate_audit["merged_group_evidence_source"],
+        "order_22562_explicit_merge_evidence": candidate_audit["explicit_merge_evidence"],
+        "order_22562_final_eligibility_status": candidate_audit["final_eligibility_status"],
+        "order_22562_final_blockers": candidate_audit["final_blockers"],
+        "candidate_22562_audit": candidate_audit,
+        "eligible_candidate_count_after_fix": scan.get("eligible_candidate_count", 0),
+        "eligible_candidate_orders_after_fix": [
+            row.get("order")
+            for row in scan.get("eligible_queue_rows", [])
+            if row.get("order")
+        ],
+        "blocked_merged_group_count_after_fix": scan.get("blocked_merged_group_count", 0),
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+        "detected_issue_summary": _candidate_22562_audit_issue_summary(candidate_audit, scan),
+    }
+
+
+def _candidate_22562_alias_audit_from_scan(scan):
+    row, section = _find_scan_order_row(scan, "#22562")
+    if not row:
+        return {
+            "order_name": "#22562",
+            "row_found": False,
+            "row_section": "not_scanned",
+            "tags": [],
+            "tags_loaded": False,
+            "review_request_tag_detected": False,
+            "matched_review_request_tag_value": "",
+            "delivered_detected": False,
+            "merged_group_evidence_source": "none",
+            "explicit_merge_evidence": False,
+            "final_eligibility_status": "not_scanned",
+            "final_blockers": ["Order #22562 was not present in the local last-60-days scan."],
+        }
+    tags = _dedupe_text(row.get("order_tags_display") or row.get("tags") or [])
+    matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_tag = (
+        _safe_text(row.get("matched_review_request_tag_value"), max_length=120)
+        or (matched_review_request_tags[0] if matched_review_request_tags else "")
+    )
+    action_state = _safe_text(row.get("action_state"), max_length=80)
+    final_status = {
+        "review_send": "eligible",
+        "already_sent": "already_sent",
+        "not_ready": "blocked",
+    }.get(action_state, section)
+    blockers = []
+    if final_status == "blocked":
+        blockers = _split_blocker_text(row.get("eligibility_reason_plain") or row.get("reason"))
+    elif final_status == "already_sent":
+        blockers = [_safe_text(row.get("trustpilot_history_label") or row.get("reason"), max_length=300)]
+    explicit_merge = row.get("merged_order_group") is True
+    evidence_source = (
+        _safe_text(row.get("merged_group_evidence_source"), max_length=160)
+        if explicit_merge
+        else "none"
+    )
+    return {
+        "order_name": "#22562",
+        "row_found": True,
+        "row_section": section,
+        "tags": tags,
+        "tags_loaded": bool(tags) or row.get("has_order_tags") is True,
+        "review_request_tag_detected": row.get("review_request_tag_present") is True or bool(matched_tag),
+        "matched_review_request_tag_value": matched_tag,
+        "review_request_tag_match_detail": _review_request_tag_match_detail(matched_tag),
+        "delivered_detected": row.get("delivered_status_label") == "Delivered",
+        "merged_group_evidence_source": evidence_source,
+        "explicit_merge_evidence": explicit_merge,
+        "final_eligibility_status": final_status,
+        "final_blockers": [blocker for blocker in blockers if blocker],
+    }
+
+
+def _find_scan_order_row(scan, order_name):
+    for section_name, key in (
+        ("eligible", "eligible_queue_rows"),
+        ("blocked", "blocked_queue_rows"),
+        ("already_sent", "already_sent_queue_rows"),
+    ):
+        for row in scan.get(key) or []:
+            if row.get("order") == order_name:
+                return row, section_name
+    return None, "not_scanned"
+
+
+def _split_blocker_text(value):
+    text = _safe_text(value, max_length=500)
+    if not text:
+        return []
+    return [
+        _safe_text(part, max_length=240)
+        for part in re.split(r";\s*", text)
+        if _safe_text(part, max_length=240)
+    ]
+
+
+def _candidate_22562_audit_issue_summary(candidate_audit, scan):
+    status = candidate_audit.get("final_eligibility_status", "unknown")
+    matched = candidate_audit.get("matched_review_request_tag_value") or "none"
+    return (
+        f"#22562 status after alias and merge-evidence correction: {status}; "
+        f"matched review request tag: {matched}; "
+        f"eligible candidates after fix: {scan.get('eligible_candidate_count', 0)}. "
+        "No Gmail, Shopify, Trustpilot, Kudosi, or Ali Reviews API calls were performed."
+    )
+
+
+def _gmail_setup_from_reports(reports):
+    return _gmail_setup_summary(
+        _trustpilot_gmail_oauth_config_helper_status(
+            reports.get("trustpilot_gmail_oauth_config_helper", {}),
+            {},
+        ),
+        _trustpilot_gmail_config_compatibility_audit_status(
+            reports.get("trustpilot_gmail_config_compatibility_audit", {}),
+        ),
+        _trustpilot_gmail_scope_compatibility_resolver_status(
+            reports.get("trustpilot_gmail_scope_compatibility_resolver", {}),
+        ),
+        _trustpilot_gmail_env_loading_audit_status(
+            reports.get("trustpilot_gmail_env_loading_audit", {}),
+        ),
+    )
+
+
+def _approval_queue(
+    candidate_queue,
+    blocked_orders,
+    invitation_history,
+    trustpilot_email_records,
+    focus,
+    gmail_setup,
+    last_60_days_scan=None,
+):
+    if last_60_days_scan:
+        return _approval_queue_from_last_60_days_scan(last_60_days_scan)
+
+    already_sent_rows = _already_sent_rows(
+        focus=focus,
+        trustpilot_email_records=trustpilot_email_records,
+        invitation_history=invitation_history,
+        blocked_orders=blocked_orders,
+    )
+    local_order_contexts = _local_order_contexts(
+        _approval_queue_order_names(
+            candidate_queue=candidate_queue,
+            blocked_orders=blocked_orders,
+            invitation_history=invitation_history,
+            trustpilot_email_records=trustpilot_email_records,
+            already_sent_rows=already_sent_rows,
+        )
+    )
+    for sent_row in already_sent_rows:
+        _apply_queue_row_context(
+            sent_row,
+            _source_row_for_order(
+                sent_row.get("order"),
+                trustpilot_email_records,
+                invitation_history,
+                blocked_orders,
+                candidate_queue,
+            ),
+            local_order_contexts.get(sent_row.get("order"), {}),
+            action_state="already_sent",
+        )
+    already_sent_orders = {row["order"] for row in already_sent_rows if row.get("order")}
+    already_sent_customers = {
+        row["customer"]
+        for row in already_sent_rows
+        if _usable_masked_customer(row.get("customer"))
+    }
+    needs_review_rows = []
+    seen_orders = set()
+    for row in candidate_queue or []:
+        order_name = _safe_text(row.get("order_name"), max_length=80)
+        if not order_name or order_name in seen_orders:
+            continue
+        seen_orders.add(order_name)
+        queue_row = _needs_review_queue_row(
+            row,
+            already_sent_orders=already_sent_orders,
+            already_sent_customers=already_sent_customers,
+            gmail_setup=gmail_setup,
+            local_context=local_order_contexts.get(order_name, {}),
+        )
+        if queue_row["action_state"] == "already_sent":
+            if queue_row["order"] not in already_sent_orders:
+                queue_row["evidence"] = queue_row["reason"]
+                already_sent_rows.append(queue_row)
+                already_sent_orders.add(queue_row["order"])
+        else:
+            needs_review_rows.append(queue_row)
+
+    if "#22582" not in seen_orders and "#22582" not in already_sent_orders:
+        source_row = _source_row_for_order("#22582", blocked_orders, candidate_queue)
+        needs_review_rows.append(
+            _known_not_ready_queue_row(
+                "#22582",
+                _masked_customer_for_order("#22582", blocked_orders, trustpilot_email_records),
+                source_row=source_row,
+                local_context=local_order_contexts.get("#22582", {}),
+            )
+        )
+
+    needs_review_rows, already_sent_rows, merged_group_summary = _apply_merged_order_group_guard(
+        needs_review_rows=needs_review_rows,
+        already_sent_rows=already_sent_rows,
+        source_row_groups=(
+            candidate_queue,
+            blocked_orders,
+            invitation_history,
+            trustpilot_email_records,
+        ),
+    )
+    needs_review_rows.sort(key=_approval_queue_sort_key)
+    already_sent_rows = _collapse_merged_group_rows(_dedupe_queue_rows(already_sent_rows))
+    ready_to_send_count = sum(1 for row in needs_review_rows if row["action_state"] == "review_send")
+    not_ready_count = sum(1 for row in needs_review_rows if row["action_state"] == "not_ready")
+    return {
+        "needs_review_rows": needs_review_rows,
+        "already_sent_rows": already_sent_rows,
+        "needs_review_count": len(needs_review_rows),
+        "already_sent_count": len(already_sent_rows),
+        "ready_to_send_count": ready_to_send_count,
+        "not_ready_count": not_ready_count,
+        "duplicate_block_count": sum(
+            1
+            for row in needs_review_rows
+            if "already received" in row.get("reason", "").lower()
+        ),
+        "review_send_action_enabled_count": ready_to_send_count,
+        "email_sent_count": sum(
+            1
+            for row in already_sent_rows
+            if "sent" in row.get("status", "").lower()
+            or "sent" in row.get("evidence", "").lower()
+        ),
+        "merged_group_count": merged_group_summary["merged_group_count"],
+        "merged_groups": merged_group_summary["merged_groups"],
+        "shopify_tag_write_enabled_count": 0,
+        "empty_message": "No orders need review email right now.",
+    }
+
+
+def _approval_queue_from_last_60_days_scan(scan):
+    needs_review_rows = list(scan.get("eligible_queue_rows") or [])
+    blocked_rows = list(scan.get("blocked_queue_rows") or [])
+    already_sent_rows = list(scan.get("already_sent_queue_rows") or [])
+    merged_groups = scan.get("merged_groups") or []
+    ready_to_send_count = len(needs_review_rows)
+    coverage_incomplete = scan.get("scan_source") != "full_shopify_orders"
+    return {
+        "needs_review_rows": needs_review_rows,
+        "blocked_rows": blocked_rows,
+        "already_sent_rows": already_sent_rows,
+        "needs_review_count": ready_to_send_count,
+        "already_sent_count": len(already_sent_rows),
+        "ready_to_send_count": ready_to_send_count,
+        "not_ready_count": len(blocked_rows),
+        "blocked_count": len(blocked_rows),
+        "duplicate_block_count": scan.get("blocked_duplicate_customer_count", 0),
+        "review_send_action_enabled_count": ready_to_send_count,
+        "email_sent_count": scan.get("already_sent_count", 0),
+        "merged_group_count": scan.get("blocked_merged_group_count", 0),
+        "merged_groups": merged_groups,
+        "shopify_tag_write_enabled_count": 0,
+        "empty_message": (
+            "Order data is incomplete. Run the 60-day Shopify sync before trusting the candidate list."
+            if coverage_incomplete
+            else "No orders need review email right now."
+        ),
+        "scan_summary": {
+            "scanned_order_count": scan.get("scanned_order_count", 0),
+            "delivered_order_count": scan.get("delivered_order_count", 0),
+            "eligible_candidate_count": scan.get("eligible_candidate_count", 0),
+            "blocked_count": scan.get("blocked_count", 0),
+            "already_sent_count": scan.get("already_sent_count", 0),
+            "window_days": scan.get("window_days", LAST_60_DAY_SCAN_WINDOW_DAYS),
+            "scan_source": scan.get("scan_source", "unknown"),
+            "coverage_incomplete": coverage_incomplete,
+        },
+    }
+
+
+def _last_60_days_candidate_scan(
+    candidate_queue,
+    blocked_orders,
+    invitation_history,
+    trustpilot_email_records,
+    all_rows,
+    focus,
+    gmail_setup,
+):
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=LAST_60_DAY_SCAN_WINDOW_DAYS)
+    source_row_groups = (
+        candidate_queue,
+        blocked_orders,
+        invitation_history,
+        trustpilot_email_records,
+        all_rows,
+    )
+    source_by_order = _source_rows_by_order(*source_row_groups)
+    source_by_order = _apply_manual_confirmed_order_evidence(source_by_order)
+    scan_contexts, local_db_error = _last_60_day_order_scan_contexts(source_by_order, cutoff)
+    scan_contexts = _ensure_current_focus_scan_contexts(scan_contexts, source_by_order, cutoff)
+    local_order_contexts = _local_order_contexts(scan_contexts.keys())
+
+    already_sent_rows = _already_sent_rows(
+        focus=focus,
+        trustpilot_email_records=trustpilot_email_records,
+        invitation_history=invitation_history,
+        blocked_orders=blocked_orders,
+    )
+    for sent_row in already_sent_rows:
+        order_name = sent_row.get("order")
+        _apply_queue_row_context(
+            sent_row,
+            _source_row_for_order(
+                order_name,
+                trustpilot_email_records,
+                invitation_history,
+                blocked_orders,
+                candidate_queue,
+                all_rows,
+            ),
+            local_order_contexts.get(order_name, {}),
+            action_state="already_sent",
+        )
+
+    already_sent_orders = {row["order"] for row in already_sent_rows if row.get("order")}
+    already_sent_customers = {
+        row["customer"]
+        for row in already_sent_rows
+        if _usable_masked_customer(row.get("customer"))
+    }
+
+    queue_rows = []
+    scanned_contexts = sorted(
+        scan_contexts.values(),
+        key=lambda item: (
+            item.get("scan_date") or "",
+            item.get("order_name") or "",
+        ),
+        reverse=True,
+    )
+    limited_contexts = list(scanned_contexts[:MAX_SOURCE_ROWS])
+    included_orders = {context.get("order_name") for context in limited_contexts}
+    for context in scanned_contexts[MAX_SOURCE_ROWS:]:
+        if context.get("order_name") in set(REVIEW_REQUEST_FOCUS_ORDER_NAMES):
+            if context.get("order_name") not in included_orders:
+                limited_contexts.append(context)
+                included_orders.add(context.get("order_name"))
+    for context in limited_contexts:
+        order_name = context.get("order_name")
+        if not order_name:
+            continue
+        if _is_simulator_order_name(order_name):
+            continue
+        source_row = _scan_queue_source_row(
+            order_name,
+            source_by_order.get(order_name) or {},
+            context,
+            local_order_contexts.get(order_name, {}),
+        )
+        queue_row = _needs_review_queue_row(
+            source_row,
+            already_sent_orders=already_sent_orders,
+            already_sent_customers=already_sent_customers,
+            gmail_setup=gmail_setup,
+            local_context=local_order_contexts.get(order_name, {}),
+        )
+        _attach_scan_date_context(queue_row, context)
+        if queue_row["action_state"] == "already_sent":
+            if queue_row["order"] not in already_sent_orders:
+                queue_row["evidence"] = queue_row["reason"]
+                already_sent_rows.append(queue_row)
+                already_sent_orders.add(queue_row["order"])
+        else:
+            queue_rows.append(queue_row)
+
+    queue_rows, already_sent_rows, merged_group_summary = _apply_merged_order_group_guard(
+        needs_review_rows=queue_rows,
+        already_sent_rows=already_sent_rows,
+        source_row_groups=source_row_groups,
+    )
+    queue_rows = _dedupe_queue_rows(queue_rows)
+    already_sent_rows = _collapse_merged_group_rows(_dedupe_queue_rows(already_sent_rows))
+    eligible_rows = [
+        row for row in queue_rows if row.get("action_state") == "review_send"
+    ]
+    blocked_rows = [
+        row for row in queue_rows if row.get("action_state") != "review_send"
+    ]
+    eligible_rows.sort(key=_approval_queue_sort_key)
+    blocked_rows.sort(key=_blocked_queue_sort_key)
+    already_sent_rows.sort(key=_already_sent_sort_key)
+
+    delivered_count = sum(
+        1
+        for context in scan_contexts.values()
+        if context.get("delivered_confirmed") is True
+    )
+    fallback_contexts = [
+        context
+        for context in scan_contexts.values()
+        if context.get("scan_date_fallback_used") is True
+    ]
+    order_data_coverage = _order_data_coverage_summary(
+        scan_contexts=scan_contexts,
+        source_by_order=source_by_order,
+        cutoff=cutoff,
+        local_db_error=local_db_error,
+    )
+    order_22530_diagnosis = _focus_order_diagnosis("#22530", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
+    return {
+        "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
+        "scan_window_started_at": cutoff.isoformat(),
+        "scan_window_ended_at": now.isoformat(),
+        "scan_source": order_data_coverage["scan_source"],
+        "coverage_warnings": order_data_coverage["coverage_warnings"],
+        "order_data_coverage": order_data_coverage,
+        "order_22530_diagnosis": order_22530_diagnosis,
+        "local_db_error_sanitized": local_db_error,
+        "scanned_order_count": len(scan_contexts),
+        "delivered_order_count": delivered_count,
+        "eligible_candidate_count": len(eligible_rows),
+        "already_sent_count": len(already_sent_rows),
+        "blocked_count": len(blocked_rows),
+        "blocked_merged_group_count": sum(1 for row in blocked_rows if _row_blocked_by_merged_group(row)),
+        "blocked_duplicate_customer_count": sum(1 for row in blocked_rows if _row_blocked_by_duplicate(row)),
+        "blocked_missing_review_request_tag_count": sum(
+            1 for row in blocked_rows if _row_blocked_by_missing_review_request_tag(row)
+        ),
+        "blocked_not_delivered_count": sum(1 for row in blocked_rows if _row_blocked_by_not_delivered(row)),
+        "eligible_queue_rows": eligible_rows,
+        "blocked_queue_rows": blocked_rows,
+        "already_sent_queue_rows": already_sent_rows,
+        "eligible_candidates_summary": [_queue_candidate_summary(row) for row in eligible_rows],
+        "blocked_candidates_summary": [_blocked_candidate_summary(row) for row in blocked_rows],
+        "already_sent_summary": [_already_sent_summary(row) for row in already_sent_rows],
+        "merged_groups": merged_group_summary["merged_groups"],
+        "date_fallback_order_count": len(fallback_contexts),
+        "date_fallback_summary": [_scan_date_summary(context) for context in fallback_contexts[:25]],
+        "gmail_permission_status": gmail_setup.get("scope_status") or "scope_missing",
+        "template_available": True,
+    }
+
+
+def _order_data_coverage_summary(scan_contexts, source_by_order, cutoff, local_db_error):
+    coverage = {
+        "scan_source": "fallback_report_only",
+        "coverage_warnings": [],
+        "last_shopify_order_sync_window": "Unknown",
+        "latest_review_request_sync_finished_at": "",
+        "latest_review_request_sync_task_name": "",
+        "local_last_60_days_order_count": 0,
+        "local_last_60_days_shenzhen_order_count": 0,
+        "local_last_60_days_non_shenzhen_order_count": 0,
+        "local_order_context_count": sum(
+            1
+            for context in scan_contexts.values()
+            if context.get("local_order_source") == "ShopifyOrder"
+        ),
+        "report_only_context_count": sum(
+            1
+            for context in scan_contexts.values()
+            if context.get("local_order_source") != "ShopifyOrder"
+        ),
+        "delivered_order_data_missing_count": sum(
+            1 for context in scan_contexts.values() if context.get("delivered_confirmed") is None
+        ),
+        "order_22530_found": False,
+        "order_22562_found": False,
+        "local_db_error_sanitized": local_db_error,
+    }
+    try:
+        query = (
+            Q(order_created_at__gte=cutoff)
+            | Q(fulfilled_at__gte=cutoff)
+            | Q(updated_at__gte=cutoff)
+        )
+        local_queryset = ShopifyOrder.objects.filter(query)
+        coverage["local_last_60_days_order_count"] = local_queryset.count()
+        shenzhen_query = Q(is_shenzhen_order=True) | Q(current_location__in=["shenzhen", "mixed"])
+        coverage["local_last_60_days_shenzhen_order_count"] = local_queryset.filter(shenzhen_query).count()
+        coverage["local_last_60_days_non_shenzhen_order_count"] = max(
+            coverage["local_last_60_days_order_count"]
+            - coverage["local_last_60_days_shenzhen_order_count"],
+            0,
+        )
+        local_orders = list(
+            local_queryset.values(
+                "order_name",
+                "order_number",
+                "current_location",
+                "is_shenzhen_order",
+                "last_order_synced_at",
+            )[:MAX_SOURCE_ROWS]
+        )
+        synced_values = [order.get("last_order_synced_at") for order in local_orders if order.get("last_order_synced_at")]
+        if synced_values:
+            coverage["latest_local_order_synced_at"] = max(synced_values).isoformat()
+        sync_state = (
+            ShopifySyncState.objects.filter(task_name__in=REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES)
+            .order_by("-last_success_at", "-finished_at", "-updated_at")
+            .first()
+        )
+        if sync_state and sync_state.last_success_at:
+            coverage["latest_review_request_sync_finished_at"] = sync_state.last_success_at.isoformat()
+            coverage["latest_review_request_sync_task_name"] = sync_state.task_name
+            coverage["last_shopify_order_sync_window"] = _review_request_sync_window_label(sync_state.task_name)
+        coverage["order_22530_found"] = _focus_order_found_locally("#22530")
+        coverage["order_22562_found"] = _focus_order_found_locally("#22562")
+    except Exception as exc:
+        coverage["local_db_error_sanitized"] = _safe_exception_summary(exc)
+
+    if coverage["latest_review_request_sync_finished_at"]:
+        coverage["scan_source"] = "full_shopify_orders"
+    elif coverage["local_last_60_days_order_count"] > 0:
+        coverage["scan_source"] = (
+            "shenzhen_only_orders"
+            if coverage["local_last_60_days_non_shenzhen_order_count"] == 0
+            else "full_shopify_orders"
+        )
+    elif source_by_order:
+        coverage["scan_source"] = "fallback_report_only"
+    else:
+        coverage["scan_source"] = "fallback_report_only"
+
+    warnings = []
+    if coverage["scan_source"] != "full_shopify_orders":
+        warnings.append("incomplete_local_order_source")
+    if not coverage["order_22530_found"]:
+        warnings.append("order_not_found_in_local_data")
+    if coverage["delivered_order_data_missing_count"] > 0:
+        warnings.append("delivered_order_data_missing")
+    coverage["coverage_warnings"] = _dedupe_text(warnings)
+    return coverage
+
+
+def _review_request_sync_window_label(task_name):
+    if task_name == "orders_review_request_3":
+        return "latest 3 days"
+    if task_name == "orders_review_request_60":
+        return "last 60 days"
+    if task_name == "orders_review_request_manual":
+        return "manual Review Request window"
+    return "Unknown"
+
+
+def _focus_order_found_locally(order_name):
+    query_names = set()
+    query_numbers = set()
+    query_shopify_ids = set()
+    _collect_order_lookup_values(order_name, "", query_names, query_numbers, query_shopify_ids)
+    query = Q()
+    if query_names:
+        query |= Q(order_name__in=query_names)
+    if query_numbers:
+        query |= Q(order_number__in=query_numbers)
+    if query_shopify_ids:
+        query |= Q(shopify_order_id__in=query_shopify_ids)
+    if not query:
+        return False
+    return ShopifyOrder.objects.filter(query).exists()
+
+
+def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_rows, already_sent_rows):
+    context = scan_contexts.get(order_name) or {}
+    row, section = _find_scan_order_row(
+        {
+            "eligible_queue_rows": eligible_rows,
+            "blocked_queue_rows": blocked_rows,
+            "already_sent_queue_rows": already_sent_rows,
+        },
+        order_name,
+    )
+    found_locally = context.get("local_order_source") == "ShopifyOrder"
+    if not found_locally:
+        message = f"{order_name} not found in local ShopifyOrder data. Run Review Request 60-day Shopify sync."
+    else:
+        message = f"{order_name} found in local ShopifyOrder data."
+    tag_data_loaded = context.get("review_request_tag_data_loaded") is True or (row or {}).get(
+        "review_request_tag_data_loaded"
+    ) is True
+    review_request_tag_present = (
+        context.get("canonical_review_request_tag_present") is True
+        or (row or {}).get("review_request_tag_present") is True
+    )
+    if not tag_data_loaded:
+        review_request_tag_status = "unavailable"
+    elif review_request_tag_present:
+        review_request_tag_status = "present"
+    else:
+        review_request_tag_status = "missing"
+    final_blockers = _focus_final_blockers(found_locally, row, tag_data_loaded)
+    return {
+        "order_name": order_name,
+        "found_in_local_shopify_order": found_locally,
+        "matched_field": _focus_matched_field(order_name, context) if found_locally else "",
+        "matched_order_name": _safe_text(context.get("matched_order_name") or context.get("order_name"), max_length=80),
+        "local_order_id": context.get("local_order_id", ""),
+        "order_number": _safe_text(context.get("order_number"), max_length=120),
+        "shopify_order_id": _safe_text(context.get("shopify_order_id"), max_length=120),
+        "order_created_at": _safe_text(context.get("order_created_at"), max_length=80),
+        "order_created_date": _date_part(context.get("order_created_at")),
+        "fulfillment_status": _safe_text(context.get("fulfillment_status"), max_length=80),
+        "shopify_note_present": context.get("shopify_note_present") is True,
+        "included_in_candidate_scan": bool(row),
+        "candidate_scan_section": section,
+        "scan_date": _safe_text(context.get("scan_date"), max_length=120),
+        "scan_date_basis": _safe_text(context.get("scan_date_basis"), max_length=80),
+        "delivered_confirmed": context.get("delivered_confirmed"),
+        "delivered_or_fulfilled_detected": context.get("delivered_confirmed") is True,
+        "tag_data_available": tag_data_loaded,
+        "review_request_tag_data_loaded": tag_data_loaded,
+        "tag_data_missing_source": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_MISSING_SOURCE,
+        "tag_data_recommended_action": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
+        "review_request_tag_status": review_request_tag_status,
+        "review_request_tag_present": review_request_tag_present,
+        "matched_review_request_tag_value": _safe_text(
+            context.get("matched_review_request_tag_value")
+            or (row or {}).get("matched_review_request_tag_value"),
+            max_length=120,
+        ),
+        "final_eligibility_status": _focus_final_eligibility_status(found_locally, row, tag_data_loaded),
+        "final_blockers": final_blockers,
+        "message": message,
+    }
+
+
+def _focus_matched_field(order_name, context):
+    target = _safe_text(order_name, max_length=120)
+    target_canonical = _canonical_order_name(target)
+    target_number = target_canonical.lstrip("#")
+    if _canonical_order_name(context.get("matched_order_name") or context.get("order_name")) == target_canonical:
+        return "order_name"
+    if target_number and _safe_text(context.get("order_number"), max_length=120).lstrip("#") == target_number:
+        return "order_number"
+    if target_number and _safe_text(context.get("shopify_order_id"), max_length=120) == target_number:
+        return "shopify_order_id"
+    return ""
+
+
+def _focus_final_eligibility_status(found_locally, row, tag_data_loaded):
+    if not found_locally:
+        return "not_found"
+    action_state = _safe_text((row or {}).get("action_state"), max_length=80)
+    if action_state == "review_send":
+        return "eligible"
+    if action_state == "already_sent":
+        return "already_sent"
+    if not tag_data_loaded:
+        return "blocked"
+    return "blocked" if row else "not_scanned"
+
+
+def _focus_final_blockers(found_locally, row, tag_data_loaded):
+    if not found_locally:
+        return ["order_not_found_in_local_shopify_order"]
+    blockers = _split_blocker_text((row or {}).get("eligibility_reason_plain") or (row or {}).get("reason"))
+    if not tag_data_loaded:
+        blockers.append("review_request_tag_data_unavailable")
+    return _dedupe_text(blockers)
+
+
+def _date_part(value):
+    text = _safe_text(value, max_length=80)
+    return text[:10] if len(text) >= 10 else text
+
+
+def _last_60_day_order_scan_contexts(source_by_order, cutoff):
+    source_order_names = sorted(_dedupe_order_names(list(source_by_order) + list(REVIEW_REQUEST_FOCUS_ORDER_NAMES)))
+    query_names = set()
+    query_numbers = set()
+    query_shopify_ids = set()
+    for order_name in source_order_names:
+        _collect_order_lookup_values(order_name, "", query_names, query_numbers, query_shopify_ids)
+
+    query = (
+        Q(order_created_at__gte=cutoff)
+        | Q(fulfilled_at__gte=cutoff)
+        | Q(updated_at__gte=cutoff)
+    )
+    lookup_query = Q()
+    if query_names:
+        lookup_query |= Q(order_name__in=query_names)
+    if query_numbers:
+        lookup_query |= Q(order_number__in=query_numbers)
+    if query_shopify_ids:
+        lookup_query |= Q(shopify_order_id__in=query_shopify_ids)
+    if lookup_query:
+        query |= lookup_query
+
+    contexts = {}
+    local_db_error = ""
+    value_fields = (
+        "id",
+        "order_name",
+        "order_number",
+        "shopify_order_id",
+        "financial_status",
+        "fulfillment_status",
+        "customer_name",
+        "customer_email",
+        "order_created_at",
+        "fulfilled_at",
+        "fulfillment_status_raw",
+        "updated_at",
+        "settlement_status",
+        "shopify_note",
+        "shopify_note_attributes",
+        "warehouse_note",
+        "transfer_note",
+    )
+    try:
+        orders = list(
+            ShopifyOrder.objects.filter(query)
+            .values(*value_fields)
+            .order_by("-updated_at", "-order_created_at", "-id")[:MAX_SOURCE_ROWS]
+        )
+        if lookup_query:
+            existing_ids = {order.get("id") for order in orders}
+            for order in ShopifyOrder.objects.filter(lookup_query).values(*value_fields)[:MAX_SOURCE_ROWS]:
+                if order.get("id") in existing_ids:
+                    continue
+                orders.append(order)
+                existing_ids.add(order.get("id"))
+    except Exception as exc:
+        orders = []
+        local_db_error = _safe_exception_summary(exc)
+
+    for order in orders:
+        order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
+        if not order_name:
+            continue
+        context = _scan_context_from_local_order(
+            order,
+            source_by_order.get(order_name) or {},
+            cutoff,
+        )
+        if context.get("scan_date_in_window") or order_name in source_by_order:
+            contexts[order_name] = context
+
+    for order_name, source_row in source_by_order.items():
+        if order_name in contexts:
+            continue
+        context = _scan_context_from_source_row(order_name, source_row, cutoff)
+        if context.get("scan_date_in_window") or context.get("scan_date_missing"):
+            contexts[order_name] = context
+    return contexts, local_db_error
+
+
+def _ensure_current_focus_scan_contexts(scan_contexts, source_by_order, cutoff):
+    result = dict(scan_contexts)
+    for order_name in REVIEW_REQUEST_FOCUS_ORDER_NAMES:
+        if order_name in result:
+            continue
+        source_row = source_by_order.get(order_name) or {}
+        if not source_row:
+            continue
+        result[order_name] = _scan_context_from_source_row(order_name, source_row, cutoff)
+    return result
+
+
+def _scan_context_from_local_order(order, source_row, cutoff):
+    order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
+    date_context = _scan_date_context(order, source_row)
+    delivered_confirmed = _scan_delivered_confirmed(source_row, order)
+    canonical_tag_present = _scan_canonical_review_request_tag_present(source_row)
+    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    matched_review_request_tags = _matched_review_request_tags(tags)
+    tag_data_loaded = _tag_data_loaded(source_row, tags)
+    local_context = {
+        "order_name": order_name,
+        "matched_order_name": order_name,
+        "local_order_id": order.get("id") or "",
+        "order_number": _safe_text(order.get("order_number"), max_length=120),
+        "shopify_order_id": _safe_text(order.get("shopify_order_id"), max_length=120),
+        "customer_display_name": _safe_customer_display_name(order.get("customer_name")),
+        "masked_email": mask_email(_safe_runtime_email(order.get("customer_email"))),
+        "financial_status": _safe_text(order.get("financial_status"), max_length=80),
+        "fulfillment_status": _safe_text(order.get("fulfillment_status"), max_length=80),
+        "fulfillment_status_raw": _safe_text(order.get("fulfillment_status_raw"), max_length=120),
+        "settlement_status": _safe_text(order.get("settlement_status"), max_length=80),
+        "order_created_at": _safe_text(order.get("order_created_at"), max_length=80),
+        "updated_at": _safe_text(order.get("updated_at"), max_length=80),
+        "fulfilled_at": _safe_text(order.get("fulfilled_at"), max_length=80),
+        "shopify_note_present": _order_note_present(order),
+        "local_order_source": "ShopifyOrder",
+        "delivered_confirmed": delivered_confirmed,
+        "canonical_review_request_tag_present": canonical_tag_present,
+        "tag_data_available": tag_data_loaded,
+        "review_request_tag_data_loaded": tag_data_loaded,
+        "tag_data_missing_source": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_MISSING_SOURCE,
+        "tag_data_recommended_action": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
+        "matched_review_request_tag_value": matched_review_request_tags[0] if matched_review_request_tags else "",
+        "scan_date_in_window": _datetime_in_window(date_context.get("scan_datetime"), cutoff),
+        "scan_date_missing": date_context.get("scan_datetime") is None,
+    }
+    local_context.update(date_context)
+    return local_context
+
+
+def _scan_context_from_source_row(order_name, source_row, cutoff):
+    date_context = _scan_date_context({}, source_row)
+    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    matched_review_request_tags = _matched_review_request_tags(tags)
+    tag_data_loaded = _tag_data_loaded(source_row, tags)
+    return {
+        "order_name": order_name,
+        "matched_order_name": order_name,
+        "customer_display_name": _safe_customer_display_name(source_row.get("customer_display_name")),
+        "masked_email": _safe_text(source_row.get("masked_email"), max_length=120),
+        "financial_status": "",
+        "fulfillment_status": "",
+        "fulfillment_status_raw": "",
+        "settlement_status": "",
+        "local_order_source": "local_review_request_report",
+        "delivered_confirmed": _scan_delivered_confirmed(source_row, {}),
+        "canonical_review_request_tag_present": _scan_canonical_review_request_tag_present(source_row),
+        "tag_data_available": tag_data_loaded,
+        "review_request_tag_data_loaded": tag_data_loaded,
+        "tag_data_missing_source": "" if tag_data_loaded else "Shopify tag data not loaded in local report source",
+        "tag_data_recommended_action": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
+        "matched_review_request_tag_value": matched_review_request_tags[0] if matched_review_request_tags else "",
+        "scan_date_in_window": _datetime_in_window(date_context.get("scan_datetime"), cutoff),
+        "scan_date_missing": date_context.get("scan_datetime") is None,
+        **date_context,
+    }
+
+
+def _order_note_present(order):
+    if _safe_text(order.get("shopify_note"), max_length=20):
+        return True
+    note_attributes = order.get("shopify_note_attributes")
+    return note_attributes not in (None, "", [], {})
+
+
+def _scan_date_context(order, source_row):
+    delivered_dt = _first_datetime_value(
+        source_row,
+        (
+            "delivered_at",
+            "delivered_date",
+            "delivery_date",
+            "deliveredAt",
+            "delivered_time",
+            "delivery_time",
+        ),
+    )
+    if delivered_dt:
+        return {
+            "scan_datetime": delivered_dt,
+            "scan_date": delivered_dt.isoformat(),
+            "scan_date_basis": "delivered_date",
+            "scan_date_fallback_used": False,
+        }
+    for basis, value in (
+        ("fulfilled_at", order.get("fulfilled_at")),
+        ("updated_at", order.get("updated_at")),
+        ("order_created_at", order.get("order_created_at")),
+        ("source_created_at", source_row.get("created_at")),
+    ):
+        parsed = _parse_datetime_value(value)
+        if parsed:
+            return {
+                "scan_datetime": parsed,
+                "scan_date": parsed.isoformat(),
+                "scan_date_basis": basis,
+                "scan_date_fallback_used": True,
+            }
+    return {
+        "scan_datetime": None,
+        "scan_date": "",
+        "scan_date_basis": "unavailable",
+        "scan_date_fallback_used": True,
+    }
+
+
+def _first_datetime_value(mapping, keys):
+    if not isinstance(mapping, dict):
+        return None
+    for key in keys:
+        parsed = _parse_datetime_value(mapping.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _parse_datetime_value(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = _safe_text(value, max_length=80)
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _datetime_in_window(value, cutoff):
+    return bool(value and value >= cutoff)
+
+
+def _scan_delivered_confirmed(source_row, order):
+    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    if source_row.get("delivered_tag_present") is True or has_delivered_tag(tags) or "妥投" in tags:
+        return True
+    fulfillment_values = {
+        _safe_text(order.get(key), max_length=160).lower()
+        for key in ("fulfillment_status", "fulfillment_status_raw")
+        if _safe_text(order.get(key), max_length=160)
+    }
+    if "fulfilled" in fulfillment_values:
+        return True
+    if source_row.get("delivered_tag_present") is False:
+        return False
+    status_text = " ".join(
+        _safe_text(value, max_length=160).lower()
+        for value in (
+            source_row.get("status"),
+            source_row.get("blocking_summary"),
+            source_row.get("classification"),
+            order.get("fulfillment_status"),
+            order.get("fulfillment_status_raw"),
+            order.get("warehouse_note"),
+        )
+    )
+    if "not delivered" in status_text or "missing delivered" in status_text:
+        return False
+    if "delivered" in status_text or "妥投" in status_text:
+        return True
+    return None
+
+
+def _scan_canonical_review_request_tag_present(source_row):
+    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    tags_loaded = _tag_data_loaded(source_row, tags)
+    if source_row.get("canonical_review_request_tag_present") is True:
+        return True
+    if source_row.get("review_request_tag_present") is True:
+        return True
+    if has_review_request_tag(tags):
+        return True
+    if not tags_loaded:
+        return None
+    if source_row.get("canonical_review_request_tag_present") is False:
+        return False
+    reason_text = " ".join(
+        _safe_text(source_row.get(key), max_length=240).lower()
+        for key in ("reason", "blocking_summary", "status", "classification")
+    )
+    if "missing" in reason_text and CANONICAL_REVIEW_REQUEST_TAG in reason_text:
+        return False
+    if tags_loaded:
+        return False
+    return None
+
+
+def _tag_data_loaded(source_row, tags):
+    if tags:
+        return True
+    return any(
+        _tag_payload_available(source_row.get(key))
+        for key in (
+            "tags",
+            "order_tags_display",
+            "safe_tags_summary",
+            "tags_summary",
+            "tags_of_interest",
+            "exact_tags_of_interest",
+        )
+    )
+
+
+def _tag_payload_available(value):
+    if value in (None, "", [], {}):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = _safe_text(value, max_length=160).lower()
+        return text not in {
+            "no tag data",
+            "no tag data in row",
+            "tag data not loaded",
+            "shopify tag data not loaded",
+            "unavailable",
+            "none",
+            "[]",
+        }
+    if isinstance(value, dict):
+        return any(_tag_payload_available(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_tag_payload_available(item) for item in value)
+    return True
+
+
+def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
+    row = dict(source_row or {})
+    tags = _dedupe_text(row.get("tags") or row.get("order_tags_display") or [])
+    trustpilot_tags = _matched_trustpilot_tags(row, tags)
+    matched_review_request_tags = _matched_review_request_tags(tags)
+    blocking_reasons = _dedupe_text(row.get("blocking_reasons") or [])
+    if _scan_local_risk_detected(scan_context):
+        blocking_reasons.append("blocked_risk_or_ticket")
+    delivered = scan_context.get("delivered_confirmed")
+    canonical_tag_present = scan_context.get("canonical_review_request_tag_present")
+    blocking_reasons = _filtered_scan_blocking_reasons(
+        blocking_reasons,
+        canonical_tag_present,
+        row,
+        local_context,
+    )
+    row.update(
+        {
+            "order_name": order_name,
+            "masked_email": (
+                _safe_text(row.get("masked_email"), max_length=120)
+                or _safe_text(scan_context.get("masked_email"), max_length=120)
+                or _safe_text(local_context.get("masked_email"), max_length=120)
+            ),
+            "customer_display_name": (
+                _safe_customer_display_name(local_context.get("customer_display_name"))
+                or _safe_customer_display_name(scan_context.get("customer_display_name"))
+                or _safe_customer_display_name(row.get("customer_display_name"))
+            ),
+            "customer_order_count": _int_or_zero(local_context.get("customer_order_count"))
+            or _int_or_zero(row.get("customer_order_count")),
+            "local_order_id": scan_context.get("local_order_id", ""),
+            "matched_order_name": scan_context.get("matched_order_name") or order_name,
+            "order_number": scan_context.get("order_number", ""),
+            "shopify_order_id": scan_context.get("shopify_order_id", ""),
+            "order_created_at": scan_context.get("order_created_at", ""),
+            "fulfillment_status": scan_context.get("fulfillment_status", ""),
+            "shopify_note_present": scan_context.get("shopify_note_present") is True,
+            "tags": tags,
+            "tag_data_available": scan_context.get("tag_data_available") is True,
+            "tag_data_missing_source": _safe_text(scan_context.get("tag_data_missing_source"), max_length=240),
+            "tag_data_recommended_action": _safe_text(scan_context.get("tag_data_recommended_action"), max_length=300),
+            "trustpilot_tags": trustpilot_tags,
+            "trustpilot_invitation_present": bool(trustpilot_tags)
+            or row.get("trustpilot_invitation_present") is True,
+            "delivered_tag_present": delivered is True,
+            "canonical_review_request_tag_present": canonical_tag_present,
+            "review_request_tag_present": canonical_tag_present,
+            "review_request_tag_data_loaded": scan_context.get("review_request_tag_data_loaded") is True,
+            "matched_review_request_tag_value": (
+                scan_context.get("matched_review_request_tag_value")
+                or (matched_review_request_tags[0] if matched_review_request_tags else "")
+            ),
+            "blocking_reasons": _dedupe_text(blocking_reasons),
+            "source_section": "last_60_days_delivered_order_scan",
+            "eligible_for_trustpilot": True,
+            "scan_date": scan_context.get("scan_date", ""),
+            "scan_date_basis": scan_context.get("scan_date_basis", ""),
+            "scan_date_fallback_used": scan_context.get("scan_date_fallback_used") is True,
+        }
+    )
+    return row
+
+
+def _scan_local_risk_detected(scan_context):
+    text = " ".join(
+        _safe_text(scan_context.get(key), max_length=160).lower()
+        for key in ("financial_status", "fulfillment_status", "settlement_status")
+    )
+    return any(
+        keyword in text
+        for keyword in ("refund", "returned", "return", "cancel", "cancelled", "void", "dispute", "chargeback")
+    )
+
+
+def _filtered_scan_blocking_reasons(blocking_reasons, review_request_tag_status, row, local_context=None):
+    local_context = local_context or {}
+    local_repeat_confirmed = _int_or_zero(local_context.get("customer_order_count")) > 1
+    filtered = []
+    for blocker in blocking_reasons or []:
+        text = _safe_text(blocker, max_length=160).lower()
+        if review_request_tag_status is True and "missing_review_request_tag" in text:
+            continue
+        if review_request_tag_status is True and "missing" in text and "review request" in text:
+            continue
+        if "merged_order_group_not_ready" in text and not _row_has_explicit_merge_evidence(row):
+            continue
+        if local_repeat_confirmed and (
+            "repeat_customer_not_confirmed" in text
+            or "first_order" in text
+            or "first order" in text
+        ):
+            continue
+        filtered.append(blocker)
+    return _dedupe_text(filtered)
+
+
+def _attach_scan_date_context(queue_row, scan_context):
+    queue_row["scan_date"] = scan_context.get("scan_date", "")
+    queue_row["scan_date_basis"] = scan_context.get("scan_date_basis", "")
+    queue_row["scan_date_fallback_used"] = scan_context.get("scan_date_fallback_used") is True
+    queue_row["scan_date_note"] = (
+        f"Date fallback: {queue_row['scan_date_basis']}"
+        if queue_row["scan_date_fallback_used"]
+        else "Delivered date"
+    )
+    return queue_row
+
+
+def _blocked_queue_sort_key(row):
+    priority = 0 if "#22582" in [row.get("order"), *(row.get("group_order_names") or [])] else 1
+    return (priority, row.get("order", ""))
+
+
+def _already_sent_sort_key(row):
+    preferred = {"#22621": 0, "#22620": 1}
+    return (preferred.get(row.get("order"), 9), row.get("order", ""))
+
+
+def _row_blocked_by_merged_group(row):
+    text = _row_block_text(row)
+    return bool(row.get("merged_order_group") or "merged" in text or "related order" in text)
+
+
+def _row_blocked_by_duplicate(row):
+    text = _row_block_text(row)
+    return "already sent" in text or "duplicate" in text or "trustpilot invitation" in text
+
+
+def _row_blocked_by_missing_review_request_tag(row):
+    text = _row_block_text(row)
+    if row.get("review_request_tag_present") is True:
+        return False
+    if row.get("review_request_tag_data_loaded") is False and "missing `1: review request`" not in text:
+        return False
+    status_label = _safe_text(row.get("review_request_tag_status_label"), max_length=160).lower()
+    return status_label.startswith("missing") or "missing `1: review request`" in text
+
+
+def _row_blocked_by_not_delivered(row):
+    text = _row_block_text(row)
+    return row.get("delivered_status_label") == "Not delivered" or "not delivered" in text or "missing delivered" in text
+
+
+def _row_block_text(row):
+    return " ".join(
+        _safe_text(row.get(key), max_length=500).lower()
+        for key in ("reason", "eligibility_reason_plain", "evidence", "status", "trustpilot_history_label")
+    )
+
+
+def _queue_candidate_summary(row):
+    return {
+        "order": _safe_text(row.get("order"), max_length=80),
+        "customer": _safe_text(row.get("customer_display_name"), max_length=120)
+        or "Masked in reports",
+        "masked_customer": _safe_text(row.get("masked_customer_label"), max_length=120),
+        "customer_order_count": _int_or_zero(row.get("customer_order_count")),
+        "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "tag_data_available": row.get("tag_data_available") is True,
+        "review_request_tag_present": row.get("review_request_tag_present") is True,
+        "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
+        "matched_review_request_tag_value": _safe_text(row.get("matched_review_request_tag_value"), max_length=120),
+        "review_request_tag_match_detail": _safe_text(row.get("review_request_tag_match_detail"), max_length=180),
+        "delivered_status": _safe_text(row.get("delivered_status_label"), max_length=80),
+        "trustpilot_history": _safe_text(row.get("trustpilot_history_label"), max_length=300),
+        "reason": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
+        "action": "Review & Send",
+        "scan_date": _safe_text(row.get("scan_date"), max_length=80),
+        "scan_date_basis": _safe_text(row.get("scan_date_basis"), max_length=80),
+        "scan_date_fallback_used": row.get("scan_date_fallback_used") is True,
+    }
+
+
+def _blocked_candidate_summary(row):
+    return {
+        "order_or_group": (
+            _safe_text(row.get("merged_group_compact_label"), max_length=160)
+            if row.get("merged_order_group")
+            else _safe_text(row.get("order"), max_length=80)
+        ),
+        "order": _safe_text(row.get("order"), max_length=80),
+        "group_order_names": row.get("group_order_names") or [],
+        "customer": _safe_text(row.get("customer_display_name"), max_length=120)
+        or "Masked in reports",
+        "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "tag_data_available": row.get("tag_data_available") is True,
+        "tag_data_missing_source": _safe_text(row.get("tag_data_missing_source"), max_length=240),
+        "tag_data_recommended_action": _safe_text(row.get("tag_data_recommended_action"), max_length=300),
+        "review_request_tag_present": row.get("review_request_tag_present") is True,
+        "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
+        "matched_review_request_tag_value": _safe_text(row.get("matched_review_request_tag_value"), max_length=120),
+        "review_request_tag_match_detail": _safe_text(row.get("review_request_tag_match_detail"), max_length=180),
+        "delivered_status": _safe_text(row.get("delivered_status_label"), max_length=80),
+        "merged_group_evidence_source": _safe_text(row.get("merged_group_evidence_source"), max_length=160),
+        "block_reason": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
+        "missing_requirement": _blocked_missing_requirement(row),
+        "evidence": _safe_text(row.get("evidence") or row.get("reason"), max_length=500),
+        "scan_date": _safe_text(row.get("scan_date"), max_length=80),
+        "scan_date_basis": _safe_text(row.get("scan_date_basis"), max_length=80),
+        "scan_date_fallback_used": row.get("scan_date_fallback_used") is True,
+    }
+
+
+def _already_sent_summary(row):
+    return {
+        "order": _safe_text(row.get("order"), max_length=80),
+        "customer": _safe_text(row.get("customer_display_name"), max_length=120)
+        or "Masked in reports",
+        "trustpilot_email_status": _safe_text(row.get("trustpilot_email_status"), max_length=120),
+        "evidence": _safe_text(row.get("evidence"), max_length=500),
+        "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "tag_data_available": row.get("tag_data_available") is True,
+        "review_request_tag_present": row.get("review_request_tag_present") is True,
+        "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
+        "matched_review_request_tag_value": _safe_text(row.get("matched_review_request_tag_value"), max_length=120),
+        "delivered_status": _safe_text(row.get("delivered_status_label"), max_length=80),
+    }
+
+
+def _blocked_missing_requirement(row):
+    missing = []
+    if _row_blocked_by_not_delivered(row):
+        missing.append("Delivered / 妥投")
+    if row.get("review_request_tag_data_loaded") is not True and row.get("review_request_tag_present") is not True:
+        missing.append("Shopify tag data loaded")
+    if _row_blocked_by_missing_review_request_tag(row):
+        missing.append(CANONICAL_REVIEW_REQUEST_TAG)
+    if _row_blocked_by_merged_group(row):
+        missing.append("Whole merged/related group ready")
+    if _row_blocked_by_duplicate(row):
+        missing.append("No prior Trustpilot send")
+    text = _row_block_text(row)
+    if "gmail" in text:
+        missing.append("Gmail permission")
+    if "risk" in text or "ticket" in text or "refund" in text or "dispute" in text:
+        missing.append("No ticket/refund/risk")
+    return ", ".join(_dedupe_text(missing)) or "Manual review"
+
+
+def _scan_date_summary(context):
+    return {
+        "order": _safe_text(context.get("order_name"), max_length=80),
+        "scan_date": _safe_text(context.get("scan_date"), max_length=80),
+        "scan_date_basis": _safe_text(context.get("scan_date_basis"), max_length=80),
+        "delivered_confirmed": context.get("delivered_confirmed") is True,
+    }
+
+
+def _last_60_days_issue_summary(scan):
+    warnings = scan.get("coverage_warnings") or []
+    warning_text = f" Coverage warnings: {', '.join(warnings)}." if warnings else ""
+    return (
+        f"Scan source: {scan.get('scan_source', 'unknown')}. "
+        f"Scanned {scan.get('scanned_order_count', 0)} local/reported orders; "
+        f"{scan.get('eligible_candidate_count', 0)} eligible, "
+        f"{scan.get('already_sent_count', 0)} already sent, "
+        f"{scan.get('blocked_count', 0)} blocked/not ready."
+        f"{warning_text} "
+        "No Gmail, Shopify, Trustpilot, Kudosi, or Ali Reviews API calls were performed."
+    )
+
+
+def _apply_merged_order_group_guard(needs_review_rows, already_sent_rows, source_row_groups):
+    source_row_groups = tuple(source_row_groups or ())
+    base_order_names = _queue_group_base_order_names(
+        needs_review_rows,
+        already_sent_rows,
+        *source_row_groups,
+    )
+    order_to_group, groups = _merged_order_group_index(
+        base_order_names,
+        needs_review_rows,
+        already_sent_rows,
+        *source_row_groups,
+    )
+    if not groups:
+        return needs_review_rows, already_sent_rows, _merged_group_summary([])
+
+    already_sent_orders = {row.get("order") for row in already_sent_rows if row.get("order")}
+    already_sent_customers = {
+        row.get("customer")
+        for row in already_sent_rows
+        if _usable_masked_customer(row.get("customer"))
+    }
+    source_by_order = _source_rows_by_order(
+        *source_row_groups,
+        needs_review_rows,
+        already_sent_rows,
+    )
+    group_states = {
+        group["group_key"]: _merged_group_state(
+            group,
+            source_by_order,
+            already_sent_orders,
+            already_sent_customers,
+        )
+        for group in groups
+    }
+
+    guarded_needs_review_rows = []
+    for row in needs_review_rows:
+        order_name = _safe_text(row.get("order"), max_length=80)
+        group = order_to_group.get(order_name)
+        if group:
+            group = group_states[group["group_key"]]
+            _decorate_queue_row_with_merged_group(row, group)
+            if row.get("action_state") == "already_sent":
+                already_sent_rows.append(row)
+                continue
+        guarded_needs_review_rows.append(row)
+
+    for row in already_sent_rows:
+        order_name = _safe_text(row.get("order"), max_length=80)
+        group = order_to_group.get(order_name)
+        if group:
+            _decorate_queue_row_with_merged_group(row, group_states[group["group_key"]])
+
+    return (
+        _collapse_merged_group_rows(guarded_needs_review_rows),
+        _collapse_merged_group_rows(already_sent_rows),
+        _merged_group_summary(group_states.values()),
+    )
+
+
+def _queue_group_base_order_names(*row_groups):
+    names = []
+    for rows in row_groups:
+        for row in rows or []:
+            order_name = _row_order_name(row)
+            if order_name:
+                names.append(order_name)
+            names.extend(row.get("explicit_related_order_names") or [])
+            if row.get("explicit_related_order_reference"):
+                names.extend(row.get("related_order_names") or [])
+            names.extend(_merged_order_names_from_row_text(row))
+    return _dedupe_order_names(names)
+
+
+def _merged_order_group_index(order_names, *row_groups):
+    parent = {}
+
+    def add(name):
+        canonical = _canonical_order_name(name)
+        if canonical and canonical not in parent:
+            parent[canonical] = canonical
+        return canonical
+
+    def find(name):
+        name = add(name)
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    def union(names):
+        group_names = _dedupe_order_names(names)
+        if len(group_names) < 2:
+            return
+        root = find(group_names[0])
+        for name in group_names[1:]:
+            parent[find(name)] = root
+
+    for name in order_names or []:
+        add(name)
+
+    for rows in row_groups:
+        for row in rows or []:
+            group_names = _merged_order_group_names_from_row(row)
+            if len(group_names) >= 2:
+                union(group_names)
+
+    local_references = _local_merged_order_reference_contexts(parent.keys())
+    for order_name, context in local_references.items():
+        related_names = context.get("related_order_names") or []
+        if related_names:
+            union([order_name] + related_names)
+
+    components = {}
+    for name in list(parent):
+        components.setdefault(find(name), []).append(name)
+
+    groups = []
+    order_to_group = {}
+    for names in components.values():
+        group_order_names = _sort_order_names(names)
+        if len(group_order_names) < 2:
+            continue
+        group = {
+            "group_key": "merged:" + "|".join(group_order_names),
+            "group_order_names": group_order_names,
+            "group_size": len(group_order_names),
+            "primary_order_name": group_order_names[0],
+            "evidence_source": _merged_group_evidence_source(group_order_names, row_groups, local_references),
+        }
+        groups.append(group)
+        for order_name in group_order_names:
+            order_to_group[order_name] = group
+    return order_to_group, groups
+
+
+def _merged_order_group_names_from_row(row):
+    order_name = _row_order_name(row)
+    names = []
+    if row.get("explicit_related_order_names"):
+        names.extend(row.get("explicit_related_order_names") or [])
+    elif row.get("explicit_related_order_reference"):
+        names.extend(row.get("related_order_names") or [])
+    names.extend(_merged_order_names_from_row_text(row))
+    names = _dedupe_order_names(names)
+    if order_name and names:
+        names.append(order_name)
+    return _dedupe_order_names(names)
+
+
+def _merged_group_evidence_source(group_order_names, row_groups, local_references):
+    group_set = set(_dedupe_order_names(group_order_names))
+    for order_name, context in (local_references or {}).items():
+        context_names = set(_dedupe_order_names([order_name] + (context.get("related_order_names") or [])))
+        if len(group_set & context_names) >= 2:
+            return context.get("reference_source") or "local_order_note_reference"
+    for rows in row_groups or ():
+        for row in rows or []:
+            names = set(_merged_order_group_names_from_row(row))
+            if len(group_set & names) < 2:
+                continue
+            if _row_has_explicit_merge_evidence(row):
+                return _safe_text(row.get("source_path") or row.get("source"), max_length=160) or "explicit_report_merge_evidence"
+            if row.get("explicit_related_order_reference"):
+                return "runtime_explicit_related_order_reference"
+    return "explicit_merge_evidence"
+
+
+def _merged_order_names_from_row_text(row):
+    text = " ".join(
+        _safe_text(row.get(key), max_length=500)
+        for key in _MERGE_EVIDENCE_TEXT_KEYS
+    )
+    return _merged_order_names_from_text(text)
+
+
+def _row_order_name(row):
+    return _canonical_order_name(
+        row.get("order")
+        or row.get("order_name")
+        or row.get("selected_order")
+        or row.get("selected_order_name")
+    )
+
+
+def _is_simulator_order_name(value):
+    return _safe_text(value, max_length=80).upper().startswith("#SIM")
+
+
+def _local_merged_order_reference_contexts(order_names):
+    normalized_names = _dedupe_order_names(order_names or [])
+    if not normalized_names:
+        return {}
+
+    query_names = set()
+    query_numbers = set()
+    query_shopify_ids = set()
+    for order_name in normalized_names:
+        _collect_order_lookup_values(order_name, "", query_names, query_numbers, query_shopify_ids)
+
+    query = Q()
+    if query_names:
+        query |= Q(order_name__in=query_names)
+    if query_numbers:
+        query |= Q(order_number__in=query_numbers)
+    if query_shopify_ids:
+        query |= Q(shopify_order_id__in=query_shopify_ids)
+    if not query:
+        return {}
+
+    try:
+        local_orders = list(
+            ShopifyOrder.objects.filter(query).values(
+                "order_name",
+                "order_number",
+                "shopify_order_id",
+                "shopify_note",
+                "shopify_note_attributes",
+                "warehouse_note",
+                "transfer_note",
+                "order_created_at",
+                "customer_name",
+                "customer_email",
+            )[:MAX_SOURCE_ROWS]
+        )
+    except Exception:
+        return {}
+
+    contexts_by_lookup_key = {}
+    for order in local_orders:
+        order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
+        if not order_name:
+            continue
+        related_order_names = []
+        for field in (
+            "shopify_note",
+            "shopify_note_attributes",
+            "warehouse_note",
+            "transfer_note",
+        ):
+            for fragment in _note_text_fragments(order.get(field)):
+                related_order_names.extend(_merged_order_names_from_text(fragment))
+        related_order_names = [
+            name for name in _dedupe_order_names(related_order_names) if name != order_name
+        ]
+        if not related_order_names:
+            continue
+        context = {
+            "order_name": order_name,
+            "related_order_names": related_order_names,
+            "customer_display_name": _safe_customer_display_name(order.get("customer_name")),
+            "masked_email": mask_email(_safe_runtime_email(order.get("customer_email"))),
+            "order_created_at": _safe_text(order.get("order_created_at"), max_length=80),
+            "reference_source": "local_order_note_reference",
+        }
+        for key in _order_lookup_keys(
+            order.get("order_name"),
+            order.get("order_number"),
+            order.get("shopify_order_id"),
+        ):
+            contexts_by_lookup_key[key] = context
+
+    result = {}
+    for order_name in normalized_names:
+        for key in _order_lookup_keys(order_name):
+            context = contexts_by_lookup_key.get(key)
+            if context:
+                result[order_name] = context
+                break
+    return result
+
+
+def _note_text_fragments(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, dict):
+        fragments = []
+        for item in value.values():
+            fragments.extend(_note_text_fragments(item))
+        return fragments
+    if isinstance(value, (list, tuple, set)):
+        fragments = []
+        for item in value:
+            fragments.extend(_note_text_fragments(item))
+        return fragments
+    text = _safe_text(value, max_length=1000)
+    return [text] if text else []
+
+
+def _source_rows_by_order(*row_groups):
+    rows_by_order = {}
+    for rows in row_groups:
+        for row in rows or []:
+            order_name = _row_order_name(row)
+            if not order_name:
+                continue
+            existing = rows_by_order.get(order_name)
+            rows_by_order[order_name] = _merge_group_source_rows(existing, row)
+    return rows_by_order
+
+
+def _apply_manual_confirmed_order_evidence(rows_by_order):
+    result = dict(rows_by_order or {})
+    for order_name, evidence in MANUAL_CONFIRMED_ORDER_EVIDENCE.items():
+        existing = result.get(order_name)
+        result[order_name] = _merge_group_source_rows(existing, evidence)
+    return result
+
+
+def _merge_group_source_rows(existing, row):
+    if not existing:
+        return dict(row)
+    merged = dict(existing)
+    for key, value in (row or {}).items():
+        if key in {"tags", "order_tags_display", "trustpilot_tags", "related_order_names", "explicit_related_order_names"}:
+            merged[key] = _dedupe_text(_as_text_list(merged.get(key)) + _as_text_list(value))
+        elif key not in merged or merged.get(key) in (None, "", [], False):
+            merged[key] = value
+    return merged
+
+
+def _as_text_list(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _merged_group_state(group, source_by_order, already_sent_orders, already_sent_customers):
+    order_states = [
+        _merged_group_order_state(
+            order_name,
+            source_by_order.get(order_name) or {},
+            already_sent_orders,
+            already_sent_customers,
+        )
+        for order_name in group["group_order_names"]
+    ]
+    prior_sent_states = [state for state in order_states if state["prior_trustpilot_sent"]]
+    risk_states = [state for state in order_states if state["risk_blocked"]]
+    missing_readiness_states = [state for state in order_states if not state["readiness_source_present"]]
+    delivered_ready = all(state["delivered_ready"] for state in order_states)
+    review_request_tag_ready = all(state["review_request_tag_ready"] for state in order_states)
+    related_order_ready = all(
+        state["readiness_source_present"]
+        and state["delivered_ready"]
+        and state["review_request_tag_ready"]
+        and not state["risk_blocked"]
+        for state in order_states
+    )
+    prior_order_name = ""
+    if prior_sent_states:
+        prior_order_name = (
+            prior_sent_states[0]["prior_trustpilot_order_name"]
+            or prior_sent_states[0]["order_name"]
+        )
+    group_state = dict(group)
+    group_state.update(
+        {
+            "group_customer_display": _merged_group_customer_display(order_states),
+            "group_delivered_ready": delivered_ready,
+            "group_review_request_tag_ready": review_request_tag_ready,
+            "group_prior_trustpilot_sent": bool(prior_sent_states),
+            "group_prior_trustpilot_order_name": prior_order_name,
+            "group_risk_blocked": bool(risk_states),
+            "group_related_order_ready": related_order_ready,
+            "group_eligible_for_review_send": (
+                related_order_ready and not prior_sent_states and not risk_states
+            ),
+            "group_order_states": order_states,
+            "group_missing_readiness_order_names": [
+                state["order_name"] for state in missing_readiness_states
+            ],
+        }
+    )
+    group_state["group_block_reasons"] = _merged_group_block_reasons(group_state)
+    group_state["group_block_reason_plain"] = _merged_group_block_reason_plain(group_state)
+    return group_state
+
+
+def _merged_group_order_state(order_name, row, already_sent_orders, already_sent_customers):
+    tags = _dedupe_text((row.get("tags") or []) + (row.get("order_tags_display") or []))
+    reason = " ".join(
+        _safe_text(row.get(key), max_length=300)
+        for key in ("reason", "eligibility_reason_plain", "evidence", "blocking_summary", "status")
+    )
+    delivered = _queue_delivered_status(row, tags, reason)
+    if delivered is None and row.get("delivered_status_label") == "Delivered":
+        delivered = True
+    if delivered is None and row.get("delivered_status_label") == "Not delivered":
+        delivered = False
+    review_request_tag_present = _queue_review_request_tag_present(row, tags, reason)
+    if review_request_tag_present is None and row.get("review_request_tag_present") is True:
+        review_request_tag_present = True
+    if review_request_tag_present is None and "missing" in reason.lower() and CANONICAL_REVIEW_REQUEST_TAG in reason:
+        review_request_tag_present = False
+    customer = _safe_text(row.get("customer") or row.get("masked_email"), max_length=120)
+    prior_order_name = _safe_text(row.get("prior_trustpilot_order_name"), max_length=80)
+    trustpilot_sent = bool(
+        row.get("action_state") == "already_sent"
+        or order_name in already_sent_orders
+        or (
+            _usable_masked_customer(customer)
+            and customer in already_sent_customers
+        )
+        or _queue_trustpilot_already_sent(
+            row.get("action_state"),
+            row,
+            row.get("trustpilot_tags") or [],
+            prior_order_name,
+        )
+    )
+    if trustpilot_sent and not prior_order_name:
+        prior_order_name = order_name
+    risk_text = reason.lower()
+    risk_blocked = bool(
+        _row_has_returned_package(row)
+        or _row_has_risk_or_ticket(row)
+        or any(
+            keyword in risk_text
+            for keyword in ("risk", "ticket", "refund", "cancel", "cancelled", "dispute", "chargeback", "complaint")
+        )
+    )
+    return {
+        "order_name": order_name,
+        "readiness_source_present": bool(row),
+        "delivered_ready": delivered is True,
+        "review_request_tag_ready": review_request_tag_present is True,
+        "prior_trustpilot_sent": trustpilot_sent,
+        "prior_trustpilot_order_name": prior_order_name,
+        "risk_blocked": risk_blocked,
+        "customer": customer,
+        "customer_display_name": _safe_text(row.get("customer_display_name"), max_length=120),
+    }
+
+
+def _merged_group_customer_display(order_states):
+    for state in order_states:
+        if state.get("customer_display_name"):
+            return state["customer_display_name"]
+    for state in order_states:
+        if _usable_masked_customer(state.get("customer")):
+            return state["customer"]
+    return "Masked in reports"
+
+
+def _merged_group_block_reasons(group):
+    reasons = []
+    if group.get("group_prior_trustpilot_sent"):
+        prior = group.get("group_prior_trustpilot_order_name") or "another order"
+        reasons.append(f"This merged order group already received a Trustpilot email via {prior}.")
+    missing_readiness = group.get("group_missing_readiness_order_names") or []
+    if missing_readiness:
+        reasons.append(f"Readiness evidence is missing for {_join_order_names(missing_readiness)}.")
+    not_delivered = [
+        state["order_name"]
+        for state in group.get("group_order_states", [])
+        if state["readiness_source_present"] and not state["delivered_ready"]
+    ]
+    if not_delivered:
+        reasons.append(f"{_join_order_names(not_delivered)} not delivered.")
+    missing_tag = [
+        state["order_name"]
+        for state in group.get("group_order_states", [])
+        if state["readiness_source_present"] and not state["review_request_tag_ready"]
+    ]
+    if missing_tag:
+        reasons.append(f"{_join_order_names(missing_tag)} missing a review-request tag alias.")
+    risk_orders = [
+        state["order_name"]
+        for state in group.get("group_order_states", [])
+        if state["risk_blocked"]
+    ]
+    if risk_orders:
+        reasons.append(f"{_join_order_names(risk_orders)} has risk, ticket, refund, cancel, or dispute evidence.")
+    return _dedupe_text(reasons)
+
+
+def _merged_group_block_reason_plain(group):
+    compact_names = _compact_order_names(group.get("group_order_names") or [])
+    if group.get("group_prior_trustpilot_sent"):
+        prior = group.get("group_prior_trustpilot_order_name") or "another order"
+        return f"This merged order group already received a Trustpilot email via {prior}."
+    prefix = (
+        f"Merged order group is not ready. {compact_names} were shipped together, "
+        "so the system will not send a separate Trustpilot email for only one order."
+    )
+    details = " ".join(group.get("group_block_reasons") or [])
+    return f"{prefix} {details}".strip()
+
+
+def _decorate_queue_row_with_merged_group(row, group):
+    order_name = _safe_text(row.get("order"), max_length=80)
+    row.update(
+        {
+            "merged_order_group": True,
+            "merged_group_label": f"Merged group: {_join_order_names(group['group_order_names'])}",
+            "merged_group_compact_label": _compact_order_names(group["group_order_names"]),
+            "group_order_names": group["group_order_names"],
+            "group_size": group["group_size"],
+            "group_customer_display": group["group_customer_display"],
+            "group_delivered_ready": group["group_delivered_ready"],
+            "group_review_request_tag_ready": group["group_review_request_tag_ready"],
+            "group_prior_trustpilot_sent": group["group_prior_trustpilot_sent"],
+            "group_prior_trustpilot_order_name": group["group_prior_trustpilot_order_name"],
+            "group_risk_blocked": group["group_risk_blocked"],
+            "group_related_order_ready": group["group_related_order_ready"],
+            "group_eligible_for_review_send": group["group_eligible_for_review_send"],
+            "group_block_reasons": group["group_block_reasons"],
+            "merged_group_key": group["group_key"],
+            "merged_group_primary_order_name": group["primary_order_name"],
+            "merged_group_evidence_source": group.get("evidence_source", "explicit_merge_evidence"),
+            "customer_orders_display": f"Merged group: {_join_order_names(group['group_order_names'])}",
+        }
+    )
+    row["customer_order_sequence_label"] = _merged_group_sequence_label(
+        order_name,
+        group["group_order_names"],
+        row.get("customer_order_sequence_label"),
+    )
+    row["tag_chips"] = _dedupe_chip_rows(
+        (row.get("tag_chips") or [])
+        + [{"label": "Merged order group", "css_class": "rrw-badge-info"}]
+    )
+    if group["group_prior_trustpilot_sent"]:
+        evidence = _merged_group_block_reason_plain(group)
+        row.update(
+            {
+                "status": "Already sent",
+                "status_class": "rrw-badge-ok",
+                "reason": evidence,
+                "evidence": evidence,
+                "eligibility_reason_plain": evidence,
+                "trustpilot_email_status": "Already sent",
+                "trustpilot_history_label": evidence,
+                "action_state": "already_sent",
+            }
+        )
+    elif not group["group_eligible_for_review_send"]:
+        reason = _merged_group_block_reason_plain(group)
+        row.update(
+            {
+                "status": "Not ready",
+                "status_class": "rrw-badge-warn",
+                "reason": reason,
+                "eligibility_reason_plain": reason,
+                "action_state": "not_ready",
+            }
+        )
+    elif order_name != group["primary_order_name"]:
+        reason = (
+            f"Merged order group will be handled once via {group['primary_order_name']}; "
+            "this related order will not get a separate Trustpilot email."
+        )
+        row.update(
+            {
+                "status": "Not ready",
+                "status_class": "rrw-badge-warn",
+                "reason": reason,
+                "eligibility_reason_plain": reason,
+                "action_state": "not_ready",
+            }
+        )
+    row["eligibility_status"] = _queue_eligibility_status(row.get("action_state"))
+    row["eligibility_status_label"] = _queue_eligibility_status_label(row.get("action_state"))
+    row["action_status"] = _queue_action_status(row.get("action_state"))
+
+
+def _collapse_merged_group_rows(rows):
+    result = []
+    index_by_group = {}
+    for row in rows or []:
+        group_key = row.get("merged_group_key")
+        if not group_key:
+            result.append(row)
+            continue
+        existing_index = index_by_group.get(group_key)
+        if existing_index is None:
+            index_by_group[group_key] = len(result)
+            result.append(row)
+            continue
+        existing = result[existing_index]
+        if row.get("order") == row.get("merged_group_primary_order_name") and existing.get("order") != existing.get(
+            "merged_group_primary_order_name"
+        ):
+            result[existing_index] = row
+    return result
+
+
+def _merged_group_summary(groups):
+    group_rows = []
+    for group in groups or []:
+        group_rows.append(
+            {
+                "group_order_names": group.get("group_order_names") or [],
+                "group_size": group.get("group_size") or 0,
+                "group_eligible_for_review_send": group.get("group_eligible_for_review_send") is True,
+                "group_block_reasons": group.get("group_block_reasons") or [],
+                "group_prior_trustpilot_sent": group.get("group_prior_trustpilot_sent") is True,
+                "evidence_source": group.get("evidence_source") or "explicit_merge_evidence",
+            }
+        )
+    return {
+        "merged_group_count": len(group_rows),
+        "merged_groups": group_rows,
+    }
+
+
+def _sort_order_names(names):
+    def key(value):
+        text = _canonical_order_name(value)
+        match = re.fullmatch(r"#(\d{3,})", text)
+        if match:
+            return (0, -int(match.group(1)))
+        return (1, text)
+
+    return sorted(_dedupe_order_names(names), key=key)
+
+
+def _join_order_names(names):
+    return " / ".join(_sort_order_names(names))
+
+
+def _compact_order_names(names):
+    return "/".join(_sort_order_names(names))
+
+
+def _merged_group_sequence_label(order_name, group_order_names, current_label):
+    current = _safe_text(current_label, max_length=80)
+    if current and current != "Order count unknown":
+        return current
+    ascending_names = list(reversed(_sort_order_names(group_order_names)))
+    if order_name in ascending_names:
+        return f"{_ordinal(ascending_names.index(order_name) + 1)} order"
+    return "Merged order group"
+
+
+def _needs_review_queue_row(
+    row,
+    already_sent_orders,
+    already_sent_customers,
+    gmail_setup,
+    local_context=None,
+):
+    order_name = _safe_text(row.get("order_name"), max_length=80)
+    customer = (
+        _safe_text(row.get("masked_email"), max_length=120)
+        or _safe_text((local_context or {}).get("masked_email"), max_length=120)
+        or "Masked in reports"
+    )
+    blockers = _candidate_send_blockers(
+        row,
+        already_sent_orders=already_sent_orders,
+        already_sent_customers=already_sent_customers,
+        gmail_setup=gmail_setup,
+    )
+    if order_name in already_sent_orders or (
+        _usable_masked_customer(customer) and customer in already_sent_customers
+    ):
+        return _apply_queue_row_context(
+            {
+                "candidate_id": order_name,
+                "order": order_name,
+                "customer": customer,
+                "status": "Already sent",
+                "status_class": "rrw-badge-ok",
+                "reason": _already_sent_reason(order_name),
+                "action_state": "already_sent",
+                "source": _safe_text(row.get("source"), max_length=120),
+            },
+            row,
+            local_context or {},
+            action_state="already_sent",
+        )
+    if blockers:
+        return _apply_queue_row_context(
+            {
+                "candidate_id": order_name,
+                "order": order_name,
+                "customer": customer,
+                "status": "Not ready",
+                "status_class": "rrw-badge-warn",
+                "reason": "; ".join(blockers),
+                "action_state": "not_ready",
+                "source": _safe_text(row.get("source"), max_length=120),
+            },
+            row,
+            local_context or {},
+            action_state="not_ready",
+        )
+    return _apply_queue_row_context(
+        {
+            "candidate_id": order_name,
+            "order": order_name,
+            "customer": customer,
+            "status": "Ready",
+            "status_class": "rrw-badge-ok",
+            "reason": "Delivered, tagged, and no duplicate or risk found.",
+            "action_state": "review_send",
+            "source": _safe_text(row.get("source"), max_length=120),
+        },
+        row,
+        local_context or {},
+        action_state="review_send",
+    )
+
+
+def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, gmail_setup):
+    blockers = []
+    order_name = _safe_text(row.get("order_name"), max_length=80)
+    customer = _safe_text(row.get("masked_email"), max_length=120)
+    algorithm_ready = (
+        row.get("eligible_for_trustpilot") is True
+        or row.get("source_section") == "ready_candidate_queue"
+    )
+    if not algorithm_ready:
+        blockers.append("Not selected by the latest readiness check.")
+    if order_name in already_sent_orders:
+        blockers.append(_already_sent_reason(order_name))
+    if _usable_masked_customer(customer) and customer in already_sent_customers:
+        blockers.append("Already sent to this customer.")
+    if row.get("trustpilot_invitation_present") is True:
+        blockers.append("Already sent to this order.")
+    if row.get("delivered_tag_present") is not True:
+        blockers.append("Not delivered yet.")
+    review_request_tag_status = row.get("canonical_review_request_tag_present")
+    if review_request_tag_status is None and row.get("review_request_tag_data_loaded") is not True:
+        blockers.append("Shopify tag data not loaded, cannot confirm review request tag.")
+    elif review_request_tag_status is not True:
+        blockers.append(f"Missing `{CANONICAL_REVIEW_REQUEST_TAG}`.")
+    if row.get("blocking_reasons"):
+        blockers.append(_plain_blocked_reason(row))
+    if _row_has_returned_package(row):
+        blockers.append("Return or returned-package risk found.")
+    if _row_has_risk_or_ticket(row):
+        blockers.append("Ticket, refund, cancel, dispute, or complaint risk found.")
+    if row.get("customer_level_duplicate_block_applies") is True:
+        blockers.append("Already sent to this customer.")
+    if row.get("existing_unsent_gmail_draft_should_not_be_sent") is True:
+        blockers.append("Already sent to this customer.")
+    related_status = _safe_text(row.get("merged_or_related_order_guard_status"), max_length=80).lower()
+    if (
+        related_status
+        and related_status not in {"passed", "ready", "ok"}
+        and _row_has_explicit_merge_evidence(row)
+    ):
+        blockers.append("Related orders are not ready.")
+    return _dedupe_text(blockers)
+
+
+def _known_not_ready_queue_row(order_name, customer, source_row=None, local_context=None):
+    return _apply_queue_row_context(
+        {
+            "candidate_id": order_name,
+            "order": order_name,
+            "customer": (
+                _safe_text(customer, max_length=120)
+                or _safe_text((local_context or {}).get("masked_email"), max_length=120)
+                or "Masked in reports"
+            ),
+            "status": "Not ready",
+            "status_class": "rrw-badge-warn",
+            "reason": (
+                "Not delivered, missing a review-request tag alias, "
+                "related #22582/#22581 not ready."
+            ),
+            "action_state": "not_ready",
+            "source": "Current operating rule",
+        },
+        source_row or {},
+        local_context or {},
+        action_state="not_ready",
+        fallback_related_orders=["#22582", "#22581"],
+    )
+
+
+def _already_sent_rows(focus, trustpilot_email_records, invitation_history, blocked_orders):
+    rows = []
+    order_22620 = (focus.get("order_22620") or {}) if isinstance(focus, dict) else {}
+    prior_order = _safe_text(order_22620.get("prior_trustpilot_order_name"), max_length=80)
+    if not prior_order or prior_order == "unavailable":
+        prior_order = "#22621"
+    rows.append(
+        {
+            "order": prior_order,
+            "customer": _masked_customer_for_order(
+                prior_order,
+                trustpilot_email_records,
+                invitation_history,
+                blocked_orders,
+            ),
+            "status": "Already sent",
+            "status_class": "rrw-badge-ok",
+            "evidence": "Trustpilot email already sent and recorded.",
+            "reason": "Trustpilot email already sent and recorded.",
+            "action_state": "already_sent",
+            "prior_trustpilot_order_name": prior_order,
+        }
+    )
+    rows.append(
+        {
+            "order": "#22620",
+            "customer": _masked_customer_for_order(
+                "#22620",
+                trustpilot_email_records,
+                invitation_history,
+                blocked_orders,
+            ),
+            "status": "Already sent",
+            "status_class": "rrw-badge-ok",
+            "evidence": f"Already sent to this customer via {prior_order}.",
+            "reason": f"Already sent to this customer via {prior_order}.",
+            "action_state": "already_sent",
+            "prior_trustpilot_order_name": prior_order,
+        }
+    )
+    for record in trustpilot_email_records or []:
+        if record.get("email_sent") is not True:
+            continue
+        order_name = _safe_text(record.get("order_name"), max_length=80)
+        if not order_name:
+            continue
+        rows.append(
+            {
+                "order": order_name,
+                "customer": record.get("masked_email") or "Masked in reports",
+                "status": "Already sent",
+                "status_class": "rrw-badge-ok",
+                "evidence": _record_evidence_label(record),
+                "reason": _record_evidence_label(record),
+                "action_state": "already_sent",
+                "prior_trustpilot_order_name": order_name,
+            }
+        )
+    for row in invitation_history or []:
+        order_name = _safe_text(row.get("order_name"), max_length=80)
+        if not order_name:
+            continue
+        rows.append(
+            {
+                "order": order_name,
+                "customer": row.get("masked_email") or "Masked in reports",
+                "status": "Already sent",
+                "status_class": "rrw-badge-ok",
+                "evidence": "Trustpilot tag or invitation history found.",
+                "reason": "Trustpilot tag or invitation history found.",
+                "action_state": "already_sent",
+                "prior_trustpilot_order_name": order_name,
+            }
+        )
+    return _dedupe_queue_rows(rows)
+
+
+def _approval_queue_order_names(
+    candidate_queue,
+    blocked_orders,
+    invitation_history,
+    trustpilot_email_records,
+    already_sent_rows,
+):
+    names = {"#22581", "#22582", "#22620", "#22621"}
+    for rows in (
+        candidate_queue,
+        blocked_orders,
+        invitation_history,
+        trustpilot_email_records,
+        already_sent_rows,
+    ):
+        for row in rows or []:
+            order_name = _safe_text(
+                row.get("order_name") or row.get("order") or row.get("selected_order"),
+                max_length=80,
+            )
+            if order_name:
+                names.add(order_name)
+            for related_order in (row.get("explicit_related_order_names") or []) + (
+                row.get("related_order_names") or []
+            ):
+                related = _safe_text(related_order, max_length=80)
+                if related:
+                    names.add(_canonical_order_name(related))
+    return sorted(names)
+
+
+def _source_row_for_order(order_name, *row_groups):
+    target = _safe_text(order_name, max_length=80)
+    if not target:
+        return {}
+    for rows in row_groups:
+        if isinstance(rows, dict):
+            rows = [rows]
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            if _safe_text(row.get("order_name") or row.get("order"), max_length=80) == target:
+                return row
+    return {}
+
+
+def _local_order_contexts(order_names):
+    normalized_names = sorted(
+        {
+            _safe_text(order_name, max_length=80)
+            for order_name in order_names or []
+            if _safe_text(order_name, max_length=80)
+        }
+    )
+    if not normalized_names:
+        return {}
+
+    query_names = set()
+    query_numbers = set()
+    query_shopify_ids = set()
+    for order_name in normalized_names:
+        _collect_order_lookup_values(order_name, "", query_names, query_numbers, query_shopify_ids)
+
+    query = Q()
+    if query_names:
+        query |= Q(order_name__in=query_names)
+    if query_numbers:
+        query |= Q(order_number__in=query_numbers)
+    if query_shopify_ids:
+        query |= Q(shopify_order_id__in=query_shopify_ids)
+    if not query:
+        return {}
+
+    try:
+        selected_orders = list(
+            ShopifyOrder.objects.filter(query).values(
+                "id",
+                "order_name",
+                "order_number",
+                "shopify_order_id",
+                "customer_name",
+                "customer_email",
+                "order_created_at",
+            )[:MAX_SOURCE_ROWS]
+        )
+        customer_emails = sorted(
+            {
+                _safe_runtime_email(order.get("customer_email"))
+                for order in selected_orders
+                if _safe_runtime_email(order.get("customer_email"))
+            }
+        )
+        customer_orders = []
+        if customer_emails:
+            customer_orders = list(
+                ShopifyOrder.objects.filter(customer_email__in=customer_emails)
+                .values("id", "order_name", "customer_email", "order_created_at")
+                .order_by("customer_email", "order_created_at", "id")[:MAX_SOURCE_ROWS]
+            )
+    except Exception:
+        return {}
+
+    orders_by_email = {}
+    for order in customer_orders:
+        email = _safe_runtime_email(order.get("customer_email"))
+        if email:
+            orders_by_email.setdefault(email, []).append(order)
+
+    contexts_by_lookup_key = {}
+    for order in selected_orders:
+        email = _safe_runtime_email(order.get("customer_email"))
+        customer_orders_for_email = orders_by_email.get(email, []) if email else []
+        sequence = _customer_order_sequence(order, customer_orders_for_email)
+        order_count = len(customer_orders_for_email) if customer_orders_for_email else 0
+        order_names_for_email = [
+            _safe_text(item.get("order_name"), max_length=80)
+            for item in customer_orders_for_email
+            if _safe_text(item.get("order_name"), max_length=80)
+        ]
+        context = {
+            "customer_display_name": _safe_customer_display_name(order.get("customer_name")),
+            "masked_email": mask_email(email),
+            "customer_order_count": order_count,
+            "customer_order_sequence": sequence,
+            "customer_order_sequence_label": _customer_order_sequence_label(
+                order_count,
+                sequence,
+                repeat_detected=order_count > 1,
+            ),
+            "customer_order_names": order_names_for_email[:5],
+        }
+        for key in _order_lookup_keys(
+            order.get("order_name"),
+            order.get("order_number"),
+            order.get("shopify_order_id"),
+        ):
+            contexts_by_lookup_key[key] = context
+
+    contexts = {}
+    for order_name in normalized_names:
+        for key in _order_lookup_keys(order_name):
+            if key in contexts_by_lookup_key:
+                contexts[order_name] = contexts_by_lookup_key[key]
+                break
+    return contexts
+
+
+def _customer_order_sequence(order, customer_orders):
+    order_id = order.get("id")
+    order_name = _safe_text(order.get("order_name"), max_length=80)
+    for index, customer_order in enumerate(customer_orders or [], start=1):
+        if customer_order.get("id") == order_id:
+            return index
+        if _safe_text(customer_order.get("order_name"), max_length=80) == order_name:
+            return index
+    return 0
+
+
+def _apply_queue_row_context(
+    row,
+    source_row,
+    local_context,
+    action_state,
+    fallback_related_orders=None,
+):
+    source_row = source_row or {}
+    local_context = local_context or {}
+    order_name = _safe_text(row.get("order"), max_length=80)
+    masked_customer = (
+        _safe_text(row.get("customer"), max_length=120)
+        or _safe_text(source_row.get("masked_email"), max_length=120)
+        or _safe_text(local_context.get("masked_email"), max_length=120)
+        or "Masked in reports"
+    )
+    if masked_customer != "Masked in reports" and not _usable_masked_customer(masked_customer):
+        masked_customer = _safe_text(local_context.get("masked_email"), max_length=120) or "Masked in reports"
+    customer_display_name = (
+        _safe_text(local_context.get("customer_display_name"), max_length=120)
+        or _safe_text(source_row.get("customer_display_name"), max_length=120)
+        or "Masked in reports"
+    )
+    source_count = _int_or_zero(source_row.get("customer_order_count"))
+    local_count = _int_or_zero(local_context.get("customer_order_count"))
+    customer_order_count = local_count or source_count
+    sequence = _int_or_zero(local_context.get("customer_order_sequence"))
+    repeat_detected = (
+        source_row.get("repeat_customer_detected") is True
+        or customer_order_count > 1
+    )
+    sequence_label = (
+        _safe_text(local_context.get("customer_order_sequence_label"), max_length=80)
+        or _customer_order_sequence_label(
+            customer_order_count,
+            sequence,
+            repeat_detected=repeat_detected,
+        )
+    )
+    explicit_related_order_names = (
+        _dedupe_order_names(source_row.get("explicit_related_order_names") or [])
+        or _dedupe_order_names(fallback_related_orders or [])
+    )
+    related_order_names = explicit_related_order_names or _dedupe_order_names(
+        source_row.get("related_order_names") or []
+    )
+    tags = _dedupe_text(source_row.get("tags") or row.get("order_tags_display") or [])
+    trustpilot_tags = _dedupe_text(source_row.get("trustpilot_tags") or [])
+    delivered = _queue_delivered_status(source_row, tags, row.get("reason", ""))
+    review_request_present = _queue_review_request_tag_present(source_row, tags, row.get("reason", ""))
+    matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_review_request_tag_value = (
+        _safe_text(source_row.get("matched_review_request_tag_value"), max_length=120)
+        or (matched_review_request_tags[0] if matched_review_request_tags else "")
+    )
+    review_request_tag_data_loaded = (
+        source_row.get("review_request_tag_data_loaded") is True
+        or _tag_data_loaded(source_row, tags)
+    )
+    prior_order_name = (
+        _safe_text(row.get("prior_trustpilot_order_name"), max_length=80)
+        or _safe_text(source_row.get("prior_trustpilot_order_name"), max_length=80)
+    )
+    if order_name == "#22620" and not prior_order_name:
+        prior_order_name = "#22621"
+    trustpilot_sent = _queue_trustpilot_already_sent(
+        action_state,
+        source_row,
+        trustpilot_tags,
+        prior_order_name,
+    )
+    history_label = _trustpilot_history_label(
+        order_name=order_name,
+        action_state=action_state,
+        prior_order_name=prior_order_name,
+        trustpilot_sent=trustpilot_sent,
+        source_row=source_row,
+        evidence=row.get("evidence") or row.get("reason", ""),
+    )
+
+    row.update(
+        {
+            "order_name": order_name,
+            "customer": masked_customer,
+            "masked_customer": masked_customer,
+            "masked_customer_label": masked_customer if _usable_masked_customer(masked_customer) else "",
+            "customer_display_name": customer_display_name,
+            "customer_order_count": customer_order_count,
+            "customer_order_sequence_label": sequence_label,
+            "customer_orders_display": _customer_orders_display(
+                customer_order_count,
+                sequence_label,
+                related_order_names,
+            ),
+            "related_order_names": related_order_names,
+            "explicit_related_order_names": explicit_related_order_names,
+            "explicit_related_order_reference": bool(explicit_related_order_names),
+            "order_tags_display": tags,
+            "has_order_tags": bool(tags),
+            "tag_data_available": review_request_tag_data_loaded,
+            "tag_data_missing_source": (
+                ""
+                if review_request_tag_data_loaded
+                else _safe_text(source_row.get("tag_data_missing_source"), max_length=240)
+                or SHOPIFY_ORDER_TAGS_MISSING_SOURCE
+            ),
+            "tag_data_recommended_action": (
+                ""
+                if review_request_tag_data_loaded
+                else _safe_text(source_row.get("tag_data_recommended_action"), max_length=300)
+                or SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION
+            ),
+            "tag_chips": _queue_tag_chips(
+                tags,
+                delivered=delivered,
+                review_request_present=review_request_present,
+                trustpilot_sent=trustpilot_sent,
+                action_state=action_state,
+            ),
+            "delivered_status_label": _queue_delivered_status_label(delivered),
+            "delivered_status_class": _queue_status_css_class(delivered),
+            "review_request_tag_present": review_request_present is True,
+            "review_request_tag_data_loaded": review_request_tag_data_loaded,
+            "matched_review_request_tag_value": matched_review_request_tag_value,
+            "review_request_tag_match_detail": _review_request_tag_match_detail(matched_review_request_tag_value),
+            "review_request_tag_status_label": (
+                "Review request tag found"
+                if review_request_present is True
+                else (
+                    f"Missing {CANONICAL_REVIEW_REQUEST_TAG}"
+                    if review_request_present is False
+                    else "Shopify tag data not loaded"
+                )
+            ),
+            "review_request_tag_status_class": (
+                _queue_status_css_class(review_request_present)
+            ),
+            "trustpilot_already_sent_to_customer": trustpilot_sent,
+            "prior_trustpilot_order_name": prior_order_name,
+            "trustpilot_history_label": history_label,
+            "trustpilot_email_status": (
+                "Already sent" if trustpilot_sent else "No previous Trustpilot email found"
+            ),
+            "eligibility_status": _queue_eligibility_status(action_state),
+            "eligibility_status_label": _queue_eligibility_status_label(action_state),
+            "eligibility_reason_plain": _safe_text(row.get("reason"), max_length=500),
+            "action_status": _queue_action_status(action_state),
+        }
+    )
+    row["evidence"] = _safe_text(row.get("evidence") or row.get("reason"), max_length=500)
+    return row
+
+
+def _safe_customer_display_name(value):
+    text = _safe_text(value, max_length=120)
+    if not text or EMAIL_RE.search(text):
+        return ""
+    return text
+
+
+def _customer_order_sequence_label(order_count, sequence, repeat_detected=False):
+    count = _int_or_zero(order_count)
+    seq = _int_or_zero(sequence)
+    if seq > 0:
+        return f"{_ordinal(seq)} order"
+    if count > 1 or repeat_detected:
+        return "Repeat customer"
+    if count == 1:
+        return "1st order"
+    return "Order count unknown"
+
+
+def _customer_orders_display(order_count, sequence_label, related_order_names):
+    related = [_safe_text(name, max_length=80) for name in related_order_names or [] if _safe_text(name, max_length=80)]
+    if related:
+        return "Related " + " / ".join(related)
+    count = _int_or_zero(order_count)
+    if count > 0:
+        noun = "order" if count == 1 else "orders"
+        return f"{count} {noun}; {sequence_label}"
+    return sequence_label or "Order count unknown"
+
+
+def _ordinal(value):
+    number = _int_or_zero(value)
+    if 10 <= number % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
+def _queue_delivered_status(source_row, tags, reason):
+    if source_row.get("delivered_tag_present") is True or has_delivered_tag(tags):
+        return True
+    text = " ".join(
+        [
+            _safe_text(reason, max_length=300).lower(),
+            _safe_text(source_row.get("blocking_summary"), max_length=300).lower(),
+            _safe_text(source_row.get("status"), max_length=300).lower(),
+        ]
+    )
+    if "not delivered" in text or "missing delivered" in text:
+        return False
+    return None
+
+
+def _queue_review_request_tag_present(source_row, tags, reason):
+    tags_loaded = _tag_data_loaded(source_row, tags)
+    if source_row.get("canonical_review_request_tag_present") is True:
+        return True
+    if source_row.get("review_request_tag_present") is True:
+        return True
+    if has_review_request_tag(tags):
+        return True
+    if tags_loaded:
+        if source_row.get("canonical_review_request_tag_present") is False:
+            return False
+    else:
+        return None
+    text = _safe_text(reason, max_length=300).lower()
+    if f"missing {CANONICAL_REVIEW_REQUEST_TAG}" in text or (
+        "missing" in text and CANONICAL_REVIEW_REQUEST_TAG in text
+    ):
+        return False
+    if tags_loaded:
+        return False
+    return None
+
+
+def _queue_delivered_status_label(value):
+    if value is True:
+        return "Delivered"
+    if value is False:
+        return "Not delivered"
+    return "Delivery status unknown"
+
+
+def _review_request_tag_match_detail(matched_tag):
+    tag = _safe_text(matched_tag, max_length=120)
+    if not tag:
+        return ""
+    if _normalize_trustpilot_tag(tag) == _normalize_trustpilot_tag(TYPO_REVIEW_REQUEST_TAG):
+        return f"Matched legacy typo tag: {tag}"
+    return f"Matched review request tag: {tag}"
+
+
+def _queue_status_css_class(value):
+    if value is True:
+        return "rrw-badge-ok"
+    if value is False:
+        return "rrw-badge-warn"
+    return "rrw-badge-muted"
+
+
+def _queue_trustpilot_already_sent(action_state, source_row, trustpilot_tags, prior_order_name):
+    return bool(
+        action_state == "already_sent"
+        or trustpilot_tags
+        or prior_order_name
+        or source_row.get("trustpilot_invitation_present") is True
+        or source_row.get("customer_level_duplicate_block_applies") is True
+        or source_row.get("existing_unsent_gmail_draft_should_not_be_sent") is True
+    )
+
+
+def _trustpilot_history_label(
+    order_name,
+    action_state,
+    prior_order_name,
+    trustpilot_sent,
+    source_row,
+    evidence,
+):
+    if action_state == "already_sent":
+        if prior_order_name and prior_order_name != order_name:
+            return f"Already sent to this customer via {prior_order_name}"
+        return _safe_text(evidence, max_length=300) or "Trustpilot email already sent and recorded"
+    if prior_order_name:
+        return f"Already sent to this customer via {prior_order_name}"
+    if trustpilot_sent:
+        return "Already sent to this customer"
+    if source_row:
+        return "No previous Trustpilot email found"
+    return "Previous Trustpilot status unknown"
+
+
+def _queue_tag_chips(tags, delivered, review_request_present, trustpilot_sent, action_state):
+    chips = [
+        {"label": tag, "css_class": _queue_tag_css_class(tag)}
+        for tag in tags
+    ]
+    if not chips:
+        chips.append({"label": "Shopify tag data not loaded", "css_class": "rrw-badge-muted"})
+    if delivered is True:
+        chips.append({"label": "Delivered", "css_class": "rrw-badge-ok"})
+    elif delivered is False and action_state != "already_sent":
+        chips.append({"label": "Missing Delivered", "css_class": "rrw-badge-warn"})
+    if review_request_present is True:
+        chips.append({"label": "Review request tag found", "css_class": "rrw-badge-ok"})
+    elif review_request_present is False and action_state != "already_sent":
+        chips.append(
+            {
+                "label": f"Missing {CANONICAL_REVIEW_REQUEST_TAG}",
+                "css_class": "rrw-badge-warn",
+            }
+        )
+    if trustpilot_sent:
+        chips.append({"label": "Trustpilot sent", "css_class": "rrw-badge-info"})
+    return _dedupe_chip_rows(chips)
+
+
+def _queue_tag_css_class(tag):
+    normalized = _normalize_trustpilot_tag(tag)
+    if normalized in {_normalize_trustpilot_tag(alias) for alias in DELIVERED_TAG_ALIASES}:
+        return "rrw-badge-ok"
+    if normalized in {_normalize_trustpilot_tag(alias) for alias in REVIEW_REQUEST_TAG_ALIASES}:
+        return "rrw-badge-ok"
+    if normalized in {_normalize_trustpilot_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}:
+        return "rrw-badge-info"
+    if re.search(r"(?i)(return|refund|cancel|dispute|chargeback|ticket|complaint)", str(tag or "")):
+        return "rrw-badge-bad"
+    return "rrw-badge-muted"
+
+
+def _dedupe_chip_rows(chips):
+    seen = set()
+    result = []
+    for chip in chips:
+        key = (chip.get("label"), chip.get("css_class"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(chip)
+    return result
+
+
+def _queue_eligibility_status(action_state):
+    if action_state == "review_send":
+        return "eligible"
+    if action_state == "already_sent":
+        return "already_sent"
+    return "blocked"
+
+
+def _queue_eligibility_status_label(action_state):
+    if action_state == "review_send":
+        return "Eligible"
+    if action_state == "already_sent":
+        return "Already sent"
+    return "Not ready"
+
+
+def _queue_action_status(action_state):
+    if action_state == "review_send":
+        return "Review & Send"
+    if action_state == "already_sent":
+        return "Already sent"
+    return "Not ready"
+
+
+def _dedupe_queue_rows(rows):
+    seen = set()
+    result = []
+    for row in rows or []:
+        key = (row.get("order") or "", row.get("customer") or "", row.get("status") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(row)
+    return result
+
+
+def _approval_queue_sort_key(row):
+    action_order = {"review_send": 0, "not_ready": 1, "already_sent": 2}
+    return (action_order.get(row.get("action_state"), 9), row.get("order", ""))
+
+
+def _usable_masked_customer(value):
+    text = _safe_text(value, max_length=120)
+    return bool(text and text != "Masked in reports" and "***" in text and "@" in text)
+
+
+def _already_sent_reason(order_name):
+    if order_name == "#22620":
+        return "Already sent to this customer via #22621."
+    return "Already sent to this customer."
+
+
+def _review_send_selected_rows(approval_queue, selected_order):
+    selected = _canonical_order_name(selected_order)
+    if not selected:
+        return []
+    rows = []
+    for row in (approval_queue.get("needs_review_rows") or []) + (
+        approval_queue.get("already_sent_rows") or []
+    ):
+        if row.get("candidate_id") == selected or row.get("order") == selected:
+            rows.append(row)
+            continue
+        if selected in (row.get("group_order_names") or []):
+            rows.append(row)
+    return rows
+
+
+def _review_send_selection_blocker(selected_order, selected_rows):
+    for row in selected_rows or []:
+        if row.get("merged_order_group"):
+            if row.get("group_prior_trustpilot_sent"):
+                return {
+                    "status": "blocked_merged_order_group_already_sent",
+                    "detail": (
+                        row.get("eligibility_reason_plain")
+                        or "No email was sent. This merged order group already received a Trustpilot email."
+                    ),
+                }
+            return {
+                "status": "blocked_merged_order_group_not_ready",
+                "detail": "No email was sent. This merged order group is not ready.",
+            }
+        if row.get("action_state") == "already_sent":
+            return {
+                "status": "blocked_order_already_sent",
+                "detail": row.get("evidence") or row.get("reason") or "No email was sent. This order already received Trustpilot.",
+            }
+        if row.get("action_state") == "not_ready":
+            return {
+                "status": "blocked_order_not_ready",
+                "detail": row.get("eligibility_reason_plain") or "No email was sent. This order is not ready.",
+            }
+    return {
+        "status": "blocked_order_not_eligible",
+        "detail": "No email was sent. This order is not eligible.",
+    }
+
+
+def _runtime_review_send_group_blockers(candidate):
+    if not candidate.get("merged_order_group"):
+        return []
+    blockers = []
+    if candidate.get("group_prior_trustpilot_sent") is True:
+        blockers.append(
+            {
+                "status": "blocked_merged_order_group_already_sent",
+                "detail": (
+                    candidate.get("eligibility_reason_plain")
+                    or "No email was sent. This merged order group already received a Trustpilot email."
+                ),
+            }
+        )
+    if candidate.get("group_eligible_for_review_send") is not True:
+        blockers.append(
+            {
+                "status": "blocked_merged_order_group_not_ready",
+                "detail": "No email was sent. This merged order group is not ready.",
+            }
+        )
+    if candidate.get("order") != candidate.get("merged_group_primary_order_name"):
+        blockers.append(
+            {
+                "status": "blocked_merged_order_group_non_primary_order",
+                "detail": "No email was sent. This related order is not the merged group send row.",
+            }
+        )
+    return blockers
+
+
+def _base_review_and_send_result(selected_order, admin_username, state):
+    queue = state["approval_queue"]
+    gmail_setup = state["gmail_setup"]
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "report_generated_at": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_trustpilot_review_and_send_execute",
+        "task_name": "shopify_review_request_trustpilot_review_and_send_execute",
+        "phase": "5.26",
+        "mode": "admin_review_and_send",
+        "execution_status": "blocked_not_started",
+        "success": False,
+        "selected_order": selected_order,
+        "selected_customer": "",
+        "selected_merged_group_order_names": [],
+        "selected_merged_group_size": 0,
+        "selected_merged_group_eligible_for_review_send": False,
+        "selected_merged_group_block_reasons": [],
+        "selected_merged_group_prior_trustpilot_sent": False,
+        "candidate_verified": False,
+        "review_and_send_requested": True,
+        "admin_user": _safe_text(admin_username, max_length=120),
+        "needs_review_count": queue["needs_review_count"],
+        "already_sent_count": queue["already_sent_count"],
+        "ready_to_send_count": queue["ready_to_send_count"],
+        "not_ready_count": queue["not_ready_count"],
+        "gmail_scope_status": gmail_setup.get("scope_status") or "scope_missing",
+        "gmail_compose_send_supported": bool(gmail_setup.get("gmail_compose_send_supported")),
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_draft_id_partial": "",
+        "gmail_draft_send_attempted": False,
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "gmail_message_id_partial": "",
+        "email_sent": False,
+        "sent_count": 0,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "shopify_tag_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "template_status": "",
+        "template_subject": "",
+        "blocking_conditions": [],
+        "blocking_condition_count": 0,
+        "blocking_status": "",
+        "blocking_detail": "",
+        "next_admin_action": "No email was sent. Review the blocker message.",
+        "privacy_scan_summary": {},
+        "report_paths": {
+            "json": f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}",
+            "html": f"logs/{REVIEW_AND_SEND_HTML_FILENAME}",
+        },
+    }
+
+
+def _runtime_review_send_blockers(candidate, gmail_setup):
+    blockers = []
+    if not candidate.get("order") or candidate.get("action_state") != "review_send":
+        blockers.append(
+            {
+                "status": "blocked_order_not_eligible",
+                "detail": "No email was sent. This order is not eligible.",
+            }
+        )
+    if str(candidate.get("order", "")).startswith("#SIM"):
+        blockers.append(
+            {
+                "status": "blocked_simulator_candidate",
+                "detail": "No email was sent. Simulator candidates cannot send real email.",
+            }
+        )
+    if not gmail_setup.get("gmail_compose_send_supported"):
+        blockers.append(
+            {
+                "status": "blocked_missing_gmail_compose_send_support",
+                "detail": "No email was sent. Gmail sending permission is not ready.",
+            }
+        )
+    if not gmail_setup.get("ready"):
+        blockers.append(
+            {
+                "status": "blocked_gmail_setup_not_ready",
+                "detail": "No email was sent. Gmail sending setup is not ready.",
+            }
+        )
+    return blockers
+
+
+def _split_runtime_scopes(value):
+    return [item for item in re.split(r"[\s,]+", str(value or "").strip()) if item]
+
+
+def _runtime_scope_status(compose_present, send_present, broad_present):
+    if broad_present:
+        return "broad_mail_scope_available"
+    if send_present:
+        return "gmail_send_scope_available"
+    if compose_present:
+        return "gmail_compose_only"
+    return "scope_missing"
+
+
+def _safe_runtime_email(value):
+    text = str(value or "").strip().lower()
+    if text and "***" not in text and EMAIL_RE.fullmatch(text):
+        return text
+    return ""
+
+
+def _safe_exception_summary(exc):
+    text = str(exc or "")
+    text = re.sub(r"(?i)(/drafts/)[A-Za-z0-9_-]{8,}", r"\1[redacted-gmail-draft-id]", text)
+    text = re.sub(r"(?i)(/messages/)[A-Za-z0-9_-]{8,}", r"\1[redacted-gmail-message-id]", text)
+    text = re.sub(
+        r"(?i)\b(draft(?:_?id)?|message(?:_?id)?|id)\s*[:=]\s*[\"']?[A-Za-z0-9_-]{8,}",
+        r"\1=[redacted-gmail-id]",
+        text,
+    )
+    return _safe_text(f"{exc.__class__.__name__}: {text}", max_length=400)
+
+
+def _finalize_review_and_send_result(result):
+    result["success"] = result.get("email_sent") is True
+    result["blocking_condition_count"] = len(result.get("blocking_conditions") or [])
+    if not result.get("blocking_status") and result.get("blocking_conditions"):
+        result["blocking_status"] = result["blocking_conditions"][0].get("status", "")
+    if not result.get("blocking_detail") and result.get("blocking_conditions"):
+        result["blocking_detail"] = result["blocking_conditions"][0].get("detail", "")
+    result["privacy_scan_summary"] = _review_send_privacy_scan(result)
+    if not result["privacy_scan_summary"]["passed"] and not result.get("email_sent"):
+        result["execution_status"] = "blocked_privacy_scan_failed"
+        result["blocking_conditions"].append(
+            {
+                "status": "blocked_privacy_scan_failed",
+                "detail": "No email was sent. The local report privacy scan failed.",
+            }
+        )
+        result["blocking_condition_count"] = len(result["blocking_conditions"])
+        result["success"] = False
+    json_path = _write_review_and_send_json_report(result)
+    html_path = _write_review_and_send_html_report(result)
+    result["json_path"] = str(json_path)
+    result["html_path"] = str(html_path)
+    return result
+
+
+def _write_review_and_send_json_report(payload):
+    path = _log_dir() / REVIEW_AND_SEND_REPORT_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as report_file:
+        json.dump(payload, report_file, ensure_ascii=False, indent=2)
+        report_file.write("\n")
+    return path
+
+
+def _write_review_and_send_html_report(payload):
+    path = _log_dir() / REVIEW_AND_SEND_HTML_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_render_review_and_send_html(payload), encoding="utf-8")
+    return path
+
+
+def _render_review_and_send_html(payload):
+    blocking_rows = "\n".join(
+        (
+            "<tr>"
+            f"<td>{escape(item.get('status', ''))}</td>"
+            f"<td>{escape(item.get('detail', ''))}</td>"
+            "</tr>"
+        )
+        for item in payload.get("blocking_conditions", [])
+    ) or '<tr><td colspan="2">None</td></tr>'
+    safety_rows = "\n".join(
+        f"<tr><th>{escape(key)}</th><td>{escape(str(payload.get(key)))}</td></tr>"
+        for key in (
+            "gmail_api_call_performed",
+            "gmail_draft_create_attempted",
+            "gmail_draft_send_attempted",
+            "email_sent",
+            "shopify_write_performed",
+            "shopify_tag_write_performed",
+        )
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Trustpilot Review &amp; Send Execute</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; color: #1f2933; }}
+    table {{ border-collapse: collapse; margin: 8px 0 24px; width: 100%; }}
+    th, td {{ border: 1px solid #d9e2ec; padding: 8px; text-align: left; vertical-align: top; }}
+    th {{ background: #f0f4f8; }}
+    code {{ background: #f5f7fa; padding: 1px 4px; }}
+  </style>
+</head>
+<body>
+  <h1>Trustpilot Review &amp; Send Execute</h1>
+  <p>Status: <strong>{escape(payload.get("execution_status", ""))}</strong></p>
+  <table><tbody>
+    <tr><th>Selected order</th><td>{escape(payload.get("selected_order", ""))}</td></tr>
+    <tr><th>Selected customer</th><td>{escape(payload.get("selected_customer", ""))}</td></tr>
+    <tr><th>Candidate verified</th><td>{escape(str(payload.get("candidate_verified") is True))}</td></tr>
+    <tr><th>Gmail scope status</th><td><code>{escape(payload.get("gmail_scope_status", ""))}</code></td></tr>
+    <tr><th>Email sent</th><td>{escape(str(payload.get("email_sent") is True))}</td></tr>
+    <tr><th>Next admin action</th><td>{escape(payload.get("next_admin_action", ""))}</td></tr>
+  </tbody></table>
+  <h2>Blocking Conditions</h2>
+  <table><thead><tr><th>Status</th><th>Detail</th></tr></thead><tbody>{blocking_rows}</tbody></table>
+  <h2>Safety Flags</h2>
+  <table><tbody>{safety_rows}</tbody></table>
+</body>
+</html>"""
+
+
+def _review_send_privacy_scan(payload):
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    raw_emails = []
+    for match in EMAIL_RE.finditer(text):
+        value = match.group(0).lower()
+        if value == GMAIL_SEND_FROM.lower() or "***" in value:
+            continue
+        raw_emails.append(mask_email(value))
+    full_id_count = len(
+        re.findall(r'"gmail_(?:draft|message)_id"\s*:\s*"[^"]+"', text)
+    )
+    token_count = 1 if SECRET_VALUE_RE.search(text) else 0
+    return {
+        "scan_performed": True,
+        "passed": not raw_emails and not full_id_count and not token_count,
+        "raw_customer_email_count": len(set(raw_emails)),
+        "masked_raw_customer_email_findings": sorted(set(raw_emails))[:5],
+        "token_secret_bearer_pattern_count": token_count,
+        "full_gmail_draft_or_message_id_field_count": full_id_count,
+    }
+
+
 def _order_count_text(count, suffix):
     noun = "order" if count == 1 else "orders"
     return f"{count} {noun} {suffix}"
@@ -4138,14 +7688,22 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         or send_scope_present
         or broad_mail_scope_present
     )
-    new_config_ready = new_file_paths_ready and real_send_scope_available
     compose_scope_present = (
         gmail_helper.get("gmail_compose_scope_present") is True
         or compatibility_audit.get("gmail_compose_scope_present") is True
         or scope_resolver.get("compose_scope_available") is True
         or env_loading_audit.get("os_environ_compose_scope_detected") is True
     )
-    ready = dependencies_ready and (new_config_ready or (legacy_config_detected and real_send_scope_available))
+    gmail_compose_send_supported = (
+        compose_scope_present or real_send_scope_available or broad_mail_scope_present
+    )
+    new_config_ready = new_file_paths_ready and gmail_compose_send_supported
+    legacy_config_ready = legacy_config_detected and gmail_compose_send_supported
+    env_scope_ready = (
+        env_loading_audit.get("scope_key_detected_in_os_environ") is True
+        or env_loading_audit.get("scope_key_detected_in_dot_env") is True
+    ) and gmail_compose_send_supported
+    ready = dependencies_ready and (new_config_ready or legacy_config_ready or env_scope_ready)
     required_scope = _safe_text(
         gmail_helper.get("required_scope_expected") or "https://www.googleapis.com/auth/gmail.send",
         max_length=120,
@@ -4160,8 +7718,8 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_value = "Permission needed"
         status_message = "Gmail permission is not configured yet."
     elif env_audit_status == "gmail_compose_scope_available_in_runner_env":
-        status_value = "Draft permission"
-        status_message = "Gmail draft permission is available. Staff can review drafts before sending."
+        status_value = "Ready"
+        status_message = "Gmail draft permission is available for Review & Send."
     elif env_audit_status == "gmail_send_scope_available_in_runner_env":
         status_value = "Ready"
         status_message = "Gmail send permission is available. Final approval is still required before sending."
@@ -4178,8 +7736,8 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_value = "Permission needed"
         status_message = "Gmail permission is not configured yet."
     elif compose_scope_present and not real_send_scope_available:
-        status_value = "Draft-only config"
-        status_message = "Gmail draft permission is available. Staff can review drafts before sending."
+        status_value = "Ready"
+        status_message = "Gmail draft permission is available for Review & Send."
     elif real_send_scope_available:
         status_value = "Ready"
         status_message = "Gmail send permission is available. Final approval is still required before sending."
@@ -4191,6 +7749,20 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_message = "Gmail permission is not configured yet."
     return {
         "ready": ready,
+        "gmail_compose_send_supported": gmail_compose_send_supported,
+        "compose_scope_present": compose_scope_present,
+        "send_scope_present": send_scope_present,
+        "broad_mail_scope_present": broad_mail_scope_present,
+        "real_send_scope_available": real_send_scope_available,
+        "scope_status": (
+            "gmail_compose_only"
+            if compose_scope_present and not real_send_scope_available
+            else (
+                "gmail_send_scope_available"
+                if real_send_scope_available
+                else scope_status or env_audit_status or "scope_missing"
+            )
+        ),
         "status_value": status_value,
         "status_message": status_message,
         "rows": [
@@ -4581,7 +8153,7 @@ def _pipeline_steps(ready_count):
         },
         {
             "number": 2,
-            "label": f"Staff adds `{CANONICAL_REVIEW_REQUEST_TAG}`",
+            "label": "Staff adds review-request tag",
             "detail": "Staff marks the order for a Trustpilot request.",
             "state_label": "Needed",
             "state_class": "rrw-step-muted",
@@ -4942,9 +8514,9 @@ def _summary(
             "note": "Detected from Trustpilot alias tags in local reports.",
         },
         {
-            "label": f"Canonical {CANONICAL_REVIEW_REQUEST_TAG}",
+            "label": "Review request tag",
             "value": len(review_request_queue),
-            "note": f"Exact canonical tag only; {TYPO_REVIEW_REQUEST_TAG} is listed separately as typo/not canonical.",
+            "note": f"Accepts canonical {CANONICAL_REVIEW_REQUEST_TAG} and legacy typo {TYPO_REVIEW_REQUEST_TAG}.",
         },
         {
             "label": "Missing delivered",
@@ -4954,7 +8526,7 @@ def _summary(
         {
             "label": "Missing review tag",
             "value": blocked_missing_review_tag,
-            "note": f"Trustpilot candidates now require exact {CANONICAL_REVIEW_REQUEST_TAG}.",
+            "note": "Trustpilot candidates accept the canonical review-request tag and the legacy typo alias.",
         },
         {
             "label": "Merged group blocked",
@@ -5069,13 +8641,37 @@ def _collect_tag_values(value, split_strings=False):
     return []
 
 
-def _matched_trustpilot_tags(item, tags):
-    normalized_aliases = {_normalize_trustpilot_tag(tag) for tag in TRUSTPILOT_TAG_ALIASES}
-    matches = [
+def has_review_request_tag(tags):
+    return bool(_matched_review_request_tags(tags))
+
+
+def has_delivered_tag(tags):
+    return bool(_matched_delivered_tags(tags))
+
+
+def has_trustpilot_sent_tag(tags):
+    return bool(_matched_trustpilot_tags({}, tags))
+
+
+def _matched_review_request_tags(tags):
+    return _matched_tag_alias_values(tags, REVIEW_REQUEST_TAG_ALIASES)
+
+
+def _matched_delivered_tags(tags):
+    return _matched_tag_alias_values(tags, DELIVERED_TAG_ALIASES)
+
+
+def _matched_tag_alias_values(tags, aliases):
+    normalized_aliases = {_normalize_trustpilot_tag(tag) for tag in aliases}
+    return _dedupe_text(
         tag
-        for tag in tags
+        for tag in _as_text_list(tags)
         if _normalize_trustpilot_tag(tag) in normalized_aliases
-    ]
+    )
+
+
+def _matched_trustpilot_tags(item, tags):
+    matches = _matched_tag_alias_values(tags, TRUSTPILOT_TAG_ALIASES)
     for key in ("matched_trustpilot_invitation_tags",):
         matches.extend(_collect_string_list(item, key))
     for key in (

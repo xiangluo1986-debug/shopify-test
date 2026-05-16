@@ -18,6 +18,27 @@
         text-decoration: none;
         background: var(--body-bg, #fff);
     }
+    .rrw-action-form {
+        margin: 0;
+    }
+    .rrw-primary-button {
+        min-height: 32px;
+        padding: 6px 12px;
+        border: 1px solid #14532d;
+        border-radius: 4px;
+        background: #166534;
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .rrw-primary-button:hover {
+        background: #14532d;
+    }
+    .rrw-disabled-action {
+        color: var(--body-quiet-color, #666);
+        font-weight: 600;
+    }
     .rrw-subtitle {
         margin: 4px 0;
         color: var(--body-fg, #222);
@@ -26,6 +47,11 @@
     }
     .rrw-muted {
         color: var(--body-quiet-color, #666);
+    }
+    .rrw-secondary-line {
+        color: var(--body-quiet-color, #666);
+        font-size: 12px;
+        margin-top: 3px;
     }
     .rrw-note {
         border-left: 4px solid #2563eb;
@@ -342,194 +368,231 @@
     </div>
 
     <h1>Review Requests</h1>
-    <p class="rrw-subtitle">Automatically checks which orders are ready for Trustpilot review emails.</p>
-    <p class="rrw-muted">Admins only | Read-only dashboard</p>
-    <div class="rrw-note">
-        This page does not send emails by itself. It only shows what is ready and what is blocked.
-    </div>
+    <p class="rrw-subtitle">Review and send Trustpilot review emails.</p>
 
-    <div class="rrw-answer-banner {{ dashboard.setup_checklist.current_answer_class }}">
-        <div class="rrw-answer-question">Can the system prepare a Trustpilot email now?</div>
-        <div class="rrw-answer-value">Current answer: {{ dashboard.setup_checklist.current_answer }}</div>
+    {% if dashboard.approval_queue.ready_to_send_count == 0 %}
+        <div class="rrw-note">{{ dashboard.approval_queue.empty_message }}</div>
+    {% endif %}
+
+    <div class="rrw-section">
+        <h2>Order data coverage</h2>
+        {% if dashboard.order_data_coverage.incomplete %}
+            <div class="rrw-warning">{{ dashboard.order_data_coverage.incomplete_message }}</div>
+        {% endif %}
+        <p>Last Shopify order sync window: {{ dashboard.order_data_coverage.last_shopify_order_sync_window }}</p>
+        <p>Local data source: {{ dashboard.order_data_coverage.local_data_source_label }}</p>
+        <p>#22530 found: {{ dashboard.order_data_coverage.order_22530_found_label }}</p>
+        <p>Candidate scan freshness: {{ dashboard.order_data_coverage.candidate_scan_freshness }}</p>
+        <p>Coverage warnings: {{ dashboard.order_data_coverage.warning_label }}</p>
     </div>
 
     <div class="rrw-section">
-        <h2>Setup checklist</h2>
-        <p class="rrw-muted">Complete these items before the system can prepare a Trustpilot Gmail draft.</p>
-        <p class="rrw-muted">Checklist areas: Gmail permission, Eligible order, Safety checks, Final approval.</p>
-        <div class="rrw-checklist">
-            {% for item in dashboard.setup_checklist.items %}
-                <article class="rrw-check-item">
-                    <div class="rrw-check-heading">
-                        <div class="rrw-check-label">{{ item.letter }}. {{ item.label }}</div>
-                        <span class="rrw-badge {{ item.status_class }}">{{ item.status }}</span>
-                    </div>
-                    <p>{{ item.text }}</p>
-                    <p class="rrw-card-note"><strong>Action:</strong> {{ item.action }}</p>
-                </article>
-            {% endfor %}
-        </div>
-    </div>
-
-    <div class="rrw-section">
-        <h2>How to make an order eligible</h2>
-        <ol class="rrw-mini-guide">
-            <li>Confirm the order was delivered.</li>
-            <li>Add Shopify tag <code>{{ wb.canonical_review_request_tag }}</code>.</li>
-            <li>Make sure the customer has not already received a Trustpilot email.</li>
-            <li>Make sure there is no open complaint, refund, return, or related-order issue.</li>
-            <li>The system will refresh after Shopify sync and show it as ready if safe.</li>
-        </ol>
-    </div>
-
-    <div class="rrw-section">
-        <h2>Current Status</h2>
-        <div class="rrw-status-grid">
-            {% for card in dashboard.status_cards %}
-                <article class="rrw-status-card rrw-status-{{ card.tone }}">
-                    <h3>{{ card.label }}</h3>
-                    <div class="rrw-status-value">{{ card.value }}</div>
-                    <div class="rrw-status-message">{{ card.message }}</div>
-                </article>
-            {% endfor %}
-        </div>
-    </div>
-
-    <div class="rrw-section">
-        <h2>What should I do next?</h2>
-        <div class="rrw-action">
-            <h3>{{ dashboard.next_action_headline }}</h3>
-            <p>Before the system can prepare a Trustpilot email draft, we need:</p>
-            <ol>
-                {% for item in dashboard.send_requirements %}
-                    <li>{{ item }}</li>
-                {% endfor %}
-            </ol>
-            {% if dashboard.current_blockers %}
-                <p><strong>Current blockers:</strong></p>
-                <ul>
-                    {% for blocker in dashboard.current_blockers %}
-                        <li>{{ blocker }}</li>
-                    {% endfor %}
-                </ul>
-            {% endif %}
-        </div>
-    </div>
-
-    <div class="rrw-section">
-        <h2>Blocked orders</h2>
+        <h2>Needs review email</h2>
         <table class="rrw-table">
             <thead>
                 <tr>
                     <th>Order</th>
+                    <th>Customer</th>
+                    <th>Orders</th>
+                    <th>Tags</th>
+                    <th>Trustpilot history</th>
                     <th>Status</th>
                     <th>Reason</th>
-                    <th>Evidence</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody>
-                {% for row in dashboard.blocked_order_rows %}
+                {% for row in dashboard.approval_queue.needs_review_rows %}
                     <tr>
                         <td>{{ row.order }}</td>
-                        <td><span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span></td>
-                        <td>{{ row.reason }}</td>
+                        <td>
+                            {{ row.customer_display_name }}
+                            {% if row.masked_customer_label %}
+                                <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ row.customer_orders_display }}
+                            {% if row.merged_order_group %}
+                                <div><span class="rrw-pill rrw-badge-info">Merged order group</span></div>
+                            {% endif %}
+                            <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
+                        </td>
+                        <td>
+                            {% for chip in row.tag_chips %}
+                                <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
+                            {% endfor %}
+                        </td>
+                        <td>{{ row.trustpilot_history_label }}</td>
+                        <td>
+                            <span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span>
+                            <div>
+                                <span class="rrw-pill {{ row.delivered_status_class }}">{{ row.delivered_status_label }}</span>
+                                <span class="rrw-pill {{ row.review_request_tag_status_class }}">{{ row.review_request_tag_status_label }}</span>
+                            </div>
+                            {% if row.review_request_tag_match_detail %}
+                                <div class="rrw-secondary-line">{{ row.review_request_tag_match_detail }}</div>
+                            {% endif %}
+                            {% if row.tag_data_missing_source %}
+                                <div class="rrw-secondary-line">{{ row.tag_data_missing_source }}</div>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.eligibility_reason_plain }}</td>
+                        <td>
+                            {% if row.action_state == "review_send" %}
+                                <form method="post" class="rrw-action-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="review_send">
+                                    <input type="hidden" name="candidate_id" value="{{ row.candidate_id }}">
+                                    <button type="submit" class="rrw-primary-button">Review &amp; Send</button>
+                                </form>
+                            {% elif row.action_state == "already_sent" %}
+                                <span class="rrw-ok">{{ row.action_status }}</span>
+                            {% else %}
+                                <span class="rrw-disabled-action">{{ row.action_status }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="8" class="rrw-muted">No orders need review email right now.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Already sent</h2>
+        <table class="rrw-table">
+            <thead>
+                <tr>
+                    <th>Order</th>
+                    <th>Customer</th>
+                    <th>Orders</th>
+                    <th>Trustpilot email</th>
+                    <th>Evidence</th>
+                    <th>Tags</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in dashboard.approval_queue.already_sent_rows %}
+                    <tr>
+                        <td>{{ row.order }}</td>
+                        <td>
+                            {{ row.customer_display_name }}
+                            {% if row.masked_customer_label %}
+                                <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ row.customer_orders_display }}
+                            {% if row.merged_order_group %}
+                                <div><span class="rrw-pill rrw-badge-info">Merged order group</span></div>
+                            {% endif %}
+                            <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
+                        </td>
+                        <td><span class="rrw-badge {{ row.status_class }}">{{ row.trustpilot_email_status }}</span></td>
                         <td>{{ row.evidence }}</td>
+                        <td>
+                            {% for chip in row.tag_chips %}
+                                <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
+                            {% endfor %}
+                        </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="4" class="rrw-muted">No blocked orders are listed right now.</td></tr>
+                    <tr><td colspan="6" class="rrw-muted">No sent Trustpilot emails are listed right now.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
-    <div class="rrw-section">
-        <h2>Gmail setup</h2>
-        <p class="{% if dashboard.gmail_setup_ready %}rrw-note{% else %}rrw-warning{% endif %}">
-            {{ dashboard.gmail_setup_message }}
-            {% if not dashboard.gmail_setup_ready %}
-                No email can be sent until setup is complete.
-            {% endif %}
-        </p>
-        <table class="rrw-table">
-            <tbody>
-                {% for row in dashboard.gmail_setup_rows %}
-                    <tr>
-                        <th>{{ row.label }}</th>
-                        <td>{{ row.value }}</td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <div class="rrw-section">
-        <h2>Draft preparation</h2>
-        <p class="{% if dashboard.setup_checklist.current_answer_class == 'rrw-answer-ready' %}rrw-note{% else %}rrw-warning{% endif %}">
-            {{ dashboard.setup_checklist.current_answer }}
-        </p>
-        <table class="rrw-table">
-            <tbody>
-                <tr>
-                    <th>Ready orders</th>
-                    <td>{{ dashboard.setup_checklist.eligible_candidate_count_label }}</td>
-                </tr>
-                <tr>
-                    <th>Selected order</th>
-                    <td>{{ dashboard.setup_checklist.selected_candidate_label }}</td>
-                </tr>
-                <tr>
-                    <th>Next action</th>
-                    <td>{{ dashboard.setup_checklist.next_plain_action }}</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-
-    <div class="rrw-section">
-        <h2>How it works</h2>
-        <ol class="rrw-pipeline">
-            {% for step in dashboard.pipeline_steps %}
-                <li class="{{ step.state_class }}">
-                    <div class="rrw-step-number">{{ step.number }}</div>
-                    <div class="rrw-step-label">{{ step.label }}</div>
-                    <div class="rrw-step-detail">{{ step.detail }}</div>
-                    <div class="rrw-step-state">{{ step.state_label }}</div>
-                </li>
-            {% endfor %}
-        </ol>
-    </div>
-
-    <div class="rrw-section">
-        <h2>Recent activity</h2>
+    <details class="rrw-section">
+        <summary><strong>Blocked / Not ready</strong> ({{ dashboard.approval_queue.blocked_count }})</summary>
         <table class="rrw-table">
             <thead>
                 <tr>
-                    <th>Order</th>
-                    <th>Status</th>
-                    <th>Reason</th>
+                    <th>Order/group</th>
+                    <th>Customer</th>
+                    <th>Block reason</th>
+                    <th>Missing requirement</th>
                     <th>Evidence</th>
                 </tr>
             </thead>
             <tbody>
-                {% for row in dashboard.recent_activity %}
+                {% for row in dashboard.approval_queue.blocked_rows %}
                     <tr>
-                        <td>{{ row.order }}</td>
-                        <td><span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span></td>
-                        <td>{{ row.reason }}</td>
-                        <td>{{ row.last_evidence }}</td>
+                        <td>
+                            {% if row.merged_order_group %}
+                                {{ row.merged_group_compact_label }}
+                                <div><span class="rrw-pill rrw-badge-info">Merged order group</span></div>
+                            {% else %}
+                                {{ row.order }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ row.customer_display_name }}
+                            {% if row.masked_customer_label %}
+                                <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.eligibility_reason_plain }}</td>
+                        <td>
+                            <span class="rrw-pill {{ row.delivered_status_class }}">{{ row.delivered_status_label }}</span>
+                            <span class="rrw-pill {{ row.review_request_tag_status_class }}">{{ row.review_request_tag_status_label }}</span>
+                            {% if row.review_request_tag_match_detail %}
+                                <div class="rrw-secondary-line">{{ row.review_request_tag_match_detail }}</div>
+                            {% endif %}
+                            {% if row.tag_data_missing_source %}
+                                <div class="rrw-secondary-line">{{ row.tag_data_missing_source }}</div>
+                            {% endif %}
+                            {% if row.merged_order_group %}
+                                <div class="rrw-secondary-line">{{ row.merged_group_label }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ row.evidence }}
+                            {% if row.scan_date_note %}
+                                <div class="rrw-secondary-line">{{ row.scan_date_note }}</div>
+                            {% endif %}
+                        </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="4" class="rrw-muted">No local Trustpilot activity is available.</td></tr>
+                    <tr><td colspan="5" class="rrw-muted">No blocked or not-ready orders are listed right now.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
-    </div>
+    </details>
 
     <details class="rrw-advanced">
         <summary>Advanced technical details</summary>
         <p class="rrw-muted">
             Internal task names, report paths, safety flags, simulator data, and local debug tables are kept here.
         </p>
+
+    <div class="rrw-section">
+        <h2>Last 60 days candidate scan</h2>
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Scanned orders</div>
+                <div class="rrw-card-value">{{ dashboard.last_60_days_candidate_scan.scanned_order_count }}</div>
+                <div class="rrw-card-note">Delivered: {{ dashboard.last_60_days_candidate_scan.delivered_order_count }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible</div>
+                <div class="rrw-card-value">{{ dashboard.last_60_days_candidate_scan.eligible_candidate_count }}</div>
+                <div class="rrw-card-note">Active buttons: {{ dashboard.approval_queue.review_send_action_enabled_count }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Already sent</div>
+                <div class="rrw-card-value">{{ dashboard.last_60_days_candidate_scan.already_sent_count }}</div>
+                <div class="rrw-card-note">#22621 and #22620 remain out of the send queue.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Blocked / not ready</div>
+                <div class="rrw-card-value">{{ dashboard.last_60_days_candidate_scan.blocked_count }}</div>
+                <div class="rrw-card-note">Merged blocked: {{ dashboard.last_60_days_candidate_scan.blocked_merged_group_count }}</div>
+            </div>
+        </div>
+    </div>
 
     <div class="rrw-section">
         <h2>Trustpilot Automation</h2>
@@ -1799,10 +1862,10 @@
         </div>
 
         <div class="rrw-advanced-section">
-            <h2>Canonical Review Request Queue</h2>
+            <h2>Review Request Alias Queue</h2>
             <p class="rrw-muted">
-                Exact canonical queue tag: <code>{{ wb.canonical_review_request_tag }}</code>.
-                The typo-like tag <code>{{ wb.typo_review_request_tag }}</code> is not treated as canonical.
+                Future writes use canonical tag <code>{{ wb.canonical_review_request_tag }}</code>.
+                Read checks also accept the legacy typo tag <code>{{ wb.typo_review_request_tag }}</code>.
             </p>
             <table class="rrw-table">
                 <thead>
@@ -1835,7 +1898,7 @@
                             <td>{{ row.source }}<br><span class="rrw-muted">{{ row.source_path }}</span></td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="6" class="rrw-muted">No rows with the exact canonical review-request tag match the current filters.</td></tr>
+                        <tr><td colspan="6" class="rrw-muted">No rows with a review-request tag alias match the current filters.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
