@@ -3033,7 +3033,7 @@
             <span class="tw-count-badge">Safe fields only</span>
           {% endif %}
         </div>
-        <p class="tw-shopify-apply-note">Safe fields only. Product descriptions update only if HTML validation passes. Product options update only when Shopify mapping is confirmed. Variants, media alt text, and technical fields stay blocked.</p>
+        <p class="tw-shopify-apply-note">Safe fields only. Product descriptions update only if HTML validation passes. Product options and media alt text update only when Shopify mapping and readback are confirmed. Variants and technical fields stay blocked.</p>
         <div class="tw-job-actions" style="align-items: flex-end;">
           <div>
             <div class="tw-header-status-label">Checked items</div>
@@ -3048,12 +3048,24 @@
             <div class="tw-header-status-value">{{ all_languages_update_display.verified_count|default:0 }}</div>
           </div>
           <div>
+            <div class="tw-header-status-label">Product titles updated</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.product_title_updated_count|default:0 }}</div>
+          </div>
+          <div>
+            <div class="tw-header-status-label">SEO fields updated</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.seo_updated_count|default:0 }}</div>
+          </div>
+          <div>
             <div class="tw-header-status-label">Product options updated</div>
             <div class="tw-header-status-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
           </div>
           <div>
             <div class="tw-header-status-label">Product descriptions updated</div>
             <div class="tw-header-status-value">{{ all_languages_update_display.product_descriptions_updated_count|default:0 }}</div>
+          </div>
+          <div>
+            <div class="tw-header-status-label">Media alt text updated</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.media_alt_updated_count|default:0 }}</div>
           </div>
           <div>
             <div class="tw-header-status-label">Needs review</div>
@@ -3068,14 +3080,14 @@
         {% if all_languages_update_display.status == "all_languages_shopify_update_not_submitted" %}
           <div class="tw-shopify-apply-disabled-reason">
             <div>Shopify has not been updated yet.</div>
-            <div>Click Update Shopify now to sync safe translations.</div>
+            <div>Click Translate and update Shopify to sync safe translations.</div>
           </div>
         {% elif all_languages_update_display.result_message %}
           <div class="tw-shopify-apply-disabled-reason">{{ all_languages_update_display.result_message }}</div>
         {% else %}
           <div class="tw-shopify-apply-disabled-reason">
             <div>Shopify has not been updated yet.</div>
-            <div>Click Update Shopify now to sync safe translations.</div>
+            <div>Click Translate and update Shopify to sync safe translations.</div>
           </div>
         {% endif %}
         {% if not all_languages_update_display.is_successfully_updated %}
@@ -3088,7 +3100,7 @@
             <input type="hidden" name="target_locale" value="{{ selected_locale }}">
             <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
             <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-            <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Update Shopify now</button>
+            <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Translate and update Shopify</button>
             <span class="tw-compact-safe-text">Safe fields only</span>
           </form>
         {% endif %}
@@ -3113,6 +3125,14 @@
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">SEO description checked</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.seo_description_candidates_found|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Product options checked</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.product_options_candidates_found|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Media alt text checked</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.media_alt_candidates_found|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Safe fields ready</div>
@@ -3186,12 +3206,24 @@
                     <div class="tw-shopify-success-value">{{ all_languages_update_display.verified_count }}</div>
                   </div>
                   <div class="tw-shopify-success-metric">
-                    <div class="tw-shopify-success-label">Product options updated</div>
-                    <div class="tw-shopify-success-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
+                    <div class="tw-shopify-success-label">Product titles updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.product_title_updated_count|default:0 }}</div>
                   </div>
                   <div class="tw-shopify-success-metric">
                     <div class="tw-shopify-success-label">Product descriptions updated</div>
                     <div class="tw-shopify-success-value">{{ all_languages_update_display.product_descriptions_updated_count|default:0 }}</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">SEO fields updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.seo_updated_count|default:0 }}</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Product options updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Media alt text updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.media_alt_updated_count|default:0 }}</div>
                   </div>
                   <div class="tw-shopify-success-metric">
                     <div class="tw-shopify-success-label">Not updated</div>
@@ -3228,12 +3260,24 @@
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.verified_count }}</div>
               </div>
               <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Product options updated</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
+                <div class="tw-shopify-update-label">Product titles updated</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.product_title_updated_count|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Product descriptions updated</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.product_descriptions_updated_count|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">SEO fields updated</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.seo_updated_count|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Product options updated</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Media alt text updated</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.media_alt_updated_count|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Needs review</div>
@@ -3255,7 +3299,7 @@
                 <h4>Why items were not updated</h4>
                 <ul class="tw-shopify-reason-list">
                   {% for item in all_languages_update_display.not_updated_breakdown %}
-                    <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}</li>
+                    <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}{% if item.plain_reason %}<br><span>{{ item.plain_reason }}</span>{% endif %}</li>
                   {% endfor %}
                 </ul>
               {% elif all_languages_update_display.blocked_count and all_languages_update_display.blocked_reason_summary %}

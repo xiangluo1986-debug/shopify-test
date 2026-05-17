@@ -50,8 +50,12 @@ SAFE_WRITE_READINESS_MAX_ENTRY_COUNT = 3
 SAFE_WRITE_READINESS_FIELDS = ("title", "meta_title", "meta_description")
 SAFE_WRITE_READINESS_FIELD_SET = set(SAFE_WRITE_READINESS_FIELDS)
 ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS = ("option.name", "option.value")
+ALL_LANGUAGES_MEDIA_ALT_AUTO_WRITE_FIELDS = ("media.alt",)
 ALL_LANGUAGES_AUTO_WRITE_FIELDS = (
-    SAFE_WRITE_READINESS_FIELDS + ("body_html",) + ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS
+    SAFE_WRITE_READINESS_FIELDS
+    + ("body_html",)
+    + ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS
+    + ALL_LANGUAGES_MEDIA_ALT_AUTO_WRITE_FIELDS
 )
 ALL_LANGUAGES_AUTO_WRITE_FIELD_SET = set(ALL_LANGUAGES_AUTO_WRITE_FIELDS)
 LOCKED_EXECUTION_ALLOWED_FIELDS = SAFE_WRITE_READINESS_FIELDS
@@ -101,8 +105,6 @@ ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS = {
     "variants",
     "important_metafields",
     "metafields",
-    "media",
-    "media_alt_text",
 }
 ALL_LANGUAGES_MAPPING_BLOCKED_REASON = (
     "Can review now; Shopify update support needs extra mapping."
@@ -149,6 +151,7 @@ ALL_LANGUAGES_SAFE_FIELD_LABELS = {
     "meta_title": "SEO title",
     "meta_description": "SEO description",
     "body_html": "Product description",
+    "media.alt": "Media alt text",
 }
 ALL_LANGUAGES_OPTION_FIELD_LABELS = {
     "option.name": "Product option name",
@@ -679,6 +682,8 @@ def apply_selected_translations_to_shopify(
         payload["shopify_api_call_performed"] = True
         payload["sanitized_errors"].extend(readback_result.get("sanitized_errors") or [])
         resource_summary = {
+            "resource_id": resource_id,
+            "readback_resource_id": readback_result.get("resource_id", ""),
             "request_failed": readback_result.get("request_failed", False),
             "http_status": readback_result.get("http_status"),
             "entries": [],
@@ -689,6 +694,8 @@ def apply_selected_translations_to_shopify(
                 key=entry.get("key", ""),
                 locale=locale,
                 proposed_translation_value=entry.get("proposed_translation_value", ""),
+                expected_resource_id=resource_id,
+                readback_resource_id=readback_result.get("resource_id", ""),
             )
             readback_verified = bool(match.get("matched")) and not readback_result.get(
                 "request_failed"
@@ -708,6 +715,7 @@ def apply_selected_translations_to_shopify(
                     "key_exists": match.get("key_exists", False),
                     "locale_matches": match.get("locale_matches", False),
                     "value_matches": match.get("value_matches", False),
+                    "resource_id_matches": match.get("resource_id_matches", False),
                     "outdated_acceptable": match.get("outdated_acceptable", False),
                 }
             )
@@ -775,7 +783,6 @@ def build_translation_workspace_all_languages_update_state(
         "blocked_fields": [
             "variants",
             "metafields",
-            "media_alt_text",
             "technical_fields",
         ],
         "entries": entries,
@@ -953,6 +960,9 @@ def _all_languages_merge_entry_metadata(entry: dict, source_entry: dict):
         "shopify_update_mapping_ready",
         "translation_preview_without_digest",
         "selected_options",
+        "media_alt",
+        "media_content_type",
+        "media_url",
     )
     for key in metadata_keys:
         value = source_entry.get(key)
@@ -1148,6 +1158,7 @@ def validate_and_update_all_languages_to_shopify(
             summary_key = f"{resource_id}|{locale}"
             readback_summaries[summary_key] = {
                 "resource_id": resource_id,
+                "readback_resource_id": readback_result.get("resource_id", ""),
                 "locale": locale,
                 "request_failed": readback_result.get("request_failed", False),
                 "http_status": readback_result.get("http_status"),
@@ -1159,6 +1170,8 @@ def validate_and_update_all_languages_to_shopify(
                     key=_all_languages_shopify_write_key(entry),
                     locale=locale,
                     proposed_translation_value=entry.get("proposed_translation_value", ""),
+                    expected_resource_id=resource_id,
+                    readback_resource_id=readback_result.get("resource_id", ""),
                 )
                 matched = bool(match.get("matched")) and not readback_result.get(
                     "request_failed"
@@ -1183,6 +1196,7 @@ def validate_and_update_all_languages_to_shopify(
                         "key_exists": match.get("key_exists", False),
                         "locale_matches": match.get("locale_matches", False),
                         "value_matches": match.get("value_matches", False),
+                        "resource_id_matches": match.get("resource_id_matches", False),
                         "outdated_acceptable": match.get("outdated_acceptable", False),
                     }
                 )
@@ -1579,6 +1593,8 @@ def execute_translation_workspace_single_locked_write(
         key=key,
         locale=locale,
         proposed_translation_value=proposed_translation_value,
+        expected_resource_id=resource_id,
+        readback_resource_id=readback_result.get("resource_id", ""),
     )
     payload["readback_matched"] = readback_match["matched"]
     payload["rollback_needed"] = not readback_match["matched"]
@@ -1592,6 +1608,7 @@ def execute_translation_workspace_single_locked_write(
         "key_exists": readback_match["key_exists"],
         "locale_matches": readback_match["locale_matches"],
         "value_matches": readback_match["value_matches"],
+        "resource_id_matches": readback_match["resource_id_matches"],
         "outdated_acceptable": readback_match["outdated_acceptable"],
         "rollback_needed": not readback_match["matched"],
     }
@@ -1900,6 +1917,7 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
     entry = {
         "entry_id": entry_id,
         "locale": locale,
+        "product_gid": row.get("product_gid") or product_gid,
         "resource_id": resource_id,
         "key": field_key,
         "source_key": source_key,
@@ -1939,6 +1957,9 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
             row.get("translation_preview_without_digest")
         ),
         "selected_options": row.get("selected_options", []),
+        "media_alt": row.get("media_alt", ""),
+        "media_content_type": row.get("media_content_type", ""),
+        "media_url": row.get("media_url", ""),
         "validation_status": row.get("validation_status", ""),
         "seo_validation_status": row.get("seo_validation_status")
         or row.get("seo_status", ""),
@@ -2252,6 +2273,14 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
         blocking_reasons = ["existing_translation_current_same_value"]
         human_blocking_reasons = ["This field is already up to date."]
         blocking_reason = human_blocking_reasons[0]
+    elif _all_languages_media_alt_write_candidate(entry) and (
+        not str(entry.get("source_value") or "").strip()
+        or not str(entry.get("proposed_translation_value") or "").strip()
+    ):
+        status = "skipped"
+        blocking_reasons = ["media_alt_text_empty"]
+        human_blocking_reasons = ["Media alt text is empty."]
+        blocking_reason = human_blocking_reasons[0]
     else:
         blocking_reasons = _all_languages_update_blocking_reasons(
             entry,
@@ -2276,6 +2305,7 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
     return {
         "entry_id": entry.get("entry_id", ""),
         "locale": entry.get("locale", ""),
+        "product_gid": entry.get("product_gid", ""),
         "key": field_key,
         "source_key": source_key,
         "shopify_key": shopify_key,
@@ -2322,6 +2352,9 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
             entry.get("translation_preview_without_digest")
         ),
         "selected_options": entry.get("selected_options", []),
+        "media_alt": entry.get("media_alt", ""),
+        "media_content_type": entry.get("media_content_type", ""),
+        "media_url": entry.get("media_url", ""),
         "validation_status": entry.get("validation_status", ""),
         "seo_validation_status": entry.get("seo_validation_status", ""),
         "seo_warning": entry.get("seo_warning", ""),
@@ -2355,6 +2388,7 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
     source_value = str(entry.get("source_value") or "").strip()
     proposed_value = str(entry.get("proposed_translation_value") or "").strip()
     option_write_candidate = _all_languages_option_write_candidate(entry)
+    media_alt_write_candidate = _all_languages_media_alt_write_candidate(entry)
 
     if group_key in ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS:
         reasons.append("blocked_future_write_needs_resource_mapping")
@@ -2362,14 +2396,27 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_not_customer_write_safe")
     if not product_gid:
         reasons.append("blocked_missing_selected_product")
-    elif resource_id and resource_id != product_gid and not option_write_candidate:
+    elif (
+        resource_id
+        and resource_id != product_gid
+        and not option_write_candidate
+        and not media_alt_write_candidate
+    ):
         reasons.append("blocked_product_gid_mismatch")
     if locale not in LOCKED_EXECUTION_SUPPORTED_LOCALES:
         reasons.append("blocked_target_locale_unsupported")
     if not source_value:
-        reasons.append("blocked_source_empty")
+        reasons.append(
+            "media_alt_text_empty"
+            if media_alt_write_candidate
+            else "blocked_source_empty"
+        )
     if not proposed_value:
-        reasons.append("blocked_proposed_translation_empty")
+        reasons.append(
+            "media_alt_text_empty"
+            if media_alt_write_candidate
+            else "blocked_proposed_translation_empty"
+        )
     if proposed_value and source_value and locale != "en" and proposed_value == source_value:
         reasons.append("blocked_proposed_translation_equals_source")
     if not resource_id:
@@ -2384,6 +2431,8 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_scope_group_not_allowed")
     if option_write_candidate:
         reasons.extend(_all_languages_option_write_blocking_reasons(entry))
+    if media_alt_write_candidate:
+        reasons.extend(_all_languages_media_alt_write_blocking_reasons(entry))
     if field_key == "title" and len(proposed_value) > 80:
         reasons.append("blocked_product_title_over_80_chars")
     if field_key == "meta_title" and len(proposed_value) > 60:
@@ -2406,7 +2455,9 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
 
 
 def _all_languages_auto_write_group_allowed(group_key: str):
-    return str(group_key or "").strip() in SAFE_WRITE_READINESS_GROUP_SET | {"options"}
+    return str(group_key or "").strip() in (
+        SAFE_WRITE_READINESS_GROUP_SET | {"options", "media", "media_alt_text"}
+    )
 
 
 def _all_languages_option_write_candidate(entry: dict):
@@ -2414,6 +2465,15 @@ def _all_languages_option_write_candidate(entry: dict):
         str((entry or {}).get("field_group") or "").strip() == "options"
         and str((entry or {}).get("key") or "").strip()
         in ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS
+    )
+
+
+def _all_languages_media_alt_write_candidate(entry: dict):
+    return (
+        str((entry or {}).get("field_group") or "").strip()
+        in {"media", "media_alt_text"}
+        and str((entry or {}).get("key") or "").strip()
+        in ALL_LANGUAGES_MEDIA_ALT_AUTO_WRITE_FIELDS
     )
 
 
@@ -2452,6 +2512,33 @@ def _all_languages_option_write_blocking_reasons(entry: dict):
     return _unique_strings(reasons)
 
 
+def _all_languages_media_alt_write_blocking_reasons(entry: dict):
+    reasons = []
+    resource_id = str(entry.get("resource_id") or "").strip()
+    digest = str(entry.get("digest") or entry.get("source_digest") or "").strip()
+    source_value = str(entry.get("source_value") or "").strip()
+    proposed_value = str(entry.get("proposed_translation_value") or "").strip()
+    shopify_key = _all_languages_media_alt_shopify_key(entry)
+
+    if not resource_id or resource_id.startswith("visible://"):
+        reasons.append("blocked_resource_id_missing")
+    if resource_id and not resource_id.startswith("gid://shopify/"):
+        reasons.append("blocked_resource_id_missing")
+    if shopify_key != "alt":
+        reasons.append("blocked_key_missing")
+    if not digest or entry.get("translation_preview_without_digest"):
+        reasons.append("blocked_digest_missing")
+    if not source_value or not proposed_value:
+        reasons.append("media_alt_text_empty")
+    if proposed_value and not _all_languages_media_alt_customer_facing_value(
+        proposed_value
+    ):
+        reasons.append("blocked_media_alt_not_customer_facing")
+    if proposed_value and len(proposed_value) > 125:
+        reasons.append("blocked_media_alt_over_125_chars")
+    return _unique_strings(reasons)
+
+
 def _all_languages_option_translation_code_only(value: str):
     text = str(value or "").strip()
     if not text:
@@ -2465,9 +2552,36 @@ def _all_languages_option_translation_code_only(value: str):
     return not any(char.isalpha() for char in text)
 
 
+def _all_languages_media_alt_customer_facing_value(value: str):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    lower = text.lower()
+    if lower.startswith(("{", "[")) or lower.endswith((".json", ".schema")):
+        return False
+    if lower in {"sku", "barcode", "id", "image", "img"}:
+        return False
+    if re.fullmatch(r"[\d\s._:/#-]+", text):
+        return False
+    return any(char.isalpha() for char in text)
+
+
+def _all_languages_media_alt_shopify_key(entry: dict):
+    source_key = str(
+        (entry or {}).get("source_key") or (entry or {}).get("shopify_key") or ""
+    ).strip()
+    if source_key == "alt":
+        return "alt"
+    if str((entry or {}).get("key") or "").strip() == "media.alt":
+        return "alt"
+    return source_key
+
+
 def _all_languages_shopify_write_key(entry: dict):
     if _all_languages_option_write_candidate(entry):
         return _all_languages_option_shopify_key(entry)
+    if _all_languages_media_alt_write_candidate(entry):
+        return _all_languages_media_alt_shopify_key(entry)
     return str(
         (entry or {}).get("shopify_key")
         or (entry or {}).get("source_key")
@@ -2903,6 +3017,8 @@ def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | No
     entry = entry or {}
     field_key = str(entry.get("key") or "").strip()
     group_key = str(entry.get("field_group") or "").strip()
+    if field_key == "media.alt" and reason == "media_alt_text_empty":
+        return "Media alt text is empty."
     if (
         field_key == "body_html"
         and reason not in {"existing_translation_current_same_value"}
@@ -2914,13 +3030,13 @@ def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | No
         "blocked_field_not_allowed_for_all_languages_update",
     }:
         if group_key == "options":
-            return "Missing Shopify option mapping."
+            return "Missing Shopify mapping."
         if group_key == "variants":
-            return "Variants need extra Shopify mapping."
+            return "Variants are not enabled yet."
         if group_key in {"important_metafields", "metafields", "technical_metafields"}:
-            return "Technical field, not updated automatically."
+            return "This is a technical field and is not updated automatically."
         if group_key in {"media", "media_alt_text"}:
-            return "Media alt text update is not enabled yet."
+            return "Missing Shopify mapping."
     if (
         field_key in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET
         and reason in {
@@ -2932,7 +3048,11 @@ def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | No
     ):
         return "Missing Shopify mapping."
     if reason == "blocked_option_translation_code_only":
-        return "Technical/code-only option value, not updated automatically."
+        return "This is a technical field and is not updated automatically."
+    if reason == "blocked_media_alt_not_customer_facing":
+        return "Needs review before update."
+    if reason == "blocked_media_alt_over_125_chars":
+        return "Translation is too long."
     return _all_languages_blocking_reason_label(reason)
 
 
@@ -2950,13 +3070,15 @@ def _all_languages_blocking_reason_label(reason: str):
         "blocked_html_media_or_link_tag_broken": "Product description needs review before automatic Shopify update.",
         "blocked_identity_review_required": "Product/model check failed.",
         "blocked_key_missing": "Missing Shopify mapping.",
+        "blocked_media_alt_not_customer_facing": "Needs review before update.",
+        "blocked_media_alt_over_125_chars": "Translation is too long.",
         "blocked_missing_background_draft_report": "Needs review before update.",
         "blocked_missing_selected_product": "Select one product before updating Shopify.",
         "blocked_needs_review_status": "Needs review before update.",
         "blocked_no_write_ready_candidates": "Needs review before update.",
-        "blocked_not_customer_write_safe": "Technical field, not updated automatically.",
+        "blocked_not_customer_write_safe": "This is a technical field and is not updated automatically.",
         "blocked_option_context_missing": "Missing Shopify mapping.",
-        "blocked_option_translation_code_only": "Technical/code-only option value, not updated automatically.",
+        "blocked_option_translation_code_only": "This is a technical field and is not updated automatically.",
         "blocked_product_gid_mismatch": "Product/model check failed.",
         "blocked_proposed_translation_empty": "Translation is empty.",
         "blocked_proposed_translation_equals_source": "Needs review before update.",
@@ -2971,6 +3093,7 @@ def _all_languages_blocking_reason_label(reason: str):
         "blocked_shopify_installation_incomplete": "Shopify installation is incomplete.",
         "blocked_source_empty": "Translation is empty.",
         "existing_translation_current_same_value": "Already up to date.",
+        "media_alt_text_empty": "Media alt text is empty.",
         "readback_mismatch": "Shopify confirmation check did not match.",
         "translations_register_failed": "Needs review before update.",
     }
@@ -3294,6 +3417,29 @@ def _all_languages_recount_payload(payload: dict):
         + int(payload.get("blocked_count") or 0)
         + int(payload.get("write_failed_count") or 0)
     )
+    payload["readback_verified_count"] = payload.get("verified_count", 0)
+    payload["product_title_updated_count"] = sum(
+        1
+        for entry in entries
+        if entry.get("key") == "title" and _all_languages_entry_updated(entry)
+    )
+    payload["product_title_confirmed_count"] = sum(
+        1
+        for entry in entries
+        if entry.get("key") == "title" and _all_languages_entry_confirmed(entry)
+    )
+    payload["seo_updated_count"] = sum(
+        1
+        for entry in entries
+        if entry.get("key") in {"meta_title", "meta_description"}
+        and _all_languages_entry_updated(entry)
+    )
+    payload["seo_confirmed_count"] = sum(
+        1
+        for entry in entries
+        if entry.get("key") in {"meta_title", "meta_description"}
+        and _all_languages_entry_confirmed(entry)
+    )
     payload["product_options_updated_count"] = sum(
         1
         for entry in entries
@@ -3306,6 +3452,8 @@ def _all_languages_recount_payload(payload: dict):
         if _all_languages_option_write_candidate(entry)
         and _all_languages_entry_confirmed(entry)
     )
+    payload["options_updated_count"] = payload["product_options_updated_count"]
+    payload["options_confirmed_count"] = payload["product_options_confirmed_count"]
     payload["product_descriptions_updated_count"] = sum(
         1
         for entry in entries
@@ -3315,6 +3463,28 @@ def _all_languages_recount_payload(payload: dict):
         1
         for entry in entries
         if entry.get("key") == "body_html" and _all_languages_entry_confirmed(entry)
+    )
+    payload["body_html_updated_count"] = payload["product_descriptions_updated_count"]
+    payload["body_html_confirmed_count"] = payload[
+        "product_descriptions_confirmed_count"
+    ]
+    payload["media_alt_updated_count"] = sum(
+        1
+        for entry in entries
+        if _all_languages_media_alt_write_candidate(entry)
+        and _all_languages_entry_updated(entry)
+    )
+    payload["media_alt_confirmed_count"] = sum(
+        1
+        for entry in entries
+        if _all_languages_media_alt_write_candidate(entry)
+        and _all_languages_entry_confirmed(entry)
+    )
+    payload["skipped_empty_count"] = sum(
+        1
+        for entry in entries
+        if entry.get("status") == "skipped"
+        and "media_alt_text_empty" in (entry.get("blocking_reasons") or [])
     )
     payload["per_locale_summary"] = _all_languages_per_locale_summary(entries)
     payload["per_field_summary"] = _all_languages_per_field_summary(entries)
@@ -3403,14 +3573,14 @@ def _all_languages_not_updated_category_reason(label: str):
     label = str(label or "")
     if label == "Product description needs review before automatic Shopify update.":
         return "The proposed product description needs manual review before it can be written."
-    if label == "Missing Shopify option mapping.":
-        return "Option translations are updated only when resource ID, key, digest, and option context are present."
-    if label == "Technical field, not updated automatically.":
+    if label == "Missing Shopify mapping.":
+        return "Rows update only when resource ID, key, digest, and readback mapping are present."
+    if label == "This is a technical field and is not updated automatically.":
         return "Technical fields are skipped by the automatic Shopify update."
-    if label == "Media alt text update is not enabled yet.":
-        return "Media alt translations exist, but automatic media-alt writes are not enabled."
-    if label == "Variants need extra Shopify mapping.":
-        return "Variant translations need extra Shopify mapping before automatic update."
+    if label == "Variants are not enabled yet.":
+        return "Variant translations stay preview-only until real variant rows and mapping are proven safe."
+    if label == "Media alt text is empty.":
+        return "Empty media alt text is skipped and is not treated as an error."
     if label == "Translation is empty.":
         return "No proposed translation was generated for this field."
     if label == "Needs review before update.":
@@ -3647,7 +3817,7 @@ def _all_languages_needs_review_plain_reason(entry: dict):
     if group_key == "technical_metafields":
         if not proposed_value:
             return "Technical/internal metafield; no automatic translation was generated, so it stays manual-review only."
-        return "Technical/internal metafield; automatic Shopify update is not enabled."
+        return "This is a technical field and is not updated automatically."
     if group_key in {"important_metafields", "metafields"}:
         return "Metafield update support needs explicit mapping before Shopify writes are safe."
     if key == "product_type":
@@ -3792,6 +3962,12 @@ def _all_languages_media_alt_mapping_audit(entries: list[dict]):
         classification = row.get("classification", "")
         classification_counts[classification] = classification_counts.get(classification, 0) + 1
     safe_mapping_count = sum(1 for row in rows if row.get("mapping_safe"))
+    write_ready_count = sum(
+        1 for row in rows if row.get("classification") == "media_alt_write_ready"
+    )
+    skipped_empty_count = sum(
+        1 for row in rows if row.get("classification") == "media_alt_empty_translation"
+    )
     registration_input_ready_count = sum(
         1 for row in rows if row.get("registration_input_ready")
     )
@@ -3803,21 +3979,22 @@ def _all_languages_media_alt_mapping_audit(entries: list[dict]):
         plain_summary = "No media alt text rows were found in this update report."
         recommendation = "Keep Media alt text preview-only until real rows are sampled."
     elif (
-        all_mapping_safe
-        and registration_input_ready_count == len(rows)
-        and readback_method_available_count == len(rows)
+        write_ready_count + skipped_empty_count == len(rows)
+        and registration_input_ready_count == write_ready_count
+        and readback_method_available_count >= write_ready_count
     ):
         plain_summary = (
-            f"{len(rows)} media alt row(s) have real media resource IDs, alt keys, "
-            "digests, proposed text, and a readback path. Writes are still disabled."
+            f"{write_ready_count} media alt row(s) have real media resource IDs, "
+            "alt keys, digests, source text, proposed text, and a readback path. "
+            f"{skipped_empty_count} empty row(s) will be skipped."
         )
-        recommendation = "Media alt text can be enabled in a later explicitly approved task."
+        recommendation = "Media alt text is enabled for automatic Shopify update when validation passes."
     else:
         plain_summary = (
-            "Keep Media alt text preview-only: at least one sampled row is missing "
+            "Keep unsafe Media alt text rows preview-only: at least one row is missing "
             "safe mapping, digest, proposed text, or readback mapping."
         )
-        recommendation = "Do not enable Media alt text yet."
+        recommendation = "Only mapped, non-empty media alt rows are enabled."
     return {
         "row_count": len(rows),
         "classification_counts": [
@@ -3828,6 +4005,8 @@ def _all_languages_media_alt_mapping_audit(entries: list[dict]):
             )
         ],
         "safe_mapping_count": safe_mapping_count,
+        "write_ready_count": write_ready_count,
+        "skipped_empty_count": skipped_empty_count,
         "registration_input_ready_count": registration_input_ready_count,
         "readback_method_available_count": readback_method_available_count,
         "all_sampled_rows_mapping_safe": all_mapping_safe,
@@ -3852,13 +4031,19 @@ def _all_languages_media_alt_mapping_row(entry: dict):
     real_gid = resource_id.startswith("gid://shopify/")
     maps_to_media = resource_type in {"MediaImage", "Image"} and key_exists
     mapping_safe = real_gid and maps_to_media
-    registration_input_ready = mapping_safe and bool(digest) and key_exists
-    readback_method_available = mapping_safe and bool(entry.get("locale"))
+    registration_input_ready = (
+        mapping_safe and bool(digest) and key_exists and bool(source_value) and bool(proposed_value)
+    )
+    readback_method_available = (
+        mapping_safe
+        and _safe_write_canonical_locale(entry.get("locale"))
+        in LOCKED_EXECUTION_SUPPORTED_LOCALES
+    )
     if not mapping_safe or not key_exists:
         classification = "media_alt_missing_mapping"
     elif not digest:
         classification = "media_alt_missing_digest"
-    elif not proposed_value:
+    elif not source_value or not proposed_value:
         classification = "media_alt_empty_translation"
     elif _all_languages_entry_needs_review(entry):
         classification = "media_alt_needs_review"
@@ -3920,6 +4105,20 @@ def _all_languages_translation_readiness_audit(
             "plain_reason": option_audit.get("plain_summary", ""),
             "checked_count": int(option_audit.get("row_count") or 0),
         },
+        {
+            "area": "Media alt text",
+            "status": (
+                "Ready now"
+                if int(media_alt_audit.get("write_ready_count") or 0) > 0
+                else "Ready now"
+                if int(media_alt_audit.get("skipped_empty_count") or 0) > 0
+                else "Not present"
+                if int(media_alt_audit.get("row_count") or 0) == 0
+                else "Needs mapping review"
+            ),
+            "plain_reason": media_alt_audit.get("plain_summary", ""),
+            "checked_count": int(media_alt_audit.get("row_count") or 0),
+        },
     ]
     needs_review = [
         {
@@ -3932,12 +4131,6 @@ def _all_languages_translation_readiness_audit(
         }
     ]
     preview_only = [
-        {
-            "area": "Media alt text",
-            "status": "Preview only",
-            "plain_reason": media_alt_audit.get("plain_summary", ""),
-            "checked_count": int(media_alt_audit.get("row_count") or 0),
-        },
         {
             "area": "Variants",
             "status": "Preview only",
@@ -3962,14 +4155,6 @@ def _all_languages_translation_readiness_audit(
         },
     ]
     future_candidate = []
-    if media_alt_audit.get("all_sampled_rows_mapping_safe"):
-        future_candidate.append(
-            {
-                "area": "Media alt text",
-                "status": "Future candidate",
-                "plain_reason": media_alt_audit.get("recommendation", ""),
-            }
-        )
     for namespace_key in future_metafields:
         future_candidate.append(
             {
@@ -4003,17 +4188,17 @@ def _all_languages_media_alt_entry(entry: dict):
 
 def _all_languages_media_alt_plain_reason(classification: str, *, mapping_safe: bool):
     if classification == "media_alt_update_not_enabled":
-        return "Mapping looks safe, but Media alt text writes are not enabled yet."
+        return "Needs review before update."
     if classification == "media_alt_missing_mapping":
         return "Missing a real Shopify media resource ID or alt key."
     if classification == "media_alt_missing_digest":
         return "Missing digest for the media alt source text."
     if classification == "media_alt_empty_translation":
-        return "Missing proposed translated alt text."
+        return "Media alt text is empty."
     if classification == "media_alt_needs_review":
         return "Translation row still needs manual review."
     if classification == "media_alt_write_ready" and mapping_safe:
-        return "Mapping is safe and the translation can be considered in a future enablement task."
+        return "Mapping is safe and media alt text is enabled for automatic update."
     return "Media alt row needs review."
 
 
@@ -4178,18 +4363,23 @@ def _all_languages_next_enablement_summary(
         entry for entry in entries or [] if entry.get("field_group") in {"media", "media_alt_text"}
     ]
     if media_entries:
-        mapped_count = sum(
+        ready_count = sum(
             1
             for entry in media_entries
-            if entry.get("resource_id") and entry.get("digest")
+            if entry.get("status") in {"write_ready", "written_verified"}
+        )
+        empty_count = sum(
+            1
+            for entry in media_entries
+            if "media_alt_text_empty" in (entry.get("blocking_reasons") or [])
         )
         rows.append(
             {
                 "area": "Media alt text",
-                "status": "Feature not enabled",
+                "status": "Enabled for update",
                 "plain_reason": (
-                    f"{mapped_count} media row(s) have resource ID and digest, "
-                    "but automatic media-alt writes are still disabled."
+                    f"{ready_count} media row(s) are ready for automatic update; "
+                    f"{empty_count} empty row(s) will be skipped."
                 ),
             }
         )
@@ -4468,6 +4658,16 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
             for item in diagnostics
             if item["field"] == "body_html"
         ),
+        "media_alt_candidates_found": next(
+            item["candidates_found"]
+            for item in diagnostics
+            if item["field"] == "media.alt"
+        ),
+        "product_options_candidates_found": sum(
+            item["candidates_found"]
+            for item in diagnostics
+            if item["field"] in ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS
+        ),
         "safe_fields_ready": ready_count,
         "safe_fields_blocked": blocked_count,
         "safe_fields_hard_blocked": blocked_count,
@@ -4546,7 +4746,7 @@ def _all_languages_safe_field_plain_reason(
     reason_summary: list[dict],
     soft_warning_summary: list[dict],
 ):
-    label = ALL_LANGUAGES_SAFE_FIELD_LABELS.get(field, field)
+    label = _all_languages_field_label(field)
     if not entries:
         return f"{label}: blocked because no candidate rows were found."
     ready_count = _all_languages_entry_status_count(entries, "write_ready")
@@ -4554,6 +4754,11 @@ def _all_languages_safe_field_plain_reason(
         return f"{label}: ready to update for {ready_count} row(s)."
     skipped_count = _all_languages_entry_status_count(entries, "skipped")
     if skipped_count and skipped_count == len(entries):
+        if any(
+            "media_alt_text_empty" in (entry.get("blocking_reasons") or [])
+            for entry in entries
+        ):
+            return f"{label}: skipped because media alt text is empty."
         return f"{label}: not updated because Shopify already has the same current value."
     if reason_summary:
         return (
@@ -5402,6 +5607,7 @@ def _real_write_readback(installation, resource_id: str, locale: str):
         "called": True,
         "request_failed": False,
         "http_status": None,
+        "resource_id": "",
         "translations": [],
         "sanitized_errors": [],
     }
@@ -5452,6 +5658,7 @@ def _real_write_readback(installation, resource_id: str, locale: str):
     graphql_errors = data.get("errors") or []
     result["request_failed"] = bool(graphql_errors)
     resource = (data.get("data") or {}).get("translatableResource") or {}
+    result["resource_id"] = resource.get("resourceId", "")
     result["translations"] = resource.get("translations") or []
     for error in graphql_errors:
         result["sanitized_errors"].append(
@@ -5470,6 +5677,8 @@ def _real_write_readback_match(
     key: str,
     locale: str,
     proposed_translation_value: str,
+    expected_resource_id: str = "",
+    readback_resource_id: str = "",
 ):
     matching_key = [item for item in translations if item.get("key") == key]
     matching = [
@@ -5484,12 +5693,19 @@ def _real_write_readback_match(
         outdated_acceptable = outdated.strip().lower() in {"", "0", "false", "none"}
     value_matches = bool(item) and item.get("value") == proposed_translation_value
     locale_matches = bool(item) and item.get("locale") == locale
+    resource_id_matches = (
+        not expected_resource_id
+        or not readback_resource_id
+        or expected_resource_id == readback_resource_id
+    )
     return {
         "matched": bool(item)
         and value_matches
         and locale_matches
+        and resource_id_matches
         and outdated_acceptable,
         "key_exists": bool(matching_key),
+        "resource_id_matches": resource_id_matches,
         "locale_matches": locale_matches,
         "value_matches": value_matches,
         "outdated": outdated,
@@ -5776,9 +5992,13 @@ def _render_all_languages_update_html(payload: dict):
             ("Raw write_ready_count", "write_ready_count"),
             ("Updated in Shopify", "updated_count"),
             ("Confirmed After Update", "verified_count"),
+            ("Product Titles Updated", "product_title_updated_count"),
+            ("Product Descriptions Updated", "body_html_updated_count"),
+            ("SEO Fields Updated", "seo_updated_count"),
             ("Product Options Updated", "product_options_updated_count"),
-            ("Product Descriptions Updated", "product_descriptions_updated_count"),
+            ("Media Alt Text Updated", "media_alt_updated_count"),
             ("Already Up To Date", "skipped_count"),
+            ("Skipped Empty", "skipped_empty_count"),
             ("Not Updated", "not_updated_count"),
             ("Review Notes", "review_note_count"),
             ("Failed", "failed_count"),
@@ -5799,8 +6019,11 @@ def _render_all_languages_update_html(payload: dict):
   <ul>
     <li>Shopify updated successfully</li>
     <li>{escape(str(payload.get('verified_count', 0)))} translations updated and confirmed</li>
+    <li>Product titles updated: {escape(str(payload.get('product_title_updated_count', 0)))}</li>
+    <li>Product descriptions updated: {escape(str(payload.get('body_html_updated_count', 0)))}</li>
+    <li>SEO fields updated: {escape(str(payload.get('seo_updated_count', 0)))}</li>
     <li>Product options updated: {escape(str(payload.get('product_options_updated_count', 0)))}</li>
-    <li>Product descriptions updated: {escape(str(payload.get('product_descriptions_updated_count', 0)))}</li>
+    <li>Media alt text updated: {escape(str(payload.get('media_alt_updated_count', 0)))}</li>
     <li>Not updated: {escape(str(payload.get('not_updated_count', 0)))}</li>
     <li>Restore not needed</li>
   </ul>
