@@ -4,6 +4,7 @@ from django.views.generic import RedirectView
 from shopify_sync import views as shopify_sync_views
 
 from django.conf import settings
+from django.http import HttpResponse
 from django.views.static import serve  # ✅ 用于生产环境直接提供 media 文件
 
 admin.site.site_header = settings.ADMIN_SITE_HEADER
@@ -11,8 +12,13 @@ admin.site.site_title = settings.ADMIN_SITE_TITLE
 admin.site.index_title = settings.ADMIN_INDEX_TITLE
 # admin.site.index_template = "admin/shopify_sync_index.html"
 
+
+def healthz(_request):
+    return HttpResponse("OK\n", content_type="text/plain")
+
 urlpatterns = [
     path("", RedirectView.as_view(url="/admin/", permanent=False)),
+    path("healthz/", healthz, name="healthz"),
     path(
         "admin/shopify_sync/translation-console/",
         shopify_sync_views.translation_console,
