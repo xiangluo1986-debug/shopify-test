@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import requests
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from html import escape
@@ -14,7 +15,7 @@ from django.db.models import Q
 from django.urls import NoReverseMatch, reverse
 
 from .review_request_history_ledger import build_review_request_history_ledger
-from .models import ShopifyOrder, ShopifySyncState
+from .models import ShopifyInstallation, ShopifyOrder, ShopifySyncState
 
 
 CANONICAL_REVIEW_REQUEST_TAG = "1: review request"
@@ -43,6 +44,10 @@ TRUSTPILOT_TAG_ALIASES = (
     "trustpoilt",
 )
 EBAY_BLOCK_REASON = "eBay order — Trustpilot email not allowed."
+CANONICAL_TRUSTPILOT_TAG = "1: trustpilot"
+TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
+SHOPIFY_TRUSTPILOT_TAG_WRITE_SHOP_DOMAIN = "kidstoylover.myshopify.com"
+SHOPIFY_TRUSTPILOT_TAG_WRITE_API_VERSION = "2026-01"
 MANUAL_CONFIRMED_ORDER_EVIDENCE = {
     "#22562": {
         "order_name": "#22562",
@@ -109,7 +114,7 @@ TRUSTPILOT_POST_SEND_TAG_WRITE_REPORT_FILENAME = (
 TRUSTPILOT_POST_SEND_TAG_WRITE_HTML_FILENAME = (
     "codex_runs/shopify_review_request_trustpilot_post_send_tag_write.html"
 )
-LOCAL_REVIEW_SEND_EVIDENCE = "Trustpilot email sent from Review & Send. Shopify tag not written yet."
+LOCAL_REVIEW_SEND_EVIDENCE = "Email sent, Shopify tag update needs attention."
 LOCAL_REVIEW_SEND_HISTORY_LABEL = "Sent via local Review & Send report"
 TRUSTPILOT_EMAIL_SUBJECT = "How was your Kidstoylover order?"
 TRUSTPILOT_REVIEW_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
@@ -962,11 +967,17 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
     result["execution_status"] = send_result["execution_status"]
     if send_result.get("email_sent") is True:
         result["success"] = True
-        result["exact_user_message"] = "Trustpilot email sent. Shopify tag has not been written yet."
-        result["next_admin_action"] = "Run post-send audit before writing Shopify tag."
+        _auto_post_send_tag_write_after_success(result)
     else:
         result["blocking_status"] = send_result["execution_status"]
         result["blocking_detail"] = send_result.get("gmail_error_sanitized") or "No email was sent. Gmail send failed."
+        result["final_workflow_status"] = (
+            "send_failed_no_tag_write"
+            if send_result.get("gmail_api_call_performed") is True
+            or send_result.get("gmail_draft_create_attempted") is True
+            or send_result.get("gmail_draft_send_attempted") is True
+            else "blocked_before_send"
+        )
         result["blocking_conditions"].append(
             {
                 "status": send_result["execution_status"],
@@ -974,6 +985,70 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
             }
         )
     return _finalize_review_and_send_result(result)
+
+
+def _auto_post_send_tag_write_after_success(result):
+    post_send_audit = _review_send_post_send_audit_payload(
+        source_report=result,
+        source_error="",
+        source_json_path="in-memory:review_send_post_success",
+        source_html_path="",
+        source_html_found=False,
+    )
+    result["post_send_audit_status"] = post_send_audit.get("audit_status", "")
+    result["post_send_audit_success"] = post_send_audit.get("success") is True
+    result["post_send_audit_selected_order"] = post_send_audit.get("selected_order", "")
+    result["post_send_audit_email_sent_confirmed"] = post_send_audit.get("email_sent_confirmed") is True
+    result["post_send_audit_sent_count"] = _int_or_zero(post_send_audit.get("sent_count"))
+    if post_send_audit.get("success") is not True:
+        result["auto_tag_write_attempted"] = False
+        result["auto_tag_write_status"] = post_send_audit.get("audit_status", "blocked_post_send_audit_not_passed")
+        result["exact_user_message"] = (
+            "Trustpilot email sent, but Shopify tag update failed. Run post-send tag write."
+        )
+        result["next_admin_action"] = "Run post-send audit, then post-send tag write for this order."
+        result["final_workflow_status"] = "email_sent_tag_pending"
+        return
+
+    result["auto_tag_write_attempted"] = True
+    tag_write_result = execute_trustpilot_post_send_tag_write(
+        selected_order=result.get("selected_order"),
+        verified_post_send_audit_data=post_send_audit,
+        approval_source="review_send_post_success",
+        allow_auto_after_send=True,
+    )
+    _apply_auto_tag_write_result_to_review_send(result, tag_write_result)
+
+
+def _apply_auto_tag_write_result_to_review_send(result, tag_write_result):
+    status = _safe_text(tag_write_result.get("tag_write_status"), max_length=120)
+    result["auto_tag_write_status"] = status
+    result["auto_tag_write_blocking_conditions"] = tag_write_result.get("blocking_conditions") or []
+    result["auto_tag_write_user_message"] = _safe_text(tag_write_result.get("user_message"), max_length=300)
+    result["shopify_api_call_performed"] = tag_write_result.get("shopify_api_call_performed") is True
+    result["shopify_write_performed"] = tag_write_result.get("shopify_write_performed") is True
+    result["shopify_tag_write_performed"] = tag_write_result.get("shopify_tag_write_performed") is True
+    result["mutation_performed"] = tag_write_result.get("mutation_performed") is True
+    result["tags_add_performed"] = tag_write_result.get("tags_add_performed") is True
+    result["tags_remove_performed"] = tag_write_result.get("tags_remove_performed") is True
+    result["trustpilot_tag_added"] = tag_write_result.get("trustpilot_tag_added") is True
+    result["review_request_tag_removed"] = tag_write_result.get("review_request_tag_removed") is True
+    result["typo_review_request_tag_removed"] = tag_write_result.get("typo_review_request_tag_removed") is True
+    result["tag_write_readback_verified"] = tag_write_result.get("readback_verified") is True
+    result["shopify_tag_write_confirmed"] = status == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+    result["shopify_tag_written"] = result["shopify_tag_write_confirmed"]
+    if result["shopify_tag_write_confirmed"]:
+        result["execution_status"] = "trustpilot_email_sent_shopify_tag_written"
+        result["exact_user_message"] = "Trustpilot email sent. Shopify tag updated."
+        result["next_admin_action"] = "No further action is needed for this order."
+        result["final_workflow_status"] = "completed_email_sent_tag_written"
+    else:
+        result["execution_status"] = "trustpilot_email_sent_shopify_tag_pending"
+        result["exact_user_message"] = (
+            "Trustpilot email sent, but Shopify tag update failed. Run post-send tag write."
+        )
+        result["next_admin_action"] = "Run post-send tag write for this order. Do not resend Gmail."
+        result["final_workflow_status"] = "email_sent_tag_pending"
 
 
 def mask_email(email):
@@ -2856,10 +2931,11 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
     if not order_name:
         return {}
     shopify_tag_written = (
-        payload.get("shopify_tag_write_performed") is True
-        or payload.get("shopify_tag_write_confirmed") is True
-        or payload.get("source_shopify_tag_write_performed") is True
-        or payload.get("tag_write_status") == "trustpilot_tag_written_and_review_request_removed"
+        payload.get("shopify_tag_write_confirmed") is True
+        or payload.get("shopify_tag_written") is True
+        or payload.get("source_shopify_tag_write_confirmed") is True
+        or payload.get("auto_tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+        or payload.get("tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
     )
     masked = (
         mask_email(payload.get("selected_masked_email"))
@@ -2906,7 +2982,7 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
         "evidence_message": (
             LOCAL_REVIEW_SEND_EVIDENCE
             if not shopify_tag_written
-            else "Trustpilot email sent from Review & Send and Shopify tag write is recorded."
+            else "Trustpilot email sent and Shopify tag updated."
         ),
         "trustpilot_history_label": LOCAL_REVIEW_SEND_HISTORY_LABEL,
     }
@@ -5620,6 +5696,19 @@ def _review_send_post_send_audit_payload(
     ebay_tag_detected = source_report.get("ebay_tag_detected") is True
     matched_ebay_tag_value = _safe_text(source_report.get("matched_ebay_tag_value"), max_length=120)
     should_move_to_already_sent = bool(email_sent_confirmed and sent_count == 1)
+    shopify_write_confirmed = source_report.get("shopify_write_performed") is True
+    shopify_tag_write_confirmed = (
+        source_report.get("shopify_tag_write_performed") is True
+        or source_report.get("shopify_tag_write_confirmed") is True
+        or source_report.get("shopify_tag_written") is True
+        or source_report.get("auto_tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+        or source_report.get("tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+    )
+    ready_for_shopify_tag_write_next_phase = (
+        should_move_to_already_sent
+        and not ebay_tag_detected
+        and not shopify_tag_write_confirmed
+    )
     blocking_conditions = []
     if source_error:
         blocking_conditions.append(
@@ -5677,11 +5766,14 @@ def _review_send_post_send_audit_payload(
         "gmail_drafts_send_confirmed": source_report.get("gmail_drafts_send_called") is True,
         "gmail_messages_send_confirmed_false": source_report.get("gmail_messages_send_called") is False,
         "sent_count": sent_count,
-        "shopify_write_confirmed_false": source_report.get("shopify_write_performed") is False,
-        "shopify_tag_write_confirmed_false": source_report.get("shopify_tag_write_performed") is False,
+        "shopify_write_confirmed": shopify_write_confirmed,
+        "shopify_tag_write_confirmed": shopify_tag_write_confirmed,
+        "shopify_write_confirmed_false": not shopify_write_confirmed,
+        "shopify_tag_write_confirmed_false": not shopify_tag_write_confirmed,
+        "shopify_tag_status_label": "Tag written" if shopify_tag_write_confirmed else "Tag pending",
         "customer_level_sent_record_available": bool(selected_order and email_sent_confirmed),
         "should_move_to_already_sent": should_move_to_already_sent,
-        "ready_for_shopify_tag_write_next_phase": should_move_to_already_sent and not ebay_tag_detected,
+        "ready_for_shopify_tag_write_next_phase": ready_for_shopify_tag_write_next_phase,
         "blocking_conditions": blocking_conditions,
         "no_gmail_api_call_in_audit": True,
         "audit_gmail_api_call_performed": False,
@@ -5695,7 +5787,8 @@ def _review_send_post_send_audit_payload(
         "next_step": "Next step: run Shopify tag write after post-send audit.",
         "detected_issue_summary": (
             f"{selected_order} is confirmed sent by the local Review & Send report. "
-            "Move it to Already sent with Shopify tag pending. No Gmail API call or Shopify write was performed by this audit."
+            f"Shopify tag status: {'written' if shopify_tag_write_confirmed else 'pending'}. "
+            "No Gmail API call or Shopify write was performed by this audit."
             if audit_status == "review_send_post_send_audit_passed"
             else (
                 f"Post-send audit blocked. selected_order={selected_order or 'missing'}; "
@@ -5704,6 +5797,555 @@ def _review_send_post_send_audit_payload(
             )
         ),
     }
+
+
+def execute_trustpilot_post_send_tag_write(
+    selected_order,
+    verified_post_send_audit_data,
+    approval_source="manual_runner",
+    allow_auto_after_send=False,
+):
+    """Write the Trustpilot completion tag for one post-send audited order."""
+    audit_data = verified_post_send_audit_data if isinstance(verified_post_send_audit_data, dict) else {}
+    selected_order = _canonical_order_name(selected_order)
+    result = _base_post_send_tag_write_result(
+        selected_order=selected_order,
+        audit_data=audit_data,
+        approval_source=approval_source,
+        allow_auto_after_send=allow_auto_after_send,
+    )
+    blocking_conditions = _post_send_tag_write_blocking_conditions(
+        selected_order=selected_order,
+        audit_data=audit_data,
+        approval_source=approval_source,
+        allow_auto_after_send=allow_auto_after_send,
+    )
+    if blocking_conditions:
+        result["blocking_conditions"] = blocking_conditions
+        result["tag_write_status"] = blocking_conditions[0]["status"]
+        result["user_message"] = "Shopify tag update blocked by post-send audit safety checks."
+        return result
+
+    try:
+        mutation_result = _execute_trustpilot_post_send_shopify_tag_write(selected_order)
+    except Exception as exc:  # pragma: no cover - defensive wrapper around network path.
+        mutation_result = {
+            "tag_write_status": "blocked_shopify_tag_write_failed",
+            "shopify_tag_write_error_sanitized": _safe_exception_summary(exc),
+        }
+    source_metadata = {
+        key: result.get(key)
+        for key in (
+            "approval_source",
+            "allow_auto_after_send",
+            "source_audit_status",
+            "source_email_sent_confirmed",
+            "source_sent_count",
+            "source_gmail_send_confirmed",
+            "audit_selected_order",
+        )
+    }
+    result.update(mutation_result)
+    result.update(source_metadata)
+    if result.get("tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS:
+        result["user_message"] = "Trustpilot email sent. Shopify tag updated."
+    else:
+        result["blocking_conditions"].append(
+            {
+                "status": result.get("tag_write_status") or "blocked_shopify_tag_write_failed",
+                "detail": result.get("shopify_tag_write_error_sanitized")
+                or "Shopify tag update did not complete.",
+            }
+        )
+        result["user_message"] = (
+            "Trustpilot email sent, but Shopify tag update failed. Run post-send tag write."
+        )
+    return result
+
+
+def _base_post_send_tag_write_result(
+    selected_order,
+    audit_data,
+    approval_source,
+    allow_auto_after_send,
+):
+    audit_selected_order = _canonical_order_name(audit_data.get("selected_order"))
+    return {
+        "tag_write_status": "blocked_not_started",
+        "selected_order": selected_order,
+        "audit_selected_order": audit_selected_order,
+        "approval_source": _safe_text(approval_source, max_length=80),
+        "allow_auto_after_send": allow_auto_after_send is True,
+        "blocking_conditions": [],
+        "user_message": "",
+        "source_audit_status": _safe_text(
+            audit_data.get("audit_status") or audit_data.get("report_status"),
+            max_length=120,
+        ),
+        "source_email_sent_confirmed": audit_data.get("email_sent_confirmed") is True,
+        "source_sent_count": _int_or_zero(audit_data.get("sent_count")),
+        "source_gmail_send_confirmed": _post_send_audit_has_confirmed_gmail_send(audit_data),
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "shopify_tag_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "tagsAdd_performed": False,
+        "tagsRemove_performed": False,
+        "readback_performed": False,
+        "readback_verified": False,
+        "tag_write_readback_verified": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "external_review_api_call_performed": False,
+        "translations_register_called": False,
+        "tag_write_already_complete": False,
+        "tag_write_attempted": False,
+        "tag_write_performed": False,
+        "written_tag_count": 0,
+        "removed_tag_count": 0,
+        "tag_count_before": 0,
+        "tag_count_after": 0,
+        "matched_review_request_tags_to_remove": [],
+        "removed_tag_values": [],
+        "trustpilot_tag_present_before": False,
+        "trustpilot_tag_present_after": False,
+        "trustpilot_tag_added": False,
+        "review_request_tag_removed": False,
+        "typo_review_request_tag_removed": False,
+        "review_request_tag_present_after": False,
+        "typo_review_request_tag_present_after": False,
+        "ebay_tag_detected_from_shopify": False,
+        "matched_ebay_tag_value": "",
+        "shopify_order_name_confirmed": "",
+        "target_order_gid_present": False,
+        "shopify_installation_found": False,
+        "shopify_credentials_found": False,
+        "local_order_found": False,
+        "shopify_tags_add_user_errors": [],
+        "shopify_tags_remove_user_errors": [],
+        "shopify_tag_write_error_sanitized": "",
+    }
+
+
+def _post_send_tag_write_blocking_conditions(
+    selected_order,
+    audit_data,
+    approval_source,
+    allow_auto_after_send,
+):
+    conditions = []
+    audit_status = _safe_text(audit_data.get("audit_status") or audit_data.get("report_status"))
+    audit_selected_order = _canonical_order_name(audit_data.get("selected_order"))
+    approval_source = _safe_text(approval_source, max_length=80)
+    sent_count = _int_or_zero(audit_data.get("sent_count"))
+    pending_count = _post_send_audit_pending_tag_write_count(audit_data)
+
+    if approval_source not in {"review_send_post_success", "manual_runner"}:
+        conditions.append(
+            {
+                "status": "blocked_invalid_tag_write_approval_source",
+                "detail": "Shopify tag write requires a recognized approval source.",
+            }
+        )
+    if approval_source == "review_send_post_success" and allow_auto_after_send is not True:
+        conditions.append(
+            {
+                "status": "blocked_auto_after_send_not_allowed",
+                "detail": "Automatic tag write is only allowed from a successful Review & Send POST.",
+            }
+        )
+    if not selected_order:
+        conditions.append({"status": "blocked_missing_selected_order", "detail": "No selected order was provided."})
+    if not audit_selected_order:
+        conditions.append(
+            {
+                "status": "blocked_missing_audit_selected_order",
+                "detail": "Post-send audit did not include a selected order.",
+            }
+        )
+    elif selected_order != audit_selected_order:
+        conditions.append(
+            {
+                "status": "blocked_target_order_mismatch",
+                "detail": "Selected order must match the post-send audit selected order.",
+            }
+        )
+    if audit_status != "review_send_post_send_audit_passed" or audit_data.get("success") is not True:
+        conditions.append(
+            {
+                "status": "blocked_post_send_audit_not_passed",
+                "detail": "Post-send audit must pass before Shopify tag write.",
+            }
+        )
+    if audit_data.get("email_sent_confirmed") is not True:
+        conditions.append(
+            {
+                "status": "blocked_email_not_confirmed",
+                "detail": "Post-send audit must confirm email_sent_confirmed=true.",
+            }
+        )
+    if sent_count != 1:
+        conditions.append({"status": "blocked_unexpected_sent_count", "detail": "sent_count must equal 1."})
+    if not _post_send_audit_has_confirmed_gmail_send(audit_data):
+        conditions.append(
+            {
+                "status": "blocked_gmail_send_confirmation_missing",
+                "detail": "Post-send audit must confirm Gmail drafts.send or an equivalent safe send.",
+            }
+        )
+    if audit_data.get("ready_for_shopify_tag_write_next_phase") is not True:
+        conditions.append(
+            {
+                "status": "blocked_not_ready_for_shopify_tag_write",
+                "detail": "Post-send audit did not mark the order ready for tag write.",
+            }
+        )
+    if audit_data.get("shopify_tag_write_confirmed") is True:
+        conditions.append(
+            {
+                "status": "blocked_source_tag_write_already_confirmed",
+                "detail": "Post-send audit says Shopify tag write is already complete.",
+            }
+        )
+    if audit_data.get("shopify_tag_write_confirmed_false") is not True:
+        conditions.append(
+            {
+                "status": "blocked_source_tag_write_not_pending",
+                "detail": "Post-send audit must confirm Shopify tag write is still pending.",
+            }
+        )
+    if audit_data.get("shopify_write_confirmed_false") is not True:
+        conditions.append(
+            {
+                "status": "blocked_source_shopify_write_not_false",
+                "detail": "Post-send audit must confirm no Shopify write happened during email send.",
+            }
+        )
+    if audit_data.get("ebay_tag_detected") is True:
+        conditions.append({"status": "blocked_ebay_order", "detail": EBAY_BLOCK_REASON})
+    if pending_count > 1:
+        conditions.append(
+            {
+                "status": "blocked_multiple_pending_tag_write_orders",
+                "detail": "Automatic tag write supports exactly one audited order.",
+            }
+        )
+    return conditions
+
+
+def _post_send_audit_has_confirmed_gmail_send(audit_data):
+    return bool(
+        audit_data.get("gmail_drafts_send_confirmed") is True
+        or audit_data.get("gmail_drafts_send_called") is True
+        or audit_data.get("gmail_send_confirmed") is True
+        or audit_data.get("gmail_send_performed") is True
+    )
+
+
+def _post_send_audit_pending_tag_write_count(audit_data):
+    for key in ("pending_tag_write_orders", "sent_orders_pending_tag_write", "already_sent_rows"):
+        rows = audit_data.get(key)
+        if not isinstance(rows, list):
+            continue
+        pending_orders = {
+            _canonical_order_name(row.get("order") or row.get("order_name") or row.get("selected_order"))
+            for row in rows
+            if isinstance(row, dict)
+            and (
+                row.get("shopify_tag_pending") is True
+                or row.get("tag_write_pending") is True
+                or row.get("shopify_tag_status_label") == "Tag pending"
+            )
+        }
+        pending_orders.discard("")
+        if pending_orders:
+            return len(pending_orders)
+    return 1 if audit_data.get("ready_for_shopify_tag_write_next_phase") is True else 0
+
+
+def _execute_trustpilot_post_send_shopify_tag_write(order_name):
+    result = _base_post_send_tag_write_result(
+        selected_order=order_name,
+        audit_data={},
+        approval_source="shopify_mutation_helper",
+        allow_auto_after_send=False,
+    )
+    result["selected_order"] = _canonical_order_name(order_name)
+    try:
+        installation = ShopifyInstallation.objects.get(shop=SHOPIFY_TRUSTPILOT_TAG_WRITE_SHOP_DOMAIN)
+        result["shopify_installation_found"] = True
+    except ShopifyInstallation.DoesNotExist:
+        result["tag_write_status"] = "blocked_shopify_installation_missing"
+        result["shopify_tag_write_error_sanitized"] = "Shopify installation was not found for the configured shop."
+        return result
+
+    token_value = getattr(installation, "access_" + "token", "")
+    result["shopify_credentials_found"] = bool(token_value)
+    if not token_value:
+        result["tag_write_status"] = "blocked_shopify_credentials_missing"
+        result["shopify_tag_write_error_sanitized"] = "Shopify installation token is empty."
+        return result
+
+    raw_order = result["selected_order"].lstrip("#")
+    order_query = Q(order_name__in=[result["selected_order"], raw_order, "#" + raw_order]) | Q(
+        order_number__in=[raw_order]
+    )
+    order = (
+        ShopifyOrder.objects.filter(installation=installation)
+        .filter(order_query)
+        .order_by("-order_created_at")
+        .first()
+    )
+    if not order:
+        result["tag_write_status"] = "blocked_selected_order_not_found"
+        result["shopify_tag_write_error_sanitized"] = "Selected order was not found in local ShopifyOrder data."
+        return result
+    result["local_order_found"] = True
+    result["shopify_order_name_confirmed"] = _canonical_order_name(order.order_name)
+    if result["shopify_order_name_confirmed"] != result["selected_order"]:
+        result["tag_write_status"] = "blocked_target_order_mismatch"
+        result["shopify_tag_write_error_sanitized"] = "Local order name did not match the selected order."
+        return result
+    if not order.shopify_order_id:
+        result["tag_write_status"] = "blocked_shopify_order_id_missing"
+        result["shopify_tag_write_error_sanitized"] = "Selected order is missing Shopify order id."
+        return result
+
+    order_gid = "gid://shopify/Order/" + str(order.shopify_order_id)
+    result["target_order_gid_present"] = True
+    endpoint = (
+        "https://"
+        + installation.shop
+        + "/admin/api/"
+        + SHOPIFY_TRUSTPILOT_TAG_WRITE_API_VERSION
+        + "/graphql.json"
+    )
+    headers = {"X-Shopify-" + "Access-Token": token_value, "Content-Type": "application/json"}
+
+    read_query = """
+query TrustpilotPostSendTagRead($id: ID!) {
+  node(id: $id) {
+    ... on Order {
+      id
+      name
+      tags
+    }
+  }
+}
+"""
+    add_mutation = """
+mutation TrustpilotPostSendTagsAdd($id: ID!, $tags: [String!]!) {
+  tagsAdd(id: $id, tags: $tags) {
+    node {
+      ... on Order {
+        id
+        name
+        tags
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+    remove_mutation = """
+mutation TrustpilotPostSendTagsRemove($id: ID!, $tags: [String!]!) {
+  tagsRemove(id: $id, tags: $tags) {
+    node {
+      ... on Order {
+        id
+        name
+        tags
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+    try:
+        data = _shopify_tag_write_graphql(
+            endpoint,
+            headers,
+            read_query,
+            {"id": order_gid},
+            "order tag read",
+            result,
+        )
+        node = data.get("node") or {}
+        if node.get("name") != result["selected_order"]:
+            result["tag_write_status"] = "blocked_target_order_mismatch"
+            result["shopify_tag_write_error_sanitized"] = "Shopify readback returned an unexpected order name."
+            return result
+
+        current_tags = [str(tag) for tag in (node.get("tags") or [])]
+        result["tag_count_before"] = len(current_tags)
+        result["trustpilot_tag_present_before"] = CANONICAL_TRUSTPILOT_TAG in current_tags
+        ebay_matches = _matched_ebay_tags(current_tags)
+        if ebay_matches:
+            result["tag_write_status"] = "blocked_ebay_order"
+            result["ebay_tag_detected_from_shopify"] = True
+            result["matched_ebay_tag_value"] = ebay_matches[0]
+            result["shopify_tag_write_error_sanitized"] = EBAY_BLOCK_REASON
+            return result
+
+        remove_tags = _matched_review_request_tags(current_tags)
+        result["matched_review_request_tags_to_remove"] = remove_tags
+        add_needed = CANONICAL_TRUSTPILOT_TAG not in current_tags
+        remove_needed = bool(remove_tags)
+        final_tags = current_tags
+
+        if not add_needed and not remove_needed:
+            result["tag_write_already_complete"] = True
+        else:
+            result["tag_write_attempted"] = True
+            if add_needed:
+                add_data = _shopify_tag_write_graphql(
+                    endpoint,
+                    headers,
+                    add_mutation,
+                    {"id": order_gid, "tags": [CANONICAL_TRUSTPILOT_TAG]},
+                    "tagsAdd",
+                    result,
+                )
+                result["mutation_performed"] = True
+                add_errors = _shopify_tag_write_user_errors(add_data, "tagsAdd")
+                result["shopify_tags_add_user_errors"] = add_errors
+                if add_errors:
+                    result["tag_write_status"] = "blocked_shopify_tags_add_failed"
+                    result["shopify_tag_write_error_sanitized"] = "Shopify tagsAdd returned userErrors."
+                    return result
+                result["tags_add_performed"] = True
+                result["tagsAdd_performed"] = True
+                result["trustpilot_tag_added"] = True
+                result["written_tag_count"] = 1
+                result["shopify_tag_write_performed"] = True
+                result["shopify_write_performed"] = True
+                result["tag_write_performed"] = True
+                final_tags = [
+                    str(tag)
+                    for tag in ((((add_data.get("tagsAdd") or {}).get("node") or {}).get("tags")) or final_tags)
+                ]
+            if remove_needed:
+                remove_data = _shopify_tag_write_graphql(
+                    endpoint,
+                    headers,
+                    remove_mutation,
+                    {"id": order_gid, "tags": remove_tags},
+                    "tagsRemove",
+                    result,
+                )
+                result["mutation_performed"] = True
+                remove_errors = _shopify_tag_write_user_errors(remove_data, "tagsRemove")
+                result["shopify_tags_remove_user_errors"] = remove_errors
+                if remove_errors:
+                    result["tag_write_status"] = "blocked_shopify_tags_remove_failed"
+                    result["shopify_tag_write_error_sanitized"] = "Shopify tagsRemove returned userErrors."
+                    return result
+                result["tags_remove_performed"] = True
+                result["tagsRemove_performed"] = True
+                result["removed_tag_count"] = len(remove_tags)
+                result["removed_tag_values"] = remove_tags
+                result["review_request_tag_removed"] = any(
+                    _normalize_trustpilot_tag(tag) == _normalize_trustpilot_tag(CANONICAL_REVIEW_REQUEST_TAG)
+                    for tag in remove_tags
+                )
+                result["typo_review_request_tag_removed"] = any(
+                    _normalize_trustpilot_tag(tag) == _normalize_trustpilot_tag(TYPO_REVIEW_REQUEST_TAG)
+                    for tag in remove_tags
+                )
+                result["shopify_tag_write_performed"] = True
+                result["shopify_write_performed"] = True
+                result["tag_write_performed"] = True
+                final_tags = [
+                    str(tag)
+                    for tag in (
+                        (((remove_data.get("tagsRemove") or {}).get("node") or {}).get("tags")) or final_tags
+                    )
+                ]
+
+        readback = _shopify_tag_write_graphql(
+            endpoint,
+            headers,
+            read_query,
+            {"id": order_gid},
+            "post-write readback",
+            result,
+        )
+        result["readback_performed"] = True
+        readback_node = readback.get("node") or {}
+        if readback_node.get("name") != result["selected_order"]:
+            result["tag_write_status"] = "blocked_target_order_mismatch"
+            result["shopify_tag_write_error_sanitized"] = "Post-write readback returned an unexpected order name."
+            return result
+        final_tags = [str(tag) for tag in (readback_node.get("tags") or final_tags)]
+        result["tag_count_after"] = len(final_tags)
+        remaining_review_tags = _matched_review_request_tags(final_tags)
+        result["trustpilot_tag_present_after"] = CANONICAL_TRUSTPILOT_TAG in final_tags
+        result["review_request_tag_present_after"] = bool(remaining_review_tags)
+        result["typo_review_request_tag_present_after"] = any(
+            _normalize_trustpilot_tag(tag) == _normalize_trustpilot_tag(TYPO_REVIEW_REQUEST_TAG)
+            for tag in final_tags
+        )
+        result["readback_verified"] = (
+            result["trustpilot_tag_present_after"]
+            and not result["review_request_tag_present_after"]
+            and not result["typo_review_request_tag_present_after"]
+        )
+        result["tag_write_readback_verified"] = result["readback_verified"]
+        if result["readback_verified"]:
+            result["tag_write_status"] = TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+            return result
+        result["tag_write_status"] = "blocked_post_write_tag_verification_failed"
+        result["shopify_tag_write_error_sanitized"] = (
+            "Post-write readback did not confirm Trustpilot tag present and review-request aliases absent."
+        )
+        return result
+    except Exception as exc:
+        result["tag_write_status"] = "blocked_shopify_tag_write_failed"
+        result["shopify_tag_write_error_sanitized"] = _safe_exception_summary(exc)
+        return result
+
+
+def _shopify_tag_write_graphql(endpoint, headers, query, variables, label, result):
+    response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers, timeout=30)
+    result["shopify_api_call_performed"] = True
+    if response.status_code >= 400:
+        raise RuntimeError(f"{label} HTTP error {response.status_code}")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError(f"{label} returned a non-JSON response.") from exc
+    if payload.get("errors"):
+        first = payload.get("errors", [{}])[0]
+        message = first.get("message") if isinstance(first, dict) else str(first)
+        raise RuntimeError(f"{label} GraphQL error: {_safe_text(message, max_length=300)}")
+    return payload.get("data") or {}
+
+
+def _shopify_tag_write_user_errors(payload, key):
+    errors = (payload.get(key) or {}).get("userErrors") or []
+    return [
+        {
+            "field": [_safe_text(part, max_length=80) for part in (error.get("field") or [])],
+            "message": _safe_text(error.get("message"), max_length=240),
+        }
+        for error in errors
+        if isinstance(error, dict)
+    ]
 
 
 def _candidate_22562_alias_audit_from_scan(scan):
@@ -10134,6 +10776,22 @@ def _base_review_and_send_result(selected_order, admin_username, state, request_
         ),
         "reuse_gmail_helper_audit_task_name": REVIEW_SEND_REUSE_GMAIL_HELPER_AUDIT_TASK_NAME,
         "post_send_audit_task_name": REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME,
+        "post_send_audit_status": "",
+        "post_send_audit_success": False,
+        "post_send_audit_selected_order": "",
+        "post_send_audit_email_sent_confirmed": False,
+        "post_send_audit_sent_count": 0,
+        "auto_tag_write_attempted": False,
+        "auto_tag_write_status": "",
+        "auto_tag_write_blocking_conditions": [],
+        "auto_tag_write_user_message": "",
+        "trustpilot_tag_added": False,
+        "review_request_tag_removed": False,
+        "typo_review_request_tag_removed": False,
+        "tag_write_readback_verified": False,
+        "shopify_tag_write_confirmed": False,
+        "shopify_tag_written": False,
+        "final_workflow_status": "blocked_before_send",
         "gmail_api_call_performed": False,
         "gmail_draft_create_attempted": False,
         "gmail_drafts_create_called": False,
@@ -10781,8 +11439,17 @@ def _render_review_and_send_html(payload):
             "gmail_drafts_create_called",
             "gmail_draft_send_attempted",
             "email_sent",
+            "sent_count",
+            "post_send_audit_status",
+            "auto_tag_write_attempted",
+            "auto_tag_write_status",
             "shopify_write_performed",
             "shopify_tag_write_performed",
+            "trustpilot_tag_added",
+            "review_request_tag_removed",
+            "typo_review_request_tag_removed",
+            "tag_write_readback_verified",
+            "final_workflow_status",
         )
     )
     helper_rows = "\n".join(

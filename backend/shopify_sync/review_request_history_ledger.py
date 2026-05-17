@@ -750,14 +750,13 @@ def _event_from_mapping(report, item, event_type, source_section):
             (
                 "shopify_tag_written",
                 "shopify_tag_write_confirmed",
-                "shopify_write_performed",
-                "shopify_tag_write_performed",
-                "source_shopify_write_performed",
-                "tags_add_performed",
-                "source_tags_add_performed",
-                "tagsAdd_performed",
+                "source_shopify_tag_write_confirmed",
             ),
-        ),
+        )
+        or _first_text(item, ("tag_write_status", "auto_tag_write_status"))
+        == "trustpilot_tag_written_and_review_request_removed"
+        or _first_text(data, ("tag_write_status", "auto_tag_write_status"))
+        == "trustpilot_tag_written_and_review_request_removed",
         "partial_draft_id": partial_draft_id,
         "partial_message_id": partial_message_id,
         "next_candidate_order_name": _safe_text(

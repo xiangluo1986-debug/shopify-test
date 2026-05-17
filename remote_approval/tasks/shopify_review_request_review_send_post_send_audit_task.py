@@ -200,11 +200,23 @@ def _build_payload(source_report: dict, source_error: str, source_html: str) -> 
     gmail_drafts_send_confirmed = source_report.get("gmail_drafts_send_called") is True
     gmail_api_call_confirmed = source_report.get("gmail_api_call_performed") is True
     gmail_messages_send_confirmed_false = source_report.get("gmail_messages_send_called") is False
-    shopify_write_confirmed_false = source_report.get("shopify_write_performed") is False
-    shopify_tag_write_confirmed_false = source_report.get("shopify_tag_write_performed") is False
+    shopify_write_confirmed = source_report.get("shopify_write_performed") is True
+    shopify_tag_write_confirmed = (
+        source_report.get("shopify_tag_write_performed") is True
+        or source_report.get("shopify_tag_write_confirmed") is True
+        or source_report.get("shopify_tag_written") is True
+        or source_report.get("auto_tag_write_status") == "trustpilot_tag_written_and_review_request_removed"
+        or source_report.get("tag_write_status") == "trustpilot_tag_written_and_review_request_removed"
+    )
+    shopify_write_confirmed_false = not shopify_write_confirmed
+    shopify_tag_write_confirmed_false = not shopify_tag_write_confirmed
     customer_level_sent_record_available = bool(selected_order and email_sent_confirmed)
     should_move_to_already_sent = bool(email_sent_confirmed and sent_count == 1)
-    ready_for_shopify_tag_write_next_phase = should_move_to_already_sent and not ebay_tag_detected
+    ready_for_shopify_tag_write_next_phase = (
+        should_move_to_already_sent
+        and not ebay_tag_detected
+        and not shopify_tag_write_confirmed
+    )
     blocking_conditions = _blocking_conditions(
         source_error=source_error,
         selected_order=selected_order,
@@ -242,8 +254,11 @@ def _build_payload(source_report: dict, source_error: str, source_html: str) -> 
         "gmail_drafts_send_confirmed": gmail_drafts_send_confirmed,
         "gmail_messages_send_confirmed_false": gmail_messages_send_confirmed_false,
         "sent_count": sent_count,
+        "shopify_write_confirmed": shopify_write_confirmed,
+        "shopify_tag_write_confirmed": shopify_tag_write_confirmed,
         "shopify_write_confirmed_false": shopify_write_confirmed_false,
         "shopify_tag_write_confirmed_false": shopify_tag_write_confirmed_false,
+        "shopify_tag_status_label": "Tag written" if shopify_tag_write_confirmed else "Tag pending",
         "customer_level_sent_record_available": customer_level_sent_record_available,
         "should_move_to_already_sent": should_move_to_already_sent,
         "ready_for_shopify_tag_write_next_phase": ready_for_shopify_tag_write_next_phase,
@@ -331,6 +346,10 @@ def _safe_source_fragment(source_report: dict) -> dict:
         "sent_count",
         "shopify_write_performed",
         "shopify_tag_write_performed",
+        "shopify_tag_write_confirmed",
+        "shopify_tag_written",
+        "auto_tag_write_status",
+        "final_workflow_status",
         "ebay_tag_detected",
         "matched_ebay_tag_value",
         "privacy_scan_summary",
@@ -364,6 +383,8 @@ def _render_html(payload: dict) -> str:
             ("Gmail drafts.send confirmed", payload.get("gmail_drafts_send_confirmed")),
             ("Gmail messages.send confirmed false", payload.get("gmail_messages_send_confirmed_false")),
             ("Sent count", payload.get("sent_count")),
+            ("Shopify tag write confirmed", payload.get("shopify_tag_write_confirmed")),
+            ("Shopify tag status", payload.get("shopify_tag_status_label")),
             ("Shopify write confirmed false", payload.get("shopify_write_confirmed_false")),
             ("Shopify tag write confirmed false", payload.get("shopify_tag_write_confirmed_false")),
             ("Move to Already sent", payload.get("should_move_to_already_sent")),
@@ -413,6 +434,8 @@ def _task_result(payload: dict, json_path, html_path) -> dict:
         "email_sent_confirmed": payload.get("email_sent_confirmed"),
         "gmail_drafts_send_confirmed": payload.get("gmail_drafts_send_confirmed"),
         "sent_count": payload.get("sent_count"),
+        "shopify_tag_write_confirmed": payload.get("shopify_tag_write_confirmed"),
+        "shopify_tag_status_label": payload.get("shopify_tag_status_label"),
         "shopify_tag_write_confirmed_false": payload.get("shopify_tag_write_confirmed_false"),
         "should_move_to_already_sent": payload.get("should_move_to_already_sent"),
         "ready_for_shopify_tag_write_next_phase": payload.get("ready_for_shopify_tag_write_next_phase"),

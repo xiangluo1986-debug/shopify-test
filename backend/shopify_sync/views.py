@@ -1147,11 +1147,13 @@ def review_request_workbench(request):
             },
         )
         if result.get("email_sent") is True:
-            messages.success(
-                request,
-                "Trustpilot email sent. Shopify tag has not been written yet.",
-            )
-            messages.info(request, "Run post-send audit before writing Shopify tag.")
+            if result.get("final_workflow_status") == "completed_email_sent_tag_written":
+                messages.success(request, "Trustpilot email sent. Shopify tag updated.")
+            else:
+                messages.warning(
+                    request,
+                    "Trustpilot email sent, but Shopify tag update failed. Run post-send tag write.",
+                )
         else:
             messages.warning(
                 request,

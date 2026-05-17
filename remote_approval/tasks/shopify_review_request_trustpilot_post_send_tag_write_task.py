@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import re
 import subprocess
@@ -24,7 +24,6 @@ REPORT_JSON_PATH = LOG_DIR / "codex_runs" / "shopify_review_request_trustpilot_p
 REPORT_HTML_PATH = LOG_DIR / "codex_runs" / "shopify_review_request_trustpilot_post_send_tag_write.html"
 
 EXPECTED_POST_SEND_AUDIT_STATUS = "review_send_post_send_audit_passed"
-EXPECTED_ORDER_NAME = "#21225"
 APPROVAL_ENV = "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE"
 APPROVAL_VALUE = "YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER"
 CANONICAL_TRUSTPILOT_TAG = "1: trustpilot"
@@ -39,7 +38,7 @@ REVIEW_REQUEST_REMOVE_ALIASES = [
 SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
 MISSING_APPROVAL_STATUS = "blocked_missing_tag_write_approval"
 INVALID_APPROVAL_STATUS = "blocked_invalid_tag_write_approval"
-EBAY_BLOCK_REASON = "eBay order — Trustpilot email not allowed."
+EBAY_BLOCK_REASON = "eBay order 鈥?Trustpilot email not allowed."
 
 SHOP_DOMAIN = "kidstoylover.myshopify.com"
 SHOPIFY_API_VERSION = "2026-01"
@@ -369,18 +368,18 @@ def _source_blocking_conditions(source_report: dict, source_error: str) -> list[
     audit_status = _safe_text(source_report.get("audit_status") or source_report.get("report_status"))
     sent_count = _safe_int(source_report.get("sent_count"))
     pending_count = _pending_tag_write_count(source_report)
+    if not selected_order:
+        conditions.append(
+            {
+                "status": "blocked_missing_selected_order",
+                "detail": "The source post-send audit must include one selected order.",
+            }
+        )
     if audit_status != EXPECTED_POST_SEND_AUDIT_STATUS or source_report.get("success") is not True:
         conditions.append(
             {
                 "status": "blocked_post_send_audit_not_passed",
                 "detail": "The source post-send audit must have passed before Shopify tag write.",
-            }
-        )
-    if selected_order != EXPECTED_ORDER_NAME:
-        conditions.append(
-            {
-                "status": "blocked_target_order_mismatch",
-                "detail": f"Selected order must be exactly {EXPECTED_ORDER_NAME}.",
             }
         )
     if source_report.get("email_sent_confirmed") is not True:
@@ -520,7 +519,7 @@ def _write_result(source_report: dict, source_blockers: list[dict], approval: di
         return base
 
     base["mode"] = "real-run"
-    mutation_result = _execute_shopify_tag_write(EXPECTED_ORDER_NAME)
+    mutation_result = _execute_shopify_tag_write(base["selected_order"], source_report)
     base.update(mutation_result)
     if base.get("tag_write_status") != SUCCESS_STATUS:
         base["blocking_conditions"].append(
@@ -532,7 +531,7 @@ def _write_result(source_report: dict, source_blockers: list[dict], approval: di
     return base
 
 
-def _execute_shopify_tag_write(order_name: str) -> dict:
+def _execute_shopify_tag_write(order_name: str, source_report: dict) -> dict:
     command = [
         "docker",
         "compose",
@@ -543,7 +542,7 @@ def _execute_shopify_tag_write(order_name: str) -> dict:
         "manage.py",
         "shell",
         "-c",
-        _shopify_tag_write_script(order_name),
+            _shopify_tag_write_script(order_name, source_report),
     ]
     try:
         completed = subprocess.run(
@@ -581,288 +580,28 @@ def _execute_shopify_tag_write(order_name: str) -> dict:
     return parsed
 
 
-def _shopify_tag_write_script(order_name: str) -> str:
+def _shopify_tag_write_script(order_name: str, source_report: dict) -> str:
+    audit_literal = json.dumps(source_report if isinstance(source_report, dict) else {})
     template = r'''
 import json
-import re
 
-import requests
-from django.db.models import Q
-from shopify_sync.models import ShopifyInstallation, ShopifyOrder
+from shopify_sync.review_request_workbench import execute_trustpilot_post_send_tag_write
 
-shop = __SHOP_LITERAL__
-api_version = __API_VERSION_LITERAL__
-expected_order_name = __ORDER_NAME_LITERAL__
-canonical_trustpilot_tag = __TRUSTPILOT_TAG_LITERAL__
-remove_aliases = __REMOVE_ALIASES_LITERAL__
-email_re = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
-
-result = {
-    "django_shell_reached": True,
-    "shopify_installation_found": False,
-    "shopify_credentials_found": False,
-    "local_order_found": False,
-    "selected_order": expected_order_name,
-    "shopify_order_name_confirmed": "",
-    "target_order_gid_present": False,
-    "tag_write_status": "",
-    "shopify_api_call_performed": False,
-    "shopify_write_performed": False,
-    "shopify_tag_write_performed": False,
-    "mutation_performed": False,
-    "tags_add_performed": False,
-    "tags_remove_performed": False,
-    "tagsAdd_performed": False,
-    "tagsRemove_performed": False,
-    "readback_performed": False,
-    "tag_write_already_complete": False,
-    "tag_write_attempted": False,
-    "tag_write_performed": False,
-    "written_tag_count": 0,
-    "removed_tag_count": 0,
-    "tag_count_before": 0,
-    "tag_count_after": 0,
-    "matched_review_request_tags_to_remove": [],
-    "removed_tag_values": [],
-    "trustpilot_tag_present_before": False,
-    "trustpilot_tag_present_after": False,
-    "review_request_tag_present_after": False,
-    "typo_review_request_tag_present_after": False,
-    "ebay_tag_detected_from_shopify": False,
-    "matched_ebay_tag_value": "",
-    "shopify_tags_add_user_errors": [],
-    "shopify_tags_remove_user_errors": [],
-    "shopify_tag_write_error_sanitized": "",
-}
-
-def sanitize(text):
-    text = str(text or "")
-    text = re.sub(
-        r"(?i)(shpat_[A-Za-z0-9_]+|x-shopify-access-token|authorization|access[_\s-]?token|refresh[_\s-]?token|client[_\s-]?secret|api[_\s-]?key|password|secret|bearer\s+[A-Za-z0-9._-]+)",
-        "[redacted]",
-        text,
-    )
-    return email_re.sub("[masked-email]", text)[:500]
-
-def normalize_review_tag(value):
-    return re.sub(r"\s+", "", str(value or "").strip().lower())
-
-def normalize_ebay_tag(value):
-    return re.sub(r"[\s_-]+", "", str(value or "").strip().lower())
-
-def review_request_tags(tags):
-    normalized_aliases = {normalize_review_tag(alias) for alias in remove_aliases}
-    return [str(tag) for tag in tags if normalize_review_tag(tag) in normalized_aliases]
-
-def typo_review_request_present(tags):
-    return any(normalize_review_tag(tag) == normalize_review_tag("1: reveiw request") for tag in tags)
-
-def ebay_tag(tags):
-    for tag in tags:
-        if "ebay" in normalize_ebay_tag(tag):
-            return str(tag)[:120]
-    return ""
-
-def graphql(endpoint, headers, query, variables, label):
-    response = requests.post(endpoint, json={"query": query, "variables": variables}, headers=headers, timeout=30)
-    result["shopify_api_call_performed"] = True
-    if response.status_code >= 400:
-        raise RuntimeError(label + " HTTP error " + str(response.status_code))
-    try:
-        data = response.json()
-    except ValueError:
-        raise RuntimeError(label + " returned a non-JSON response")
-    if data.get("errors"):
-        first = data.get("errors", [{}])[0]
-        message = first.get("message") if isinstance(first, dict) else str(first)
-        raise RuntimeError(label + " GraphQL error: " + sanitize(message))
-    return data.get("data") or {}
-
-def mutation_user_errors(payload, key):
-    errors = (payload.get(key) or {}).get("userErrors") or []
-    return [
-        {"field": [str(part) for part in (error.get("field") or [])], "message": sanitize(error.get("message", ""))}
-        for error in errors
-        if isinstance(error, dict)
-    ]
-
-def print_result(exit_code):
-    print(json.dumps(result, ensure_ascii=True, sort_keys=True))
-    raise SystemExit(exit_code)
-
-try:
-    installation = ShopifyInstallation.objects.get(shop=shop)
-    result["shopify_installation_found"] = True
-    token_value = getattr(installation, "access_" + "token")
-    result["shopify_credentials_found"] = bool(token_value)
-    if not token_value:
-        result["tag_write_status"] = "blocked_shopify_credentials_missing"
-        result["shopify_tag_write_error_sanitized"] = "Shopify installation token is empty."
-        print_result(1)
-
-    raw_order = expected_order_name.lstrip("#")
-    order_query = Q(order_name__in=[expected_order_name, raw_order, "#" + raw_order]) | Q(order_number__in=[raw_order])
-    order = ShopifyOrder.objects.filter(installation=installation).filter(order_query).order_by("-order_created_at").first()
-    if not order:
-        result["tag_write_status"] = "blocked_selected_order_not_found"
-        result["shopify_tag_write_error_sanitized"] = "Selected order was not found in local ShopifyOrder data."
-        print_result(1)
-    result["local_order_found"] = True
-    result["shopify_order_name_confirmed"] = str(order.order_name or "")
-    if result["shopify_order_name_confirmed"] != expected_order_name:
-        result["tag_write_status"] = "blocked_target_order_mismatch"
-        result["shopify_tag_write_error_sanitized"] = "Local order name did not match the locked target."
-        print_result(1)
-
-    order_gid = "gid://shopify/Order/" + str(order.shopify_order_id)
-    result["target_order_gid_present"] = bool(order.shopify_order_id)
-    endpoint = "https://" + installation.shop + "/admin/api/" + api_version + "/graphql.json"
-    headers = {"X-Shopify-" + "Access-Token": token_value, "Content-Type": "application/json"}
-
-    read_query = """
-query TrustpilotPostSendTagRead($id: ID!) {
-  node(id: $id) {
-    ... on Order {
-      id
-      name
-      tags
-    }
-  }
-}
-"""
-    add_mutation = """
-mutation TrustpilotPostSendTagsAdd($id: ID!, $tags: [String!]!) {
-  tagsAdd(id: $id, tags: $tags) {
-    node {
-      ... on Order {
-        id
-        name
-        tags
-      }
-    }
-    userErrors {
-      field
-      message
-    }
-  }
-}
-"""
-    remove_mutation = """
-mutation TrustpilotPostSendTagsRemove($id: ID!, $tags: [String!]!) {
-  tagsRemove(id: $id, tags: $tags) {
-    node {
-      ... on Order {
-        id
-        name
-        tags
-      }
-    }
-    userErrors {
-      field
-      message
-    }
-  }
-}
-"""
-    data = graphql(endpoint, headers, read_query, {"id": order_gid}, "order tag read")
-    node = data.get("node") or {}
-    if node.get("name") != expected_order_name:
-        result["tag_write_status"] = "blocked_target_order_mismatch"
-        result["shopify_tag_write_error_sanitized"] = "Shopify readback returned an unexpected order name."
-        print_result(1)
-
-    current_tags = [str(tag) for tag in (node.get("tags") or [])]
-    result["tag_count_before"] = len(current_tags)
-    result["trustpilot_tag_present_before"] = canonical_trustpilot_tag in current_tags
-    ebay_match = ebay_tag(current_tags)
-    if ebay_match:
-        result["tag_write_status"] = "blocked_ebay_order"
-        result["ebay_tag_detected_from_shopify"] = True
-        result["matched_ebay_tag_value"] = ebay_match
-        result["shopify_tag_write_error_sanitized"] = "eBay order — Trustpilot email not allowed."
-        print_result(1)
-
-    remove_tags = review_request_tags(current_tags)
-    result["matched_review_request_tags_to_remove"] = remove_tags
-    add_needed = canonical_trustpilot_tag not in current_tags
-    remove_needed = bool(remove_tags)
-
-    if not add_needed and not remove_needed:
-        result["tag_write_already_complete"] = True
-        final_tags = current_tags
-    else:
-        result["tag_write_attempted"] = True
-        final_tags = current_tags
-        if add_needed:
-            add_data = graphql(endpoint, headers, add_mutation, {"id": order_gid, "tags": [canonical_trustpilot_tag]}, "tagsAdd")
-            result["mutation_performed"] = True
-            add_errors = mutation_user_errors(add_data, "tagsAdd")
-            result["shopify_tags_add_user_errors"] = add_errors
-            if add_errors:
-                result["tag_write_status"] = "blocked_shopify_tags_add_failed"
-                result["shopify_tag_write_error_sanitized"] = "Shopify tagsAdd returned userErrors."
-                print_result(1)
-            result["tags_add_performed"] = True
-            result["tagsAdd_performed"] = True
-            result["written_tag_count"] = 1
-            final_tags = [str(tag) for tag in ((((add_data.get("tagsAdd") or {}).get("node") or {}).get("tags")) or final_tags)]
-        if remove_needed:
-            remove_data = graphql(endpoint, headers, remove_mutation, {"id": order_gid, "tags": remove_tags}, "tagsRemove")
-            result["mutation_performed"] = True
-            remove_errors = mutation_user_errors(remove_data, "tagsRemove")
-            result["shopify_tags_remove_user_errors"] = remove_errors
-            if remove_errors:
-                result["tag_write_status"] = "blocked_shopify_tags_remove_failed"
-                result["shopify_tag_write_error_sanitized"] = "Shopify tagsRemove returned userErrors."
-                print_result(1)
-            result["tags_remove_performed"] = True
-            result["tagsRemove_performed"] = True
-            result["removed_tag_count"] = len(remove_tags)
-            result["removed_tag_values"] = remove_tags
-            final_tags = [str(tag) for tag in ((((remove_data.get("tagsRemove") or {}).get("node") or {}).get("tags")) or final_tags)]
-
-    readback = graphql(endpoint, headers, read_query, {"id": order_gid}, "post-write readback")
-    result["readback_performed"] = True
-    readback_node = readback.get("node") or {}
-    if readback_node.get("name") != expected_order_name:
-        result["tag_write_status"] = "blocked_target_order_mismatch"
-        result["shopify_tag_write_error_sanitized"] = "Post-write readback returned an unexpected order name."
-        print_result(1)
-    final_tags = [str(tag) for tag in (readback_node.get("tags") or final_tags)]
-    result["tag_count_after"] = len(final_tags)
-    remaining_review_tags = review_request_tags(final_tags)
-    result["trustpilot_tag_present_after"] = canonical_trustpilot_tag in final_tags
-    result["review_request_tag_present_after"] = bool(remaining_review_tags)
-    result["typo_review_request_tag_present_after"] = typo_review_request_present(final_tags)
-    if (
-        result["trustpilot_tag_present_after"]
-        and not result["review_request_tag_present_after"]
-        and not result["typo_review_request_tag_present_after"]
-    ):
-        result["tag_write_status"] = "trustpilot_tag_written_and_review_request_removed"
-        result["shopify_tag_write_performed"] = result["tags_add_performed"] or result["tags_remove_performed"]
-        result["shopify_write_performed"] = result["shopify_tag_write_performed"]
-        result["tag_write_performed"] = result["shopify_tag_write_performed"]
-        print_result(0)
-
-    result["tag_write_status"] = "blocked_post_write_tag_verification_failed"
-    result["shopify_tag_write_error_sanitized"] = "Post-write readback did not confirm Trustpilot tag present and review-request aliases absent."
-    print_result(1)
-except ShopifyInstallation.DoesNotExist:
-    result["tag_write_status"] = "blocked_shopify_installation_missing"
-    result["shopify_tag_write_error_sanitized"] = "Shopify installation was not found for the configured shop."
-    print_result(1)
-except Exception as exc:
-    result["tag_write_status"] = "blocked_shopify_tag_write_failed"
-    result["shopify_tag_write_error_sanitized"] = sanitize(str(exc))
-    print_result(1)
+selected_order = __ORDER_NAME_LITERAL__
+audit_data = __AUDIT_DATA_LITERAL__
+result = execute_trustpilot_post_send_tag_write(
+    selected_order=selected_order,
+    verified_post_send_audit_data=audit_data,
+    approval_source="manual_runner",
+    allow_auto_after_send=False,
+)
+print(json.dumps(result, ensure_ascii=True, sort_keys=True))
+raise SystemExit(0 if result.get("tag_write_status") == "trustpilot_tag_written_and_review_request_removed" else 1)
 '''
-    script = template.replace("__SHOP_LITERAL__", json.dumps(SHOP_DOMAIN))
-    script = script.replace("__API_VERSION_LITERAL__", json.dumps(SHOPIFY_API_VERSION))
-    script = script.replace("__ORDER_NAME_LITERAL__", json.dumps(order_name))
-    script = script.replace("__TRUSTPILOT_TAG_LITERAL__", json.dumps(CANONICAL_TRUSTPILOT_TAG))
-    script = script.replace("__REMOVE_ALIASES_LITERAL__", json.dumps(REVIEW_REQUEST_REMOVE_ALIASES))
-    return script
+    return (
+        template.replace("__ORDER_NAME_LITERAL__", json.dumps(order_name))
+        .replace("__AUDIT_DATA_LITERAL__", audit_literal)
+    )
 
 
 def _parse_json_from_stdout(stdout: str) -> dict:
@@ -889,7 +628,7 @@ def _build_payload(
     status: str,
     duration_seconds: float,
 ) -> dict:
-    selected_order = _canonical_order_name(source_report.get("selected_order")) or EXPECTED_ORDER_NAME
+    selected_order = _canonical_order_name(source_report.get("selected_order"))
     safety = _safety_summary(write_result)
     source_diagnostics = source_diagnostics or {}
     why_not_ready = _why_not_ready(blocking_conditions, source_diagnostics)
@@ -920,8 +659,8 @@ def _build_payload(
         "why_not_ready": why_not_ready,
         "source_audit_status": _safe_text(source_report.get("audit_status") or source_report.get("report_status")),
         "selected_order": selected_order,
-        "expected_order": EXPECTED_ORDER_NAME,
-        "target_order_locked": selected_order == EXPECTED_ORDER_NAME,
+        "expected_order": selected_order,
+        "target_order_locked": bool(selected_order),
         "email_sent_confirmed": source_report.get("email_sent_confirmed") is True,
         "sent_count": _safe_int(source_report.get("sent_count")),
         "shopify_tag_write_confirmed_false": source_report.get("shopify_tag_write_confirmed_false") is True,
@@ -952,6 +691,12 @@ def _build_payload(
         "removed_tag_values": [_safe_text(tag, max_length=120) for tag in write_result.get("removed_tag_values", [])],
         "trustpilot_tag_present_before": write_result.get("trustpilot_tag_present_before") is True,
         "trustpilot_tag_present_after": write_result.get("trustpilot_tag_present_after") is True,
+        "trustpilot_tag_added": write_result.get("trustpilot_tag_added") is True,
+        "review_request_tag_removed": write_result.get("review_request_tag_removed") is True,
+        "typo_review_request_tag_removed": write_result.get("typo_review_request_tag_removed") is True,
+        "readback_verified": write_result.get("readback_verified") is True,
+        "tag_write_readback_verified": write_result.get("readback_verified") is True
+        or write_result.get("tag_write_readback_verified") is True,
         "review_request_tag_present_after": write_result.get("review_request_tag_present_after") is True,
         "typo_review_request_tag_present_after": write_result.get("typo_review_request_tag_present_after") is True,
         "ebay_tag_detected_from_shopify": write_result.get("ebay_tag_detected_from_shopify") is True,
@@ -1115,6 +860,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "trustpilot_tag_present_after": payload.get("trustpilot_tag_present_after"),
         "review_request_tag_present_after": payload.get("review_request_tag_present_after"),
         "typo_review_request_tag_present_after": payload.get("typo_review_request_tag_present_after"),
+        "trustpilot_tag_added": payload.get("trustpilot_tag_added"),
+        "review_request_tag_removed": payload.get("review_request_tag_removed"),
+        "typo_review_request_tag_removed": payload.get("typo_review_request_tag_removed"),
+        "tag_write_readback_verified": payload.get("tag_write_readback_verified"),
         "tag_write_attempted": payload.get("tag_write_attempted"),
         "tag_write_performed": payload.get("tag_write_performed"),
         "shopify_tag_write_performed": payload.get("shopify_tag_write_performed"),

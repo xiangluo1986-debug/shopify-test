@@ -182,7 +182,7 @@ Phase 0.2 automation decision:
   `blocked_ebay_order_count` in scan/audit reports.
 - [x] Add locked task
   `shopify_review_request_trustpilot_post_send_tag_write` for one successful
-  post-send audited order only, currently `#21225`.
+  post-send audited order only.
 - [x] Require exact approval env
   `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE=YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER`
   before any Shopify API call.
@@ -204,6 +204,21 @@ Phase 0.2 automation decision:
 - [x] Blocked reports include `source_paths_checked`, host/web/history source
   found flags, selected order, email sent confirmation, sent count, and
   `why_not_ready`.
+
+#### Phase 5.29 Automatic Post-Send Shopify Tag Write
+
+- [x] Admin `Review & Send` now builds an immediate in-memory post-send audit
+  after a successful Gmail drafts.send result.
+- [x] If the audit confirms exactly one sent order and the selected order
+  matches, the same one-order Shopify tag-write helper adds `1: trustpilot`
+  and removes `1: review request` / `1: reveiw request` aliases.
+- [x] No Shopify tag write is attempted when Gmail send fails, when the
+  post-send audit fails, or when the selected order does not match.
+- [x] The manual
+  `shopify_review_request_trustpilot_post_send_tag_write` runner still requires
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE=YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER`.
+- [x] Existing Sent / Tag pending rows remain pending until the strict manual
+  one-order post-send tag write handles that exact audited order.
 - [x] The no-approval run remains no-write: no Shopify API call, no Shopify tag
   write, no Gmail action, no external review API call, and no
   `translationsRegister`.
@@ -1257,3 +1272,17 @@ Future tracking design note:
   addition to Shopify tag aliases such as `1: trustpilot`, `1: trustpoilt`,
   `trustpilot`, `trustpoilt`, and spacing/case variants.
 - [x] Shopify tag write remains a later phase after post-send audit.
+
+## Phase 5.29 Automatic Review & Send Tag Completion
+
+- [x] After a successful admin `Review & Send`, the server builds a post-send
+  audit immediately and runs the shared Shopify tag-write helper for the same
+  selected order only.
+- [x] Success status becomes `completed_email_sent_tag_written`; the Already
+  sent table shows `Sent`, `Tag written`, and evidence that the Trustpilot
+  email was sent and Shopify tag updated.
+- [x] If the tag write fails after Gmail succeeds, the workflow remains
+  `email_sent_tag_pending`; the order stays out of Needs review and can be
+  repaired by the manual one-order tag-write runner without resending Gmail.
+- [x] If Gmail send fails or server-side revalidation blocks before send,
+  Shopify tag write is not attempted.

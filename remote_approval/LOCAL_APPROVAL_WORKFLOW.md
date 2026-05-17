@@ -165,8 +165,8 @@ python remote_approval_runner.py --task shopify_review_request_trustpilot_post_s
 Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE
 ```
 
-The task is locked to the successful post-send audited order, currently
-`#21225`. It may add `1: trustpilot` and remove `1: review request` /
+The task is locked to the single selected order from the successful post-send
+audit. It may add `1: trustpilot` and remove `1: review request` /
 `1: reveiw request` aliases only after the exact approval gate passes. It must
 not call Gmail, Trustpilot, Kudosi, or Ali Reviews APIs.
 
@@ -177,6 +177,15 @@ the Django/web audit builder, the latest Review & Send report, and the latest
 post-send audit were found. If the audited send is found, the report should show
 `tag_write_ready=true`, `email_sent_confirmed=true`, `sent_count=1`, and no
 Shopify API call or write.
+
+Phase 5.29 makes the admin `Review & Send` POST complete the same one-order
+Shopify tag update automatically after Gmail drafts.send succeeds. The POST
+flow first builds the post-send audit in memory; if it confirms the same
+selected order, `email_sent_confirmed=true`, and `sent_count=1`, it calls the
+shared tag-write helper for that order only. If Gmail send fails or the audit
+fails, no Shopify tag write is attempted. The manual runner above still
+requires the approval environment value and is used for existing Sent / Tag
+pending rows.
 
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local
@@ -575,7 +584,14 @@ with `sent_count=1`, and writes a local post-send audit under
 `logs/codex_runs/`. It does not call Gmail, create drafts, send email, call
 Shopify, write tags, call Trustpilot/Kudosi/Ali Reviews, or call
 `translationsRegister`. A confirmed local Review & Send success counts as
-Trustpilot sent history until the later Shopify tag-write phase is approved.
+Trustpilot sent history until Shopify tag write completes.
+
+Phase 5.29 updates that admin POST flow: after Gmail drafts.send succeeds for
+one server-revalidated selected order, the server builds the post-send audit in
+memory and calls the shared one-order Shopify tag-write helper. If the audit or
+tag write fails, Gmail is not retried and the order remains Sent / Tag pending
+for the manual runner. If Gmail send fails, the Shopify tag-write helper is not
+called.
 
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 
