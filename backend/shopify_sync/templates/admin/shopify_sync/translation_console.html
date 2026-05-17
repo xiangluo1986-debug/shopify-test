@@ -65,6 +65,14 @@
     background: transparent;
     color: #111827;
   }
+  /*
+   Translation Workspace UI quality gate:
+   - Do not use default Django admin tables for normal Translation Workspace UI.
+   - Use .tw-card, .tw-grid, .tw-summary-card, or Translation Workspace card/grid classes for visible summaries.
+   - Any unavoidable table must use .tw-readable-table with explicit dark-mode-safe colors.
+   - Technical details must stay collapsed by default.
+   - Important results must not depend on inherited black/dark admin row styling.
+  */
   .translation-workspace table {
     width: 100%;
     border-collapse: separate;
@@ -767,6 +775,38 @@
     font-weight: 700;
     padding: 9px 10px;
   }
+  .translation-workspace .tw-shopify-diagnostic-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .translation-workspace .tw-shopify-diagnostic-card {
+    min-width: 0;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #111827;
+    padding: 9px 10px;
+  }
+  .translation-workspace .tw-shopify-diagnostic-title {
+    color: #111827;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+  .translation-workspace .tw-shopify-diagnostic-meta {
+    margin-top: 4px;
+    color: #4b5563;
+    font-size: 12px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+  .translation-workspace .tw-shopify-diagnostic-reason {
+    margin-top: 7px;
+    color: #111827;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
   .translation-workspace .tw-shopify-reason-list {
     display: grid;
     gap: 6px;
@@ -811,6 +851,26 @@
   }
   .translation-workspace .tw-shopify-diagnostic-table {
     margin-top: 8px;
+  }
+  .translation-workspace .tw-readable-table,
+  .translation-workspace .tw-readable-table thead,
+  .translation-workspace .tw-readable-table tbody,
+  .translation-workspace .tw-readable-table tr,
+  .translation-workspace .tw-readable-table th,
+  .translation-workspace .tw-readable-table td {
+    border-color: #dbe1e8 !important;
+    background-color: #ffffff !important;
+    color: #111827 !important;
+  }
+  .translation-workspace .tw-readable-table thead th,
+  .translation-workspace .tw-readable-table tbody th {
+    background-color: #f3f6fa !important;
+    color: #1f2937 !important;
+  }
+  .translation-workspace .tw-readable-table tbody tr:nth-child(even) td,
+  .translation-workspace .tw-readable-table tbody tr:nth-child(even) th {
+    background-color: #fbfdff !important;
+    color: #111827 !important;
   }
   .tw-report-guard-warning {
     margin: 8px 0;
@@ -2832,13 +2892,13 @@
               <input type="hidden" name="target_locale" value="{{ selected_locale }}">
               <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
               <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-              <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active or all_languages_update_display.is_successfully_updated %} disabled{% endif %}>{% if all_languages_update_display.is_successfully_updated %}Translate again / Update again{% elif translation_background_job.show_translation_results %}Update Shopify now{% else %}Translate all languages{% endif %}</button>
+              <button type="submit" class="button tw-main-action-button" data-job-start-button data-label-initial="Translate and update Shopify" data-label-rerun="Translate again / Update again" data-label-running="Updating&hellip;"{% if translation_background_job.is_active %} disabled{% endif %}>{% if translation_background_job.is_active %}Updating&hellip;{% elif translation_background_job.show_translation_results or all_languages_update_display.is_successfully_updated %}Translate again / Update again{% else %}Translate and update Shopify{% endif %}</button>
             </form>
           {% else %}
-            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate all languages</button>
+            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate and update Shopify</button>
           {% endif %}
           <span class="tw-compact-safe-text">Safe fields only.</span>
-          <span class="tw-compact-safe-text">{% if translation_background_job.show_translation_results and not translation_background_job.is_active %}Translation is ready. Click Update Shopify now to sync safe translations.{% else %}Translation runs first. Shopify update only runs after an explicit click when results are ready.{% endif %}</span>
+          <span class="tw-compact-safe-text">{% if translation_background_job.is_active %}Updating now. The button unlocks when the job finishes.{% elif all_languages_update_display.is_successfully_updated %}Already updated. Run again only if translations changed.{% elif translation_background_job.show_translation_results %}Translation is ready. Click Translate again / Update again to sync safe translations.{% else %}Translation runs first. Shopify update only runs after an explicit click when results are ready.{% endif %}</span>
         </div>
         <div class="tw-job-pill is-{{ translation_background_job.compact_status_key|default:'not_started' }}" data-job-status-pill>
           <div class="tw-job-pill-head">
@@ -3082,7 +3142,7 @@
                 {% endfor %}
               </ul>
             {% endif %}
-            <table class="tw-shopify-diagnostic-table">
+            <table class="tw-readable-table tw-shopify-diagnostic-table">
               <thead>
                 <tr>
                   <th>Field</th>
@@ -3209,7 +3269,7 @@
             </details>
           {% endif %}
           {% if all_languages_update_display.german_body_html_diagnostic.exists or all_languages_update_display.needs_review_rows or all_languages_update_display.option_mapping_audit.row_count %}
-            <details class="tw-shopify-update-details" open>
+            <details class="tw-shopify-update-details">
               <summary>Remaining field diagnostics</summary>
               {% if all_languages_update_display.german_body_html_diagnostic.exists %}
                 <h4>German product description blocker</h4>
@@ -3238,10 +3298,6 @@
                     <div class="tw-shopify-update-label">Identity mismatch</div>
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.identity_mismatch }}</div>
                   </div>
-                  <div class="tw-shopify-update-card">
-                    <div class="tw-shopify-update-label">Empty/missing digest</div>
-                    <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.empty_or_missing_digest }}</div>
-                  </div>
                   <div class="tw-shopify-update-card is-wide">
                     <div class="tw-shopify-update-label">Plain reason</div>
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.plain_reason }}</div>
@@ -3253,30 +3309,26 @@
                     </div>
                   {% endif %}
                 </div>
+                <details class="tw-shopify-update-details">
+                  <summary>Technical details</summary>
+                  <div class="tw-shopify-update-kv-grid">
+                    <div class="tw-shopify-update-card">
+                      <div class="tw-shopify-update-label">Empty/missing digest</div>
+                      <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.empty_or_missing_digest }}</div>
+                    </div>
+                  </div>
+                </details>
               {% endif %}
               {% if all_languages_update_display.needs_review_rows %}
                 <h4>Needs review rows</h4>
-                <div class="tw-editor-table-wrap">
-                  <table class="tw-results-table tw-shopify-diagnostic-table">
-                    <thead>
-                      <tr>
-                        <th>Locale</th>
-                        <th>Key</th>
-                        <th>Context</th>
-                        <th>Plain reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {% for row in all_languages_update_display.needs_review_rows %}
-                        <tr>
-                          <td>{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</td>
-                          <td>{{ row.key }}</td>
-                          <td>{{ row.context_label }}</td>
-                          <td>{{ row.plain_reason }}</td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
+                <div class="tw-shopify-diagnostic-card-grid">
+                  {% for row in all_languages_update_display.needs_review_rows %}
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</div>
+                      <div class="tw-shopify-diagnostic-meta">{% if row.context_label %}{{ row.context_label }}{% else %}Field needs review{% endif %}</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ row.plain_reason }}</div>
+                    </article>
+                  {% endfor %}
                 </div>
               {% endif %}
               {% if all_languages_update_display.option_mapping_audit.row_count %}
@@ -3292,7 +3344,7 @@
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.mapping_safe_count }}</div>
                   </div>
                   <div class="tw-shopify-update-card">
-                    <div class="tw-shopify-update-label">Update-ready</div>
+                    <div class="tw-shopify-update-label">Can update later</div>
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.future_update_ready_count }}</div>
                   </div>
                   <div class="tw-shopify-update-card">
@@ -3300,34 +3352,42 @@
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.blocked_count }}</div>
                   </div>
                 </div>
-                <div class="tw-editor-table-wrap">
-                  <table class="tw-results-table tw-shopify-diagnostic-table">
-                    <thead>
-                      <tr>
-                        <th>Locale</th>
-                        <th>Field</th>
-                        <th>resource_id</th>
-                        <th>key</th>
-                        <th>digest</th>
-                        <th>Option context</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {% for row in all_languages_update_display.option_mapping_audit.rows %}
-                        <tr>
-                          <td>{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</td>
-                          <td>{{ row.field_label }}</td>
-                          <td>{{ row.resource_id }}</td>
-                          <td>{{ row.key }}</td>
-                          <td>{{ row.digest }}</td>
-                          <td>{% if row.option_name %}{{ row.option_name }}{% endif %}{% if row.option_value %}: {{ row.option_value }}{% endif %}{% if row.option_position %} (option {{ row.option_position }}){% endif %}</td>
-                          <td>{{ row.future_update_ready_label }}. {{ row.plain_reason }}</td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
+                <div class="tw-shopify-diagnostic-card-grid">
+                  {% for row in all_languages_update_display.option_mapping_audit.rows %}
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %} - {{ row.field_label }}</div>
+                      <div class="tw-shopify-diagnostic-meta">{% if row.option_name %}{{ row.option_name }}{% endif %}{% if row.option_value %}: {{ row.option_value }}{% endif %}{% if row.option_position %} (option {{ row.option_position }}){% endif %}</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ row.future_update_ready_label }}. {{ row.plain_reason }}</div>
+                    </article>
+                  {% endfor %}
                 </div>
+                <details class="tw-shopify-update-details">
+                  <summary>Technical details</summary>
+                  <div class="tw-editor-table-wrap">
+                    <table class="tw-readable-table tw-shopify-diagnostic-table">
+                      <thead>
+                        <tr>
+                          <th>Locale</th>
+                          <th>Field</th>
+                          <th>resource_id</th>
+                          <th>key</th>
+                          <th>digest</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in all_languages_update_display.option_mapping_audit.rows %}
+                          <tr>
+                            <td>{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</td>
+                            <td>{{ row.field_label }}</td>
+                            <td>{{ row.resource_id }}</td>
+                            <td>{{ row.key }}</td>
+                            <td>{{ row.digest }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
               {% endif %}
               {% if all_languages_update_display.next_enablement_summary %}
                 <h4>Next fields that can be enabled</h4>
@@ -7221,7 +7281,7 @@
       }
 
       function shouldShowResults(status) {
-        return isActiveStatus(status) || status === "completed" || status === "partial" || status === "failed" || status === "stale";
+        return isActiveStatus(status) || status === "completed" || status === "partial" || status === "failed" || status === "stale" || status === "cancelled";
       }
 
       function renderedResultCount() {
@@ -7304,6 +7364,32 @@
           return "Translation stopped. Open technical details for the local report.";
         }
         return "Select a product, then start translation.";
+      }
+
+      function statusHasResults(data, status) {
+        return shouldShowResults(status) ||
+          numberOrZero(data.translation_result_count) > 0 ||
+          renderedResultCount() > 0;
+      }
+
+      function jobStartLabel(button, status, hasResults) {
+        if (isActiveStatus(status)) {
+          return button.getAttribute("data-label-running") || "Updating...";
+        }
+        if (hasResults) {
+          return button.getAttribute("data-label-rerun") || "Translate again / Update again";
+        }
+        return button.getAttribute("data-label-initial") || "Translate and update Shopify";
+      }
+
+      function syncJobStartButtons(status, disabled, hasResults) {
+        Array.prototype.slice.call(document.querySelectorAll("[data-job-start-button]"))
+          .forEach(function (button) {
+            button.disabled = disabled;
+            if (button.hasAttribute("data-label-initial")) {
+              button.textContent = jobStartLabel(button, status, hasResults);
+            }
+          });
       }
 
       function clearChildren(element) {
@@ -7511,10 +7597,7 @@
         syncLanguageTabs(data.per_locale_progress || data.per_locale_status || []);
         renderGroupRows(data.per_group_progress || data.per_group_status || []);
         setPollingMessage(shouldContinue, statusLabel, false);
-        Array.prototype.slice.call(document.querySelectorAll("[data-job-start-button]"))
-          .forEach(function (button) {
-            button.disabled = shouldContinue;
-          });
+        syncJobStartButtons(status, shouldContinue, statusHasResults(data, status));
         if (shouldContinue) {
           schedulePoll();
         } else {
