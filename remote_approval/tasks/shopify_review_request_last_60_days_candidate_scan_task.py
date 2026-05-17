@@ -56,6 +56,50 @@ TRUSTPILOT_TAG_ALIASES = {
     "trustpilot",
     "trustpoilt",
 }
+NOTE_RISK_FIELDS = (
+    "shopify_note",
+    "shopify_note_attributes",
+    "warehouse_note",
+    "transfer_note",
+    "exception_review_reason",
+    "exception_review_response",
+    "cost_calculation_note",
+)
+NOTE_RISK_KEYWORDS = (
+    "aftersales",
+    "after sale",
+    "after-sale",
+    "support",
+    "ticket",
+    "complaint",
+    "issue",
+    "problem",
+    "replacement",
+    "refund",
+    "return",
+    "returned",
+    "dispute",
+    "chargeback",
+    "damaged",
+    "missing",
+    "defective",
+    "broken",
+    "售后",
+    "工单",
+    "客诉",
+    "投诉",
+    "退款",
+    "退货",
+    "返修",
+    "补发",
+    "换货",
+    "丢件",
+    "破损",
+    "少件",
+    "有问题",
+    "问题单",
+)
+NOTE_RISK_REASON = "Aftersales/ticket note found"
 MANUAL_CONFIRMED_ORDER_EVIDENCE = {
     "#22562": {
         "order_name": "#22562",
@@ -74,6 +118,7 @@ MANUAL_CONFIRMED_ORDER_EVIDENCE = {
     },
 }
 FOCUS_ORDER_NAMES = (
+    "#21083",
     "#21070",
     "#21075",
     "#21076",
@@ -385,6 +430,11 @@ def _load_sqlite_orders() -> list[dict]:
                 "settlement_status",
                 "shopify_note",
                 "shopify_note_attributes",
+                "warehouse_note",
+                "transfer_note",
+                "exception_review_reason",
+                "exception_review_response",
+                "cost_calculation_note",
                 SHOPIFY_ORDER_TAG_FIELD,
             )
             if column in columns
@@ -472,6 +522,13 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         blocked_rows,
         already_sent_rows,
     )
+    order_21083_diagnosis = _sqlite_focus_order_diagnosis(
+        "#21083",
+        local_by_order,
+        eligible_rows,
+        blocked_rows,
+        already_sent_rows,
+    )
     order_21070_diagnosis = _sqlite_focus_order_diagnosis("#21070", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     order_21075_diagnosis = _sqlite_focus_order_diagnosis("#21075", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     order_21076_diagnosis = _sqlite_focus_order_diagnosis("#21076", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
@@ -506,7 +563,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28H",
+        "phase": "5.28I",
         "mode": "dry-run-local-synced-order-scan",
         "command_label": COMMAND_LABEL,
         "window_days": 60,
@@ -515,6 +572,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "scan_source": "sqlite_report_fallback",
         "coverage_warnings": order_data_coverage["coverage_warnings"],
         "order_data_coverage": order_data_coverage,
+        "order_21083_diagnosis": order_21083_diagnosis,
         "order_21070_diagnosis": order_21070_diagnosis,
         "order_21075_diagnosis": order_21075_diagnosis,
         "order_21076_diagnosis": order_21076_diagnosis,
@@ -539,9 +597,26 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if row.get("merged_order_group")),
         "blocked_duplicate_customer_count": sum(1 for row in blocked_rows if "prior Trustpilot" in row.get("block_reason", "") or "already" in row.get("block_reason", "").lower()),
+        "blocked_note_risk_count": sum(1 for row in blocked_rows if row.get("note_risk_detected") is True),
         "first_order_blocked_count": sum(1 for row in blocked_rows if "first-order customer" in row.get("block_reason", "").lower() or "first order" in row.get("block_reason", "").lower()),
         "prior_trustpilot_customer_blocked_count": sum(1 for row in blocked_rows if row.get("customer_level_trustpilot_already_sent") is True),
         "customer_history_unknown_count": sum(1 for row in blocked_rows if "customer history not confirmed" in row.get("block_reason", "").lower()),
+        "customer_history_low_confidence_count": sum(1 for row in blocked_rows if row.get("customer_history_confidence") == "low"),
+        "customer_history_weak_name_only_match_count": sum(
+            _int_value(row.get("customer_history_weak_match_count")) for row in blocked_rows + eligible_rows
+        ),
+        "overcounted_customer_history_count": sum(
+            1
+            for row in blocked_rows + eligible_rows
+            if _int_value(row.get("customer_history_order_count_before_precision"))
+            > _int_value(row.get("customer_history_order_count"))
+        ),
+        "candidates_blocked_by_low_confidence_history": sum(
+            1 for row in blocked_rows if "customer history not confirmed" in row.get("block_reason", "").lower()
+        ),
+        "candidates_blocked_by_note_risk": sum(1 for row in blocked_rows if row.get("note_risk_detected") is True),
+        "active_review_send_count_before_precision": eligible_candidate_count_total
+        + sum(1 for row in blocked_rows if _blocked_only_by_precision_fix(row)),
         "blocked_missing_review_request_tag_count": sum(
             1 for row in blocked_rows if row.get("canonical_review_request_tag_present") is False
         ),
@@ -645,6 +720,7 @@ def _already_sent_rows_from_sources(source_by_order: dict) -> list[dict]:
 def _sqlite_customer_history_by_order(local_orders) -> dict:
     orders = [dict(order) for order in local_orders or []]
     by_identity = {}
+    by_name = {}
     identity_by_order = {}
     for order in orders:
         order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
@@ -653,44 +729,120 @@ def _sqlite_customer_history_by_order(local_orders) -> dict:
         identity = _sqlite_customer_history_identity(order)
         identity_by_order[order_name] = identity
         if identity.get("key"):
-            by_identity.setdefault(identity["key"], []).append(order)
+            if identity.get("confidence") == "low":
+                by_name.setdefault(identity["key"], []).append(order)
+            else:
+                by_identity.setdefault(identity["key"], []).append(order)
+        name_key = _sqlite_name_identity(order).get("key", "")
+        if name_key:
+            by_name.setdefault(name_key, []).append(order)
 
     result = {}
     for order_name, identity in identity_by_order.items():
+        exact_orders = _dedupe_history_orders(by_identity.get(identity.get("key", ""), []))
+        weak_orders = _dedupe_history_orders(by_name.get(identity.get("weak_key") or identity.get("key", ""), []))
+        exact_names = _dedupe(
+            _canonical_order_name(item.get("order_name") or item.get("order_number"))
+            for item in exact_orders
+            if _canonical_order_name(item.get("order_name") or item.get("order_number"))
+        )
+        weak_names = _dedupe(
+            _canonical_order_name(item.get("order_name") or item.get("order_number"))
+            for item in weak_orders
+            if _canonical_order_name(item.get("order_name") or item.get("order_number"))
+        )
+        excluded_weak_names = [name for name in weak_names if name not in set(exact_names)]
         customer_orders = sorted(
-            by_identity.get(identity.get("key", ""), []),
+            exact_orders,
             key=lambda item: (_parse_dt(item.get("order_created_at")) or datetime.min.replace(tzinfo=timezone.utc), _int_value(item.get("id"))),
         )
-        confirmed = bool(identity.get("key") and customer_orders)
+        confirmed = bool(identity.get("key") and customer_orders and identity.get("confidence") in {"high", "medium"})
         count = len(customer_orders) if confirmed else 0
         sequence = _sqlite_customer_order_sequence(order_name, customer_orders) if confirmed else 0
-        previous_orders, previous_tags = _sqlite_previous_trustpilot_history(order_name, customer_orders)
+        previous_orders, previous_tags = (
+            _sqlite_previous_trustpilot_history(order_name, customer_orders) if confirmed else ([], [])
+        )
+        before_precision_names = _dedupe(exact_names + excluded_weak_names)
         result[order_name] = {
             "customer_history_order_count": count,
+            "customer_history_order_count_before_precision": len(before_precision_names),
             "customer_order_sequence_number": sequence,
             "customer_order_sequence_label": _sqlite_customer_order_sequence_label(count, confirmed),
-            "historical_order_names": _dedupe(
-                _canonical_order_name(item.get("order_name") or item.get("order_number"))
-                for item in customer_orders
-                if _canonical_order_name(item.get("order_name") or item.get("order_number"))
-            ),
+            "historical_order_names": exact_names if confirmed else [],
+            "customer_history_matched_order_names": exact_names if confirmed else [],
+            "customer_history_match_method": identity.get("source", "unavailable"),
+            "customer_history_excluded_weak_matches": excluded_weak_names,
+            "customer_history_weak_match_count": len(excluded_weak_names),
+            "customer_history_exact_match_count": len(exact_names) if confirmed else 0,
             "previous_trustpilot_order_names": previous_orders,
             "previous_trustpilot_tag_values": previous_tags,
             "customer_history_source": identity.get("source", "unavailable"),
-            "customer_history_confidence": identity.get("confidence", "unknown") if confirmed else "unknown",
+            "customer_history_confidence": identity.get("confidence", "unknown") if confirmed else ("low" if excluded_weak_names else "unknown"),
             "customer_history_confirmed": confirmed,
         }
     return result
 
 
+def _dedupe_history_orders(orders):
+    result = []
+    seen = set()
+    for order in sorted(
+        orders or [],
+        key=lambda item: (_parse_dt(item.get("order_created_at")) or datetime.min.replace(tzinfo=timezone.utc), _int_value(item.get("id"))),
+    ):
+        order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
+        key = order_name or f"id:{order.get('id')}"
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(order)
+    return result
+
+
 def _sqlite_customer_history_identity(order):
+    name = _sqlite_name_identity(order)
     email = _normalize_email(order.get("customer_email"))
     if email:
-        return {"source": "customer_email", "confidence": "high", "key": f"email:{email}"}
+        return {
+            "source": "customer_email",
+            "confidence": "high",
+            "key": f"email:{email}",
+            "weak_key": name.get("key", ""),
+        }
+    phone = _sqlite_phone_identity(order)
+    if phone:
+        return {
+            "source": "name_shipping_phone",
+            "confidence": "medium",
+            "key": phone,
+            "weak_key": name.get("key", ""),
+        }
     shipping = _sqlite_shipping_identity(order)
     if shipping:
-        return {"source": "shipping_fallback", "confidence": "medium", "key": shipping}
-    return {"source": "unavailable", "confidence": "unknown", "key": ""}
+        return {
+            "source": "name_shipping_address_postcode",
+            "confidence": "medium",
+            "key": shipping,
+            "weak_key": name.get("key", ""),
+        }
+    if name:
+        return {"source": "name_only", "confidence": "low", "key": name["key"], "weak_key": name["key"]}
+    return {"source": "unavailable", "confidence": "unknown", "key": "", "weak_key": ""}
+
+
+def _sqlite_name_identity(order):
+    name = _norm_history_piece(order.get("customer_name") or order.get("shipping_name"))
+    if not name:
+        return {}
+    return {"key": f"name:{name}", "name": name}
+
+
+def _sqlite_phone_identity(order):
+    name = _sqlite_name_identity(order)
+    phone = re.sub(r"\D+", "", str(order.get("shipping_phone") or ""))
+    if not (name and phone):
+        return ""
+    return f"name_phone:{name['name']}|{phone}"
 
 
 def _sqlite_shipping_identity(order):
@@ -756,6 +908,7 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
     matched_review_request_tags = _matched_review_request_tags(tags)
     masked_customer = source.get("masked_email") or _mask_email(local.get("customer_email"))
     delivered = _sqlite_delivered_confirmed(local, source, tags)
+    note_risk = _note_risk_detection(local)
     if source.get("canonical_review_request_tag_present") is True or has_review_request_tag(tags):
         canonical_tag = True
     elif tag_data_loaded:
@@ -783,6 +936,8 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         blockers.append("Customer history not confirmed.")
     elif history_count <= 1:
         blockers.append("First-order customer; Trustpilot is for repeat customers.")
+    if note_risk["note_risk_detected"]:
+        blockers.append(NOTE_RISK_REASON)
     if previous_trustpilot_order_names:
         blockers.append(
             f"Already sent Trustpilot to this customer via {_join_order_names(previous_trustpilot_order_names)}."
@@ -818,6 +973,11 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         "order_created_at": _safe_text(local.get("order_created_at"), 120),
         "fulfillment_status": _safe_text(local.get("fulfillment_status"), 80),
         "shopify_note_present": _order_note_present(local),
+        "note_risk_detected": note_risk["note_risk_detected"],
+        "note_risk_field": note_risk["note_risk_field"],
+        "note_risk_fields": note_risk["note_risk_fields"],
+        "note_risk_keywords": note_risk["note_risk_keywords"],
+        "note_risk_reason": note_risk["note_risk_reason"],
         "tags": tags,
         "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
         "tags_summary": _tags_summary(tags, tag_data_loaded),
@@ -838,10 +998,18 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
             else "No previous Trustpilot email found"
         ),
         "customer_history_order_count": history_count,
+        "customer_history_order_count_before_precision": _int_value(
+            history.get("customer_history_order_count_before_precision")
+        ),
         "customer_order_count": history_count,
         "customer_order_sequence_number": _int_value(history.get("customer_order_sequence_number")),
         "customer_order_sequence_label": history.get("customer_order_sequence_label", ""),
         "historical_order_names": history.get("historical_order_names", []),
+        "customer_history_matched_order_names": history.get("customer_history_matched_order_names", []),
+        "customer_history_match_method": history.get("customer_history_match_method", ""),
+        "customer_history_excluded_weak_matches": history.get("customer_history_excluded_weak_matches", []),
+        "customer_history_weak_match_count": _int_value(history.get("customer_history_weak_match_count")),
+        "customer_history_exact_match_count": _int_value(history.get("customer_history_exact_match_count")),
         "previous_trustpilot_order_names": previous_trustpilot_order_names,
         "previous_trustpilot_tag_values": previous_trustpilot_tag_values,
         "customer_history_source": history.get("customer_history_source", "unavailable"),
@@ -894,6 +1062,54 @@ def _order_note_present(local):
         return True
     note_attributes = local.get("shopify_note_attributes")
     return note_attributes not in (None, "", [], {})
+
+
+def _note_text_fragments(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, dict):
+        fragments = []
+        for item in value.values():
+            fragments.extend(_note_text_fragments(item))
+        return fragments
+    if isinstance(value, (list, tuple, set)):
+        fragments = []
+        for item in value:
+            fragments.extend(_note_text_fragments(item))
+        return fragments
+    text = _safe_text(value, 1000)
+    return [text] if text else []
+
+
+def _note_risk_detection(row):
+    row = row or {}
+    fields = []
+    keywords = []
+    for field in NOTE_RISK_FIELDS:
+        for fragment in _note_text_fragments(row.get(field)):
+            matched = _note_risk_keywords_in_text(fragment)
+            if not matched:
+                continue
+            fields.append(field)
+            keywords.extend(matched)
+    fields = _dedupe(fields)
+    keywords = _dedupe(keywords)
+    return {
+        "note_risk_detected": bool(fields),
+        "note_risk_field": fields[0] if fields else "",
+        "note_risk_fields": fields,
+        "note_risk_keywords": keywords,
+        "note_risk_reason": NOTE_RISK_REASON if fields else "",
+    }
+
+
+def _note_risk_keywords_in_text(value):
+    text = _safe_text(value, 1000).lower()
+    return _dedupe(
+        keyword
+        for keyword in NOTE_RISK_KEYWORDS
+        if _safe_text(keyword, 80).lower() in text
+    )
 
 
 def _effective_order_tags(local, source):
@@ -1049,15 +1265,28 @@ def _sqlite_focus_order_diagnosis(order_name, local_by_order, eligible_rows, blo
         "review_queue_rank": int(row.get("review_queue_rank") or 0) if row else 0,
         "visible_in_review_batch": row.get("visible_in_review_batch") is True if row else False,
         "hidden_reason": _safe_text(row.get("hidden_reason"), 120) if row else "not_scanned",
+        "displayed_order_count_before_precision": _int_value(
+            row.get("customer_history_order_count_before_precision")
+        ) if row else 0,
         "customer_history_order_count": _int_value(row.get("customer_history_order_count")) if row else 0,
         "customer_order_sequence_number": _int_value(row.get("customer_order_sequence_number")) if row else 0,
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label", ""), 120) if row else "",
         "historical_order_names": row.get("historical_order_names", []) if row else [],
+        "customer_history_matched_order_names": row.get("customer_history_matched_order_names", []) if row else [],
+        "customer_history_match_method": _safe_text(row.get("customer_history_match_method", ""), 80) if row else "",
+        "customer_history_excluded_weak_matches": row.get("customer_history_excluded_weak_matches", []) if row else [],
+        "customer_history_weak_match_count": _int_value(row.get("customer_history_weak_match_count")) if row else 0,
+        "customer_history_exact_match_count": _int_value(row.get("customer_history_exact_match_count")) if row else 0,
         "previous_trustpilot_order_names": row.get("previous_trustpilot_order_names", []) if row else [],
         "previous_trustpilot_tag_values": row.get("previous_trustpilot_tag_values", []) if row else [],
         "customer_history_source": _safe_text(row.get("customer_history_source", ""), 80) if row else "",
         "customer_history_confidence": _safe_text(row.get("customer_history_confidence", ""), 80) if row else "",
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True if row else False,
+        "note_risk_detected": row.get("note_risk_detected") is True if row else False,
+        "note_risk_field": _safe_text(row.get("note_risk_field", ""), 120) if row else "",
+        "note_risk_fields": row.get("note_risk_fields", []) if row else [],
+        "note_risk_keywords": row.get("note_risk_keywords", []) if row else [],
+        "note_risk_reason": _safe_text(row.get("note_risk_reason", ""), 120) if row else "",
         "final_eligibility_status": _sqlite_focus_final_eligibility(found_locally, row, tag_data_loaded),
         "final_blockers": _sqlite_focus_final_blockers(found_locally, row, tag_data_loaded),
         "message": message,
@@ -1112,7 +1341,7 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28H",
+        "phase": "5.28I",
         "mode": "dry-run-local-synced-order-scan",
         "command_label": COMMAND_LABEL,
         "report_status": "blocked_last_60_days_candidate_scan_failed",
@@ -1458,14 +1687,27 @@ def _eligible_summary(row: dict) -> dict:
         "customer": row.get("customer") or "Masked in reports",
         "masked_customer": row.get("masked_customer", ""),
         "customer_history_order_count": _int_value(row.get("customer_history_order_count")),
+        "customer_history_order_count_before_precision": _int_value(
+            row.get("customer_history_order_count_before_precision")
+        ),
         "customer_order_sequence_number": _int_value(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": row.get("customer_order_sequence_label", ""),
         "historical_order_names": row.get("historical_order_names", []),
+        "customer_history_matched_order_names": row.get("customer_history_matched_order_names", []),
+        "customer_history_match_method": row.get("customer_history_match_method", ""),
+        "customer_history_excluded_weak_matches": row.get("customer_history_excluded_weak_matches", []),
+        "customer_history_weak_match_count": _int_value(row.get("customer_history_weak_match_count")),
+        "customer_history_exact_match_count": _int_value(row.get("customer_history_exact_match_count")),
         "previous_trustpilot_order_names": row.get("previous_trustpilot_order_names", []),
         "previous_trustpilot_tag_values": row.get("previous_trustpilot_tag_values", []),
         "customer_history_source": row.get("customer_history_source", ""),
         "customer_history_confidence": row.get("customer_history_confidence", ""),
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
+        "note_risk_detected": row.get("note_risk_detected") is True,
+        "note_risk_field": row.get("note_risk_field", ""),
+        "note_risk_fields": row.get("note_risk_fields", []),
+        "note_risk_keywords": row.get("note_risk_keywords", []),
+        "note_risk_reason": row.get("note_risk_reason", ""),
         "tags": row.get("tags", []),
         "tag_data_available": row.get("tag_data_available") is True,
         "review_request_tag_present": row.get("canonical_review_request_tag_present") is True,
@@ -1491,14 +1733,27 @@ def _blocked_summary(row: dict) -> dict:
         "group_order_names": row.get("group_order_names", []),
         "customer": row.get("customer") or "Masked in reports",
         "customer_history_order_count": _int_value(row.get("customer_history_order_count")),
+        "customer_history_order_count_before_precision": _int_value(
+            row.get("customer_history_order_count_before_precision")
+        ),
         "customer_order_sequence_number": _int_value(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": row.get("customer_order_sequence_label", ""),
         "historical_order_names": row.get("historical_order_names", []),
+        "customer_history_matched_order_names": row.get("customer_history_matched_order_names", []),
+        "customer_history_match_method": row.get("customer_history_match_method", ""),
+        "customer_history_excluded_weak_matches": row.get("customer_history_excluded_weak_matches", []),
+        "customer_history_weak_match_count": _int_value(row.get("customer_history_weak_match_count")),
+        "customer_history_exact_match_count": _int_value(row.get("customer_history_exact_match_count")),
         "previous_trustpilot_order_names": row.get("previous_trustpilot_order_names", []),
         "previous_trustpilot_tag_values": row.get("previous_trustpilot_tag_values", []),
         "customer_history_source": row.get("customer_history_source", ""),
         "customer_history_confidence": row.get("customer_history_confidence", ""),
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
+        "note_risk_detected": row.get("note_risk_detected") is True,
+        "note_risk_field": row.get("note_risk_field", ""),
+        "note_risk_fields": row.get("note_risk_fields", []),
+        "note_risk_keywords": row.get("note_risk_keywords", []),
+        "note_risk_reason": row.get("note_risk_reason", ""),
         "tags": row.get("tags", []),
         "tag_data_available": row.get("tag_data_available") is True,
         "tag_data_missing_source": row.get("tag_data_missing_source", ""),
@@ -1794,11 +2049,28 @@ def _missing_requirement(delivered: bool, canonical_tag: bool, trustpilot_sent: 
         missing.append("Repeat customer")
     if "customer history not confirmed" in text:
         missing.append("Confirmed customer history")
+    if "aftersales/ticket note found" in text:
+        missing.append("No aftersales/ticket note")
     if "merged" in text or "related" in text:
         missing.append("Whole merged/related group ready")
     if "risk" in text or "ticket" in text or "refund" in text or "dispute" in text:
         missing.append("No ticket/refund/risk")
     return ", ".join(_dedupe(missing)) or "None"
+
+
+def _blocked_only_by_precision_fix(row: dict) -> bool:
+    if not row or row.get("candidate_status") == "eligible":
+        return False
+    if row.get("delivered_confirmed") is not True:
+        return False
+    if row.get("canonical_review_request_tag_present") is not True:
+        return False
+    text = _safe_text(row.get("block_reason"), 500).lower()
+    blockers = [part.strip() for part in text.split(";") if part.strip()]
+    if not blockers:
+        return False
+    precision_tokens = ("customer history not confirmed", "aftersales/ticket note found")
+    return all(any(token in blocker for token in precision_tokens) for blocker in blockers)
 
 
 def _dedupe_summary_rows(rows: list[dict]) -> list[dict]:

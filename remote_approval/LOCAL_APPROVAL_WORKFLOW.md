@@ -482,7 +482,28 @@ unknown blocks, prior Trustpilot customer-history blocks, focus order diagnoses
 for `#21070`, `#21075`, `#21076`, `#21102`, and `#21778`, and performs no API
 calls or writes.
 
-The `Review & Send` admin POST remains locked in Phase 5.27. It verifies the
+Phase 5.28I tightens customer-history matching and blocks note-based
+aftersales/ticket risk. Name-only customer matches are low confidence and never
+count as confirmed order history for Review & Send. Local order notes are
+scanned only for safe risk keywords; full note text is not shown in reports or
+HTML.
+
+`shopify_review_request_customer_history_precision_audit` is the local audit
+task for Phase 5.28I. It reports the `#21083` diagnosis, overcounted history
+count, weak name-only matches, note-risk blocks, low-confidence history blocks,
+and active Review & Send before/after counts. It performs no Shopify, Gmail,
+Trustpilot, Kudosi, Ali Reviews, or external API calls and performs no writes.
+
+Phase 5.28J adds `shopify_review_request_review_send_failure_audit` for the
+`#21075` Review & Send failure and paginates the Needs review email queue. The
+audit reports the exact blocker, Gmail scope status, Gmail send permission
+readiness, helper readiness, candidate eligibility, customer-history status,
+prior Trustpilot evidence, and note-risk state. The page defaults to 25 visible
+eligible candidates and supports `?page=` / `?page_size=` with 25, 50, and 100.
+Direct admin sending remains blocked unless Gmail permission and helper
+compatibility are both confirmed; no Shopify tag write happens in this phase.
+
+The `Review & Send` admin POST verifies the
 selected order against the current eligible queue and returns a no-send blocker;
 no Gmail API call, draft creation, email send, Shopify write, or external
 review API call is performed by this phase.

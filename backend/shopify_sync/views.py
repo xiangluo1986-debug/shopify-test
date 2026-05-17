@@ -322,28 +322,28 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "missing_part_type": "SEO may be missing the part type",
     "missing_use_case": "SEO may be missing the use case",
     "missing_value_point": "SEO may be missing a value point",
-    "future_write_needs_resource_mapping": "Can review now; Shopify update support needs extra mapping",
+    "future_write_needs_resource_mapping": "Can review now; Shopify update support needs extra mapping.",
     "source_empty": "Original source is empty",
     "not_eligible_technical_field": "Technical field, not translated automatically",
     "not_draft_eligible": "Technical field, not translated automatically",
     "already_translated": "Already up to date",
     "existing_translation_current": "Already up to date",
-    "manual_review_required": "Needs manual review",
+    "manual_review_required": "Needs review before update",
     "no_generated_draft": "No automatic translation was generated",
     "openai_invalid_translation_response": "OpenAI returned an invalid response format",
-    "body_html_structure_broken": "Product description HTML structure needs review",
+    "body_html_structure_broken": "Product description needs review before automatic update",
     "draft_equals_source": "Translation is unchanged from the source",
     "missing_translation_not_requested": "Not translated automatically in this run",
     "child_resource_query_failed": "Some Shopify content could not be read",
     "skipped_child_resource_query_failed": "Some Shopify content could not be read",
-    "product_identity_mismatch": "Possible wrong product text",
-    "draft_blocked": "Translation was blocked for review",
+    "product_identity_mismatch": "Product/model check failed",
+    "draft_blocked": "Needs review before update",
     "not_eligible_for_apply_plan": "Not ready for Shopify update preparation",
     "current_translation_outdated": "Existing translation is outdated",
     "draft_over_max_chars": "Translation is too long",
-    "forbidden_marketing_or_origin_phrase": "Forbidden CTA, shipping, or origin phrase",
-    "forbidden_marketing_or_shipping_phrase": "Forbidden CTA, shipping, or origin phrase",
-    "html_media_or_link_tag_broken": "HTML, video, link, or image tag needs review",
+    "forbidden_marketing_or_origin_phrase": "Contains blocked wording",
+    "forbidden_marketing_or_shipping_phrase": "Contains blocked wording",
+    "html_media_or_link_tag_broken": "Product description needs review before automatic update",
     "keyword_stuffing_or_duplicate": "SEO text needs review",
     "product_title_over_80_chars": "Product title is over 80 characters",
     "seo_title_over_60_chars": "SEO title is over 60 characters",
@@ -1152,7 +1152,7 @@ def review_request_workbench(request):
                 result.get("blocking_detail")
                 or "No email was sent. This order is not eligible.",
             )
-        return HttpResponseRedirect(request.path)
+        return HttpResponseRedirect(request.get_full_path())
     if request.method not in {"GET", "HEAD"}:
         return HttpResponseNotAllowed(["GET", "HEAD", "POST"])
 
@@ -1948,6 +1948,7 @@ def translation_console(request):
         translation_background_job,
         safe_write_readiness_state,
         selected_translations_apply_state,
+        all_languages_update_state,
     )
     if is_manual_translation_edit_post:
         blocking_conditions = list(
@@ -5955,6 +5956,7 @@ def _attach_translation_workspace_safe_write_ui(
     translation_background_job: dict,
     safe_write_readiness_state: dict,
     selected_translations_apply_state: dict | None = None,
+    all_languages_update_state: dict | None = None,
 ):
     if not isinstance(translation_background_job, dict):
         return
@@ -5979,8 +5981,37 @@ def _attach_translation_workspace_safe_write_ui(
         for entry in selected_apply_entries
         if entry.get("entry_id")
     }
+    all_language_entries = [
+        entry
+        for entry in (all_languages_update_state or {}).get("entries") or []
+        if isinstance(entry, dict)
+    ]
+    all_language_entries_by_id = {
+        entry.get("entry_id"): entry
+        for entry in all_language_entries
+        if entry.get("entry_id")
+    }
+    all_language_entries_by_key = {
+        (
+            entry.get("resource_id", ""),
+            entry.get("key", ""),
+            entry.get("locale", ""),
+            entry.get("digest", ""),
+        ): entry
+        for entry in all_language_entries
+    }
     for row in translation_background_job.get("review_rows") or []:
         entry_id = row.get("safe_write_entry_id") or row.get("entry_id")
+        update_key = (
+            str(row.get("resource_id") or "").strip(),
+            _translation_editor_normalize_field_key(row.get("field") or row.get("key")),
+            _translation_editor_canonical_locale(row.get("language") or row.get("locale")),
+            str(row.get("source_digest") or row.get("digest") or "").strip(),
+        )
+        all_language_entry = all_language_entries_by_id.get(
+            entry_id
+        ) or all_language_entries_by_key.get(update_key)
+        _attach_translation_workspace_row_update_status(row, all_language_entry)
         entry = entries_by_id.get(entry_id)
         selected_apply_entry = selected_apply_entries_by_id.get(entry_id)
         apply_field = (
@@ -6037,6 +6068,50 @@ def _attach_translation_workspace_safe_write_ui(
         )
 
 
+def _attach_translation_workspace_row_update_status(row: dict, update_entry: dict | None):
+    update_entry = update_entry or {}
+    status = str(update_entry.get("status") or "").strip()
+    if status == "write_ready":
+        label = "Ready for Shopify update"
+        status_key = "ready"
+    elif status == "written_verified":
+        label = "Updated and confirmed"
+        status_key = "ready"
+    elif status == "readback_mismatch":
+        label = "Updated, confirmation needs review"
+        status_key = "needs_review"
+    elif status == "skipped":
+        label = update_entry.get("blocking_reason") or "Already up to date"
+        status_key = "already_up_to_date"
+    elif status == "write_failed":
+        label = update_entry.get("blocking_reason") or "Needs review before update"
+        status_key = "needs_review"
+    elif status == "blocked":
+        label = update_entry.get("blocking_reason") or "Needs review before update"
+        status_key = "needs_review"
+    else:
+        label = _translation_workspace_plain_update_unavailable_reason(row)
+        status_key = "not_translated_automatically"
+    row["shopify_update_status_label"] = label
+    row["shopify_update_status_key"] = status_key
+
+
+def _translation_workspace_plain_update_unavailable_reason(row: dict):
+    field = _translation_editor_normalize_field_key(row.get("field") or row.get("key"))
+    group_key = str(row.get("group_key") or row.get("resource_group") or "").strip()
+    if field == "body_html":
+        return "Product description needs review before automatic Shopify update."
+    if group_key == "options":
+        return "Options need extra Shopify mapping."
+    if group_key == "variants":
+        return "Variants need extra Shopify mapping."
+    if group_key in {"important_metafields", "technical_metafields", "metafields"}:
+        return "Metafields need extra Shopify mapping."
+    if group_key in {"media", "media_alt_text"}:
+        return "Media alt text update is not enabled yet."
+    return "Needs review before update."
+
+
 def _translation_workspace_shopify_apply_block_reason_label(row: dict):
     if row.get("shopify_apply_selectable"):
         return ""
@@ -6044,13 +6119,13 @@ def _translation_workspace_shopify_apply_block_reason_label(row: dict):
     group_key = str(row.get("group_key") or row.get("resource_group") or "").strip()
     reason = str(row.get("shopify_apply_block_reason") or "").strip()
     if field == "body_html":
-        return "Product description update is not enabled yet."
+        return "Product description needs review before automatic Shopify update."
     if group_key == "options":
-        return "Options need extra Shopify mapping before update."
+        return "Options need extra Shopify mapping."
     if group_key == "variants":
-        return "Variants need extra Shopify mapping before update."
+        return "Variants need extra Shopify mapping."
     if group_key in {"important_metafields", "technical_metafields", "metafields"}:
-        return "Metafields need extra Shopify mapping before update."
+        return "Metafields need extra Shopify mapping."
     if group_key in {"media", "media_alt_text"}:
         return "Media alt text update is not enabled yet."
     return TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS.get(

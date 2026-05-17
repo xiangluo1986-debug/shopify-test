@@ -1129,3 +1129,39 @@ Future tracking design note:
 - [x] Phase 5.28H performs no Shopify writes, tag mutations, Gmail API calls,
   email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
   `translationsRegister` calls.
+
+## Phase 5.28I Customer History Precision And Note Risk Guard
+
+- [x] Customer history now counts only high/medium confidence identity matches:
+  Shopify customer ID if available, exact email, exact normalized name plus
+  shipping phone, or exact normalized name plus shipping address/postcode.
+- [x] Name-only matches are reported as low confidence, excluded from confirmed
+  customer order counts, and blocked from Review & Send until manually reviewed.
+- [x] Candidate reports expose exact matched order names, match method,
+  confidence, weak-match count, exact-match count, and excluded weak matches.
+- [x] Local note fields are scanned for aftersales/ticket/refund/return risk
+  keywords, but reports and UI show only the safe field name, keyword, and plain
+  reason `Aftersales/ticket note found`.
+- [x] Added `shopify_review_request_customer_history_precision_audit` to report
+  `#21083` diagnosis, history overcount metrics, note-risk blocks,
+  low-confidence history blocks, and active Review & Send before/after counts.
+- [x] Phase 5.28I performs no Shopify writes, tag mutations, Gmail API calls,
+  email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
+  `translationsRegister` calls.
+
+## Phase 5.28J Review Send Failure Audit And Queue Pagination
+
+- [x] Added `shopify_review_request_review_send_failure_audit` to diagnose the
+  latest `#21075` Review & Send attempt with candidate, customer-history,
+  Trustpilot duplicate, note-risk, Gmail scope, Gmail helper, and exact
+  user-message fields.
+- [x] Improved Review & Send blocked messages so Gmail draft-only scope reports
+  that direct sending requires `gmail.send` instead of showing only a vague
+  sending-permission message.
+- [x] Needs review email queue is paginated with default page size 25 and
+  allowed page sizes 25, 50, and 100 via `?page=` and `?page_size=`.
+- [x] Review & Send buttons render only for rows visible on the current page;
+  blocked rows remain secondary and limited in the collapsed section.
+- [x] No Shopify tag write, Shopify mutation, external review API call,
+  Gmail API call, email send, or `translationsRegister` call is performed by
+  this phase. Direct send depends on Gmail permission and helper compatibility.

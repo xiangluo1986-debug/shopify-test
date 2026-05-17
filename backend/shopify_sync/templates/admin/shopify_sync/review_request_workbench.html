@@ -259,6 +259,11 @@
         width: 100%;
         border-collapse: collapse;
     }
+    .rrw-table-scroll {
+        max-width: 100%;
+        overflow-x: auto;
+        border: 1px solid var(--border-color, #d6d6d6);
+    }
     .rrw-table th,
     .rrw-table td {
         border: 1px solid var(--border-color, #d6d6d6);
@@ -269,6 +274,74 @@
     }
     .rrw-table th {
         background: var(--darkened-bg, #f8f8f8);
+    }
+    .rrw-table-compact {
+        min-width: 980px;
+    }
+    .rrw-table-compact th,
+    .rrw-table-compact td {
+        padding: 6px;
+        font-size: 12px;
+        line-height: 1.35;
+    }
+    .rrw-table-compact .rrw-pill,
+    .rrw-table-compact .rrw-badge {
+        border-radius: 4px;
+        padding: 1px 5px;
+        line-height: 1.35;
+    }
+    .rrw-order-col {
+        min-width: 80px;
+        white-space: nowrap;
+    }
+    .rrw-customer-col {
+        min-width: 145px;
+        max-width: 190px;
+    }
+    .rrw-tags-col,
+    .rrw-status-col {
+        min-width: 150px;
+        max-width: 210px;
+    }
+    .rrw-reason-col {
+        min-width: 190px;
+        max-width: 260px;
+    }
+    .rrw-action-col,
+    .rrw-action-cell {
+        min-width: 130px;
+        position: sticky;
+        right: 0;
+        z-index: 1;
+        background: var(--body-bg, #fff);
+    }
+    .rrw-action-col {
+        z-index: 2;
+        background: var(--darkened-bg, #f8f8f8);
+    }
+    .rrw-pagination {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 10px 0 14px;
+    }
+    .rrw-page-link,
+    .rrw-page-disabled,
+    .rrw-page-current {
+        display: inline-block;
+        border: 1px solid var(--border-color, #d6d6d6);
+        border-radius: 4px;
+        padding: 5px 8px;
+        text-decoration: none;
+    }
+    .rrw-page-disabled {
+        color: var(--body-quiet-color, #666);
+        background: var(--darkened-bg, #f8f8f8);
+    }
+    .rrw-page-current {
+        font-weight: 700;
+        background: #eff6ff;
     }
     .rrw-pill,
     .rrw-badge {
@@ -391,12 +464,32 @@
     <div class="rrw-section">
         <h2>Needs review email</h2>
         <p class="rrw-note">
-            Showing {{ dashboard.approval_queue.review_queue_visible_count }} of
+            Showing {{ dashboard.approval_queue.review_queue_showing_start }}&ndash;{{ dashboard.approval_queue.review_queue_showing_end }} of
             {{ dashboard.approval_queue.eligible_candidate_count_total }} eligible candidates.
         </p>
-        {% if dashboard.approval_queue.review_queue_overflow_count > 0 %}
-            <p class="rrw-muted">More candidates are available. Review this batch first.</p>
-        {% endif %}
+        <div class="rrw-pagination">
+            {% if dashboard.approval_queue.review_queue_has_previous %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.review_queue_previous_page_url }}">Previous</a>
+            {% else %}
+                <span class="rrw-page-disabled">Previous</span>
+            {% endif %}
+            <span class="rrw-page-current">
+                Page {{ dashboard.approval_queue.review_queue_page }} of {{ dashboard.approval_queue.review_queue_total_pages }}
+            </span>
+            {% if dashboard.approval_queue.review_queue_has_next %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.review_queue_next_page_url }}">Next</a>
+            {% else %}
+                <span class="rrw-page-disabled">Next</span>
+            {% endif %}
+            <span class="rrw-muted">Rows per page:</span>
+            {% for option in dashboard.approval_queue.review_queue_page_size_options %}
+                {% if option.selected %}
+                    <span class="rrw-page-current">{{ option.label }}</span>
+                {% else %}
+                    <a class="rrw-page-link" href="{{ option.url }}">{{ option.label }}</a>
+                {% endif %}
+            {% endfor %}
+        </div>
         <div class="rrw-grid">
             <div class="rrw-card">
                 <div class="rrw-card-title">Eligible total</div>
@@ -416,24 +509,25 @@
                 <div class="rrw-card-value">{{ dashboard.approval_queue.blocked_count }}</div>
             </div>
         </div>
-        <table class="rrw-table">
+        <div class="rrw-table-scroll">
+        <table class="rrw-table rrw-table-compact rrw-review-table">
             <thead>
                 <tr>
-                    <th>Order</th>
-                    <th>Customer</th>
+                    <th class="rrw-order-col">Order</th>
+                    <th class="rrw-customer-col">Customer</th>
                     <th>Customer orders</th>
-                    <th>Tags</th>
+                    <th class="rrw-tags-col">Tags</th>
                     <th>Trustpilot history</th>
-                    <th>Status</th>
-                    <th>Reason</th>
-                    <th>Action</th>
+                    <th class="rrw-status-col">Status</th>
+                    <th class="rrw-reason-col">Reason</th>
+                    <th class="rrw-action-col">Action</th>
                 </tr>
             </thead>
             <tbody>
                 {% for row in dashboard.approval_queue.needs_review_rows %}
                     <tr>
-                        <td>{{ row.order }}</td>
-                        <td>
+                        <td class="rrw-order-col">{{ row.order }}</td>
+                        <td class="rrw-customer-col">
                             {{ row.customer_display_name }}
                             {% if row.masked_customer_label %}
                                 <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
@@ -446,7 +540,7 @@
                             {% endif %}
                             <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
                         </td>
-                        <td>
+                        <td class="rrw-tags-col">
                             {% for chip in row.tag_chips %}
                                 <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
                             {% endfor %}
@@ -457,7 +551,7 @@
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
                             {% endif %}
                         </td>
-                        <td>
+                        <td class="rrw-status-col">
                             <span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span>
                             <div>
                                 <span class="rrw-pill {{ row.delivered_status_class }}">{{ row.delivered_status_label }}</span>
@@ -466,12 +560,19 @@
                             {% if row.review_request_tag_match_detail %}
                                 <div class="rrw-secondary-line">{{ row.review_request_tag_match_detail }}</div>
                             {% endif %}
+                            {% if row.note_risk_detected %}
+                                <div class="rrw-secondary-line">
+                                    Aftersales/ticket note found
+                                    {% if row.note_risk_field %} - {{ row.note_risk_field }}{% endif %}
+                                    {% if row.note_risk_keywords %} ({{ row.note_risk_keywords|join:", " }}){% endif %}
+                                </div>
+                            {% endif %}
                             {% if row.tag_data_missing_source %}
                                 <div class="rrw-secondary-line">{{ row.tag_data_missing_source }}</div>
                             {% endif %}
                         </td>
-                        <td>{{ row.eligibility_reason_plain }}</td>
-                        <td>
+                        <td class="rrw-reason-col">{{ row.eligibility_reason_plain }}</td>
+                        <td class="rrw-action-cell">
                             {% if row.action_state == "review_send" %}
                                 <form method="post" class="rrw-action-form">
                                     {% csrf_token %}
@@ -491,6 +592,22 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
+        <div class="rrw-pagination">
+            {% if dashboard.approval_queue.review_queue_has_previous %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.review_queue_previous_page_url }}">Previous</a>
+            {% else %}
+                <span class="rrw-page-disabled">Previous</span>
+            {% endif %}
+            <span class="rrw-page-current">
+                Page {{ dashboard.approval_queue.review_queue_page }} of {{ dashboard.approval_queue.review_queue_total_pages }}
+            </span>
+            {% if dashboard.approval_queue.review_queue_has_next %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.review_queue_next_page_url }}">Next</a>
+            {% else %}
+                <span class="rrw-page-disabled">Next</span>
+            {% endif %}
+        </div>
     </div>
 
     <div class="rrw-section">
@@ -540,6 +657,12 @@
 
     <details class="rrw-section">
         <summary><strong>Blocked / Not ready</strong> ({{ dashboard.approval_queue.blocked_count }})</summary>
+        {% if dashboard.approval_queue.blocked_overflow_count > 0 %}
+            <p class="rrw-muted">
+                Showing {{ dashboard.approval_queue.blocked_visible_count }} blocked rows here;
+                {{ dashboard.approval_queue.blocked_overflow_count }} more remain hidden in this collapsed section.
+            </p>
+        {% endif %}
         <table class="rrw-table">
             <thead>
                 <tr>
@@ -591,6 +714,13 @@
                             <span class="rrw-pill {{ row.review_request_tag_status_class }}">{{ row.review_request_tag_status_label }}</span>
                             {% if row.review_request_tag_match_detail %}
                                 <div class="rrw-secondary-line">{{ row.review_request_tag_match_detail }}</div>
+                            {% endif %}
+                            {% if row.note_risk_detected %}
+                                <div class="rrw-secondary-line">
+                                    Aftersales/ticket note found
+                                    {% if row.note_risk_field %} - {{ row.note_risk_field }}{% endif %}
+                                    {% if row.note_risk_keywords %} ({{ row.note_risk_keywords|join:", " }}){% endif %}
+                                </div>
                             {% endif %}
                             {% if row.tag_data_missing_source %}
                                 <div class="rrw-secondary-line">{{ row.tag_data_missing_source }}</div>

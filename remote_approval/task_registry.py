@@ -18,6 +18,12 @@ from remote_approval.tasks.shopify_review_request_customer_level_trustpilot_dupl
 from remote_approval.tasks.shopify_review_request_customer_history_trustpilot_guard_audit_task import (
     run_shopify_review_request_customer_history_trustpilot_guard_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_customer_history_precision_audit_task import (
+    run_shopify_review_request_customer_history_precision_audit_task,
+)
+from remote_approval.tasks.shopify_review_request_review_send_failure_audit_task import (
+    run_shopify_review_request_review_send_failure_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
     run_shopify_review_request_gmail_readiness_package_task,
 )
@@ -374,6 +380,12 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_customer_history_trustpilot_guard_audit": (
         run_shopify_review_request_customer_history_trustpilot_guard_audit_task
     ),
+    "shopify_review_request_customer_history_precision_audit": (
+        run_shopify_review_request_customer_history_precision_audit_task
+    ),
+    "shopify_review_request_review_send_failure_audit": (
+        run_shopify_review_request_review_send_failure_audit_task
+    ),
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
     "shopify_review_request_gmail_oauth_setup_helper": run_shopify_review_request_gmail_oauth_setup_helper_task,
     "shopify_review_request_history_ledger_audit": run_shopify_review_request_history_ledger_audit_task,
@@ -713,6 +725,18 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local ShopifyOrder/report audit only",
         "review_file_path": "logs/shopify_review_request_customer_history_trustpilot_guard_audit.json",
+    },
+    "shopify_review_request_customer_history_precision_audit": {
+        "description": "Audit exact customer-history matching and note-based aftersales/ticket blockers for Review & Send without APIs or writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local ShopifyOrder/report audit only",
+        "review_file_path": "logs/shopify_review_request_customer_history_precision_audit.json",
+    },
+    "shopify_review_request_review_send_failure_audit": {
+        "description": "Diagnose the latest Review & Send failure for #21075 without Gmail, Shopify, or external review writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local report audit only",
+        "review_file_path": "logs/shopify_review_request_review_send_failure_audit.json",
     },
     "shopify_review_request_gmail_readiness_package": {
         "description": "Generate a docs-only Gmail send permission readiness package for review requests.",

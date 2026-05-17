@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.db.models import Q
@@ -70,6 +71,7 @@ FUTURE_TRACKING_STATUSES = (
     "blocked_returned_package",
     "blocked_first_order_customer",
     "blocked_risk_or_ticket",
+    "blocked_note_risk_detected",
 )
 STATUS_FILTER_OPTIONS = (
     ("all", "All"),
@@ -96,7 +98,8 @@ GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_BROAD_SCOPE = "https://mail.google.com/"
 LAST_60_DAY_SCAN_WINDOW_DAYS = 60
-REVIEW_QUEUE_BATCH_SIZE = 20
+REVIEW_QUEUE_BATCH_SIZE = 25
+BLOCKED_QUEUE_DISPLAY_LIMIT = 50
 REVIEW_QUEUE_SORT_ORDER = (
     "most_recent_delivered_updated_created_date",
     "clean_tags",
@@ -113,6 +116,7 @@ REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
 SHOPIFY_ORDER_TAG_FIELD = "shopify_tags"
 SHOPIFY_ORDER_TAG_FIELD_LABEL = "ShopifyOrder.shopify_tags"
 REVIEW_REQUEST_FOCUS_ORDER_NAMES = (
+    "#21083",
     "#21070",
     "#21075",
     "#21076",
@@ -132,6 +136,50 @@ SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION = (
     "Run the Review Request Shopify order sync after applying the shopify_tags migration."
 )
 MERGED_ORDER_REFERENCE_RE = re.compile(r"#?\d{3,}")
+NOTE_RISK_FIELDS = (
+    "shopify_note",
+    "shopify_note_attributes",
+    "warehouse_note",
+    "transfer_note",
+    "exception_review_reason",
+    "exception_review_response",
+    "cost_calculation_note",
+)
+NOTE_RISK_KEYWORDS = (
+    "aftersales",
+    "after sale",
+    "after-sale",
+    "support",
+    "ticket",
+    "complaint",
+    "issue",
+    "problem",
+    "replacement",
+    "refund",
+    "return",
+    "returned",
+    "dispute",
+    "chargeback",
+    "damaged",
+    "missing",
+    "defective",
+    "broken",
+    "售后",
+    "工单",
+    "客诉",
+    "投诉",
+    "退款",
+    "退货",
+    "返修",
+    "补发",
+    "换货",
+    "丢件",
+    "破损",
+    "少件",
+    "有问题",
+    "问题单",
+)
+NOTE_RISK_REASON = "Aftersales/ticket note found"
 MERGED_ORDER_KEYWORDS = (
     "combined",
     "merged",
@@ -181,6 +229,11 @@ BLOCKED_REASON_DEFINITIONS = (
         "Risk / ticket / refund / cancel / dispute",
         ("risk", "ticket", "refund", "cancel", "cancelled", "dispute", "chargeback"),
     ),
+    (
+        "note_risk_detected",
+        "Aftersales/ticket note",
+        ("aftersales/ticket note found", "blocked_note_risk_detected"),
+    ),
 )
 ADMIN_STATUS_LABELS = {
     "scope_missing": "Gmail permission missing",
@@ -196,6 +249,7 @@ ADMIN_STATUS_LABELS = {
     "blocked_multiple_candidates_require_manual_selection": "More than one order needs review",
     "blocked_candidate_safety_check_failed": "Safety check failed",
     "blocked_missing_vendor_api_documentation": "Waiting for API docs",
+    "blocked_note_risk_detected": NOTE_RISK_REASON,
     "no_eligible_delivered_review_request_candidate": "No orders ready",
     "env_file_has_gmail_scope_but_runner_env_missing": "Runner cannot see .env Gmail settings",
     "env_file_loaded_but_scope_still_missing": "Gmail permission missing",
@@ -250,6 +304,12 @@ REPORT_DEFINITIONS = (
         "customer_history_trustpilot_guard_audit",
         "Customer history Trustpilot guard audit",
         "shopify_review_request_customer_history_trustpilot_guard_audit.json",
+        ("report_status", "status"),
+    ),
+    (
+        "customer_history_precision_audit",
+        "Customer history precision audit",
+        "shopify_review_request_customer_history_precision_audit.json",
         ("report_status", "status"),
     ),
     (
@@ -403,6 +463,12 @@ REPORT_DEFINITIONS = (
         ("execution_status", "report_status", "status"),
     ),
     (
+        "review_send_failure_audit",
+        "Review & Send failure audit",
+        "shopify_review_request_review_send_failure_audit.json",
+        ("review_send_failure_audit_status", "report_status", "status"),
+    ),
+    (
         "trustpilot_gmail_draft_package",
         "Trustpilot Gmail draft package",
         "shopify_review_request_trustpilot_gmail_draft_package.json",
@@ -514,6 +580,7 @@ CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 MAX_REPORT_BYTES = 4_000_000
 MAX_SOURCE_ROWS = 500
+MAX_LOCAL_ORDER_SCAN_ROWS = 5_000
 MAX_TABLE_ROWS = DEFAULT_LIMIT
 
 
@@ -672,6 +739,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_gmail_scope_compatibility_resolver=trustpilot_gmail_scope_compatibility_resolver,
         trustpilot_gmail_draft_only_preflight=trustpilot_gmail_draft_only_preflight,
         trustpilot_gmail_one_draft_create_locked_runner=trustpilot_gmail_one_draft_create_locked_runner,
+        filters=filters,
     )
 
     return {
@@ -751,13 +819,14 @@ def build_review_request_workbench_context(params=None):
             ),
             "tag_filter_options": _selected_options(TAG_FILTER_OPTIONS, filters["tag"]),
             "limit_filter_options": _selected_limit_options(filters["limit"]),
+            "review_queue_page_size_options": _selected_page_size_options(filters["page_size"]),
             "safety_confirmations": _current_page_safety_confirmations(),
         }
     }
 
 
-def review_request_review_and_send(order_identifier, admin_username=""):
-    state = _build_review_send_state()
+def review_request_review_and_send(order_identifier, admin_username="", params=None):
+    state = _build_review_send_state(params)
     selected_order = _safe_text(order_identifier, max_length=80)
     result = _base_review_and_send_result(selected_order, admin_username, state)
     selected_rows = _review_send_selected_rows(state["approval_queue"], selected_order)
@@ -768,12 +837,29 @@ def review_request_review_and_send(order_identifier, admin_username=""):
     ]
     if len(matches) != 1:
         blocker = _review_send_selection_blocker(selected_order, selected_rows)
+        diagnosis = _review_send_readiness_diagnosis(
+            selected_order,
+            selected_rows[0] if selected_rows else {},
+            state["gmail_setup"],
+            candidate_found=bool(selected_rows),
+            candidate_currently_eligible=False,
+            route_revalidation_blocker=blocker["status"],
+        )
+        _apply_review_send_diagnosis(result, diagnosis)
         result["execution_status"] = blocker["status"]
         result["blocking_detail"] = blocker["detail"]
         result["blocking_conditions"].append(blocker)
         return _finalize_review_and_send_result(result)
 
     candidate = matches[0]
+    diagnosis = _review_send_readiness_diagnosis(
+        selected_order,
+        candidate,
+        state["gmail_setup"],
+        candidate_found=True,
+        candidate_currently_eligible=True,
+    )
+    _apply_review_send_diagnosis(result, diagnosis)
     result["candidate_verified"] = True
     result["selected_order"] = candidate["order"]
     result["selected_customer"] = candidate["customer"]
@@ -800,25 +886,25 @@ def review_request_review_and_send(order_identifier, admin_username=""):
         result["blocking_conditions"].extend(group_blockers)
         return _finalize_review_and_send_result(result)
 
-    runtime_blockers = _runtime_review_send_blockers(candidate, state["gmail_setup"])
+    runtime_blockers = _runtime_review_send_blockers(candidate, state["gmail_setup"], diagnosis)
     if runtime_blockers:
         result["execution_status"] = runtime_blockers[0]["status"]
         result["blocking_detail"] = runtime_blockers[0]["detail"]
         result["blocking_conditions"].extend(runtime_blockers)
         return _finalize_review_and_send_result(result)
 
-    result["execution_status"] = "blocked_phase_5_28h_scan_ui_report_only"
-    result["blocking_status"] = "blocked_phase_5_28h_scan_ui_report_only"
+    result["execution_status"] = "blocked_phase_5_28j_direct_send_not_enabled"
+    result["blocking_status"] = "blocked_phase_5_28j_direct_send_not_enabled"
     result["blocking_detail"] = (
-        "No email was sent. Phase 5.28H is scan/UI/report only; Gmail draft and send paths are disabled."
+        "No email was sent. The Gmail send helper is not ready."
     )
     result["blocking_conditions"].append(
         {
-            "status": "blocked_phase_5_28h_scan_ui_report_only",
+            "status": "blocked_phase_5_28j_direct_send_not_enabled",
             "detail": result["blocking_detail"],
         }
     )
-    result["next_admin_action"] = "Review the candidate on the page; sending remains locked."
+    result["next_admin_action"] = "Review the candidate on the page; direct sending remains locked."
     return _finalize_review_and_send_result(result)
 
 
@@ -1948,11 +2034,24 @@ def _normalize_filters(params):
         limit = DEFAULT_LIMIT
     if limit not in LIMIT_OPTIONS:
         limit = DEFAULT_LIMIT
+    try:
+        page = int(_param_get(params, "page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    page = max(page, 1)
+    try:
+        page_size = int(_param_get(params, "page_size") or DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        page_size = DEFAULT_LIMIT
+    if page_size not in LIMIT_OPTIONS:
+        page_size = DEFAULT_LIMIT
     return {
         "q": q,
         "status": status,
         "tag": tag,
         "limit": limit,
+        "page": page,
+        "page_size": page_size,
         "has_active_filters": bool(q or status != "all" or tag != "all" or limit != DEFAULT_LIMIT),
     }
 
@@ -1976,6 +2075,26 @@ def _selected_limit_options(selected_limit):
         {"value": value, "label": str(value), "selected": value == selected_limit}
         for value in LIMIT_OPTIONS
     ]
+
+
+def _selected_page_size_options(selected_page_size):
+    return [
+        {
+            "value": value,
+            "label": str(value),
+            "selected": value == selected_page_size,
+            "url": _review_queue_page_url(1, value),
+        }
+        for value in LIMIT_OPTIONS
+    ]
+
+
+def _review_queue_page_url(page, page_size):
+    normalized_page = max(_int_or_zero(page), 1)
+    normalized_page_size = _int_or_zero(page_size)
+    if normalized_page_size not in LIMIT_OPTIONS:
+        normalized_page_size = DEFAULT_LIMIT
+    return "?" + urlencode({"page": normalized_page, "page_size": normalized_page_size})
 
 
 def _filter_rows(rows, filters, section_status):
@@ -2374,9 +2493,23 @@ def _row_has_first_order(row):
 
 
 def _row_has_risk_or_ticket(row):
-    return _row_text_contains(
-        row,
-        ("risk", "ticket", "refund", "cancel", "cancelled", "dispute", "chargeback"),
+    if row.get("note_risk_detected") is True:
+        return True
+    text = _row_block_text(row)
+    text = text.replace("no duplicate or risk found", "").replace("no duplicate or risk", "")
+    return any(
+        needle in text
+        for needle in (
+            "risk",
+            "ticket",
+            "refund",
+            "cancel",
+            "cancelled",
+            "dispute",
+            "chargeback",
+            "blocked_note_risk_detected",
+            "aftersales/ticket note found",
+        )
     )
 
 
@@ -2385,8 +2518,11 @@ def _row_text_contains(row, needles):
         (
             row.get("status", ""),
             row.get("blocking_summary", ""),
+            row.get("reason", ""),
+            row.get("eligibility_reason_plain", ""),
             row.get("tags_summary", ""),
             row.get("source_section", ""),
+            row.get("note_risk_reason", ""),
         )
     ).lower()
     return any(needle in haystack for needle in needles)
@@ -4299,7 +4435,9 @@ def _operating_dashboard(
     trustpilot_gmail_scope_compatibility_resolver,
     trustpilot_gmail_draft_only_preflight,
     trustpilot_gmail_one_draft_create_locked_runner,
+    filters=None,
 ):
+    filters = filters or _normalize_filters({})
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
     events = history_ledger.get("all_events") or []
@@ -4350,6 +4488,8 @@ def _operating_dashboard(
         focus=focus,
         gmail_setup=gmail_setup,
         last_60_days_scan=last_60_days_scan,
+        page=filters["page"],
+        page_size=filters["page_size"],
     )
     order_data_coverage = _dashboard_order_data_coverage(last_60_days_scan)
     return {
@@ -4546,7 +4686,8 @@ def _trustpilot_sent_count(events, invitation_history, focus):
     return max(len(sent_orders), len(invitation_history))
 
 
-def _build_review_send_state():
+def _build_review_send_state(params=None):
+    filters = _normalize_filters(params)
     reports = _load_known_reports()
     history_ledger = build_review_request_history_ledger(_log_dir(), {})
     all_rows = _dedupe_rows(_collect_report_rows(reports))
@@ -4575,8 +4716,11 @@ def _build_review_send_state():
         focus=history_ledger.get("focus") or {},
         gmail_setup=gmail_setup,
         last_60_days_scan=last_60_days_scan,
+        page=filters["page"],
+        page_size=filters["page_size"],
     )
     return {
+        "filters": filters,
         "reports": reports,
         "history_ledger": history_ledger,
         "candidate_queue": candidate_queue,
@@ -4614,7 +4758,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "task": LAST_60_DAY_SCAN_TASK_NAME,
         "task_name": LAST_60_DAY_SCAN_TASK_NAME,
-        "phase": "5.28H",
+        "phase": "5.28I",
         "mode": "dry-run-local-synced-order-scan",
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "report_status": "last_60_days_candidate_scan_ready",
@@ -4622,6 +4766,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "scan_source": scan["scan_source"],
         "coverage_warnings": scan["coverage_warnings"],
         "order_data_coverage": scan["order_data_coverage"],
+        "order_21083_diagnosis": scan["order_21083_diagnosis"],
         "order_21070_diagnosis": scan["order_21070_diagnosis"],
         "order_21075_diagnosis": scan["order_21075_diagnosis"],
         "order_21076_diagnosis": scan["order_21076_diagnosis"],
@@ -4638,9 +4783,16 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "blocked_count": scan["blocked_count"],
         "blocked_merged_group_count": scan["blocked_merged_group_count"],
         "blocked_duplicate_customer_count": scan["blocked_duplicate_customer_count"],
+        "blocked_note_risk_count": scan["blocked_note_risk_count"],
         "first_order_blocked_count": scan["first_order_blocked_count"],
         "prior_trustpilot_customer_blocked_count": scan["prior_trustpilot_customer_blocked_count"],
         "customer_history_unknown_count": scan["customer_history_unknown_count"],
+        "customer_history_low_confidence_count": scan["customer_history_low_confidence_count"],
+        "customer_history_weak_name_only_match_count": scan["customer_history_weak_name_only_match_count"],
+        "overcounted_customer_history_count": scan["overcounted_customer_history_count"],
+        "candidates_blocked_by_low_confidence_history": scan["candidates_blocked_by_low_confidence_history"],
+        "candidates_blocked_by_note_risk": scan["candidates_blocked_by_note_risk"],
+        "active_review_send_count_before_precision": scan["active_review_send_count_before_precision"],
         "blocked_missing_review_request_tag_count": scan["blocked_missing_review_request_tag_count"],
         "blocked_not_delivered_count": scan["blocked_not_delivered_count"],
         "review_queue_batch_size": scan["review_queue_batch_size"],
@@ -4741,13 +4893,14 @@ def build_review_request_customer_history_trustpilot_guard_audit_report(params=N
     first_order_rows = [row for row in blocked_rows if _row_blocked_by_first_order(row)]
     prior_trustpilot_rows = [row for row in blocked_rows if _row_blocked_by_prior_trustpilot_history(row)]
     unknown_history_rows = [row for row in blocked_rows if _row_blocked_by_customer_history_unknown(row)]
+    note_risk_rows = [row for row in blocked_rows if _row_blocked_by_note_risk(row)]
     eligible_after = _int_or_zero(scan.get("eligible_candidate_count"))
     candidate_count_before_fix = eligible_after + len(first_order_rows) + len(prior_trustpilot_rows)
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "task": "shopify_review_request_customer_history_trustpilot_guard_audit",
         "task_name": "shopify_review_request_customer_history_trustpilot_guard_audit",
-        "phase": "5.28H",
+        "phase": "5.28I",
         "mode": "dry-run-local-customer-history-trustpilot-guard-audit",
         "report_status": "customer_history_trustpilot_guard_audit_ready",
         "success": True,
@@ -4758,6 +4911,10 @@ def build_review_request_customer_history_trustpilot_guard_audit_report(params=N
         "first_order_blocked_count": len(first_order_rows),
         "prior_trustpilot_customer_blocked_count": len(prior_trustpilot_rows),
         "customer_history_unknown_count": len(unknown_history_rows),
+        "candidates_blocked_by_note_risk": len(note_risk_rows),
+        "candidates_blocked_by_low_confidence_history": _int_or_zero(
+            scan.get("candidates_blocked_by_low_confidence_history")
+        ),
         "candidate_count_before_fix": candidate_count_before_fix,
         "candidate_count_after_fix": eligible_after,
         "visible_review_send_count_after_fix": _int_or_zero(
@@ -4768,6 +4925,7 @@ def build_review_request_customer_history_trustpilot_guard_audit_report(params=N
         "active_review_send_count_after_fix": _int_or_zero(
             approval_queue.get("review_send_action_enabled_count")
         ),
+        "order_21083_diagnosis": scan.get("order_21083_diagnosis") or {},
         "order_21070_diagnosis": scan.get("order_21070_diagnosis") or {},
         "order_21075_diagnosis": scan.get("order_21075_diagnosis") or {},
         "order_21076_diagnosis": scan.get("order_21076_diagnosis") or {},
@@ -4815,6 +4973,237 @@ def build_review_request_customer_history_trustpilot_guard_audit_report(params=N
             unknown_history_rows,
             eligible_after,
             approval_queue,
+        ),
+    }
+
+
+def build_review_request_customer_history_precision_audit_report(params=None):
+    state = _build_review_send_state()
+    scan = state["last_60_days_scan"]
+    approval_queue = state["approval_queue"]
+    blocked_rows = list(scan.get("blocked_queue_rows") or [])
+    eligible_rows = list(scan.get("eligible_queue_rows") or [])
+    rows = blocked_rows + eligible_rows
+    note_risk_rows = [row for row in blocked_rows if _row_blocked_by_note_risk(row)]
+    low_confidence_rows = [row for row in blocked_rows if _row_blocked_by_customer_history_unknown(row)]
+    overcounted_rows = [
+        row
+        for row in rows
+        if _int_or_zero(row.get("customer_history_order_count_before_precision"))
+        > _int_or_zero(row.get("customer_history_order_count"))
+    ]
+    active_after = _int_or_zero(approval_queue.get("review_send_action_enabled_count"))
+    active_before = _int_or_zero(scan.get("active_review_send_count_before_precision")) or active_after
+    order_21083 = scan.get("order_21083_diagnosis") or {}
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_customer_history_precision_audit",
+        "task_name": "shopify_review_request_customer_history_precision_audit",
+        "phase": "5.28I",
+        "mode": "dry-run-local-customer-history-precision-audit",
+        "report_status": "customer_history_precision_audit_ready",
+        "success": True,
+        "customer_history_matching_policy": {
+            "high_confidence": ["shopify_customer_id_if_available", "customer_email"],
+            "medium_confidence": ["normalized_full_name_shipping_phone", "normalized_full_name_shipping_address_postcode"],
+            "low_confidence": ["name_only_excluded_from_confirmed_history"],
+        },
+        "order_21083_diagnosis": order_21083,
+        "order_21083_found": order_21083.get("found_in_local_shopify_order") is True,
+        "order_21083_displayed_order_count_before": _int_or_zero(
+            order_21083.get("displayed_order_count_before_precision")
+        ),
+        "order_21083_customer_order_count_after": _int_or_zero(order_21083.get("customer_history_order_count")),
+        "order_21083_matched_order_names_after": _dedupe_order_names(
+            order_21083.get("customer_history_matched_order_names") or []
+        ),
+        "order_21083_match_method": _safe_text(order_21083.get("customer_history_match_method"), max_length=80),
+        "order_21083_customer_history_confidence": _safe_text(
+            order_21083.get("customer_history_confidence"), max_length=80
+        ),
+        "order_21083_note_risk_detected": order_21083.get("note_risk_detected") is True,
+        "order_21083_note_risk_field": _safe_text(order_21083.get("note_risk_field"), max_length=120),
+        "order_21083_note_risk_keywords": _dedupe_text(order_21083.get("note_risk_keywords") or []),
+        "order_21083_final_eligibility": _safe_text(order_21083.get("final_eligibility_status"), max_length=80),
+        "order_21083_final_blockers": _dedupe_text(order_21083.get("final_blockers") or []),
+        "overcounted_customer_history_count": len(overcounted_rows),
+        "weak_name_only_match_count": sum(
+            _int_or_zero(row.get("customer_history_weak_match_count")) for row in rows
+        ),
+        "candidates_blocked_by_low_confidence_history": len(low_confidence_rows),
+        "candidates_blocked_by_note_risk": len(note_risk_rows),
+        "first_order_blocked_count": _int_or_zero(scan.get("first_order_blocked_count")),
+        "prior_trustpilot_blocked_count": _int_or_zero(scan.get("prior_trustpilot_customer_blocked_count")),
+        "active_review_send_count_before_fix": active_before,
+        "active_review_send_count_after_fix": active_after,
+        "review_queue_visible_count_after_fix": _int_or_zero(scan.get("review_queue_visible_count")),
+        "eligible_candidate_count_after_fix": _int_or_zero(scan.get("eligible_candidate_count")),
+        "overcounted_customer_history_orders": [
+            {
+                "order": _safe_text(row.get("order"), max_length=80),
+                "before": _int_or_zero(row.get("customer_history_order_count_before_precision")),
+                "after": _int_or_zero(row.get("customer_history_order_count")),
+                "confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
+                "method": _safe_text(row.get("customer_history_match_method"), max_length=80),
+                "excluded_weak_matches": _dedupe_order_names(
+                    row.get("customer_history_excluded_weak_matches") or []
+                ),
+            }
+            for row in overcounted_rows[:50]
+        ],
+        "note_risk_blocked_orders": [
+            {
+                "order": _safe_text(row.get("order"), max_length=80),
+                "note_risk_field": _safe_text(row.get("note_risk_field"), max_length=120),
+                "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
+                "reason": NOTE_RISK_REASON,
+            }
+            for row in note_risk_rows[:50]
+        ],
+        "low_confidence_blocked_orders": [
+            {
+                "order": _safe_text(row.get("order"), max_length=80),
+                "confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
+                "match_method": _safe_text(row.get("customer_history_match_method"), max_length=80),
+                "weak_match_count": _int_or_zero(row.get("customer_history_weak_match_count")),
+                "reason": "Customer history not confirmed",
+            }
+            for row in low_confidence_rows[:50]
+        ],
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "full_note_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+        "detected_issue_summary": (
+            f"Customer-history precision audit ready. Overcounted histories: {len(overcounted_rows)}; "
+            f"note-risk blocked: {len(note_risk_rows)}; low-confidence history blocked: {len(low_confidence_rows)}; "
+            f"active Review & Send before/after: {active_before}/{active_after}. "
+            "No Gmail, Shopify, Trustpilot, Kudosi, Ali Reviews, or external API calls were performed."
+        ),
+    }
+
+
+def build_review_request_review_send_failure_audit_report(params=None):
+    state = _build_review_send_state(params)
+    target_order = "#21075"
+    scan = state["last_60_days_scan"]
+    row, section = _find_scan_order_row(
+        {
+            "eligible_queue_rows": scan.get("eligible_queue_rows") or [],
+            "blocked_queue_rows": scan.get("blocked_queue_rows") or [],
+            "already_sent_queue_rows": scan.get("already_sent_queue_rows") or [],
+        },
+        target_order,
+    )
+    candidate_found = bool(row)
+    candidate_currently_eligible = section == "eligible"
+    route_blocker = "" if candidate_currently_eligible else section
+    diagnosis = _review_send_readiness_diagnosis(
+        target_order,
+        row or {},
+        state["gmail_setup"],
+        candidate_found=candidate_found,
+        candidate_currently_eligible=candidate_currently_eligible,
+        route_revalidation_blocker=route_blocker,
+    )
+    latest_attempt = (state["reports"].get("trustpilot_review_and_send_execute") or {}).get("data") or {}
+    latest_attempt_order = _canonical_order_name(
+        latest_attempt.get("selected_order") or latest_attempt.get("target_order") or ""
+    )
+    latest_attempt_matches_target = latest_attempt_order == target_order
+    latest_attempt_message = _safe_text(
+        latest_attempt.get("exact_user_message")
+        or latest_attempt.get("blocking_detail")
+        or latest_attempt.get("detected_issue_summary"),
+        max_length=400,
+    )
+    latest_attempt_status = _safe_text(
+        latest_attempt.get("execution_status") or latest_attempt.get("report_status") or latest_attempt.get("status"),
+        max_length=120,
+    )
+    blocked_reason = diagnosis["blocked_reason"]
+    exact_user_message = diagnosis["exact_user_message"]
+    if latest_attempt_matches_target and latest_attempt_status and not exact_user_message:
+        exact_user_message = latest_attempt_message
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "report_generated_at": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_review_send_failure_audit",
+        "task_name": "shopify_review_request_review_send_failure_audit",
+        "phase": "5.28J",
+        "mode": "dry-run-local-review-send-failure-audit",
+        "review_send_failure_audit_status": "review_send_failure_audit_ready",
+        "report_status": "review_send_failure_audit_ready",
+        "success": True,
+        "target_order": target_order,
+        "candidate_found": candidate_found,
+        "candidate_currently_eligible": candidate_currently_eligible,
+        "candidate_section": section,
+        "customer_history_confirmed": diagnosis["customer_history_confirmed"],
+        "customer_history_changed": diagnosis["customer_history_changed"],
+        "prior_trustpilot_found": diagnosis["prior_trustpilot_found"],
+        "note_risk_found": diagnosis["note_risk_found"],
+        "gmail_scope_status": diagnosis["gmail_scope_status"],
+        "gmail_scope_missing": diagnosis["gmail_scope_missing"],
+        "gmail_scope_compose_only": diagnosis["gmail_scope_compose_only"],
+        "gmail_send_path_requires_gmail_send": diagnosis["gmail_send_path_requires_gmail_send"],
+        "gmail_send_permission_ready": diagnosis["gmail_send_permission_ready"],
+        "gmail_helper_ready": diagnosis["gmail_helper_ready"],
+        "gmail_credentials_missing": diagnosis["gmail_credentials_missing"],
+        "direct_send_supported_by_current_helper": diagnosis["direct_send_supported_by_current_helper"],
+        "draft_send_supported_by_existing_locked_helper": diagnosis[
+            "draft_send_supported_by_existing_locked_helper"
+        ],
+        "route_revalidation_blocker": diagnosis["route_revalidation_blocker"],
+        "blocked_reason": blocked_reason,
+        "exact_user_message": exact_user_message,
+        "recommended_fix": diagnosis["recommended_fix"],
+        "latest_review_send_attempt_found": bool(latest_attempt),
+        "latest_review_send_attempt_matches_target": latest_attempt_matches_target,
+        "latest_review_send_attempt_order": latest_attempt_order,
+        "latest_review_send_attempt_status": latest_attempt_status,
+        "latest_review_send_attempt_message": latest_attempt_message,
+        "latest_review_send_attempt_email_sent": latest_attempt.get("email_sent") is True,
+        "review_queue_page": state["approval_queue"].get("review_queue_page"),
+        "review_queue_page_size": state["approval_queue"].get("review_queue_page_size"),
+        "review_queue_visible_count": state["approval_queue"].get("review_queue_visible_count"),
+        "eligible_candidate_count_total": state["approval_queue"].get("eligible_candidate_count_total"),
+        "gmail_api_call_performed": False,
+        "email_sent": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "shopify_tag_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "translations_register_called": False,
+        "raw_customer_email_output": False,
+        "full_note_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+        "detected_issue_summary": (
+            f"{target_order} Review & Send diagnosis: {blocked_reason}. "
+            f"{exact_user_message} No Gmail API call, email send, Shopify write, "
+            "Trustpilot/Kudosi/Ali Reviews API call, or translationsRegister call was performed."
         ),
     }
 
@@ -4942,9 +5331,11 @@ def _approval_queue(
     focus,
     gmail_setup,
     last_60_days_scan=None,
+    page=1,
+    page_size=DEFAULT_LIMIT,
 ):
     if last_60_days_scan:
-        return _approval_queue_from_last_60_days_scan(last_60_days_scan)
+        return _approval_queue_from_last_60_days_scan(last_60_days_scan, page=page, page_size=page_size)
 
     already_sent_rows = _already_sent_rows(
         focus=focus,
@@ -5053,34 +5444,101 @@ def _approval_queue(
     }
 
 
-def _approval_queue_from_last_60_days_scan(scan):
-    needs_review_rows = list(scan.get("review_queue_rows") or scan.get("eligible_queue_rows") or [])
+def _approval_queue_pagination(total_count, page=1, page_size=DEFAULT_LIMIT):
+    normalized_total = max(_int_or_zero(total_count), 0)
+    normalized_page_size = _int_or_zero(page_size)
+    if normalized_page_size not in LIMIT_OPTIONS:
+        normalized_page_size = DEFAULT_LIMIT
+    total_pages = max((normalized_total + normalized_page_size - 1) // normalized_page_size, 1)
+    normalized_page = max(_int_or_zero(page), 1)
+    normalized_page = min(normalized_page, total_pages)
+    start_index = (normalized_page - 1) * normalized_page_size
+    end_index = min(start_index + normalized_page_size, normalized_total)
+    showing_start = start_index + 1 if normalized_total else 0
+    showing_end = end_index if normalized_total else 0
+    previous_page = normalized_page - 1 if normalized_page > 1 else 0
+    next_page = normalized_page + 1 if normalized_page < total_pages else 0
+    return {
+        "total_count": normalized_total,
+        "page": normalized_page,
+        "page_size": normalized_page_size,
+        "total_pages": total_pages,
+        "start_index": start_index,
+        "end_index": end_index,
+        "showing_start": showing_start,
+        "showing_end": showing_end,
+        "has_previous": bool(previous_page),
+        "has_next": bool(next_page),
+        "previous_page": previous_page,
+        "next_page": next_page,
+        "previous_page_url": _review_queue_page_url(previous_page, normalized_page_size) if previous_page else "",
+        "next_page_url": _review_queue_page_url(next_page, normalized_page_size) if next_page else "",
+    }
+
+
+def _review_queue_visible_row(row, pagination):
+    visible = dict(row or {})
+    visible["visible_in_review_batch"] = True
+    visible["hidden_reason"] = ""
+    visible["review_queue_page"] = pagination["page"]
+    visible["review_queue_page_size"] = pagination["page_size"]
+    return visible
+
+
+def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT):
+    needs_review_source_rows = list(scan.get("eligible_queue_rows") or scan.get("review_queue_rows") or [])
     blocked_rows = list(scan.get("blocked_queue_rows") or [])
     already_sent_rows = list(scan.get("already_sent_queue_rows") or [])
     merged_groups = scan.get("merged_groups") or []
     eligible_total = _int_or_zero(
-        scan.get("eligible_candidate_count_total") or scan.get("eligible_candidate_count")
+        scan.get("eligible_candidate_count_total") or scan.get("eligible_candidate_count") or len(needs_review_source_rows)
     )
-    ready_to_send_count = len(needs_review_rows)
+    pagination = _approval_queue_pagination(
+        total_count=len(needs_review_source_rows) or eligible_total,
+        page=page,
+        page_size=page_size,
+    )
+    needs_review_rows = [
+        _review_queue_visible_row(row, pagination)
+        for row in needs_review_source_rows[pagination["start_index"] : pagination["end_index"]]
+    ]
+    blocked_visible_rows = blocked_rows[:BLOCKED_QUEUE_DISPLAY_LIMIT]
+    ready_to_send_count = len(needs_review_source_rows) or eligible_total
     coverage_incomplete = scan.get("scan_source") != "full_shopify_orders"
     return {
         "needs_review_rows": needs_review_rows,
-        "blocked_rows": blocked_rows,
+        "blocked_rows": blocked_visible_rows,
         "already_sent_rows": already_sent_rows,
+        "all_needs_review_rows": needs_review_source_rows,
         "needs_review_count": ready_to_send_count,
         "already_sent_count": len(already_sent_rows),
         "ready_to_send_count": ready_to_send_count,
         "not_ready_count": len(blocked_rows),
         "blocked_count": len(blocked_rows),
+        "blocked_visible_count": len(blocked_visible_rows),
+        "blocked_display_limit": BLOCKED_QUEUE_DISPLAY_LIMIT,
+        "blocked_overflow_count": max(len(blocked_rows) - len(blocked_visible_rows), 0),
         "duplicate_block_count": scan.get("blocked_duplicate_customer_count", 0),
-        "review_send_action_enabled_count": ready_to_send_count,
+        "review_send_action_enabled_count": len(needs_review_rows),
         "email_sent_count": scan.get("already_sent_count", 0),
         "merged_group_count": scan.get("blocked_merged_group_count", 0),
         "merged_groups": merged_groups,
         "eligible_candidate_count_total": eligible_total,
-        "review_queue_batch_size": _int_or_zero(scan.get("review_queue_batch_size")) or REVIEW_QUEUE_BATCH_SIZE,
-        "review_queue_visible_count": _int_or_zero(scan.get("review_queue_visible_count")) or ready_to_send_count,
-        "review_queue_overflow_count": _int_or_zero(scan.get("review_queue_overflow_count")),
+        "review_queue_batch_size": pagination["page_size"],
+        "review_queue_page_size": pagination["page_size"],
+        "review_queue_page": pagination["page"],
+        "review_queue_total_pages": pagination["total_pages"],
+        "review_queue_has_previous": pagination["has_previous"],
+        "review_queue_has_next": pagination["has_next"],
+        "review_queue_previous_page": pagination["previous_page"],
+        "review_queue_next_page": pagination["next_page"],
+        "review_queue_previous_page_url": pagination["previous_page_url"],
+        "review_queue_next_page_url": pagination["next_page_url"],
+        "review_queue_showing_start": pagination["showing_start"],
+        "review_queue_showing_end": pagination["showing_end"],
+        "review_queue_visible_count": len(needs_review_rows),
+        "review_queue_overflow_count": max(ready_to_send_count - pagination["showing_end"], 0),
+        "review_queue_page_size_options": _selected_page_size_options(pagination["page_size"]),
         "review_queue_sort_order": scan.get("review_queue_sort_order") or list(REVIEW_QUEUE_SORT_ORDER),
         "shopify_tag_write_enabled_count": 0,
         "empty_message": (
@@ -5163,9 +5621,9 @@ def _last_60_days_candidate_scan(
         ),
         reverse=True,
     )
-    limited_contexts = list(scanned_contexts[:MAX_SOURCE_ROWS])
+    limited_contexts = list(scanned_contexts[:MAX_LOCAL_ORDER_SCAN_ROWS])
     included_orders = {context.get("order_name") for context in limited_contexts}
-    for context in scanned_contexts[MAX_SOURCE_ROWS:]:
+    for context in scanned_contexts[MAX_LOCAL_ORDER_SCAN_ROWS:]:
         if context.get("order_name") in set(REVIEW_REQUEST_FOCUS_ORDER_NAMES):
             if context.get("order_name") not in included_orders:
                 limited_contexts.append(context)
@@ -5231,6 +5689,7 @@ def _last_60_days_candidate_scan(
         cutoff=cutoff,
         local_db_error=local_db_error,
     )
+    order_21083_diagnosis = _focus_order_diagnosis("#21083", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21070_diagnosis = _focus_order_diagnosis("#21070", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21075_diagnosis = _focus_order_diagnosis("#21075", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21076_diagnosis = _focus_order_diagnosis("#21076", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
@@ -5247,6 +5706,7 @@ def _last_60_days_candidate_scan(
         "scan_source": order_data_coverage["scan_source"],
         "coverage_warnings": order_data_coverage["coverage_warnings"],
         "order_data_coverage": order_data_coverage,
+        "order_21083_diagnosis": order_21083_diagnosis,
         "order_21070_diagnosis": order_21070_diagnosis,
         "order_21075_diagnosis": order_21075_diagnosis,
         "order_21076_diagnosis": order_21076_diagnosis,
@@ -5264,6 +5724,7 @@ def _last_60_days_candidate_scan(
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if _row_blocked_by_merged_group(row)),
         "blocked_duplicate_customer_count": sum(1 for row in blocked_rows if _row_blocked_by_duplicate(row)),
+        "blocked_note_risk_count": sum(1 for row in blocked_rows if _row_blocked_by_note_risk(row)),
         "first_order_blocked_count": sum(1 for row in blocked_rows if _row_blocked_by_first_order(row)),
         "prior_trustpilot_customer_blocked_count": sum(
             1 for row in blocked_rows if _row_blocked_by_prior_trustpilot_history(row)
@@ -5271,6 +5732,24 @@ def _last_60_days_candidate_scan(
         "customer_history_unknown_count": sum(
             1 for row in blocked_rows if _row_blocked_by_customer_history_unknown(row)
         ),
+        "customer_history_low_confidence_count": sum(
+            1 for row in blocked_rows if _safe_text(row.get("customer_history_confidence"), max_length=80) == "low"
+        ),
+        "customer_history_weak_name_only_match_count": sum(
+            _int_or_zero(row.get("customer_history_weak_match_count")) for row in blocked_rows + eligible_rows
+        ),
+        "overcounted_customer_history_count": sum(
+            1
+            for row in blocked_rows + eligible_rows
+            if _int_or_zero(row.get("customer_history_order_count_before_precision"))
+            > _int_or_zero(row.get("customer_history_order_count"))
+        ),
+        "candidates_blocked_by_low_confidence_history": sum(
+            1 for row in blocked_rows if _row_blocked_by_customer_history_unknown(row)
+        ),
+        "candidates_blocked_by_note_risk": sum(1 for row in blocked_rows if _row_blocked_by_note_risk(row)),
+        "active_review_send_count_before_precision": eligible_candidate_count_total
+        + sum(1 for row in blocked_rows if _row_blocked_only_by_precision_fix(row)),
         "blocked_missing_review_request_tag_count": sum(
             1 for row in blocked_rows if _row_blocked_by_missing_review_request_tag(row)
         ),
@@ -5494,10 +5973,24 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         "visible_in_review_batch": (row or {}).get("visible_in_review_batch") is True,
         "hidden_reason": _safe_text((row or {}).get("hidden_reason"), max_length=120)
         or ("not_scanned" if not row else ""),
+        "displayed_order_count_before_precision": _int_or_zero(
+            (row or {}).get("customer_history_order_count_before_precision")
+        ),
         "customer_history_order_count": _int_or_zero((row or {}).get("customer_history_order_count")),
         "customer_order_sequence_number": _int_or_zero((row or {}).get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text((row or {}).get("customer_order_sequence_label"), max_length=120),
         "historical_order_names": _dedupe_order_names((row or {}).get("historical_order_names") or []),
+        "customer_history_matched_order_names": _dedupe_order_names(
+            (row or {}).get("customer_history_matched_order_names")
+            or (row or {}).get("historical_order_names")
+            or []
+        ),
+        "customer_history_match_method": _safe_text((row or {}).get("customer_history_match_method"), max_length=80),
+        "customer_history_excluded_weak_matches": _dedupe_order_names(
+            (row or {}).get("customer_history_excluded_weak_matches") or []
+        ),
+        "customer_history_weak_match_count": _int_or_zero((row or {}).get("customer_history_weak_match_count")),
+        "customer_history_exact_match_count": _int_or_zero((row or {}).get("customer_history_exact_match_count")),
         "previous_trustpilot_order_names": _dedupe_order_names(
             (row or {}).get("previous_trustpilot_order_names") or []
         ),
@@ -5505,6 +5998,11 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         "customer_history_source": _safe_text((row or {}).get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text((row or {}).get("customer_history_confidence"), max_length=80),
         "customer_level_trustpilot_already_sent": (row or {}).get("customer_level_trustpilot_already_sent") is True,
+        "note_risk_detected": (row or context).get("note_risk_detected") is True,
+        "note_risk_field": _safe_text((row or context).get("note_risk_field"), max_length=120),
+        "note_risk_fields": _dedupe_text((row or context).get("note_risk_fields") or []),
+        "note_risk_keywords": _dedupe_text((row or context).get("note_risk_keywords") or []),
+        "note_risk_reason": _safe_text((row or context).get("note_risk_reason"), max_length=120),
         "final_eligibility_status": _focus_final_eligibility_status(found_locally, row, tag_data_loaded),
         "final_blockers": final_blockers,
         "message": message,
@@ -5607,16 +6105,19 @@ def _last_60_day_order_scan_contexts(source_by_order, cutoff):
         SHOPIFY_ORDER_TAG_FIELD,
         "warehouse_note",
         "transfer_note",
+        "exception_review_reason",
+        "exception_review_response",
+        "cost_calculation_note",
     )
     try:
         orders = list(
             ShopifyOrder.objects.filter(query)
             .values(*value_fields)
-            .order_by("-updated_at", "-order_created_at", "-id")[:MAX_SOURCE_ROWS]
+            .order_by("-updated_at", "-order_created_at", "-id")[:MAX_LOCAL_ORDER_SCAN_ROWS]
         )
         if lookup_query:
             existing_ids = {order.get("id") for order in orders}
-            for order in ShopifyOrder.objects.filter(lookup_query).values(*value_fields)[:MAX_SOURCE_ROWS]:
+            for order in ShopifyOrder.objects.filter(lookup_query).values(*value_fields)[:MAX_LOCAL_ORDER_SCAN_ROWS]:
                 if order.get("id") in existing_ids:
                     continue
                 orders.append(order)
@@ -5669,6 +6170,7 @@ def _scan_context_from_local_order(order, source_row, cutoff):
     delivered_confirmed = _scan_delivered_confirmed(tag_source_row, order)
     canonical_tag_present = _scan_canonical_review_request_tag_present(tag_source_row)
     matched_review_request_tags = _matched_review_request_tags(tags)
+    note_risk = _note_risk_detection(order)
     local_context = {
         "order_name": order_name,
         "matched_order_name": order_name,
@@ -5685,6 +6187,11 @@ def _scan_context_from_local_order(order, source_row, cutoff):
         "updated_at": _safe_text(order.get("updated_at"), max_length=80),
         "fulfilled_at": _safe_text(order.get("fulfilled_at"), max_length=80),
         "shopify_note_present": _order_note_present(order),
+        "note_risk_detected": note_risk["note_risk_detected"],
+        "note_risk_field": note_risk["note_risk_field"],
+        "note_risk_fields": note_risk["note_risk_fields"],
+        "note_risk_keywords": note_risk["note_risk_keywords"],
+        "note_risk_reason": note_risk["note_risk_reason"],
         "local_order_source": "ShopifyOrder",
         "delivered_confirmed": delivered_confirmed,
         "canonical_review_request_tag_present": canonical_tag_present,
@@ -5708,6 +6215,7 @@ def _scan_context_from_source_row(order_name, source_row, cutoff):
     tags = _source_row_tags(source_row)
     matched_review_request_tags = _matched_review_request_tags(tags)
     tag_data_loaded = _tag_data_loaded(source_row, tags)
+    note_risk = _note_risk_detection(source_row)
     return {
         "order_name": order_name,
         "matched_order_name": order_name,
@@ -5717,6 +6225,11 @@ def _scan_context_from_source_row(order_name, source_row, cutoff):
         "fulfillment_status": "",
         "fulfillment_status_raw": "",
         "settlement_status": "",
+        "note_risk_detected": note_risk["note_risk_detected"],
+        "note_risk_field": note_risk["note_risk_field"],
+        "note_risk_fields": note_risk["note_risk_fields"],
+        "note_risk_keywords": note_risk["note_risk_keywords"],
+        "note_risk_reason": note_risk["note_risk_reason"],
         "local_order_source": "local_review_request_report",
         "delivered_confirmed": _scan_delivered_confirmed(source_row, {}),
         "canonical_review_request_tag_present": _scan_canonical_review_request_tag_present(source_row),
@@ -5993,6 +6506,9 @@ def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
     blocking_reasons = _dedupe_text(row.get("blocking_reasons") or [])
     if _scan_local_risk_detected(scan_context):
         blocking_reasons.append("blocked_risk_or_ticket")
+    note_risk = _note_risk_from_sources(scan_context, local_context, row)
+    if note_risk["note_risk_detected"]:
+        blocking_reasons.append("blocked_note_risk_detected")
     delivered = scan_context.get("delivered_confirmed")
     canonical_tag_present = scan_context.get("canonical_review_request_tag_present")
     blocking_reasons = _filtered_scan_blocking_reasons(
@@ -6023,6 +6539,11 @@ def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
             "order_created_at": scan_context.get("order_created_at", ""),
             "fulfillment_status": scan_context.get("fulfillment_status", ""),
             "shopify_note_present": scan_context.get("shopify_note_present") is True,
+            "note_risk_detected": note_risk["note_risk_detected"],
+            "note_risk_field": note_risk["note_risk_field"],
+            "note_risk_fields": note_risk["note_risk_fields"],
+            "note_risk_keywords": note_risk["note_risk_keywords"],
+            "note_risk_reason": note_risk["note_risk_reason"],
             "tags": tags,
             "tag_data_available": scan_context.get("tag_data_available") is True,
             "tag_data_missing_source": _safe_text(scan_context.get("tag_data_missing_source"), max_length=240),
@@ -6206,6 +6727,8 @@ def _review_queue_policy_hidden_reason(row):
         return "missing_review_request_tag_alias"
     if has_trustpilot_sent_tag(tags) or row.get("trustpilot_already_sent_to_customer") is True:
         return "prior_trustpilot_send_evidence"
+    if row.get("note_risk_detected") is True:
+        return "note_risk_detected"
     if _review_queue_has_duplicate_risk(row):
         return "duplicate_risk"
     if _row_has_returned_package(row) or _row_has_risk_or_ticket(row):
@@ -6277,6 +6800,30 @@ def _row_blocked_by_customer_history_unknown(row):
     return "customer history not confirmed" in text or row.get("customer_history_confirmed") is False
 
 
+def _row_blocked_by_note_risk(row):
+    text = _row_block_text(row)
+    return row.get("note_risk_detected") is True or "aftersales/ticket note found" in text
+
+
+def _row_blocked_only_by_precision_fix(row):
+    if not row or row.get("action_state") == "review_send":
+        return False
+    if row.get("delivered_tag_present") is not True:
+        return False
+    if row.get("review_request_tag_present") is not True:
+        return False
+    if _row_blocked_by_duplicate(row) or _row_blocked_by_merged_group(row):
+        return False
+    blockers = [
+        part.lower()
+        for part in _split_blocker_text(row.get("eligibility_reason_plain") or row.get("reason"))
+    ]
+    if not blockers:
+        return False
+    precision_tokens = ("customer history not confirmed", "aftersales/ticket note found")
+    return all(any(token in blocker for token in precision_tokens) for blocker in blockers)
+
+
 def _row_blocked_by_prior_trustpilot_history(row):
     text = _row_block_text(row)
     return (
@@ -6305,7 +6852,14 @@ def _row_blocked_by_not_delivered(row):
 def _row_block_text(row):
     return " ".join(
         _safe_text(row.get(key), max_length=500).lower()
-        for key in ("reason", "eligibility_reason_plain", "evidence", "status", "trustpilot_history_label")
+        for key in (
+            "reason",
+            "eligibility_reason_plain",
+            "evidence",
+            "status",
+            "trustpilot_history_label",
+            "note_risk_reason",
+        )
     )
 
 
@@ -6318,14 +6872,31 @@ def _queue_candidate_summary(row):
         "masked_customer": _safe_text(row.get("masked_customer_label"), max_length=120),
         "customer_order_count": _int_or_zero(row.get("customer_order_count")),
         "customer_history_order_count": _int_or_zero(row.get("customer_history_order_count")),
+        "customer_history_order_count_before_precision": _int_or_zero(
+            row.get("customer_history_order_count_before_precision")
+        ),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
+        "customer_history_matched_order_names": _dedupe_order_names(
+            row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
+        ),
+        "customer_history_match_method": _safe_text(row.get("customer_history_match_method"), max_length=80),
+        "customer_history_excluded_weak_matches": _dedupe_order_names(
+            row.get("customer_history_excluded_weak_matches") or []
+        ),
+        "customer_history_weak_match_count": _int_or_zero(row.get("customer_history_weak_match_count")),
+        "customer_history_exact_match_count": _int_or_zero(row.get("customer_history_exact_match_count")),
         "previous_trustpilot_order_names": _dedupe_order_names(row.get("previous_trustpilot_order_names") or []),
         "previous_trustpilot_tag_values": _dedupe_text(row.get("previous_trustpilot_tag_values") or []),
         "customer_history_source": _safe_text(row.get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
+        "note_risk_detected": row.get("note_risk_detected") is True,
+        "note_risk_field": _safe_text(row.get("note_risk_field"), max_length=120),
+        "note_risk_fields": _dedupe_text(row.get("note_risk_fields") or []),
+        "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
+        "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
         "tag_data_available": row.get("tag_data_available") is True,
         "review_request_tag_present": row.get("review_request_tag_present") is True,
@@ -6357,14 +6928,31 @@ def _blocked_candidate_summary(row):
         "customer": _safe_text(row.get("customer_display_name"), max_length=120)
         or "Masked in reports",
         "customer_history_order_count": _int_or_zero(row.get("customer_history_order_count")),
+        "customer_history_order_count_before_precision": _int_or_zero(
+            row.get("customer_history_order_count_before_precision")
+        ),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
+        "customer_history_matched_order_names": _dedupe_order_names(
+            row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
+        ),
+        "customer_history_match_method": _safe_text(row.get("customer_history_match_method"), max_length=80),
+        "customer_history_excluded_weak_matches": _dedupe_order_names(
+            row.get("customer_history_excluded_weak_matches") or []
+        ),
+        "customer_history_weak_match_count": _int_or_zero(row.get("customer_history_weak_match_count")),
+        "customer_history_exact_match_count": _int_or_zero(row.get("customer_history_exact_match_count")),
         "previous_trustpilot_order_names": _dedupe_order_names(row.get("previous_trustpilot_order_names") or []),
         "previous_trustpilot_tag_values": _dedupe_text(row.get("previous_trustpilot_tag_values") or []),
         "customer_history_source": _safe_text(row.get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
+        "note_risk_detected": row.get("note_risk_detected") is True,
+        "note_risk_field": _safe_text(row.get("note_risk_field"), max_length=120),
+        "note_risk_fields": _dedupe_text(row.get("note_risk_fields") or []),
+        "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
+        "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
         "tag_data_available": row.get("tag_data_available") is True,
         "tag_data_missing_source": _safe_text(row.get("tag_data_missing_source"), max_length=240),
@@ -6422,6 +7010,8 @@ def _blocked_missing_requirement(row):
     if _row_blocked_by_customer_history_unknown(row):
         missing.append("Confirmed customer history")
     text = _row_block_text(row)
+    if row.get("note_risk_detected") is True or "aftersales/ticket note found" in text:
+        missing.append("No aftersales/ticket note")
     if "gmail" in text:
         missing.append("Gmail permission")
     if "risk" in text or "ticket" in text or "refund" in text or "dispute" in text:
@@ -6666,6 +7256,11 @@ def _local_merged_order_reference_contexts(order_names):
     normalized_names = _dedupe_order_names(order_names or [])
     if not normalized_names:
         return {}
+    if len(normalized_names) > 50:
+        contexts = {}
+        for index in range(0, len(normalized_names), 50):
+            contexts.update(_local_order_contexts(normalized_names[index : index + 50]))
+        return contexts
 
     query_names = set()
     query_numbers = set()
@@ -6760,6 +7355,65 @@ def _note_text_fragments(value):
         return fragments
     text = _safe_text(value, max_length=1000)
     return [text] if text else []
+
+
+def _note_risk_detection(row):
+    row = row or {}
+    fields = []
+    keywords = []
+    for field in NOTE_RISK_FIELDS:
+        for fragment in _note_text_fragments(row.get(field)):
+            matched = _note_risk_keywords_in_text(fragment)
+            if not matched:
+                continue
+            fields.append(field)
+            keywords.extend(matched)
+    fields = _dedupe_text(fields)
+    keywords = _dedupe_text(keywords)
+    return {
+        "note_risk_detected": bool(fields),
+        "note_risk_field": fields[0] if fields else "",
+        "note_risk_fields": fields,
+        "note_risk_keywords": keywords,
+        "note_risk_reason": NOTE_RISK_REASON if fields else "",
+    }
+
+
+def _note_risk_keywords_in_text(value):
+    text = _safe_text(value, max_length=1000)
+    lowered = text.lower()
+    matched = []
+    for keyword in NOTE_RISK_KEYWORDS:
+        safe_keyword = _safe_text(keyword, max_length=80)
+        if not safe_keyword:
+            continue
+        if safe_keyword.lower() in lowered:
+            matched.append(safe_keyword)
+    return _dedupe_text(matched)
+
+
+def _note_risk_from_sources(*sources):
+    fields = []
+    keywords = []
+    for source in sources:
+        source = source or {}
+        if source.get("note_risk_detected") is True:
+            fields.extend(source.get("note_risk_fields") or [source.get("note_risk_field")])
+            keywords.extend(source.get("note_risk_keywords") or [])
+            continue
+        detected = _note_risk_detection(source)
+        if detected["note_risk_detected"]:
+            fields.extend(detected["note_risk_fields"])
+            keywords.extend(detected["note_risk_keywords"])
+    fields = _dedupe_text(field for field in fields if field)
+    keywords = _dedupe_text(keyword for keyword in keywords if keyword)
+    return {
+        "note_risk_detected": bool(fields),
+        "note_risk_field": fields[0] if fields else "",
+        "note_risk_fields": fields,
+        "note_risk_keywords": keywords,
+        "note_risk_reason": NOTE_RISK_REASON if fields else "",
+    }
 
 
 def _source_rows_by_order(*row_groups):
@@ -7211,11 +7865,14 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
         local_context.get("previous_trustpilot_order_names")
         or row.get("previous_trustpilot_order_names")
         or []
-    )
+    ) if history_confirmed else []
+    note_risk = _note_risk_from_sources(local_context, row)
     if not history_confirmed:
         blockers.append("Customer history not confirmed.")
     elif history_count <= 1:
         blockers.append("First-order customer; Trustpilot is for repeat customers.")
+    if note_risk["note_risk_detected"]:
+        blockers.append(NOTE_RISK_REASON)
     if previous_trustpilot_order_names:
         blockers.append(
             f"Already sent Trustpilot to this customer via {_join_order_names(previous_trustpilot_order_names)}."
@@ -7233,7 +7890,7 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
         blockers.append(_plain_blocked_reason(row))
     if _row_has_returned_package(row):
         blockers.append("Return or returned-package risk found.")
-    if _row_has_risk_or_ticket(row):
+    if _row_has_risk_or_ticket(row) and not note_risk["note_risk_detected"]:
         blockers.append("Ticket, refund, cancel, dispute, or complaint risk found.")
     if row.get("customer_level_duplicate_block_applies") is True:
         blockers.append("Already sent to this customer.")
@@ -7408,6 +8065,11 @@ def _local_order_contexts(order_names):
     )
     if not normalized_names:
         return {}
+    if len(normalized_names) > 50:
+        contexts = {}
+        for index in range(0, len(normalized_names), 50):
+            contexts.update(_local_order_contexts(normalized_names[index : index + 50]))
+        return contexts
 
     query_names = set()
     query_numbers = set()
@@ -7443,9 +8105,16 @@ def _local_order_contexts(order_names):
             "shipping_phone",
             "order_created_at",
             SHOPIFY_ORDER_TAG_FIELD,
+            "shopify_note",
+            "shopify_note_attributes",
+            "warehouse_note",
+            "transfer_note",
+            "exception_review_reason",
+            "exception_review_response",
+            "cost_calculation_note",
         )
         selected_orders = list(
-            ShopifyOrder.objects.filter(query).values(*history_value_fields)[:MAX_SOURCE_ROWS]
+            ShopifyOrder.objects.filter(query).values(*history_value_fields)[:MAX_LOCAL_ORDER_SCAN_ROWS]
         )
         history_orders_by_identity = _customer_history_orders_for_selected(
             selected_orders,
@@ -7460,22 +8129,36 @@ def _local_order_contexts(order_names):
         history = _customer_history_for_order(order, history_orders_by_identity)
         tags = _shopify_tags_from_order(order)
         tag_data_loaded = _shopify_tags_loaded_from_order(order)
+        note_risk = _note_risk_detection(order)
         context = {
             "customer_display_name": _safe_customer_display_name(order.get("customer_name")),
             "masked_email": mask_email(email),
             "customer_order_count": history["customer_history_order_count"],
             "customer_history_order_count": history["customer_history_order_count"],
+            "customer_history_order_count_before_precision": history[
+                "customer_history_order_count_before_precision"
+            ],
             "customer_order_sequence": history["customer_order_sequence_number"],
             "customer_order_sequence_number": history["customer_order_sequence_number"],
             "customer_order_sequence_label": history["customer_order_sequence_label"],
             "customer_order_names": history["historical_order_names"][:5],
             "historical_order_names": history["historical_order_names"],
+            "customer_history_matched_order_names": history["customer_history_matched_order_names"],
+            "customer_history_match_method": history["customer_history_match_method"],
+            "customer_history_excluded_weak_matches": history["customer_history_excluded_weak_matches"],
+            "customer_history_weak_match_count": history["customer_history_weak_match_count"],
+            "customer_history_exact_match_count": history["customer_history_exact_match_count"],
             "previous_trustpilot_order_names": history["previous_trustpilot_order_names"],
             "previous_trustpilot_tag_values": history["previous_trustpilot_tag_values"],
             "customer_history_source": history["customer_history_source"],
             "customer_history_confidence": history["customer_history_confidence"],
             "customer_history_confirmed": history["customer_history_confirmed"],
             "customer_level_trustpilot_already_sent": history["customer_level_trustpilot_already_sent"],
+            "note_risk_detected": note_risk["note_risk_detected"],
+            "note_risk_field": note_risk["note_risk_field"],
+            "note_risk_fields": note_risk["note_risk_fields"],
+            "note_risk_keywords": note_risk["note_risk_keywords"],
+            "note_risk_reason": note_risk["note_risk_reason"],
             "order_tags_display": tags,
             "tags_summary": _tags_summary(tags, tag_data_loaded),
             "tag_data_available": tag_data_loaded,
@@ -7513,24 +8196,52 @@ def _customer_history_orders_for_selected(selected_orders, value_fields):
         query = identity.get("query")
         if query:
             history_query |= query
+        weak_query = identity.get("weak_query")
+        if weak_query:
+            history_query |= weak_query
     if not history_query:
         return {}
 
     history_orders = list(
         ShopifyOrder.objects.filter(history_query)
         .values(*value_fields)
-        .order_by("order_created_at", "id")[:MAX_SOURCE_ROWS]
+        .order_by("order_created_at", "id")[:MAX_LOCAL_ORDER_SCAN_ROWS]
     )
 
-    orders_by_identity = {identity["key"]: [] for identity in identities}
+    orders_by_identity = {
+        identity["key"]: {"exact": [], "weak": [], "identity": identity}
+        for identity in identities
+    }
     for history_order in history_orders:
         for identity in identities:
+            entry = orders_by_identity.setdefault(
+                identity["key"],
+                {"exact": [], "weak": [], "identity": identity},
+            )
             if _order_matches_customer_history_identity(history_order, identity):
-                orders_by_identity.setdefault(identity["key"], []).append(history_order)
+                if identity.get("confidence") == "low":
+                    entry["weak"].append(history_order)
+                else:
+                    entry["exact"].append(history_order)
+            elif _order_matches_customer_history_name_identity(history_order, identity):
+                entry["weak"].append(history_order)
     return orders_by_identity
 
 
 def _customer_history_identity(order):
+    name_identity = _name_history_identity(order)
+    customer_id = _customer_history_customer_id(order)
+    if customer_id:
+        return {
+            "source": "shopify_customer_id",
+            "confidence": "high",
+            "key": f"shopify_customer_id:{customer_id}",
+            "query": Q(customer_id__iexact=customer_id) if "customer_id" in (order or {}) else None,
+            "weak_query": name_identity.get("query") if name_identity else None,
+            "weak_key": name_identity.get("key", "") if name_identity else "",
+            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
+        }
+
     email = _safe_runtime_email((order or {}).get("customer_email"))
     if email:
         return {
@@ -7538,6 +8249,21 @@ def _customer_history_identity(order):
             "confidence": "high",
             "key": f"email:{email}",
             "query": Q(customer_email__iexact=email),
+            "weak_query": name_identity.get("query") if name_identity else None,
+            "weak_key": name_identity.get("key", "") if name_identity else "",
+            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
+        }
+
+    phone = _phone_history_identity(order)
+    if phone:
+        return {
+            "source": "name_shipping_phone",
+            "confidence": "medium",
+            "key": phone["key"],
+            "query": phone["query"],
+            "weak_query": name_identity.get("query") if name_identity else None,
+            "weak_key": name_identity.get("key", "") if name_identity else "",
+            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
         }
 
     shipping = _shipping_history_identity(order)
@@ -7556,13 +8282,74 @@ def _customer_history_identity(order):
         if shipping.get("city_raw") and not shipping.get("zip_raw"):
             query &= Q(shipping_city__iexact=shipping["city_raw"])
         return {
-            "source": "shipping_fallback",
+            "source": "name_shipping_address_postcode",
             "confidence": "medium",
             "key": shipping["key"],
             "query": query,
+            "weak_query": name_identity.get("query") if name_identity else None,
+            "weak_key": name_identity.get("key", "") if name_identity else "",
+            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
         }
 
-    return {"source": "unavailable", "confidence": "unknown", "key": "", "query": None}
+    if name_identity:
+        return {
+            "source": "name_only",
+            "confidence": "low",
+            "key": name_identity["key"],
+            "query": name_identity["query"],
+            "weak_query": name_identity["query"],
+            "weak_key": name_identity["key"],
+            "name_raw": name_identity["name_raw"],
+        }
+
+    return {"source": "unavailable", "confidence": "unknown", "key": "", "query": None, "weak_query": None}
+
+
+def _customer_history_customer_id(order):
+    for key in ("shopify_customer_id", "customer_id", "shopify_customer_gid", "customer_gid"):
+        text = _safe_text((order or {}).get(key), max_length=120)
+        if text:
+            return text
+    return ""
+
+
+def _name_history_identity(order):
+    order = order or {}
+    name_raw = _safe_text(order.get("customer_name") or order.get("shipping_name"), max_length=120)
+    name = _normalize_customer_history_piece(name_raw)
+    if not name:
+        return {}
+    return {
+        "key": f"name:{name}",
+        "name": name,
+        "name_raw": name_raw,
+        "query": Q(customer_name__iexact=name_raw) | Q(shipping_name__iexact=name_raw),
+    }
+
+
+def _customer_history_name_query(order):
+    name = _name_history_identity(order)
+    return name.get("query") if name else None
+
+
+def _phone_history_identity(order):
+    order = order or {}
+    name = _name_history_identity(order)
+    phone_raw = _safe_text(order.get("shipping_phone"), max_length=60)
+    phone = _normalize_customer_history_phone(phone_raw)
+    if not (name and phone):
+        return {}
+    return {
+        "key": f"name_phone:{name['name']}|{phone}",
+        "name": name["name"],
+        "name_raw": name["name_raw"],
+        "phone": phone,
+        "phone_raw": phone_raw,
+        "query": (
+            Q(shipping_phone__iexact=phone_raw)
+            & (Q(customer_name__iexact=name["name_raw"]) | Q(shipping_name__iexact=name["name_raw"]))
+        ),
+    }
 
 
 def _shipping_history_identity(order):
@@ -7597,34 +8384,93 @@ def _normalize_customer_history_piece(value):
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+def _normalize_customer_history_phone(value):
+    return re.sub(r"\D+", "", str(value or ""))
+
+
 def _order_matches_customer_history_identity(order, identity):
     if not identity.get("key"):
         return False
+    if identity.get("source") == "shopify_customer_id":
+        customer_id = _customer_history_customer_id(order)
+        return bool(customer_id and identity["key"] == f"shopify_customer_id:{customer_id}")
     if identity.get("source") == "customer_email":
         email = _safe_runtime_email((order or {}).get("customer_email"))
         return identity["key"] == f"email:{email}" if email else False
-    if identity.get("source") == "shipping_fallback":
+    if identity.get("source") == "name_shipping_phone":
+        phone = _phone_history_identity(order)
+        return bool(phone and phone.get("key") == identity["key"])
+    if identity.get("source") == "name_shipping_address_postcode":
         shipping = _shipping_history_identity(order)
         return bool(shipping and shipping.get("key") == identity["key"])
+    if identity.get("source") == "name_only":
+        name = _name_history_identity(order)
+        return bool(name and name.get("key") == identity["key"])
     return False
+
+
+def _order_matches_customer_history_name_identity(order, identity):
+    name = _name_history_identity(order)
+    if not name:
+        return False
+    weak_key = _safe_text(identity.get("weak_key"), max_length=180)
+    if weak_key:
+        return name["key"] == weak_key
+    identity_name = _name_history_identity(
+        {
+            "customer_name": identity.get("name_raw"),
+            "shipping_name": identity.get("name_raw"),
+        }
+    )
+    if identity_name:
+        return name["key"] == identity_name["key"]
+    if identity.get("source") == "name_only":
+        return name["key"] == identity.get("key")
+    return name["key"] == (_name_history_identity_from_key(identity) or "")
+
+
+def _name_history_identity_from_key(identity):
+    weak_query = identity.get("weak_query")
+    if not weak_query:
+        return ""
+    key = _safe_text(identity.get("key"), max_length=200)
+    if key.startswith("name:"):
+        return key
+    return ""
 
 
 def _customer_history_for_order(order, history_orders_by_identity):
     identity = _customer_history_identity(order)
     identity_key = identity.get("key", "")
-    customer_orders = list(history_orders_by_identity.get(identity_key) or [])
-    customer_orders.sort(key=_customer_history_order_sort_key)
-    confirmed = bool(identity_key and customer_orders)
-    order_count = len(customer_orders) if confirmed else 0
-    sequence = _customer_order_sequence(order, customer_orders) if confirmed else 0
-    historical_order_names = _dedupe_order_names(
+    history_entry = history_orders_by_identity.get(identity_key) or {}
+    if isinstance(history_entry, list):
+        history_entry = {"exact": history_entry, "weak": []}
+    exact_orders = _dedupe_customer_history_orders(history_entry.get("exact") or [])
+    weak_orders = _dedupe_customer_history_orders(history_entry.get("weak") or [])
+    exact_order_names = _dedupe_order_names(
         _safe_text(item.get("order_name"), max_length=80)
-        for item in customer_orders
+        for item in exact_orders
         if _safe_text(item.get("order_name"), max_length=80)
     )
-    previous_order_names, previous_tag_values = _previous_trustpilot_history(order, customer_orders)
+    weak_order_names = _dedupe_order_names(
+        _safe_text(item.get("order_name"), max_length=80)
+        for item in weak_orders
+        if _safe_text(item.get("order_name"), max_length=80)
+    )
+    excluded_weak_order_names = [name for name in weak_order_names if name not in set(exact_order_names)]
+    customer_orders = sorted(exact_orders, key=_customer_history_order_sort_key)
+    confirmed = bool(identity_key and customer_orders and identity.get("confidence") in {"high", "medium"})
+    order_count = len(customer_orders) if confirmed else 0
+    sequence = _customer_order_sequence(order, customer_orders) if confirmed else 0
+    historical_order_names = exact_order_names if confirmed else []
+    previous_order_names, previous_tag_values = (
+        _previous_trustpilot_history(order, customer_orders) if confirmed else ([], [])
+    )
+    confidence = identity.get("confidence") if confirmed else ("low" if excluded_weak_order_names else "unknown")
+    before_precision_names = _dedupe_order_names(exact_order_names + excluded_weak_order_names)
     return {
         "customer_history_order_count": order_count,
+        "customer_history_order_count_before_precision": len(before_precision_names),
         "customer_order_sequence_number": sequence,
         "customer_order_sequence_label": _customer_order_sequence_label(
             order_count,
@@ -7633,13 +8479,31 @@ def _customer_history_for_order(order, history_orders_by_identity):
             history_confirmed=confirmed,
         ),
         "historical_order_names": historical_order_names,
+        "customer_history_matched_order_names": historical_order_names,
+        "customer_history_match_method": identity.get("source") or "unavailable",
+        "customer_history_excluded_weak_matches": excluded_weak_order_names,
+        "customer_history_weak_match_count": len(excluded_weak_order_names),
+        "customer_history_exact_match_count": len(exact_order_names) if confirmed else 0,
         "previous_trustpilot_order_names": previous_order_names,
         "previous_trustpilot_tag_values": previous_tag_values,
         "customer_history_source": identity.get("source") or "unavailable",
-        "customer_history_confidence": identity.get("confidence") if confirmed else "unknown",
+        "customer_history_confidence": confidence,
         "customer_history_confirmed": confirmed,
         "customer_level_trustpilot_already_sent": bool(previous_order_names),
     }
+
+
+def _dedupe_customer_history_orders(orders):
+    result = []
+    seen = set()
+    for order in sorted(orders or [], key=_customer_history_order_sort_key):
+        order_name = _canonical_order_name((order or {}).get("order_name") or (order or {}).get("order_number"))
+        key = order_name or f"id:{(order or {}).get('id')}"
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(order)
+    return result
 
 
 def _customer_history_order_sort_key(order):
@@ -7738,15 +8602,25 @@ def _apply_queue_row_context(
         or source_row.get("customer_order_names")
         or []
     )
-    previous_trustpilot_order_names = _dedupe_order_names(
-        local_context.get("previous_trustpilot_order_names")
-        or source_row.get("previous_trustpilot_order_names")
-        or []
+    if not history_confirmed:
+        historical_order_names = []
+    previous_trustpilot_order_names = (
+        _dedupe_order_names(
+            local_context.get("previous_trustpilot_order_names")
+            or source_row.get("previous_trustpilot_order_names")
+            or []
+        )
+        if history_confirmed
+        else []
     )
-    previous_trustpilot_tag_values = _dedupe_text(
-        local_context.get("previous_trustpilot_tag_values")
-        or source_row.get("previous_trustpilot_tag_values")
-        or []
+    previous_trustpilot_tag_values = (
+        _dedupe_text(
+            local_context.get("previous_trustpilot_tag_values")
+            or source_row.get("previous_trustpilot_tag_values")
+            or []
+        )
+        if history_confirmed
+        else []
     )
     customer_history_source = (
         _safe_text(local_context.get("customer_history_source"), max_length=80)
@@ -7758,6 +8632,31 @@ def _apply_queue_row_context(
         or _safe_text(source_row.get("customer_history_confidence"), max_length=80)
         or "unknown"
     )
+    customer_history_match_method = (
+        _safe_text(local_context.get("customer_history_match_method"), max_length=80)
+        or _safe_text(source_row.get("customer_history_match_method"), max_length=80)
+        or customer_history_source
+    )
+    customer_history_before_precision = (
+        _int_or_zero(local_context.get("customer_history_order_count_before_precision"))
+        or _int_or_zero(source_row.get("customer_history_order_count_before_precision"))
+        or customer_order_count
+    )
+    customer_history_excluded_weak_matches = _dedupe_order_names(
+        local_context.get("customer_history_excluded_weak_matches")
+        or source_row.get("customer_history_excluded_weak_matches")
+        or []
+    )
+    customer_history_weak_match_count = (
+        _int_or_zero(local_context.get("customer_history_weak_match_count"))
+        or _int_or_zero(source_row.get("customer_history_weak_match_count"))
+    )
+    customer_history_exact_match_count = (
+        _int_or_zero(local_context.get("customer_history_exact_match_count"))
+        or _int_or_zero(source_row.get("customer_history_exact_match_count"))
+        or (len(historical_order_names) if history_confirmed else 0)
+    )
+    note_risk = _note_risk_from_sources(local_context, source_row, row)
     explicit_related_order_names = (
         _dedupe_order_names(source_row.get("explicit_related_order_names") or [])
         or _dedupe_order_names(fallback_related_orders or [])
@@ -7792,6 +8691,8 @@ def _apply_queue_row_context(
         prior_order_name = "#22621"
     if previous_trustpilot_order_names and not prior_order_name:
         prior_order_name = previous_trustpilot_order_names[0]
+    if not history_confirmed and prior_order_name and prior_order_name != order_name and action_state != "already_sent":
+        prior_order_name = ""
     trustpilot_sent = _queue_trustpilot_already_sent(
         action_state,
         source_row,
@@ -7817,9 +8718,15 @@ def _apply_queue_row_context(
             "customer_display_name": customer_display_name,
             "customer_order_count": customer_order_count,
             "customer_history_order_count": customer_order_count,
+            "customer_history_order_count_before_precision": customer_history_before_precision,
             "customer_order_sequence_number": sequence,
             "customer_order_sequence_label": sequence_label,
             "historical_order_names": historical_order_names,
+            "customer_history_matched_order_names": historical_order_names,
+            "customer_history_match_method": customer_history_match_method,
+            "customer_history_excluded_weak_matches": customer_history_excluded_weak_matches,
+            "customer_history_weak_match_count": customer_history_weak_match_count,
+            "customer_history_exact_match_count": customer_history_exact_match_count,
             "customer_order_names": historical_order_names[:5],
             "previous_trustpilot_order_names": previous_trustpilot_order_names,
             "previous_trustpilot_tag_values": previous_trustpilot_tag_values,
@@ -7827,10 +8734,16 @@ def _apply_queue_row_context(
             "customer_history_confidence": customer_history_confidence,
             "customer_history_confirmed": history_confirmed,
             "customer_level_trustpilot_already_sent": bool(previous_trustpilot_order_names),
+            "note_risk_detected": note_risk["note_risk_detected"],
+            "note_risk_field": note_risk["note_risk_field"],
+            "note_risk_fields": note_risk["note_risk_fields"],
+            "note_risk_keywords": note_risk["note_risk_keywords"],
+            "note_risk_reason": note_risk["note_risk_reason"],
             "customer_orders_display": _customer_orders_display(
                 customer_order_count,
                 sequence_label,
                 related_order_names,
+                history_confirmed=history_confirmed,
             ),
             "related_order_names": related_order_names,
             "explicit_related_order_names": explicit_related_order_names,
@@ -7915,7 +8828,9 @@ def _customer_order_sequence_label(order_count, sequence, repeat_detected=False,
     return "Order count unknown"
 
 
-def _customer_orders_display(order_count, sequence_label, related_order_names):
+def _customer_orders_display(order_count, sequence_label, related_order_names, history_confirmed=True):
+    if not history_confirmed:
+        return sequence_label or "Customer history not confirmed"
     related = [_safe_text(name, max_length=80) for name in related_order_names or [] if _safe_text(name, max_length=80)]
     if related:
         return "Related " + " / ".join(related)
@@ -8231,7 +9146,7 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "report_generated_at": datetime.now(timezone.utc).isoformat(),
         "task": "shopify_review_request_trustpilot_review_and_send_execute",
         "task_name": "shopify_review_request_trustpilot_review_and_send_execute",
-        "phase": "5.28H",
+        "phase": "5.28J",
         "mode": "admin_review_and_send",
         "execution_status": "blocked_not_started",
         "success": False,
@@ -8251,6 +9166,14 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "not_ready_count": queue["not_ready_count"],
         "gmail_scope_status": gmail_setup.get("scope_status") or "scope_missing",
         "gmail_compose_send_supported": bool(gmail_setup.get("gmail_compose_send_supported")),
+        "gmail_send_permission_ready": bool(gmail_setup.get("real_send_scope_available")),
+        "gmail_helper_ready": bool(gmail_setup.get("gmail_helper_ready")),
+        "direct_send_supported_by_current_helper": bool(
+            gmail_setup.get("admin_direct_send_helper_supported")
+        ),
+        "draft_send_supported_by_existing_locked_helper": bool(
+            gmail_setup.get("locked_draft_send_helper_available")
+        ),
         "gmail_api_call_performed": False,
         "gmail_draft_create_attempted": False,
         "gmail_draft_created": False,
@@ -8278,6 +9201,9 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "blocking_condition_count": 0,
         "blocking_status": "",
         "blocking_detail": "",
+        "blocked_reason": "",
+        "exact_user_message": "",
+        "send_readiness_diagnosis": {},
         "next_admin_action": "No email was sent. Review the blocker message.",
         "privacy_scan_summary": {},
         "report_paths": {
@@ -8287,7 +9213,175 @@ def _base_review_and_send_result(selected_order, admin_username, state):
     }
 
 
-def _runtime_review_send_blockers(candidate, gmail_setup):
+def _review_send_readiness_diagnosis(
+    target_order,
+    candidate,
+    gmail_setup,
+    candidate_found=False,
+    candidate_currently_eligible=False,
+    route_revalidation_blocker="",
+):
+    candidate = candidate or {}
+    gmail_blocker = _review_send_gmail_blocker(gmail_setup)
+    previous_trustpilot_order_names = _dedupe_order_names(
+        candidate.get("previous_trustpilot_order_names") or []
+    )
+    prior_trustpilot_found = bool(
+        previous_trustpilot_order_names
+        or candidate.get("customer_level_trustpilot_already_sent") is True
+        or candidate.get("prior_trustpilot_order_name")
+        or candidate.get("trustpilot_sent") is True
+        or candidate.get("action_state") == "already_sent"
+    )
+    route_blocked = bool(route_revalidation_blocker)
+    candidate_blocked = bool(candidate_found and not candidate_currently_eligible)
+    already_sent = bool(candidate.get("action_state") == "already_sent" or prior_trustpilot_found)
+    note_risk_found = candidate.get("note_risk_detected") is True
+    customer_history_confirmed = candidate.get("customer_history_confirmed") is True
+    customer_history_changed = bool(candidate_found and not customer_history_confirmed)
+
+    blocked_reason = ""
+    exact_user_message = ""
+    recommended_fix = ""
+    if not candidate_found:
+        blocked_reason = "candidate no longer eligible"
+        exact_user_message = "No email was sent. This order is no longer eligible."
+        recommended_fix = "Refresh the Review Requests page and re-run the local candidate scan if the order should still qualify."
+    elif route_blocked:
+        blocked_reason = "route/revalidation blocker"
+        exact_user_message = "No email was sent. Server-side revalidation blocked this order."
+        recommended_fix = "Review the server-side blocker before retrying Review & Send."
+    elif candidate_blocked:
+        blocked_reason = "candidate no longer eligible"
+        exact_user_message = "No email was sent. This order is no longer eligible."
+        recommended_fix = "Refresh the queue and review the current candidate status."
+    elif already_sent:
+        blocked_reason = "already sent"
+        exact_user_message = "No email was sent. Already sent Trustpilot to this customer."
+        recommended_fix = "Do not send another Trustpilot email for this customer unless a separate manual exception is approved."
+    elif note_risk_found:
+        blocked_reason = "risk blocker"
+        exact_user_message = f"No email was sent. {NOTE_RISK_REASON}."
+        recommended_fix = "Manually review the order notes or ticket history before any customer-facing email."
+    elif customer_history_changed:
+        blocked_reason = "customer history changed"
+        exact_user_message = "No email was sent. Customer history not confirmed."
+        recommended_fix = "Confirm repeat-customer history before retrying Review & Send."
+    elif gmail_blocker:
+        blocked_reason = _review_send_plain_blocked_reason(gmail_blocker["status"])
+        exact_user_message = gmail_blocker["detail"]
+        recommended_fix = _review_send_gmail_recommended_fix(gmail_blocker["status"])
+    else:
+        blocked_reason = "gmail helper not configured"
+        exact_user_message = "No email was sent. The Gmail send helper is not ready."
+        recommended_fix = "Enable a reviewed Gmail direct-send helper before allowing admin Review & Send to send real email."
+
+    return {
+        "target_order": _canonical_order_name(target_order),
+        "candidate_found": bool(candidate_found),
+        "candidate_currently_eligible": bool(candidate_currently_eligible),
+        "customer_history_confirmed": customer_history_confirmed,
+        "customer_history_changed": customer_history_changed,
+        "prior_trustpilot_found": prior_trustpilot_found,
+        "already_sent": already_sent,
+        "note_risk_found": note_risk_found,
+        "risk_blocker": note_risk_found,
+        "route_revalidation_blocker": _safe_text(route_revalidation_blocker, max_length=120),
+        "gmail_scope_status": gmail_setup.get("scope_status") or "scope_missing",
+        "gmail_scope_missing": (gmail_setup.get("scope_status") or "scope_missing") == "scope_missing",
+        "gmail_scope_compose_only": (gmail_setup.get("scope_status") == "gmail_compose_only"),
+        "gmail_scope_send_available": bool(gmail_setup.get("real_send_scope_available")),
+        "gmail_send_permission_ready": bool(gmail_setup.get("real_send_scope_available")),
+        "gmail_send_path_requires_gmail_send": True,
+        "gmail_helper_ready": bool(gmail_setup.get("gmail_helper_ready")),
+        "gmail_credentials_missing": not bool(gmail_setup.get("gmail_credentials_ready")),
+        "direct_send_supported_by_current_helper": bool(
+            gmail_setup.get("admin_direct_send_helper_supported")
+        ),
+        "draft_send_supported_by_existing_locked_helper": bool(
+            gmail_setup.get("locked_draft_send_helper_available")
+        ),
+        "blocked_reason": blocked_reason,
+        "exact_user_message": exact_user_message,
+        "recommended_fix": recommended_fix,
+        "gmail_api_call_performed": False,
+        "email_sent": False,
+        "shopify_write_performed": False,
+    }
+
+
+def _apply_review_send_diagnosis(result, diagnosis):
+    result["send_readiness_diagnosis"] = diagnosis
+    result["blocked_reason"] = diagnosis.get("blocked_reason", "")
+    result["exact_user_message"] = diagnosis.get("exact_user_message", "")
+    result["gmail_send_permission_ready"] = diagnosis.get("gmail_send_permission_ready") is True
+    result["gmail_helper_ready"] = diagnosis.get("gmail_helper_ready") is True
+    result["direct_send_supported_by_current_helper"] = (
+        diagnosis.get("direct_send_supported_by_current_helper") is True
+    )
+    result["draft_send_supported_by_existing_locked_helper"] = (
+        diagnosis.get("draft_send_supported_by_existing_locked_helper") is True
+    )
+
+
+def _review_send_plain_blocked_reason(status):
+    if status == "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send":
+        return "Gmail scope compose-only"
+    if status == "blocked_missing_gmail_send_scope":
+        return "Gmail scope missing"
+    if status == "blocked_gmail_credentials_missing":
+        return "Gmail credentials missing"
+    if status == "blocked_gmail_direct_send_helper_not_enabled":
+        return "Gmail helper not configured"
+    return "Gmail helper not configured"
+
+
+def _review_send_gmail_recommended_fix(status):
+    if status == "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send":
+        return (
+            "Grant gmail.send for direct admin sending, or build a separately reviewed "
+            "dynamic drafts.create plus drafts.send path before allowing compose-only sends."
+        )
+    if status == "blocked_missing_gmail_send_scope":
+        return "Configure Gmail send permission before retrying direct Review & Send."
+    if status == "blocked_gmail_credentials_missing":
+        return "Configure Gmail OAuth credentials and token files without exposing secret values."
+    return "Enable and review the Gmail direct-send helper before retrying."
+
+
+def _review_send_gmail_blocker(gmail_setup):
+    scope_status = gmail_setup.get("scope_status") or "scope_missing"
+    compose_only = scope_status == "gmail_compose_only" or (
+        gmail_setup.get("compose_scope_present") is True
+        and gmail_setup.get("real_send_scope_available") is not True
+    )
+    if compose_only:
+        return {
+            "status": "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send",
+            "detail": (
+                "No email was sent. Gmail currently has draft permission only; "
+                "direct send requires gmail.send permission."
+            ),
+        }
+    if gmail_setup.get("real_send_scope_available") is not True:
+        return {
+            "status": "blocked_missing_gmail_send_scope",
+            "detail": "No email was sent. Gmail send permission is missing; direct send requires gmail.send permission.",
+        }
+    if gmail_setup.get("gmail_credentials_ready") is not True:
+        return {
+            "status": "blocked_gmail_credentials_missing",
+            "detail": "No email was sent. Gmail credentials are missing.",
+        }
+    if gmail_setup.get("admin_direct_send_helper_supported") is not True:
+        return {
+            "status": "blocked_gmail_direct_send_helper_not_enabled",
+            "detail": "No email was sent. The Gmail send helper is not ready.",
+        }
+    return None
+
+
+def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
     blockers = []
     if not candidate.get("order") or candidate.get("action_state") != "review_send":
         blockers.append(
@@ -8330,20 +9424,16 @@ def _runtime_review_send_blockers(candidate, gmail_setup):
                 ),
             }
         )
-    if not gmail_setup.get("gmail_compose_send_supported"):
+    if candidate.get("note_risk_detected") is True:
         blockers.append(
             {
-                "status": "blocked_missing_gmail_compose_send_support",
-                "detail": "No email was sent. Gmail sending permission is not ready.",
+                "status": "blocked_note_risk_detected",
+                "detail": f"No email was sent. {NOTE_RISK_REASON}.",
             }
         )
-    if not gmail_setup.get("ready"):
-        blockers.append(
-            {
-                "status": "blocked_gmail_setup_not_ready",
-                "detail": "No email was sent. Gmail sending setup is not ready.",
-            }
-        )
+    gmail_blocker = _review_send_gmail_blocker(gmail_setup)
+    if gmail_blocker:
+        blockers.append(gmail_blocker)
     return blockers
 
 
@@ -8387,6 +9477,10 @@ def _finalize_review_and_send_result(result):
         result["blocking_status"] = result["blocking_conditions"][0].get("status", "")
     if not result.get("blocking_detail") and result.get("blocking_conditions"):
         result["blocking_detail"] = result["blocking_conditions"][0].get("detail", "")
+    if not result.get("exact_user_message"):
+        result["exact_user_message"] = result.get("blocking_detail", "")
+    if not result.get("blocked_reason") and result.get("blocking_status"):
+        result["blocked_reason"] = _review_send_plain_blocked_reason(result["blocking_status"])
     result["privacy_scan_summary"] = _review_send_privacy_scan(result)
     if not result["privacy_scan_summary"]["passed"] and not result.get("email_sent"):
         result["execution_status"] = "blocked_privacy_scan_failed"
@@ -8463,6 +9557,8 @@ def _render_review_and_send_html(payload):
     <tr><th>Selected customer</th><td>{escape(payload.get("selected_customer", ""))}</td></tr>
     <tr><th>Candidate verified</th><td>{escape(str(payload.get("candidate_verified") is True))}</td></tr>
     <tr><th>Gmail scope status</th><td><code>{escape(payload.get("gmail_scope_status", ""))}</code></td></tr>
+    <tr><th>Blocked reason</th><td>{escape(payload.get("blocked_reason", ""))}</td></tr>
+    <tr><th>User message</th><td>{escape(payload.get("exact_user_message", "") or payload.get("blocking_detail", ""))}</td></tr>
     <tr><th>Email sent</th><td>{escape(str(payload.get("email_sent") is True))}</td></tr>
     <tr><th>Next admin action</th><td>{escape(payload.get("next_admin_action", ""))}</td></tr>
   </tbody></table>
@@ -8550,6 +9646,8 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         env_loading_audit.get("scope_key_detected_in_os_environ") is True
         or env_loading_audit.get("scope_key_detected_in_dot_env") is True
     ) and gmail_compose_send_supported
+    credentials_ready = new_file_paths_ready or legacy_config_detected
+    gmail_helper_ready = dependencies_ready and credentials_ready
     ready = dependencies_ready and (new_config_ready or legacy_config_ready or env_scope_ready)
     required_scope = _safe_text(
         gmail_helper.get("required_scope_expected") or "https://www.googleapis.com/auth/gmail.send",
@@ -8565,8 +9663,8 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_value = "Permission needed"
         status_message = "Gmail permission is not configured yet."
     elif env_audit_status == "gmail_compose_scope_available_in_runner_env":
-        status_value = "Ready"
-        status_message = "Gmail draft permission is available for Review & Send."
+        status_value = "Draft only"
+        status_message = "Gmail draft permission is available, but direct Review & Send requires gmail.send."
     elif env_audit_status == "gmail_send_scope_available_in_runner_env":
         status_value = "Ready"
         status_message = "Gmail send permission is available. Final approval is still required before sending."
@@ -8583,8 +9681,8 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_value = "Permission needed"
         status_message = "Gmail permission is not configured yet."
     elif compose_scope_present and not real_send_scope_available:
-        status_value = "Ready"
-        status_message = "Gmail draft permission is available for Review & Send."
+        status_value = "Draft only"
+        status_message = "Gmail draft permission is available, but direct Review & Send requires gmail.send."
     elif real_send_scope_available:
         status_value = "Ready"
         status_message = "Gmail send permission is available. Final approval is still required before sending."
@@ -8601,6 +9699,10 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         "send_scope_present": send_scope_present,
         "broad_mail_scope_present": broad_mail_scope_present,
         "real_send_scope_available": real_send_scope_available,
+        "gmail_credentials_ready": credentials_ready,
+        "gmail_helper_ready": gmail_helper_ready,
+        "admin_direct_send_helper_supported": False,
+        "locked_draft_send_helper_available": True,
         "scope_status": (
             "gmail_compose_only"
             if compose_scope_present and not real_send_scope_available
@@ -8977,12 +10079,20 @@ def _plain_blocked_status(row):
 
 
 def _plain_blocked_reason(row):
+    if (row or {}).get("note_risk_detected") is True:
+        return NOTE_RISK_REASON
     text = " ".join(
         (
             _safe_text(row.get("status")),
             _safe_text(row.get("blocking_summary")),
+            _safe_text(row.get("reason")),
+            _safe_text(row.get("eligibility_reason_plain")),
         )
     )
+    if "aftersales/ticket note found" in text.lower() or "blocked_note_risk_detected" in text.lower():
+        return NOTE_RISK_REASON
+    if "customer history not confirmed" in text.lower():
+        return "Customer history not confirmed"
     label = _admin_status_label(text)
     if label and label != "-":
         return label

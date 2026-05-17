@@ -68,6 +68,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("report_status", "status"),
     },
     {
+        "key": "customer_history_precision_audit",
+        "label": "Customer history precision audit",
+        "filename": "shopify_review_request_customer_history_precision_audit.json",
+        "channel": "trustpilot",
+        "event_type": "duplicate_block",
+        "status_keys": ("report_status", "status"),
+    },
+    {
         "key": "customer_level_duplicate_audit",
         "label": "Customer-level Trustpilot duplicate audit",
         "filename": "shopify_review_request_customer_level_trustpilot_duplicate_audit.json",
@@ -226,6 +234,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "channel": "trustpilot",
         "event_type": "send_execute",
         "status_keys": ("execution_status", "report_status", "status"),
+    },
+    {
+        "key": "review_send_failure_audit",
+        "label": "Review & Send failure audit",
+        "filename": "shopify_review_request_review_send_failure_audit.json",
+        "channel": "trustpilot",
+        "event_type": "send_execute",
+        "status_keys": ("review_send_failure_audit_status", "report_status", "status"),
     },
     {
         "key": "trustpilot_tag_write_design_dry_run",
