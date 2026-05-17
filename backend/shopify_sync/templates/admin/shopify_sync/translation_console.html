@@ -3184,6 +3184,127 @@
               {% endif %}
             </details>
           {% endif %}
+          {% if all_languages_update_display.german_body_html_diagnostic.exists or all_languages_update_display.needs_review_rows or all_languages_update_display.option_mapping_audit.row_count %}
+            <details class="tw-shopify-update-details" open>
+              <summary>Remaining field diagnostics</summary>
+              {% if all_languages_update_display.german_body_html_diagnostic.exists %}
+                <h4>German product description blocker</h4>
+                <div class="tw-shopify-update-kv-grid">
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Exact blocker</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.blocker_category_label }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Forbidden phrase</div>
+                    <div class="tw-shopify-update-value">{% if all_languages_update_display.german_body_html_diagnostic.found_forbidden_phrases %}{{ all_languages_update_display.german_body_html_diagnostic.found_forbidden_phrases|join:", " }}{% else %}None detected{% endif %}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">HTML structure issue</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.html_structure_issue }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Link/image/video mismatch</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.link_image_video_mismatch }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Identity mismatch</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.identity_mismatch }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Empty/missing digest</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.empty_or_missing_digest }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card is-wide">
+                    <div class="tw-shopify-update-label">Plain reason</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.plain_reason }}</div>
+                  </div>
+                </div>
+              {% endif %}
+              {% if all_languages_update_display.needs_review_rows %}
+                <h4>Needs review rows</h4>
+                <div class="tw-editor-table-wrap">
+                  <table class="tw-results-table tw-shopify-diagnostic-table">
+                    <thead>
+                      <tr>
+                        <th>Locale</th>
+                        <th>Key</th>
+                        <th>Context</th>
+                        <th>Plain reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in all_languages_update_display.needs_review_rows %}
+                        <tr>
+                          <td>{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</td>
+                          <td>{{ row.key }}</td>
+                          <td>{{ row.context_label }}</td>
+                          <td>{{ row.plain_reason }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+              {% if all_languages_update_display.option_mapping_audit.row_count %}
+                <h4>Options mapping audit</h4>
+                <p class="tw-shopify-not-updated-note">{{ all_languages_update_display.option_mapping_audit.plain_summary }}</p>
+                <div class="tw-shopify-update-kv-grid">
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Option rows checked</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.row_count }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Safe mapping</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.mapping_safe_count }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Future update-ready</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.future_update_ready_count }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Still blocked</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.blocked_count }}</div>
+                  </div>
+                </div>
+                <div class="tw-editor-table-wrap">
+                  <table class="tw-results-table tw-shopify-diagnostic-table">
+                    <thead>
+                      <tr>
+                        <th>Locale</th>
+                        <th>Field</th>
+                        <th>resource_id</th>
+                        <th>key</th>
+                        <th>digest</th>
+                        <th>Option context</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in all_languages_update_display.option_mapping_audit.rows %}
+                        <tr>
+                          <td>{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</td>
+                          <td>{{ row.field_label }}</td>
+                          <td>{{ row.resource_id }}</td>
+                          <td>{{ row.key }}</td>
+                          <td>{{ row.digest }}</td>
+                          <td>{% if row.option_name %}{{ row.option_name }}{% endif %}{% if row.option_value %}: {{ row.option_value }}{% endif %}{% if row.option_position %} (option {{ row.option_position }}){% endif %}</td>
+                          <td>{{ row.future_update_ready_label }}. {{ row.plain_reason }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+              {% if all_languages_update_display.next_enablement_summary %}
+                <h4>Next fields that can be enabled</h4>
+                <ul class="tw-shopify-success-list">
+                  {% for item in all_languages_update_display.next_enablement_summary %}
+                    <li>{{ item.area }}: {{ item.status }} - {{ item.plain_reason }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </details>
+          {% endif %}
           <details class="tw-shopify-update-details">
           <summary>Update report details</summary>
           <h4>Per-language update summary</h4>

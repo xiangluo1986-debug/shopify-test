@@ -111,6 +111,22 @@ ALL_LANGUAGES_SAFE_FIELD_LABELS = {
     "meta_description": "SEO description",
     "body_html": "Product description",
 }
+ALL_LANGUAGES_OPTION_FIELD_LABELS = {
+    "option.name": "Product option name",
+    "option.value": "Product option value",
+}
+ALL_LANGUAGES_FORBIDDEN_PHRASE_LABELS = (
+    ("buy now", "buy now"),
+    ("shop now", "shop now"),
+    ("free shipping", "free shipping"),
+    ("ships worldwide", "ships worldwide"),
+    ("worldwide shipping", "worldwide shipping"),
+    ("made in china", "Made in China"),
+    ("mainland china", "mainland China"),
+    ("versand weltweit", "Versand weltweit"),
+    ("weltweiter versand", "Weltweiter Versand"),
+    ("lieferung weltweit", "Lieferung weltweit"),
+)
 ALL_LANGUAGES_NEUTRAL_REVIEW_CODES = {
     "already_translated_skipped",
     "draft_ready_for_manual_review",
@@ -778,6 +794,7 @@ def load_latest_all_languages_update_report(product_gid: str):
         payload["html_report_path"] = (
             payload.get("html_report_path") or report_path.with_suffix(".html").as_posix()
         )
+        _all_languages_backfill_entry_metadata_from_source_report(payload)
         _all_languages_recount_payload(payload)
         return _all_languages_attach_plain_language(payload)
     return {}
@@ -794,6 +811,96 @@ def _all_languages_update_report_search_dirs():
         seen.add(key)
         unique_dirs.append(report_dir)
     return unique_dirs
+
+
+def _all_languages_backfill_entry_metadata_from_source_report(payload: dict):
+    report_path = _all_languages_resolve_source_report_path(
+        payload.get("source_background_report_path", "")
+    )
+    if not report_path:
+        return
+    try:
+        source_report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(source_report, dict):
+        return
+    product_gid = str(payload.get("product_gid") or "").strip()
+    source_entries = [
+        _safe_write_entry_from_row(row, product_gid=product_gid)
+        for row in source_report.get("review_rows") or []
+        if isinstance(row, dict)
+    ]
+    by_entry_id = {
+        entry.get("entry_id"): entry
+        for entry in source_entries
+        if entry.get("entry_id")
+    }
+    by_identity = {
+        _all_languages_entry_metadata_identity(entry): entry
+        for entry in source_entries
+    }
+    for entry in payload.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        source_entry = by_entry_id.get(entry.get("entry_id")) or by_identity.get(
+            _all_languages_entry_metadata_identity(entry)
+        )
+        if source_entry:
+            _all_languages_merge_entry_metadata(entry, source_entry)
+
+
+def _all_languages_resolve_source_report_path(path_text: str):
+    path_text = str(path_text or "").strip()
+    if not path_text:
+        return None
+    candidates = [Path(path_text)]
+    if not Path(path_text).is_absolute():
+        candidates.append(Path("backend") / path_text)
+    for path in candidates:
+        if path.suffix.lower() != ".json":
+            continue
+        try:
+            if path.exists() and path.is_file():
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def _all_languages_entry_metadata_identity(entry: dict):
+    return (
+        _safe_write_canonical_locale(entry.get("locale")),
+        str(entry.get("resource_id") or "").strip(),
+        str(entry.get("key") or "").strip(),
+        str(entry.get("digest") or entry.get("source_digest") or "").strip(),
+    )
+
+
+def _all_languages_merge_entry_metadata(entry: dict, source_entry: dict):
+    metadata_keys = (
+        "source_key",
+        "shopify_key",
+        "source_digest",
+        "resource_type",
+        "resource_note",
+        "field_label",
+        "context_label",
+        "option_name",
+        "option_value",
+        "option_position",
+        "visible_product_option",
+        "translation_preview_available",
+        "shopify_update_mapping_ready",
+        "translation_preview_without_digest",
+        "selected_options",
+    )
+    for key in metadata_keys:
+        value = source_entry.get(key)
+        if value in (None, "", [], {}):
+            continue
+        if entry.get(key) in (None, "", [], {}):
+            entry[key] = value
 
 
 def validate_and_update_all_languages_to_shopify(
@@ -1692,6 +1799,7 @@ def _skipped_row(entry):
 def _safe_write_entry_from_row(row: dict, *, product_gid: str):
     field_key = _safe_write_field_key(row)
     group_key = _safe_write_group_key(row, field_key)
+    source_key = str(row.get("source_key") or row.get("resource_key") or field_key)
     source_value = _safe_write_text_value(
         row,
         "source_value",
@@ -1734,8 +1842,13 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
         "locale": locale,
         "resource_id": resource_id,
         "key": field_key,
-        "source_key": str(row.get("source_key") or row.get("resource_key") or field_key),
+        "source_key": source_key,
+        "shopify_key": source_key,
         "digest": digest,
+        "source_digest": digest,
+        "resource_type": row.get("resource_type", ""),
+        "resource_note": row.get("resource_note", ""),
+        "field_label": row.get("field_label", ""),
         "source_value": source_value,
         "existing_translation_value": existing_value,
         "existing_translation_present": existing_present,
@@ -1752,6 +1865,20 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
         or row.get("original_openai_translation", ""),
         "field_group": group_key,
         "context_label": row.get("context_label", ""),
+        "option_name": row.get("option_name", ""),
+        "option_value": row.get("option_value", ""),
+        "option_position": row.get("option_position", ""),
+        "visible_product_option": _safe_write_bool(row.get("visible_product_option")),
+        "translation_preview_available": _safe_write_bool(
+            row.get("translation_preview_available")
+        ),
+        "shopify_update_mapping_ready": _safe_write_bool(
+            row.get("shopify_update_mapping_ready")
+        ),
+        "translation_preview_without_digest": _safe_write_bool(
+            row.get("translation_preview_without_digest")
+        ),
+        "selected_options": row.get("selected_options", []),
         "validation_status": row.get("validation_status", ""),
         "seo_validation_status": row.get("seo_validation_status")
         or row.get("seo_status", ""),
@@ -2045,6 +2172,7 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
     entry = _safe_write_entry_from_row(row, product_gid=product_gid)
     field_key = entry.get("key", "")
     group_key = entry.get("field_group", "")
+    source_key = str(entry.get("source_key") or field_key)
     existing_value = str(entry.get("existing_translation_value") or "")
     proposed_value = str(entry.get("proposed_translation_value") or "")
     existing_current_same = (
@@ -2084,9 +2212,13 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
         "entry_id": entry.get("entry_id", ""),
         "locale": entry.get("locale", ""),
         "key": field_key,
+        "source_key": source_key,
+        "shopify_key": source_key,
         "field_group": group_key,
         "resource_id": entry.get("resource_id", ""),
+        "resource_type": entry.get("resource_type", ""),
         "digest": entry.get("digest", ""),
+        "source_digest": entry.get("source_digest") or entry.get("digest", ""),
         "source_value": entry.get("source_value", ""),
         "previous_translation_value": existing_value,
         "previous_translation_existed": bool(existing_value.strip()),
@@ -2109,6 +2241,22 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
         "rollback_needed": False,
         "restore_candidate": existing_value,
         "context_label": entry.get("context_label", ""),
+        "resource_note": entry.get("resource_note", ""),
+        "field_label": entry.get("field_label", ""),
+        "option_name": entry.get("option_name", ""),
+        "option_value": entry.get("option_value", ""),
+        "option_position": entry.get("option_position", ""),
+        "visible_product_option": bool(entry.get("visible_product_option")),
+        "translation_preview_available": bool(
+            entry.get("translation_preview_available")
+        ),
+        "shopify_update_mapping_ready": bool(
+            entry.get("shopify_update_mapping_ready")
+        ),
+        "translation_preview_without_digest": bool(
+            entry.get("translation_preview_without_digest")
+        ),
+        "selected_options": entry.get("selected_options", []),
         "validation_status": entry.get("validation_status", ""),
         "seo_validation_status": entry.get("seo_validation_status", ""),
         "seo_warning": entry.get("seo_warning", ""),
@@ -2668,11 +2816,14 @@ def _all_languages_attach_plain_language(payload: dict):
     entries = payload.get("entries") or []
     for entry in entries:
         _all_languages_refresh_entry_human_reasons(entry)
-        entry["field_label"] = _all_languages_field_label(entry.get("key", ""))
+        entry["field_label"] = entry.get("field_label") or _all_languages_field_label(
+            entry.get("key", "")
+        )
         entry["language_label"] = _all_languages_locale_label(entry.get("locale", ""))
         entry["confirmed_label"] = (
             "Yes" if _all_languages_entry_confirmed(entry) else "No"
         )
+        _all_languages_attach_entry_diagnostic_flags(entry)
     payload["status_label"] = _all_languages_status_label(payload)
     payload["result_message"] = _all_languages_result_message(payload)
     payload["shopify_update_label"] = (
@@ -2705,6 +2856,16 @@ def _all_languages_attach_plain_language(payload: dict):
     )
     payload["not_updated_explanation"] = _all_languages_not_updated_explanation(payload)
     payload["not_updated_breakdown"] = _all_languages_not_updated_breakdown(entries)
+    payload["german_body_html_diagnostic"] = (
+        _all_languages_german_body_html_diagnostic(entries)
+    )
+    payload["needs_review_rows"] = _all_languages_needs_review_rows(entries)
+    payload["option_mapping_audit"] = _all_languages_option_mapping_audit(entries)
+    payload["next_enablement_summary"] = _all_languages_next_enablement_summary(
+        entries,
+        payload.get("option_mapping_audit") or {},
+        payload.get("german_body_html_diagnostic") or {},
+    )
     payload["updated_entries"] = _all_languages_updated_entries_display(entries)
     payload["updated_field_labels"] = _all_languages_updated_field_labels(entries)
     payload["successful_locale_summaries"] = (
@@ -2826,9 +2987,413 @@ def _all_languages_not_updated_breakdown(entries: list[dict]):
             label = "Needs review before update."
         counts[label] = counts.get(label, 0) + 1
     return [
-        {"label": label, "count": count}
+        {
+            "label": label,
+            "count": count,
+            "plain_reason": _all_languages_not_updated_category_reason(label),
+        }
         for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _all_languages_not_updated_category_reason(label: str):
+    label = str(label or "")
+    if label == "Product description needs review before automatic Shopify update.":
+        return "The proposed product description needs manual review before it can be written."
+    if label == "Options need extra Shopify mapping.":
+        return "Option translations exist, but the current all-language writer does not yet write option resources."
+    if label == "Media alt text update is not enabled yet.":
+        return "Media alt translations exist, but automatic media-alt writes are not enabled."
+    if label == "Translation is empty.":
+        return "No proposed translation was generated for this field."
+    if label == "Needs review before update.":
+        return "This row is outside the automatic customer-facing write scope or needs manual review."
+    if label == "Already up to date.":
+        return "Shopify already has the same current value."
+    return label
+
+
+def _all_languages_attach_entry_diagnostic_flags(entry: dict):
+    if entry.get("field_group") != "options":
+        return
+    audit = _all_languages_option_mapping_row(entry)
+    entry["option_mapping_safe"] = audit.get("mapping_safe", False)
+    entry["option_future_update_ready"] = audit.get("future_update_ready", False)
+    entry["option_mapping_plain_reason"] = audit.get("plain_reason", "")
+
+
+def _all_languages_german_body_html_diagnostic(entries: list[dict]):
+    entry = next(
+        (
+            item
+            for item in entries or []
+            if _safe_write_canonical_locale(item.get("locale")) == "de"
+            and str(item.get("key") or "") == "body_html"
+        ),
+        None,
+    )
+    if not entry:
+        return {
+            "exists": False,
+            "plain_reason": "German product description was not found in this report.",
+            "blocker_category_label": "Other",
+            "blocker_categories": ["other"],
+        }
+    categories = _all_languages_body_html_blocker_categories(entry)
+    labels = [
+        _all_languages_body_html_blocker_label(category) for category in categories
+    ]
+    forbidden_phrases = _all_languages_forbidden_phrase_matches(
+        entry.get("proposed_translation_value", "")
+    )
+    primary = labels[0] if labels else "Other"
+    plain_reason = _all_languages_german_body_html_plain_reason(
+        entry,
+        categories,
+        forbidden_phrases,
+    )
+    return {
+        "exists": True,
+        "locale": "de",
+        "language_label": _all_languages_locale_label("de"),
+        "key": "body_html",
+        "field_label": _all_languages_field_label("body_html"),
+        "status": entry.get("status", ""),
+        "blocking_reason": entry.get("blocking_reason", ""),
+        "blocking_reasons": entry.get("blocking_reasons") or [],
+        "human_blocking_reasons": entry.get("human_blocking_reasons") or [],
+        "soft_warning_reasons": entry.get("soft_warning_reasons") or [],
+        "human_soft_warnings": entry.get("human_soft_warnings") or [],
+        "validation_status": entry.get("validation_status", ""),
+        "seo_validation_status": entry.get("seo_validation_status", ""),
+        "digest_present": bool(str(entry.get("digest") or "").strip()),
+        "proposed_translation_present": bool(
+            str(entry.get("proposed_translation_value") or "").strip()
+        ),
+        "blocker_categories": categories,
+        "blocker_category_labels": labels,
+        "blocker_category_label": primary,
+        "html_structure_issue": "html_structure_issue" in categories,
+        "link_image_video_mismatch": "link_image_video_mismatch" in categories,
+        "forbidden_phrase": "forbidden_phrase" in categories,
+        "identity_mismatch": "identity_mismatch" in categories,
+        "empty_or_missing_digest": "empty_or_missing_digest" in categories,
+        "other": "other" in categories,
+        "found_forbidden_phrases": forbidden_phrases,
+        "plain_reason": plain_reason,
+    }
+
+
+def _all_languages_body_html_blocker_categories(entry: dict):
+    reasons = set(entry.get("blocking_reasons") or [])
+    codes = set(_all_languages_entry_review_codes(entry))
+    categories = []
+    if (
+        "blocked_body_html_structure_broken" in reasons
+        or "body_html_structure_broken" in codes
+    ):
+        categories.append("html_structure_issue")
+    if (
+        "blocked_html_media_or_link_tag_broken" in reasons
+        or "html_media_or_link_tag_broken" in codes
+    ):
+        categories.append("link_image_video_mismatch")
+    if (
+        "blocked_forbidden_phrase_detected" in reasons
+        or "forbidden_marketing_or_origin_phrase" in codes
+        or "forbidden_marketing_or_shipping_phrase" in codes
+        or _all_languages_forbidden_phrase_matches(
+            entry.get("proposed_translation_value", "")
+        )
+    ):
+        categories.append("forbidden_phrase")
+    if (
+        "blocked_identity_review_required" in reasons
+        or "product_identity_mismatch" in codes
+        or entry.get("product_identity_mismatch")
+    ):
+        categories.append("identity_mismatch")
+    if (
+        "blocked_proposed_translation_empty" in reasons
+        or "blocked_digest_missing" in reasons
+        or not str(entry.get("proposed_translation_value") or "").strip()
+        or not str(entry.get("digest") or "").strip()
+    ):
+        categories.append("empty_or_missing_digest")
+    if not categories and entry.get("status") in {"blocked", "write_failed"}:
+        categories.append("other")
+    return _unique_strings(categories)
+
+
+def _all_languages_body_html_blocker_label(category: str):
+    labels = {
+        "html_structure_issue": "HTML structure issue",
+        "link_image_video_mismatch": "Link/image/video mismatch",
+        "forbidden_phrase": "Forbidden phrase",
+        "identity_mismatch": "Identity mismatch",
+        "empty_or_missing_digest": "Empty translation or missing digest",
+        "other": "Other",
+    }
+    return labels.get(category, "Other")
+
+
+def _all_languages_german_body_html_plain_reason(
+    entry: dict,
+    categories: list[str],
+    forbidden_phrases: list[str],
+):
+    if "forbidden_phrase" in categories:
+        phrase_text = (
+            f": {', '.join(forbidden_phrases)}" if forbidden_phrases else ""
+        )
+        return (
+            "German product description was blocked for forbidden marketing, "
+            f"shipping, or origin wording{phrase_text}."
+        )
+    if "html_structure_issue" in categories:
+        return "German product description was blocked because the HTML structure did not match the source."
+    if "link_image_video_mismatch" in categories:
+        return "German product description was blocked because links, images, or video tags did not match the source."
+    if "identity_mismatch" in categories:
+        return "German product description was blocked because the product/model identity check failed."
+    if "empty_or_missing_digest" in categories:
+        return "German product description was blocked because the translation or Shopify digest was missing."
+    return (
+        entry.get("blocking_reason")
+        or "German product description was blocked for manual review."
+    )
+
+
+def _all_languages_forbidden_phrase_matches(value: str):
+    text = str(value or "").lower()
+    matches = []
+    for needle, label in ALL_LANGUAGES_FORBIDDEN_PHRASE_LABELS:
+        if needle in text and label not in matches:
+            matches.append(label)
+    return matches
+
+
+def _all_languages_needs_review_rows(entries: list[dict]):
+    rows = []
+    for entry in entries or []:
+        if entry.get("status") != "blocked":
+            continue
+        labels = entry.get("human_blocking_reasons") or []
+        first_label = str(
+            labels[0] if labels else entry.get("blocking_reason") or ""
+        ).strip()
+        if first_label != "Needs review before update.":
+            continue
+        rows.append(
+            {
+                "locale": entry.get("locale", ""),
+                "language_label": _all_languages_locale_label(entry.get("locale", "")),
+                "key": entry.get("key", ""),
+                "field_label": entry.get("field_label")
+                or _all_languages_field_label(entry.get("key", "")),
+                "context_label": entry.get("context_label", ""),
+                "field_group": entry.get("field_group", ""),
+                "resource_id": entry.get("resource_id", ""),
+                "digest": entry.get("digest", ""),
+                "plain_reason": _all_languages_needs_review_plain_reason(entry),
+                "blocking_reasons": entry.get("blocking_reasons") or [],
+            }
+        )
+    return rows
+
+
+def _all_languages_needs_review_plain_reason(entry: dict):
+    group_key = str(entry.get("field_group") or "")
+    key = str(entry.get("key") or "")
+    proposed_value = str(entry.get("proposed_translation_value") or "").strip()
+    if group_key == "technical_metafields":
+        if not proposed_value:
+            return "Technical/internal metafield; no automatic translation was generated, so it stays manual-review only."
+        return "Technical/internal metafield; automatic Shopify update is not enabled."
+    if group_key in {"important_metafields", "metafields"}:
+        return "Metafield update support needs explicit mapping before Shopify writes are safe."
+    if key == "product_type":
+        return "Product type is outside the current automatic all-language write scope."
+    if key == "handle":
+        return "URL handle updates require manual review and are outside the automatic write scope."
+    if not proposed_value:
+        return "No proposed translation was generated for this row."
+    return entry.get("blocking_reason") or "Manual review is required before update."
+
+
+def _all_languages_option_mapping_audit(entries: list[dict]):
+    rows = [
+        _all_languages_option_mapping_row(entry)
+        for entry in entries or []
+        if entry.get("field_group") == "options"
+    ]
+    mapping_safe_count = sum(1 for row in rows if row.get("mapping_safe"))
+    future_ready_count = sum(1 for row in rows if row.get("future_update_ready"))
+    blocked_count = len(rows) - future_ready_count
+    all_future_ready = bool(rows) and future_ready_count == len(rows)
+    if all_future_ready:
+        plain_summary = (
+            f"Options mapping is safe for {future_ready_count} row(s). "
+            "They are future update-ready, but the current task did not write options."
+        )
+    elif rows:
+        plain_summary = (
+            f"Options mapping is incomplete for {blocked_count} of {len(rows)} row(s); "
+            "keep option writes blocked until those rows have resource ID, key, digest, and option context."
+        )
+    else:
+        plain_summary = "No option rows were found in this report."
+    return {
+        "row_count": len(rows),
+        "mapping_safe_count": mapping_safe_count,
+        "future_update_ready_count": future_ready_count,
+        "blocked_count": blocked_count,
+        "all_future_update_ready": all_future_ready,
+        "plain_summary": plain_summary,
+        "rows": rows,
+    }
+
+
+def _all_languages_option_mapping_row(entry: dict):
+    display_key = str(entry.get("key") or "")
+    shopify_key = _all_languages_option_shopify_key(entry)
+    resource_id = str(entry.get("resource_id") or "").strip()
+    digest = str(entry.get("digest") or entry.get("source_digest") or "").strip()
+    option_name = str(entry.get("option_name") or "").strip()
+    option_value = str(entry.get("option_value") or "").strip()
+    context_label = str(entry.get("context_label") or "").strip()
+    missing = []
+    if not resource_id or resource_id.startswith("visible://"):
+        missing.append("resource_id")
+    if shopify_key not in {"name", "value"}:
+        missing.append("key")
+    if not digest or entry.get("translation_preview_without_digest"):
+        missing.append("digest")
+    if display_key == "option.name" and not (option_name or context_label):
+        missing.append("option name context")
+    if display_key == "option.value" and not (
+        (option_name and option_value) or context_label
+    ):
+        missing.append("option value context")
+    mapping_safe = not missing
+    draft_ready = (
+        str(entry.get("validation_status") or "") == "draft_ready_for_manual_review"
+        and str(entry.get("seo_validation_status") or "") in {"", "seo_ready"}
+        and bool(str(entry.get("proposed_translation_value") or "").strip())
+        and not entry.get("draft_blocked")
+        and not entry.get("product_identity_mismatch")
+    )
+    future_update_ready = mapping_safe and draft_ready
+    if future_update_ready:
+        plain_reason = (
+            "Mapping exists: resource_id, Shopify key, digest, and option context are present."
+        )
+    elif missing:
+        plain_reason = f"Keep blocked: missing {', '.join(missing)}."
+    else:
+        plain_reason = "Keep blocked: translation draft still needs review."
+    return {
+        "locale": entry.get("locale", ""),
+        "language_label": _all_languages_locale_label(entry.get("locale", "")),
+        "field": display_key,
+        "field_label": ALL_LANGUAGES_OPTION_FIELD_LABELS.get(
+            display_key,
+            entry.get("field_label") or _all_languages_field_label(display_key),
+        ),
+        "resource_id": resource_id,
+        "key": shopify_key,
+        "display_key": display_key,
+        "digest": digest,
+        "option_name": option_name,
+        "option_value": option_value,
+        "option_position": entry.get("option_position", ""),
+        "context_label": context_label,
+        "resource_note": entry.get("resource_note", ""),
+        "mapping_safe": mapping_safe,
+        "future_update_ready": future_update_ready,
+        "mapping_status_label": "Safe mapping" if mapping_safe else "Mapping incomplete",
+        "future_update_ready_label": (
+            "Future update-ready" if future_update_ready else "Keep blocked"
+        ),
+        "missing_mapping_parts": missing,
+        "validation_status": entry.get("validation_status", ""),
+        "seo_validation_status": entry.get("seo_validation_status", ""),
+        "plain_reason": plain_reason,
+    }
+
+
+def _all_languages_option_shopify_key(entry: dict):
+    source_key = str(entry.get("source_key") or entry.get("shopify_key") or "").strip()
+    if source_key:
+        return source_key
+    display_key = str(entry.get("key") or "")
+    if display_key in {"option.name", "option.value"}:
+        return "name"
+    return display_key
+
+
+def _all_languages_next_enablement_summary(
+    entries: list[dict],
+    option_audit: dict,
+    german_body_html_diagnostic: dict,
+):
+    rows = []
+    if option_audit.get("row_count"):
+        if option_audit.get("all_future_update_ready"):
+            rows.append(
+                {
+                    "area": "Product options",
+                    "status": "Future update-ready",
+                    "plain_reason": option_audit.get("plain_summary", ""),
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "area": "Product options",
+                    "status": "Keep blocked",
+                    "plain_reason": option_audit.get("plain_summary", ""),
+                }
+            )
+    if german_body_html_diagnostic.get("exists"):
+        if german_body_html_diagnostic.get("forbidden_phrase"):
+            rows.append(
+                {
+                    "area": "German product description",
+                    "status": "Manual review first",
+                    "plain_reason": (
+                        "Can be retried after removing the forbidden phrase and rechecking the draft."
+                    ),
+                }
+            )
+        elif german_body_html_diagnostic.get("status") == "written_verified":
+            rows.append(
+                {
+                    "area": "German product description",
+                    "status": "Already updated",
+                    "plain_reason": "No enablement needed for this field.",
+                }
+            )
+    media_entries = [
+        entry for entry in entries or [] if entry.get("field_group") in {"media", "media_alt_text"}
+    ]
+    if media_entries:
+        mapped_count = sum(
+            1
+            for entry in media_entries
+            if entry.get("resource_id") and entry.get("digest")
+        )
+        rows.append(
+            {
+                "area": "Media alt text",
+                "status": "Feature not enabled",
+                "plain_reason": (
+                    f"{mapped_count} media row(s) have resource ID and digest, "
+                    "but automatic media-alt writes are still disabled."
+                ),
+            }
+        )
+    return rows
 
 
 def _all_languages_successful_locale_summaries(entries: list[dict]):
@@ -2931,6 +3496,8 @@ def _all_languages_entry_confirmed(entry: dict):
 
 def _all_languages_field_label(field: str):
     field = str(field or "")
+    if field in ALL_LANGUAGES_OPTION_FIELD_LABELS:
+        return ALL_LANGUAGES_OPTION_FIELD_LABELS[field]
     return ALL_LANGUAGES_SAFE_FIELD_LABELS.get(
         field,
         field.replace("_", " ").strip().capitalize() or "Field",
@@ -4454,6 +5021,7 @@ def _render_all_languages_update_html(payload: dict):
         _real_write_error_row(error)
         for error in payload.get("sanitized_errors", [])
     ) or "<tr><td colspan='3'>No sanitized errors recorded</td></tr>"
+    diagnostic_html = _all_languages_update_diagnostic_html(payload)
     return f"""<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>All Languages Shopify Translation Update Audit</title></head>
@@ -4473,6 +5041,7 @@ def _render_all_languages_update_html(payload: dict):
     <thead><tr><th>Field</th><th>Checked Items</th><th>Raw Ready Count</th><th>Updated in Shopify</th><th>Confirmed After Update</th><th>Already Up To Date</th><th>Not Updated</th><th>Review Notes</th><th>Failed</th></tr></thead>
     <tbody>{field_rows}</tbody>
   </table>
+  {diagnostic_html}
   <h2>Entries</h2>
   <table border="1" cellspacing="0" cellpadding="6">
     <thead><tr><th>Locale</th><th>Field</th><th>Proposed value</th><th>Confirmed</th></tr></thead>
@@ -4491,6 +5060,100 @@ def _render_all_languages_update_html(payload: dict):
 </body>
 </html>
 """
+
+
+def _all_languages_update_diagnostic_html(payload: dict):
+    german = payload.get("german_body_html_diagnostic") or {}
+    needs_review_rows = "\n".join(
+        _all_languages_needs_review_html_row(row)
+        for row in payload.get("needs_review_rows", [])
+    ) or "<tr><td colspan='4'>No generic Needs review rows</td></tr>"
+    option_audit = payload.get("option_mapping_audit") or {}
+    option_rows = "\n".join(
+        _all_languages_option_mapping_html_row(row)
+        for row in option_audit.get("rows", [])
+    ) or "<tr><td colspan='8'>No option rows</td></tr>"
+    next_rows = "\n".join(
+        _all_languages_next_enablement_html_row(row)
+        for row in payload.get("next_enablement_summary", [])
+    ) or "<tr><td colspan='3'>No next enablement candidates</td></tr>"
+    german_phrases = ", ".join(german.get("found_forbidden_phrases") or [])
+    return f"""
+  <h2>Plain-Language Diagnostics</h2>
+  <h3>German Body HTML</h3>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <tbody>
+      <tr><th>Blocker</th><td>{escape(str(german.get('blocker_category_label', '')))}</td></tr>
+      <tr><th>Plain Reason</th><td>{escape(str(german.get('plain_reason', '')))}</td></tr>
+      <tr><th>Forbidden Phrase(s)</th><td>{escape(german_phrases or 'None detected')}</td></tr>
+      <tr><th>HTML Structure Issue</th><td>{escape(str(german.get('html_structure_issue', False)))}</td></tr>
+      <tr><th>Link/Image/Video Mismatch</th><td>{escape(str(german.get('link_image_video_mismatch', False)))}</td></tr>
+      <tr><th>Identity Mismatch</th><td>{escape(str(german.get('identity_mismatch', False)))}</td></tr>
+      <tr><th>Empty/Missing Digest</th><td>{escape(str(german.get('empty_or_missing_digest', False)))}</td></tr>
+    </tbody>
+  </table>
+  <h3>Needs Review Rows</h3>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Locale</th><th>Key</th><th>Context</th><th>Plain Reason</th></tr></thead>
+    <tbody>{needs_review_rows}</tbody>
+  </table>
+  <h3>Option Mapping Audit</h3>
+  <p>{escape(str(option_audit.get('plain_summary', '')))}</p>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Locale</th><th>Field</th><th>Resource ID</th><th>Key</th><th>Digest</th><th>Option Context</th><th>Mapping</th><th>Future Status</th></tr></thead>
+    <tbody>{option_rows}</tbody>
+  </table>
+  <h3>Next Enablement</h3>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Area</th><th>Status</th><th>Reason</th></tr></thead>
+    <tbody>{next_rows}</tbody>
+  </table>
+"""
+
+
+def _all_languages_needs_review_html_row(row):
+    return (
+        "<tr>"
+        f"<td>{escape(str(row.get('language_label') or row.get('locale') or ''))}</td>"
+        f"<td>{escape(str(row.get('key', '')))}</td>"
+        f"<td>{escape(str(row.get('context_label', '')))}</td>"
+        f"<td>{escape(str(row.get('plain_reason', '')))}</td>"
+        "</tr>"
+    )
+
+
+def _all_languages_option_mapping_html_row(row):
+    context = " | ".join(
+        str(part)
+        for part in (
+            row.get("option_name", ""),
+            row.get("option_value", ""),
+            row.get("context_label", ""),
+        )
+        if str(part or "").strip()
+    )
+    return (
+        "<tr>"
+        f"<td>{escape(str(row.get('language_label') or row.get('locale') or ''))}</td>"
+        f"<td>{escape(str(row.get('field_label') or row.get('field') or ''))}</td>"
+        f"<td>{escape(str(row.get('resource_id', '')))}</td>"
+        f"<td>{escape(str(row.get('key', '')))}</td>"
+        f"<td>{escape(str(row.get('digest', '')))}</td>"
+        f"<td>{escape(context)}</td>"
+        f"<td>{escape(str(row.get('mapping_status_label', '')))}</td>"
+        f"<td>{escape(str(row.get('future_update_ready_label', '')))}</td>"
+        "</tr>"
+    )
+
+
+def _all_languages_next_enablement_html_row(row):
+    return (
+        "<tr>"
+        f"<td>{escape(str(row.get('area', '')))}</td>"
+        f"<td>{escape(str(row.get('status', '')))}</td>"
+        f"<td>{escape(str(row.get('plain_reason', '')))}</td>"
+        "</tr>"
+    )
 
 
 def _all_languages_update_entry_row(entry):
