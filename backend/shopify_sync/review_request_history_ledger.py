@@ -456,7 +456,7 @@ def _events_from_report(report):
     event_type = report["event_type"]
     events = [_event_from_mapping(report, data, event_type, "report_summary")]
 
-    if key in {"candidate_scan", "next_candidate_scan"}:
+    if key in {"candidate_scan", "next_candidate_scan", "last_60_days_candidate_scan"}:
         events.extend(_candidate_scan_events(report))
     elif key == "customer_level_duplicate_audit":
         events.extend(_duplicate_audit_events(report))
@@ -517,6 +517,7 @@ def _candidate_scan_events(report):
     for list_key, section in (
         ("ready_candidate_queue", "ready_candidate_queue"),
         ("repeat_customer_candidates", "repeat_customer_candidates"),
+        ("review_queue_candidates", "review_queue_candidates"),
     ):
         value = data.get(list_key)
         if not isinstance(value, list):

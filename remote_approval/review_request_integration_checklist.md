@@ -157,6 +157,22 @@ Phase 0.2 automation decision:
   only, no Gmail draft create/send/delete, no Shopify write/tag change, no
   external review API call, and no tracking token or redirect.
 
+#### Phase 5.28G Review Queue Batch Limit
+
+- [x] Keep the last-60-days candidate scan broad and report the full eligible
+  candidate total.
+- [x] Add a separate Trustpilot review queue layer for the admin approval page.
+- [x] Limit the visible review batch to 20 candidates by default.
+- [x] Sort the review batch by most recent delivered/updated/created date,
+  clean tags, merge/related ambiguity, duplicate risk, and order number
+  descending.
+- [x] Include `review_queue_rank`, `visible_in_review_batch`, and
+  `hidden_reason` diagnostics for eligible candidates, including #22530 and
+  #22562 when present in the candidate report.
+- [x] Keep the phase scan/UI/report only: no Gmail API, no email send, no
+  Shopify write, no Shopify mutation, no external review API, and no raw email
+  output.
+
 ### Shopify Admin API Tag Permissions
 
 - [ ] Confirm the app has the required `write_orders` scope before any order tag

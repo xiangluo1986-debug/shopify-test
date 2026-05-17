@@ -124,7 +124,7 @@ def _run_django_local_audit() -> dict:
             "    tags_summary = ', '.join(tags) if tags else ('Shopify response had no order tags' if tag_data_available else 'Shopify tag data not loaded')",
             "    return {'order_name': order_name, 'found': True, 'matched_order_name': row.get('order_name') or '', 'local_order_id': row.get('id') or '', 'tag_field_data_available': tag_data_available, 'tag_field_value_present': bool(str(raw_tags or '').strip()), 'tags': tags, 'tags_summary': tags_summary, 'tag_data_missing_source': missing_source, 'review_request_tag_detected': has_alias(tags, REVIEW_ALIASES), 'matched_review_request_tag_value': matched_alias(tags, REVIEW_ALIASES), 'delivered_tag_detected': has_alias(tags, DELIVERED_ALIASES), 'trustpilot_sent_tag_detected': has_alias(tags, TRUSTPILOT_ALIASES)}",
             "scan = build_review_request_last_60_days_candidate_scan_report({})",
-            "payload = {'timestamp': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(), 'task': 'shopify_review_request_order_tags_persistence_audit', 'task_name': 'shopify_review_request_order_tags_persistence_audit', 'phase': '5.28F', 'mode': 'dry-run-local-order-tags-persistence-audit', 'command_label': 'shopify_review_request_order_tags_persistence_audit_local_only', 'report_status': 'order_tags_persistence_audit_ready', 'success': True, 'selected_local_tag_field': 'ShopifyOrder.shopify_tags', 'model_tag_field_exists': model_tag_field_exists, 'database_tag_field_exists': db_tag_field_exists, 'order_22530': lookup_order('#22530'), 'order_22562': lookup_order('#22562'), 'order_22530_diagnosis': scan.get('order_22530_diagnosis') or {}, 'eligible_candidate_count_after_tag_availability': int(scan.get('eligible_candidate_count') or 0), 'blocked_count_after_tag_availability': int(scan.get('blocked_count') or 0), 'scan_source': scan.get('scan_source', ''), 'coverage_warnings': scan.get('coverage_warnings') or []}",
+            "payload = {'timestamp': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(), 'task': 'shopify_review_request_order_tags_persistence_audit', 'task_name': 'shopify_review_request_order_tags_persistence_audit', 'phase': '5.28G', 'mode': 'dry-run-local-order-tags-persistence-audit', 'command_label': 'shopify_review_request_order_tags_persistence_audit_local_only', 'report_status': 'order_tags_persistence_audit_ready', 'success': True, 'selected_local_tag_field': 'ShopifyOrder.shopify_tags', 'model_tag_field_exists': model_tag_field_exists, 'database_tag_field_exists': db_tag_field_exists, 'order_22530': lookup_order('#22530'), 'order_22562': lookup_order('#22562'), 'order_22530_diagnosis': scan.get('order_22530_diagnosis') or {}, 'order_22562_diagnosis': scan.get('order_22562_diagnosis') or {}, 'eligible_candidate_count_after_tag_availability': int(scan.get('eligible_candidate_count') or 0), 'eligible_candidate_count_total': int(scan.get('eligible_candidate_count_total') or scan.get('eligible_candidate_count') or 0), 'review_queue_batch_size': int(scan.get('review_queue_batch_size') or 20), 'review_queue_visible_count': int(scan.get('review_queue_visible_count') or 0), 'review_queue_overflow_count': int(scan.get('review_queue_overflow_count') or 0), 'review_queue_sort_order': scan.get('review_queue_sort_order') or [], 'review_queue_candidates': scan.get('review_queue_candidates') or [], 'blocked_count_after_tag_availability': int(scan.get('blocked_count') or 0), 'scan_source': scan.get('scan_source', ''), 'coverage_warnings': scan.get('coverage_warnings') or []}",
             f"print('{JSON_BEGIN}')",
             "print(json.dumps(payload, ensure_ascii=False, sort_keys=True))",
             f"print('{JSON_END}')",
@@ -165,7 +165,7 @@ def _fallback_payload(result: dict) -> dict:
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28F",
+        "phase": "5.28G",
         "mode": "dry-run-local-order-tags-persistence-audit-fallback",
         "command_label": COMMAND_LABEL,
         "report_status": "blocked_order_tags_persistence_audit_failed",
@@ -179,9 +179,27 @@ def _fallback_payload(result: dict) -> dict:
             "order_name": "#22530",
             "found_in_local_shopify_order": False,
             "tag_data_available": False,
+            "review_queue_rank": 0,
+            "visible_in_review_batch": False,
+            "hidden_reason": "not_scanned",
             "message": "Local Django audit failed before #22530 tag persistence could be checked.",
         },
+        "order_22562_diagnosis": {
+            "order_name": "#22562",
+            "found_in_local_shopify_order": False,
+            "tag_data_available": False,
+            "review_queue_rank": 0,
+            "visible_in_review_batch": False,
+            "hidden_reason": "not_scanned",
+            "message": "Local Django audit failed before #22562 tag persistence could be checked.",
+        },
         "eligible_candidate_count_after_tag_availability": 0,
+        "eligible_candidate_count_total": 0,
+        "review_queue_batch_size": 20,
+        "review_queue_visible_count": 0,
+        "review_queue_overflow_count": 0,
+        "review_queue_sort_order": [],
+        "review_queue_candidates": [],
         "blocked_count_after_tag_availability": 0,
         "scan_source": "unavailable",
         "coverage_warnings": ["order_tags_persistence_audit_failed"],
@@ -222,7 +240,7 @@ def _sqlite_fallback_payload(result: dict) -> dict:
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28F",
+        "phase": "5.28G",
         "mode": "dry-run-local-order-tags-persistence-audit-sqlite-fallback",
         "command_label": COMMAND_LABEL,
         "report_status": "order_tags_persistence_audit_ready_sqlite_fallback",
@@ -233,7 +251,16 @@ def _sqlite_fallback_payload(result: dict) -> dict:
         "order_22530": _sqlite_order_audit("#22530", rows, db_tag_field_exists),
         "order_22562": _sqlite_order_audit("#22562", rows, db_tag_field_exists),
         "order_22530_diagnosis": scan.get("order_22530_diagnosis") or {},
+        "order_22562_diagnosis": scan.get("order_22562_diagnosis") or {},
         "eligible_candidate_count_after_tag_availability": int(scan.get("eligible_candidate_count") or 0),
+        "eligible_candidate_count_total": int(
+            scan.get("eligible_candidate_count_total") or scan.get("eligible_candidate_count") or 0
+        ),
+        "review_queue_batch_size": int(scan.get("review_queue_batch_size") or 20),
+        "review_queue_visible_count": int(scan.get("review_queue_visible_count") or 0),
+        "review_queue_overflow_count": int(scan.get("review_queue_overflow_count") or 0),
+        "review_queue_sort_order": scan.get("review_queue_sort_order") or [],
+        "review_queue_candidates": scan.get("review_queue_candidates") or [],
         "blocked_count_after_tag_availability": int(scan.get("blocked_count") or 0),
         "scan_source": scan.get("scan_source", "sqlite_fallback_no_scan_report"),
         "coverage_warnings": scan.get("coverage_warnings") or ["django_audit_unavailable_sqlite_fallback_used"],
@@ -457,6 +484,14 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "eligible_candidate_count_after_tag_availability": int(
             payload.get("eligible_candidate_count_after_tag_availability") or 0
         ),
+        "eligible_candidate_count_total": int(
+            payload.get("eligible_candidate_count_total")
+            or payload.get("eligible_candidate_count_after_tag_availability")
+            or 0
+        ),
+        "review_queue_batch_size": int(payload.get("review_queue_batch_size") or 20),
+        "review_queue_visible_count": int(payload.get("review_queue_visible_count") or 0),
+        "review_queue_overflow_count": int(payload.get("review_queue_overflow_count") or 0),
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "gmail_api_call_performed": False,
@@ -482,6 +517,9 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"#22530 review request tag detected: {order_22530.get('review_request_tag_detected') is True}\n"
         f"#22562 tags: {order_22562.get('tags_summary', '')}\n"
         f"Eligible candidates after tag availability: {payload.get('eligible_candidate_count_after_tag_availability', 0)}\n"
+        f"Review batch: {payload.get('review_queue_visible_count', 0)} of "
+        f"{payload.get('eligible_candidate_count_total') or payload.get('eligible_candidate_count_after_tag_availability', 0)} "
+        f"(batch size {payload.get('review_queue_batch_size', 20)}, overflow {payload.get('review_queue_overflow_count', 0)})\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"
         "Choose next step:\n"
@@ -518,6 +556,9 @@ def _render_html(payload: dict) -> str:
     <tr><th>#22562 tags summary</th><td>{escape(str(order_22562.get("tags_summary", "")))}</td></tr>
     <tr><th>#22562 review request tag detected</th><td>{escape(str(order_22562.get("review_request_tag_detected") is True))}</td></tr>
     <tr><th>Eligible candidate count</th><td>{escape(str(payload.get("eligible_candidate_count_after_tag_availability", 0)))}</td></tr>
+    <tr><th>Review queue batch size</th><td>{escape(str(payload.get("review_queue_batch_size", 20)))}</td></tr>
+    <tr><th>Review queue visible count</th><td>{escape(str(payload.get("review_queue_visible_count", 0)))}</td></tr>
+    <tr><th>Review queue overflow count</th><td>{escape(str(payload.get("review_queue_overflow_count", 0)))}</td></tr>
   </tbody></table>
   <h2>Safety</h2>
   <table><tbody>
@@ -540,7 +581,9 @@ def _issue_summary(payload: dict) -> str:
         f"#22530 tag data available: {order_22530.get('tag_field_data_available') is True}; "
         f"#22530 review tag detected: {order_22530.get('review_request_tag_detected') is True}; "
         f"#22562 review tag detected: {order_22562.get('review_request_tag_detected') is True}; "
-        f"eligible candidates after tag availability: {payload.get('eligible_candidate_count_after_tag_availability', 0)}. "
+        f"eligible candidates after tag availability: {payload.get('eligible_candidate_count_after_tag_availability', 0)}; "
+        f"review queue showing {payload.get('review_queue_visible_count', 0)} of "
+        f"{payload.get('eligible_candidate_count_total') or payload.get('eligible_candidate_count_after_tag_availability', 0)}. "
         "No Shopify, Gmail, Trustpilot, Kudosi, or Ali Reviews API calls or writes were performed."
     )
 

@@ -72,6 +72,14 @@ MANUAL_CONFIRMED_ORDER_EVIDENCE = {
     },
 }
 FOCUS_ORDER_NAMES = ("#22530", "#22562", "#22581", "#22582", "#22620", "#22621")
+REVIEW_QUEUE_BATCH_SIZE = 20
+REVIEW_QUEUE_SORT_ORDER = (
+    "most_recent_delivered_updated_created_date",
+    "clean_tags",
+    "no_merge_or_related_ambiguity",
+    "no_duplicate_risk",
+    "order_number_descending",
+)
 
 
 def run_shopify_review_request_last_60_days_candidate_scan_task(mode: str) -> dict:
@@ -409,7 +417,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     candidate_rows = _apply_known_merged_group(candidate_rows)
     eligible_rows = [row for row in candidate_rows if row["candidate_status"] == "eligible"]
     blocked_rows = [row for row in candidate_rows if row["candidate_status"] != "eligible"]
-    eligible_rows.sort(key=lambda row: row["order"])
+    eligible_rows, review_queue_rows = _apply_review_queue_selection(eligible_rows)
     blocked_rows.sort(key=lambda row: (0 if "#22582" in row.get("group_order_names", [row["order"]]) else 1, row["order"]))
     already_sent_rows = _dedupe_summary_rows(already_sent_rows)
     already_sent_rows.sort(key=lambda row: {"#22621": 0, "#22620": 1}.get(row["order"], 9))
@@ -426,6 +434,15 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         blocked_rows,
         already_sent_rows,
     )
+    order_22562_diagnosis = _sqlite_focus_order_diagnosis(
+        "#22562",
+        local_by_order,
+        eligible_rows,
+        blocked_rows,
+        already_sent_rows,
+    )
+    eligible_candidate_count_total = len(eligible_rows)
+    review_queue_visible_count = len(review_queue_rows)
     order_data_coverage = {
         "scan_source": "sqlite_report_fallback",
         "coverage_warnings": _dedupe(coverage_warnings),
@@ -453,7 +470,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28F",
+        "phase": "5.28G",
         "mode": "dry-run-local-synced-order-scan",
         "command_label": COMMAND_LABEL,
         "window_days": 60,
@@ -463,11 +480,13 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "coverage_warnings": order_data_coverage["coverage_warnings"],
         "order_data_coverage": order_data_coverage,
         "order_22530_diagnosis": order_22530_diagnosis,
+        "order_22562_diagnosis": order_22562_diagnosis,
         "scan_window_started_at": cutoff.isoformat(),
         "scan_window_ended_at": now.isoformat(),
         "scanned_order_count": len(order_names),
         "delivered_order_count": sum(1 for row in candidate_rows + already_sent_rows if row.get("delivered_confirmed")),
-        "eligible_candidate_count": len(eligible_rows),
+        "eligible_candidate_count": eligible_candidate_count_total,
+        "eligible_candidate_count_total": eligible_candidate_count_total,
         "already_sent_count": len(already_sent_rows),
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if row.get("merged_order_group")),
@@ -476,6 +495,11 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
             1 for row in blocked_rows if row.get("canonical_review_request_tag_present") is False
         ),
         "blocked_not_delivered_count": sum(1 for row in blocked_rows if not row.get("delivered_confirmed")),
+        "review_queue_batch_size": REVIEW_QUEUE_BATCH_SIZE,
+        "review_queue_visible_count": review_queue_visible_count,
+        "review_queue_overflow_count": max(eligible_candidate_count_total - review_queue_visible_count, 0),
+        "review_queue_sort_order": list(REVIEW_QUEUE_SORT_ORDER),
+        "review_queue_candidates": [_eligible_summary(row) for row in review_queue_rows],
         "eligible_candidates_summary": [_eligible_summary(row) for row in eligible_rows],
         "blocked_candidates_summary": [_blocked_summary(row) for row in blocked_rows],
         "already_sent_summary": [_already_sent_public_summary(row) for row in already_sent_rows],
@@ -506,7 +530,8 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "all_new_actions_no_write_confirmed": True,
         "detected_issue_summary": (
             f"Scan source: sqlite_report_fallback. Scanned {len(order_names)} local/report orders; "
-            f"{len(eligible_rows)} eligible, {len(already_sent_rows)} already sent, {len(blocked_rows)} blocked. "
+            f"{eligible_candidate_count_total} eligible, showing {review_queue_visible_count} in the current review batch, "
+            f"{len(already_sent_rows)} already sent, {len(blocked_rows)} blocked. "
             f"Coverage warnings: {', '.join(order_data_coverage['coverage_warnings']) or 'none'}. "
             "No Gmail, Shopify, or external review API calls were performed."
         ),
@@ -835,6 +860,9 @@ def _sqlite_focus_order_diagnosis(order_name, local_by_order, eligible_rows, blo
         "review_request_tag_status": review_request_tag_status,
         "review_request_tag_present": review_request_tag_present,
         "matched_review_request_tag_value": _safe_text(row.get("matched_review_request_tag_value", ""), 120) if row else "",
+        "review_queue_rank": int(row.get("review_queue_rank") or 0) if row else 0,
+        "visible_in_review_batch": row.get("visible_in_review_batch") is True if row else False,
+        "hidden_reason": _safe_text(row.get("hidden_reason"), 120) if row else "not_scanned",
         "final_eligibility_status": _sqlite_focus_final_eligibility(found_locally, row, tag_data_loaded),
         "final_blockers": _sqlite_focus_final_blockers(found_locally, row, tag_data_loaded),
         "message": message,
@@ -889,7 +917,7 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28F",
+        "phase": "5.28G",
         "mode": "dry-run-local-synced-order-scan",
         "command_label": COMMAND_LABEL,
         "report_status": "blocked_last_60_days_candidate_scan_failed",
@@ -912,17 +940,36 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
             "found_in_local_shopify_order": False,
             "included_in_candidate_scan": False,
             "candidate_scan_section": "not_scanned",
+            "review_queue_rank": 0,
+            "visible_in_review_batch": False,
+            "hidden_reason": "not_scanned",
             "message": "#22530 not found in local ShopifyOrder data. Run Review Request 60-day Shopify sync.",
+        },
+        "order_22562_diagnosis": {
+            "order_name": "#22562",
+            "found_in_local_shopify_order": False,
+            "included_in_candidate_scan": False,
+            "candidate_scan_section": "not_scanned",
+            "review_queue_rank": 0,
+            "visible_in_review_batch": False,
+            "hidden_reason": "not_scanned",
+            "message": "#22562 not found in local ShopifyOrder data. Run Review Request 60-day Shopify sync.",
         },
         "scanned_order_count": 0,
         "delivered_order_count": 0,
         "eligible_candidate_count": 0,
+        "eligible_candidate_count_total": 0,
         "already_sent_count": 0,
         "blocked_count": 0,
         "blocked_merged_group_count": 0,
         "blocked_duplicate_customer_count": 0,
         "blocked_missing_review_request_tag_count": 0,
         "blocked_not_delivered_count": 0,
+        "review_queue_batch_size": REVIEW_QUEUE_BATCH_SIZE,
+        "review_queue_visible_count": 0,
+        "review_queue_overflow_count": 0,
+        "review_queue_sort_order": list(REVIEW_QUEUE_SORT_ORDER),
+        "review_queue_candidates": [],
         "eligible_candidates_summary": [],
         "blocked_candidates_summary": [],
         "already_sent_summary": [],
@@ -978,6 +1025,12 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "scanned_order_count": int(payload.get("scanned_order_count") or 0),
         "delivered_order_count": int(payload.get("delivered_order_count") or 0),
         "eligible_candidate_count": int(payload.get("eligible_candidate_count") or 0),
+        "eligible_candidate_count_total": int(
+            payload.get("eligible_candidate_count_total") or payload.get("eligible_candidate_count") or 0
+        ),
+        "review_queue_batch_size": int(payload.get("review_queue_batch_size") or REVIEW_QUEUE_BATCH_SIZE),
+        "review_queue_visible_count": int(payload.get("review_queue_visible_count") or 0),
+        "review_queue_overflow_count": int(payload.get("review_queue_overflow_count") or 0),
         "already_sent_count": int(payload.get("already_sent_count") or 0),
         "blocked_count": int(payload.get("blocked_count") or 0),
         "blocked_merged_group_count": int(payload.get("blocked_merged_group_count") or 0),
@@ -1006,6 +1059,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Scan source: {payload.get('scan_source', 'unknown')}\n"
         f"Scanned orders: {payload.get('scanned_order_count', 0)}\n"
         f"Eligible candidates: {payload.get('eligible_candidate_count', 0)}\n"
+        f"Review batch: {payload.get('review_queue_visible_count', 0)} of {payload.get('eligible_candidate_count_total') or payload.get('eligible_candidate_count', 0)} "
+        f"(batch size {payload.get('review_queue_batch_size', REVIEW_QUEUE_BATCH_SIZE)}, overflow {payload.get('review_queue_overflow_count', 0)})\n"
         f"Already sent: {payload.get('already_sent_count', 0)}\n"
         f"Blocked / not ready: {payload.get('blocked_count', 0)}\n"
         f"Coverage warnings: {', '.join(payload.get('coverage_warnings') or []) or 'none'}\n"
@@ -1041,9 +1096,14 @@ def _render_html(payload: dict) -> str:
     <tr><th>Scanned order count</th><td>{escape(str(payload.get("scanned_order_count", 0)))}</td></tr>
     <tr><th>Delivered order count</th><td>{escape(str(payload.get("delivered_order_count", 0)))}</td></tr>
     <tr><th>Eligible candidate count</th><td>{escape(str(payload.get("eligible_candidate_count", 0)))}</td></tr>
+    <tr><th>Review queue batch size</th><td>{escape(str(payload.get("review_queue_batch_size", REVIEW_QUEUE_BATCH_SIZE)))}</td></tr>
+    <tr><th>Review queue visible count</th><td>{escape(str(payload.get("review_queue_visible_count", 0)))}</td></tr>
+    <tr><th>Review queue overflow count</th><td>{escape(str(payload.get("review_queue_overflow_count", 0)))}</td></tr>
     <tr><th>Already sent count</th><td>{escape(str(payload.get("already_sent_count", 0)))}</td></tr>
     <tr><th>Blocked / not ready count</th><td>{escape(str(payload.get("blocked_count", 0)))}</td></tr>
   </tbody></table>
+  <h2>Review Queue Batch</h2>
+  {_summary_table(payload.get("review_queue_candidates") or [])}
   <h2>Eligible Candidates</h2>
   {_summary_table(payload.get("eligible_candidates_summary") or [])}
   <h2>Already Sent</h2>
@@ -1082,7 +1142,122 @@ def _display_value(value) -> str:
     return str(value if value is not None else "")
 
 
+def _apply_review_queue_selection(eligible_rows: list[dict], batch_size: int = REVIEW_QUEUE_BATCH_SIZE) -> tuple[list[dict], list[dict]]:
+    rows = list(_dedupe_summary_rows(eligible_rows))
+    rows.sort(key=_review_queue_sort_key)
+    visible_rows = []
+    seen_customers = set()
+    for index, row in enumerate(rows, start=1):
+        row["review_queue_rank"] = index
+        row["review_queue_batch_size"] = batch_size
+        row["review_queue_sort_order"] = list(REVIEW_QUEUE_SORT_ORDER)
+        hidden_reason = _review_queue_policy_hidden_reason(row)
+        customer_key = _review_queue_customer_key(row)
+        if not hidden_reason and customer_key and customer_key in seen_customers:
+            hidden_reason = "duplicate_customer_in_current_batch"
+        if not hidden_reason and len(visible_rows) >= batch_size:
+            hidden_reason = "outside_current_batch"
+        row["visible_in_review_batch"] = not hidden_reason
+        row["hidden_reason"] = hidden_reason
+        if hidden_reason:
+            continue
+        visible_rows.append(row)
+        if customer_key:
+            seen_customers.add(customer_key)
+    return rows, visible_rows
+
+
+def _review_queue_sort_key(row: dict) -> tuple:
+    return (
+        -_review_queue_date_value(row),
+        0 if _review_queue_has_clean_tags(row) else 1,
+        0 if not _review_queue_has_merge_or_related_ambiguity(row) else 1,
+        0 if not _review_queue_has_duplicate_risk(row) else 1,
+        -_order_number_value(row.get("order")),
+    )
+
+
+def _review_queue_date_value(row: dict) -> float:
+    parsed = _parse_dt(row.get("scan_date"))
+    if parsed:
+        return parsed.timestamp()
+    parsed = _parse_dt(row.get("order_created_at"))
+    return parsed.timestamp() if parsed else 0
+
+
+def _review_queue_has_clean_tags(row: dict) -> bool:
+    tags = row.get("tags") or []
+    return (
+        row.get("tag_data_available") is True
+        and row.get("delivered_confirmed") is True
+        and row.get("canonical_review_request_tag_present") is True
+        and not has_trustpilot_sent_tag(tags)
+    )
+
+
+def _review_queue_has_merge_or_related_ambiguity(row: dict) -> bool:
+    return bool(row.get("merged_order_group") and row.get("candidate_status") != "eligible")
+
+
+def _review_queue_has_duplicate_risk(row: dict) -> bool:
+    prior_order = _safe_text(row.get("prior_trustpilot_order_name"), 80).lower()
+    text = " ".join(
+        _safe_text(row.get(key), 300).lower()
+        for key in ("block_reason", "missing_requirement", "trustpilot_history")
+    )
+    duplicate_text = (
+        "already sent" in text
+        or "trustpilot invitation" in text
+        or ("duplicate" in text and "no duplicate" not in text)
+    )
+    return prior_order not in {"", "unavailable", "unknown", "none"} or duplicate_text
+
+
+def _review_queue_policy_hidden_reason(row: dict) -> str:
+    tags = row.get("tags") or []
+    if row.get("candidate_status") != "eligible":
+        return "not_ready"
+    if row.get("delivered_confirmed") is not True or not has_delivered_tag(tags):
+        return "missing_delivered_tag"
+    if row.get("canonical_review_request_tag_present") is not True or not has_review_request_tag(tags):
+        return "missing_review_request_tag_alias"
+    if has_trustpilot_sent_tag(tags):
+        return "prior_trustpilot_send_evidence"
+    if _review_queue_has_duplicate_risk(row):
+        return "duplicate_risk"
+    if row.get("merged_order_group") and row.get("candidate_status") != "eligible":
+        return "unready_merged_group"
+    if not _safe_text(row.get("scan_date"), 80):
+        return "outside_configured_window"
+    if not _review_queue_display_context_available(row):
+        return "missing_display_context"
+    return ""
+
+
+def _review_queue_display_context_available(row: dict) -> bool:
+    order_name = _safe_text(row.get("order"), 80)
+    customer = _safe_text(row.get("customer"), 120) or _safe_text(row.get("masked_customer"), 120)
+    return bool(order_name and customer and customer != "Masked in reports")
+
+
+def _review_queue_customer_key(row: dict) -> str:
+    masked = _safe_text(row.get("masked_customer"), 120)
+    if "***" in masked and "@" in masked:
+        return masked.lower()
+    customer = _safe_text(row.get("customer"), 120)
+    if customer and customer != "Masked in reports":
+        return re.sub(r"\s+", " ", customer).strip().lower()
+    return ""
+
+
+def _order_number_value(value) -> int:
+    text = _canonical_order_name(value)
+    match = re.fullmatch(r"#(\d{3,})", text)
+    return int(match.group(1)) if match else 0
+
+
 def _eligible_summary(row: dict) -> dict:
+    visible = row.get("visible_in_review_batch") is True
     return {
         "order": row["order"],
         "customer": row.get("customer") or "Masked in reports",
@@ -1095,7 +1270,10 @@ def _eligible_summary(row: dict) -> dict:
         "delivered_status": "Delivered" if row.get("delivered_confirmed") else "Not delivered",
         "trustpilot_history": row.get("trustpilot_history", ""),
         "reason": row.get("block_reason", ""),
-        "action": "Review & Send",
+        "action": "Review & Send" if visible else "Queued for later review",
+        "review_queue_rank": int(row.get("review_queue_rank") or 0),
+        "visible_in_review_batch": visible,
+        "hidden_reason": _safe_text(row.get("hidden_reason"), 120),
         "scan_date": row.get("scan_date", ""),
         "scan_date_basis": row.get("scan_date_basis", ""),
         "scan_date_fallback_used": row.get("scan_date_fallback_used") is True,

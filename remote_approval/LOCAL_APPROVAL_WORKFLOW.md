@@ -138,6 +138,12 @@ data, the safe tag summaries, review-request alias matches, and the candidate
 count after local tag availability. It does not call Shopify, Gmail, Trustpilot,
 Kudosi, or Ali Reviews APIs and does not write Shopify data.
 
+Phase 5.28G keeps the candidate scan broad but caps the Trustpilot admin review
+queue to a 20-candidate batch. The scan report includes the full eligible total,
+visible review batch count, overflow count, sort order, and per-candidate rank
+diagnostics. The admin page should show only the current review batch; any
+Review & Send control is limited to those visible rows.
+
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local
 candidate scan can use Shopify order tags, `fulfillment_status`, notes, and

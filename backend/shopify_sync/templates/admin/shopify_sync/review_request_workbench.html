@@ -390,6 +390,32 @@
 
     <div class="rrw-section">
         <h2>Needs review email</h2>
+        <p class="rrw-note">
+            Showing {{ dashboard.approval_queue.review_queue_visible_count }} of
+            {{ dashboard.approval_queue.eligible_candidate_count_total }} eligible candidates.
+        </p>
+        {% if dashboard.approval_queue.review_queue_overflow_count > 0 %}
+            <p class="rrw-muted">More candidates are available. Review this batch first.</p>
+        {% endif %}
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Eligible total</div>
+                <div class="rrw-card-value">{{ dashboard.approval_queue.eligible_candidate_count_total }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Showing now</div>
+                <div class="rrw-card-value">{{ dashboard.approval_queue.review_queue_visible_count }}</div>
+                <div class="rrw-card-note">Batch size {{ dashboard.approval_queue.review_queue_batch_size }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Already sent</div>
+                <div class="rrw-card-value">{{ dashboard.approval_queue.already_sent_count }}</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Blocked / not ready</div>
+                <div class="rrw-card-value">{{ dashboard.approval_queue.blocked_count }}</div>
+            </div>
+        </div>
         <table class="rrw-table">
             <thead>
                 <tr>

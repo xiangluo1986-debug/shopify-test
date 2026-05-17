@@ -94,6 +94,14 @@ GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_BROAD_SCOPE = "https://mail.google.com/"
 LAST_60_DAY_SCAN_WINDOW_DAYS = 60
+REVIEW_QUEUE_BATCH_SIZE = 20
+REVIEW_QUEUE_SORT_ORDER = (
+    "most_recent_delivered_updated_created_date",
+    "clean_tags",
+    "no_merge_or_related_ambiguity",
+    "no_duplicate_risk",
+    "order_number_descending",
+)
 LAST_60_DAY_SCAN_TASK_NAME = "shopify_review_request_last_60_days_candidate_scan"
 REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
     "orders_review_request_3",
@@ -4586,7 +4594,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "task": LAST_60_DAY_SCAN_TASK_NAME,
         "task_name": LAST_60_DAY_SCAN_TASK_NAME,
-        "phase": "5.28F",
+        "phase": "5.28G",
         "mode": "dry-run-local-synced-order-scan",
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "report_status": "last_60_days_candidate_scan_ready",
@@ -4595,15 +4603,22 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "coverage_warnings": scan["coverage_warnings"],
         "order_data_coverage": scan["order_data_coverage"],
         "order_22530_diagnosis": scan["order_22530_diagnosis"],
+        "order_22562_diagnosis": scan["order_22562_diagnosis"],
         "scanned_order_count": scan["scanned_order_count"],
         "delivered_order_count": scan["delivered_order_count"],
         "eligible_candidate_count": scan["eligible_candidate_count"],
+        "eligible_candidate_count_total": scan["eligible_candidate_count_total"],
         "already_sent_count": scan["already_sent_count"],
         "blocked_count": scan["blocked_count"],
         "blocked_merged_group_count": scan["blocked_merged_group_count"],
         "blocked_duplicate_customer_count": scan["blocked_duplicate_customer_count"],
         "blocked_missing_review_request_tag_count": scan["blocked_missing_review_request_tag_count"],
         "blocked_not_delivered_count": scan["blocked_not_delivered_count"],
+        "review_queue_batch_size": scan["review_queue_batch_size"],
+        "review_queue_visible_count": scan["review_queue_visible_count"],
+        "review_queue_overflow_count": scan["review_queue_overflow_count"],
+        "review_queue_sort_order": scan["review_queue_sort_order"],
+        "review_queue_candidates": scan["review_queue_candidates"],
         "eligible_candidates_summary": scan["eligible_candidates_summary"],
         "blocked_candidates_summary": scan["blocked_candidates_summary"],
         "already_sent_summary": scan["already_sent_summary"],
@@ -4703,6 +4718,9 @@ def _candidate_22562_alias_audit_from_scan(scan):
             "delivered_detected": False,
             "merged_group_evidence_source": "none",
             "explicit_merge_evidence": False,
+            "review_queue_rank": 0,
+            "visible_in_review_batch": False,
+            "hidden_reason": "not_scanned",
             "final_eligibility_status": "not_scanned",
             "final_blockers": ["Order #22562 was not present in the local last-60-days scan."],
         }
@@ -4741,6 +4759,9 @@ def _candidate_22562_alias_audit_from_scan(scan):
         "delivered_detected": row.get("delivered_status_label") == "Delivered",
         "merged_group_evidence_source": evidence_source,
         "explicit_merge_evidence": explicit_merge,
+        "review_queue_rank": _int_or_zero(row.get("review_queue_rank")),
+        "visible_in_review_batch": row.get("visible_in_review_batch") is True,
+        "hidden_reason": _safe_text(row.get("hidden_reason"), max_length=120),
         "final_eligibility_status": final_status,
         "final_blockers": [blocker for blocker in blockers if blocker],
     }
@@ -4918,10 +4939,13 @@ def _approval_queue(
 
 
 def _approval_queue_from_last_60_days_scan(scan):
-    needs_review_rows = list(scan.get("eligible_queue_rows") or [])
+    needs_review_rows = list(scan.get("review_queue_rows") or scan.get("eligible_queue_rows") or [])
     blocked_rows = list(scan.get("blocked_queue_rows") or [])
     already_sent_rows = list(scan.get("already_sent_queue_rows") or [])
     merged_groups = scan.get("merged_groups") or []
+    eligible_total = _int_or_zero(
+        scan.get("eligible_candidate_count_total") or scan.get("eligible_candidate_count")
+    )
     ready_to_send_count = len(needs_review_rows)
     coverage_incomplete = scan.get("scan_source") != "full_shopify_orders"
     return {
@@ -4938,6 +4962,11 @@ def _approval_queue_from_last_60_days_scan(scan):
         "email_sent_count": scan.get("already_sent_count", 0),
         "merged_group_count": scan.get("blocked_merged_group_count", 0),
         "merged_groups": merged_groups,
+        "eligible_candidate_count_total": eligible_total,
+        "review_queue_batch_size": _int_or_zero(scan.get("review_queue_batch_size")) or REVIEW_QUEUE_BATCH_SIZE,
+        "review_queue_visible_count": _int_or_zero(scan.get("review_queue_visible_count")) or ready_to_send_count,
+        "review_queue_overflow_count": _int_or_zero(scan.get("review_queue_overflow_count")),
+        "review_queue_sort_order": scan.get("review_queue_sort_order") or list(REVIEW_QUEUE_SORT_ORDER),
         "shopify_tag_write_enabled_count": 0,
         "empty_message": (
             "Order data is incomplete. Run the 60-day Shopify sync before trusting the candidate list."
@@ -4947,7 +4976,7 @@ def _approval_queue_from_last_60_days_scan(scan):
         "scan_summary": {
             "scanned_order_count": scan.get("scanned_order_count", 0),
             "delivered_order_count": scan.get("delivered_order_count", 0),
-            "eligible_candidate_count": scan.get("eligible_candidate_count", 0),
+            "eligible_candidate_count": eligible_total,
             "blocked_count": scan.get("blocked_count", 0),
             "already_sent_count": scan.get("already_sent_count", 0),
             "window_days": scan.get("window_days", LAST_60_DAY_SCAN_WINDOW_DAYS),
@@ -5067,7 +5096,7 @@ def _last_60_days_candidate_scan(
     blocked_rows = [
         row for row in queue_rows if row.get("action_state") != "review_send"
     ]
-    eligible_rows.sort(key=_approval_queue_sort_key)
+    eligible_rows, review_queue_rows = _apply_review_queue_selection(eligible_rows)
     blocked_rows.sort(key=_blocked_queue_sort_key)
     already_sent_rows.sort(key=_already_sent_sort_key)
 
@@ -5088,6 +5117,9 @@ def _last_60_days_candidate_scan(
         local_db_error=local_db_error,
     )
     order_22530_diagnosis = _focus_order_diagnosis("#22530", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
+    order_22562_diagnosis = _focus_order_diagnosis("#22562", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
+    eligible_candidate_count_total = len(eligible_rows)
+    review_queue_visible_count = len(review_queue_rows)
     return {
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "scan_window_started_at": cutoff.isoformat(),
@@ -5096,10 +5128,12 @@ def _last_60_days_candidate_scan(
         "coverage_warnings": order_data_coverage["coverage_warnings"],
         "order_data_coverage": order_data_coverage,
         "order_22530_diagnosis": order_22530_diagnosis,
+        "order_22562_diagnosis": order_22562_diagnosis,
         "local_db_error_sanitized": local_db_error,
         "scanned_order_count": len(scan_contexts),
         "delivered_order_count": delivered_count,
-        "eligible_candidate_count": len(eligible_rows),
+        "eligible_candidate_count": eligible_candidate_count_total,
+        "eligible_candidate_count_total": eligible_candidate_count_total,
         "already_sent_count": len(already_sent_rows),
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if _row_blocked_by_merged_group(row)),
@@ -5109,8 +5143,14 @@ def _last_60_days_candidate_scan(
         ),
         "blocked_not_delivered_count": sum(1 for row in blocked_rows if _row_blocked_by_not_delivered(row)),
         "eligible_queue_rows": eligible_rows,
+        "review_queue_rows": review_queue_rows,
         "blocked_queue_rows": blocked_rows,
         "already_sent_queue_rows": already_sent_rows,
+        "review_queue_batch_size": REVIEW_QUEUE_BATCH_SIZE,
+        "review_queue_visible_count": review_queue_visible_count,
+        "review_queue_overflow_count": max(eligible_candidate_count_total - review_queue_visible_count, 0),
+        "review_queue_sort_order": list(REVIEW_QUEUE_SORT_ORDER),
+        "review_queue_candidates": [_queue_candidate_summary(row) for row in review_queue_rows],
         "eligible_candidates_summary": [_queue_candidate_summary(row) for row in eligible_rows],
         "blocked_candidates_summary": [_blocked_candidate_summary(row) for row in blocked_rows],
         "already_sent_summary": [_already_sent_summary(row) for row in already_sent_rows],
@@ -5317,6 +5357,10 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
             or (row or {}).get("matched_review_request_tag_value"),
             max_length=120,
         ),
+        "review_queue_rank": _int_or_zero((row or {}).get("review_queue_rank")),
+        "visible_in_review_batch": (row or {}).get("visible_in_review_batch") is True,
+        "hidden_reason": _safe_text((row or {}).get("hidden_reason"), max_length=120)
+        or ("not_scanned" if not row else ""),
         "final_eligibility_status": _focus_final_eligibility_status(found_locally, row, tag_data_loaded),
         "final_blockers": final_blockers,
         "message": message,
@@ -5904,6 +5948,140 @@ def _already_sent_sort_key(row):
     return (preferred.get(row.get("order"), 9), row.get("order", ""))
 
 
+def _apply_review_queue_selection(eligible_rows, batch_size=REVIEW_QUEUE_BATCH_SIZE):
+    rows = list(_dedupe_queue_rows(eligible_rows))
+    rows.sort(key=_review_queue_sort_key)
+    visible_rows = []
+    seen_customers = set()
+    for index, row in enumerate(rows, start=1):
+        row["review_queue_rank"] = index
+        row["review_queue_batch_size"] = batch_size
+        row["review_queue_sort_order"] = list(REVIEW_QUEUE_SORT_ORDER)
+        hidden_reason = _review_queue_policy_hidden_reason(row)
+        customer_key = _review_queue_customer_key(row)
+        if not hidden_reason and customer_key and customer_key in seen_customers:
+            hidden_reason = "duplicate_customer_in_current_batch"
+        if not hidden_reason and len(visible_rows) >= batch_size:
+            hidden_reason = "outside_current_batch"
+        row["visible_in_review_batch"] = not hidden_reason
+        row["hidden_reason"] = hidden_reason
+        if hidden_reason:
+            continue
+        visible_rows.append(row)
+        if customer_key:
+            seen_customers.add(customer_key)
+    return rows, visible_rows
+
+
+def _review_queue_sort_key(row):
+    return (
+        -_review_queue_date_value(row),
+        0 if _review_queue_has_clean_tags(row) else 1,
+        0 if not _review_queue_has_merge_or_related_ambiguity(row) else 1,
+        0 if not _review_queue_has_duplicate_risk(row) else 1,
+        -_order_number_value(row.get("order")),
+    )
+
+
+def _review_queue_date_value(row):
+    parsed = _parse_datetime_value(row.get("scan_date"))
+    if parsed:
+        return parsed.timestamp()
+    for key in ("order_created_at", "updated_at", "created_at"):
+        parsed = _parse_datetime_value(row.get(key))
+        if parsed:
+            return parsed.timestamp()
+    return 0
+
+
+def _review_queue_has_clean_tags(row):
+    tags = _dedupe_text(row.get("order_tags_display") or row.get("tags") or [])
+    return (
+        row.get("tag_data_available") is True
+        and (row.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags))
+        and (row.get("review_request_tag_present") is True or has_review_request_tag(tags))
+        and not has_trustpilot_sent_tag(tags)
+        and not row.get("tag_data_missing_source")
+    )
+
+
+def _review_queue_has_merge_or_related_ambiguity(row):
+    if row.get("merged_order_group") and row.get("group_eligible_for_review_send") is not True:
+        return True
+    if row.get("explicit_related_order_reference"):
+        return True
+    related = _dedupe_order_names(row.get("related_order_names") or [])
+    if related and not (row.get("merged_order_group") and row.get("group_eligible_for_review_send") is True):
+        return True
+    return False
+
+
+def _review_queue_has_duplicate_risk(row):
+    prior_order = _safe_text(row.get("prior_trustpilot_order_name"), max_length=80).lower()
+    text = _row_block_text(row)
+    duplicate_text = (
+        "already sent" in text
+        or "trustpilot invitation" in text
+        or ("duplicate" in text and "no duplicate" not in text)
+    )
+    return (
+        row.get("trustpilot_already_sent_to_customer") is True
+        or prior_order not in {"", "unavailable", "unknown", "none"}
+        or row.get("customer_level_duplicate_block_applies") is True
+        or row.get("existing_unsent_gmail_draft_should_not_be_sent") is True
+        or duplicate_text
+    )
+
+
+def _review_queue_policy_hidden_reason(row):
+    tags = _dedupe_text(row.get("order_tags_display") or row.get("tags") or [])
+    if row.get("action_state") != "review_send":
+        return "not_ready"
+    if not (row.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags)):
+        return "missing_delivered_tag"
+    if not (row.get("review_request_tag_present") is True or has_review_request_tag(tags)):
+        return "missing_review_request_tag_alias"
+    if has_trustpilot_sent_tag(tags) or row.get("trustpilot_already_sent_to_customer") is True:
+        return "prior_trustpilot_send_evidence"
+    if _review_queue_has_duplicate_risk(row):
+        return "duplicate_risk"
+    if _row_has_returned_package(row) or _row_has_risk_or_ticket(row):
+        return "risk_or_ticket"
+    if row.get("merged_order_group") and row.get("group_eligible_for_review_send") is not True:
+        return "unready_merged_group"
+    if not _safe_text(row.get("scan_date"), max_length=80):
+        return "outside_configured_window"
+    if not _review_queue_display_context_available(row):
+        return "missing_display_context"
+    return ""
+
+
+def _review_queue_display_context_available(row):
+    order_name = _safe_text(row.get("order"), max_length=80)
+    customer_label = (
+        _safe_text(row.get("customer_display_name"), max_length=120)
+        or _safe_text(row.get("masked_customer_label"), max_length=120)
+        or _safe_text(row.get("customer"), max_length=120)
+    )
+    return bool(order_name and customer_label and customer_label != "Masked in reports")
+
+
+def _review_queue_customer_key(row):
+    masked = _safe_text(row.get("masked_customer_label"), max_length=120)
+    if _usable_masked_customer(masked):
+        return masked.lower()
+    customer = _safe_text(row.get("customer_display_name"), max_length=120)
+    if customer and customer != "Masked in reports":
+        return re.sub(r"\s+", " ", customer).strip().lower()
+    return ""
+
+
+def _order_number_value(value):
+    text = _canonical_order_name(value)
+    match = re.fullmatch(r"#(\d{3,})", text)
+    return int(match.group(1)) if match else 0
+
+
 def _row_blocked_by_merged_group(row):
     text = _row_block_text(row)
     return bool(row.get("merged_order_group") or "merged" in text or "related order" in text)
@@ -5937,6 +6115,7 @@ def _row_block_text(row):
 
 
 def _queue_candidate_summary(row):
+    visible = row.get("visible_in_review_batch") is True
     return {
         "order": _safe_text(row.get("order"), max_length=80),
         "customer": _safe_text(row.get("customer_display_name"), max_length=120)
@@ -5952,7 +6131,10 @@ def _queue_candidate_summary(row):
         "delivered_status": _safe_text(row.get("delivered_status_label"), max_length=80),
         "trustpilot_history": _safe_text(row.get("trustpilot_history_label"), max_length=300),
         "reason": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
-        "action": "Review & Send",
+        "action": "Review & Send" if visible else "Queued for later review",
+        "review_queue_rank": _int_or_zero(row.get("review_queue_rank")),
+        "visible_in_review_batch": visible,
+        "hidden_reason": _safe_text(row.get("hidden_reason"), max_length=120),
         "scan_date": _safe_text(row.get("scan_date"), max_length=80),
         "scan_date_basis": _safe_text(row.get("scan_date_basis"), max_length=80),
         "scan_date_fallback_used": row.get("scan_date_fallback_used") is True,
@@ -6041,6 +6223,7 @@ def _last_60_days_issue_summary(scan):
         f"Scan source: {scan.get('scan_source', 'unknown')}. "
         f"Scanned {scan.get('scanned_order_count', 0)} local/reported orders; "
         f"{scan.get('eligible_candidate_count', 0)} eligible, "
+        f"showing {scan.get('review_queue_visible_count', 0)} in the current review batch, "
         f"{scan.get('already_sent_count', 0)} already sent, "
         f"{scan.get('blocked_count', 0)} blocked/not ready."
         f"{warning_text} "
