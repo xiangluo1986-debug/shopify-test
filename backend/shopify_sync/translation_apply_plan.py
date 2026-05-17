@@ -107,6 +107,42 @@ ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS = {
 ALL_LANGUAGES_MAPPING_BLOCKED_REASON = (
     "Can review now; Shopify update support needs extra mapping."
 )
+ALL_LANGUAGES_TECHNICAL_METAFIELD_MARKERS = (
+    "google",
+    "google_product_category",
+    "product_seo_template",
+    "json",
+    "schema",
+    "system",
+    "rating",
+    "review",
+    "reviews",
+    "inventory",
+    " id",
+    "_id",
+    "sku",
+    "barcode",
+    "wishlist",
+    "count",
+)
+ALL_LANGUAGES_CUSTOMER_FACING_METAFIELD_MARKERS = (
+    "benefit",
+    "bullet",
+    "compat",
+    "description",
+    "feature",
+    "highlight",
+    "included",
+    "material",
+    "model",
+    "package",
+    "scale",
+    "short_description",
+    "size",
+    "spec",
+    "subtitle",
+    "summary",
+)
 ALL_LANGUAGES_BODY_HTML_LINK_MEDIA_TAGS = {"a", "img", "iframe", "source", "video"}
 ALL_LANGUAGES_SAFE_FIELD_LABELS = {
     "title": "Product title",
@@ -3196,6 +3232,16 @@ def _all_languages_attach_plain_language(payload: dict):
     )
     payload["needs_review_rows"] = _all_languages_needs_review_rows(entries)
     payload["option_mapping_audit"] = _all_languages_option_mapping_audit(entries)
+    payload["media_alt_mapping_audit"] = _all_languages_media_alt_mapping_audit(
+        entries
+    )
+    payload["translation_readiness_audit"] = (
+        _all_languages_translation_readiness_audit(
+            entries,
+            payload.get("option_mapping_audit") or {},
+            payload.get("media_alt_mapping_audit") or {},
+        )
+    )
     payload["next_enablement_summary"] = _all_languages_next_enablement_summary(
         entries,
         payload.get("option_mapping_audit") or {},
@@ -3733,6 +3779,334 @@ def _all_languages_option_mapping_row(entry: dict):
         "seo_validation_status": entry.get("seo_validation_status", ""),
         "plain_reason": plain_reason,
     }
+
+
+def _all_languages_media_alt_mapping_audit(entries: list[dict]):
+    rows = [
+        _all_languages_media_alt_mapping_row(entry)
+        for entry in entries or []
+        if _all_languages_media_alt_entry(entry)
+    ]
+    classification_counts = {}
+    for row in rows:
+        classification = row.get("classification", "")
+        classification_counts[classification] = classification_counts.get(classification, 0) + 1
+    safe_mapping_count = sum(1 for row in rows if row.get("mapping_safe"))
+    registration_input_ready_count = sum(
+        1 for row in rows if row.get("registration_input_ready")
+    )
+    readback_method_available_count = sum(
+        1 for row in rows if row.get("readback_method_available")
+    )
+    all_mapping_safe = bool(rows) and safe_mapping_count == len(rows)
+    if not rows:
+        plain_summary = "No media alt text rows were found in this update report."
+        recommendation = "Keep Media alt text preview-only until real rows are sampled."
+    elif (
+        all_mapping_safe
+        and registration_input_ready_count == len(rows)
+        and readback_method_available_count == len(rows)
+    ):
+        plain_summary = (
+            f"{len(rows)} media alt row(s) have real media resource IDs, alt keys, "
+            "digests, proposed text, and a readback path. Writes are still disabled."
+        )
+        recommendation = "Media alt text can be enabled in a later explicitly approved task."
+    else:
+        plain_summary = (
+            "Keep Media alt text preview-only: at least one sampled row is missing "
+            "safe mapping, digest, proposed text, or readback mapping."
+        )
+        recommendation = "Do not enable Media alt text yet."
+    return {
+        "row_count": len(rows),
+        "classification_counts": [
+            {"classification": key, "count": value}
+            for key, value in sorted(
+                classification_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ],
+        "safe_mapping_count": safe_mapping_count,
+        "registration_input_ready_count": registration_input_ready_count,
+        "readback_method_available_count": readback_method_available_count,
+        "all_sampled_rows_mapping_safe": all_mapping_safe,
+        "plain_summary": plain_summary,
+        "recommendation": recommendation,
+        "rows": rows,
+    }
+
+
+def _all_languages_media_alt_mapping_row(entry: dict):
+    resource_id = str(entry.get("resource_id") or "").strip()
+    source_key = str(
+        entry.get("source_key") or entry.get("shopify_key") or entry.get("key") or ""
+    ).strip()
+    digest = str(entry.get("digest") or entry.get("source_digest") or "").strip()
+    source_value = str(entry.get("source_value") or "").strip()
+    proposed_value = str(entry.get("proposed_translation_value") or "").strip()
+    resource_type = _all_languages_shopify_gid_type(resource_id) or str(
+        entry.get("resource_type") or ""
+    ).strip()
+    key_exists = source_key == "alt" or str(entry.get("key") or "") == "media.alt"
+    real_gid = resource_id.startswith("gid://shopify/")
+    maps_to_media = resource_type in {"MediaImage", "Image"} and key_exists
+    mapping_safe = real_gid and maps_to_media
+    registration_input_ready = mapping_safe and bool(digest) and key_exists
+    readback_method_available = mapping_safe and bool(entry.get("locale"))
+    if not mapping_safe or not key_exists:
+        classification = "media_alt_missing_mapping"
+    elif not digest:
+        classification = "media_alt_missing_digest"
+    elif not proposed_value:
+        classification = "media_alt_empty_translation"
+    elif _all_languages_entry_needs_review(entry):
+        classification = "media_alt_needs_review"
+    elif str(entry.get("status") or "") == "blocked":
+        classification = "media_alt_update_not_enabled"
+    else:
+        classification = "media_alt_write_ready"
+    return {
+        "locale": entry.get("locale", ""),
+        "language_label": _all_languages_locale_label(entry.get("locale", "")),
+        "media_resource_type": resource_type,
+        "resource_id": resource_id,
+        "resource_id_exists": bool(resource_id),
+        "resource_id_is_real_shopify_gid": real_gid,
+        "resource_id_is_visible_or_local_only": resource_id.startswith("visible://"),
+        "key": "alt" if key_exists else source_key,
+        "key_exists": key_exists,
+        "digest": digest,
+        "digest_exists": bool(digest),
+        "source_alt_text_exists": bool(source_value),
+        "proposed_translation_exists": bool(proposed_value),
+        "existing_translation_state": _all_languages_existing_translation_state(entry),
+        "readback_method_available": readback_method_available,
+        "registration_input_ready": registration_input_ready,
+        "maps_to_correct_media_object": maps_to_media,
+        "mapping_safe": mapping_safe,
+        "classification": classification,
+        "plain_reason": _all_languages_media_alt_plain_reason(
+            classification,
+            mapping_safe=mapping_safe,
+        ),
+    }
+
+
+def _all_languages_translation_readiness_audit(
+    entries: list[dict],
+    option_audit: dict,
+    media_alt_audit: dict,
+):
+    technical_fields, future_metafields = _all_languages_metafield_readiness(entries)
+    variant_entries = [
+        entry
+        for entry in entries or []
+        if str(entry.get("field_group") or "") == "variants"
+        or str(entry.get("key") or "").startswith("variant.")
+    ]
+    ready_now = [
+        _all_languages_readiness_area("Product title", entries, key="title"),
+        _all_languages_readiness_area("SEO title", entries, key="meta_title"),
+        _all_languages_readiness_area("SEO description", entries, key="meta_description"),
+        _all_languages_readiness_area("Product description", entries, key="body_html"),
+        {
+            "area": "Product options",
+            "status": (
+                "Ready now"
+                if option_audit.get("all_future_update_ready")
+                else "Needs mapping review"
+            ),
+            "plain_reason": option_audit.get("plain_summary", ""),
+            "checked_count": int(option_audit.get("row_count") or 0),
+        },
+    ]
+    needs_review = [
+        {
+            "area": "Fields needing review",
+            "status": "Needs review",
+            "plain_reason": (
+                f"{len(_all_languages_needs_review_rows(entries))} row(s) have manual review notes."
+            ),
+            "checked_count": len(_all_languages_needs_review_rows(entries)),
+        }
+    ]
+    preview_only = [
+        {
+            "area": "Media alt text",
+            "status": "Preview only",
+            "plain_reason": media_alt_audit.get("plain_summary", ""),
+            "checked_count": int(media_alt_audit.get("row_count") or 0),
+        },
+        {
+            "area": "Variants",
+            "status": "Preview only",
+            "plain_reason": (
+                "Variant writes remain disabled; variant rows need a separate mapping audit."
+                if variant_entries
+                else "No variant rows were present in this report."
+            ),
+            "checked_count": len(variant_entries),
+        },
+        {
+            "area": "Metafields",
+            "status": "Preview only",
+            "plain_reason": "Metafield writes remain disabled.",
+            "checked_count": len(
+                [
+                    entry
+                    for entry in entries or []
+                    if "metafield" in str(entry.get("field_group") or "")
+                ]
+            ),
+        },
+    ]
+    future_candidate = []
+    if media_alt_audit.get("all_sampled_rows_mapping_safe"):
+        future_candidate.append(
+            {
+                "area": "Media alt text",
+                "status": "Future candidate",
+                "plain_reason": media_alt_audit.get("recommendation", ""),
+            }
+        )
+    for namespace_key in future_metafields:
+        future_candidate.append(
+            {
+                "area": namespace_key,
+                "status": "Future candidate",
+                "plain_reason": "Customer-facing metafield candidate; keep disabled until a dedicated audit approves it.",
+            }
+        )
+    return {
+        "ready_now": ready_now,
+        "needs_review": needs_review,
+        "preview_only": preview_only,
+        "future_candidate": future_candidate,
+        "blocked_technical_fields": [
+            {
+                "area": namespace_key,
+                "status": "Blocked technical field",
+                "plain_reason": "Technical/internal metafield; do not enable automatic translation writes.",
+            }
+            for namespace_key in technical_fields
+        ],
+    }
+
+
+def _all_languages_media_alt_entry(entry: dict):
+    return (
+        str(entry.get("field_group") or "") in {"media", "media_alt_text"}
+        or str(entry.get("key") or "") == "media.alt"
+    )
+
+
+def _all_languages_media_alt_plain_reason(classification: str, *, mapping_safe: bool):
+    if classification == "media_alt_update_not_enabled":
+        return "Mapping looks safe, but Media alt text writes are not enabled yet."
+    if classification == "media_alt_missing_mapping":
+        return "Missing a real Shopify media resource ID or alt key."
+    if classification == "media_alt_missing_digest":
+        return "Missing digest for the media alt source text."
+    if classification == "media_alt_empty_translation":
+        return "Missing proposed translated alt text."
+    if classification == "media_alt_needs_review":
+        return "Translation row still needs manual review."
+    if classification == "media_alt_write_ready" and mapping_safe:
+        return "Mapping is safe and the translation can be considered in a future enablement task."
+    return "Media alt row needs review."
+
+
+def _all_languages_existing_translation_state(entry: dict):
+    existing_value = str(
+        entry.get("previous_translation_value")
+        or entry.get("existing_translation_value")
+        or ""
+    ).strip()
+    outdated = entry.get("previous_translation_outdated")
+    if outdated is None:
+        outdated = entry.get("existing_translation_outdated")
+    if existing_value and outdated is True:
+        return "existing_outdated"
+    if existing_value:
+        return "existing_current_or_unknown"
+    return "missing"
+
+
+def _all_languages_readiness_area(label: str, entries: list[dict], *, key: str):
+    key_entries = [entry for entry in entries or [] if entry.get("key") == key]
+    updated = _all_languages_entry_status_count(
+        key_entries,
+        "written_verified",
+        "readback_mismatch",
+    )
+    verified = _all_languages_entry_status_count(key_entries, "written_verified")
+    ready = _all_languages_entry_status_count(key_entries, "write_ready")
+    blocked = _all_languages_entry_status_count(key_entries, "blocked")
+    skipped = _all_languages_entry_status_count(key_entries, "skipped")
+    if updated:
+        status = "Ready now"
+        reason = f"{verified} of {updated} updated row(s) were confirmed."
+    elif ready:
+        status = "Ready now"
+        reason = f"{ready} row(s) are ready to update."
+    elif skipped and not blocked:
+        status = "Ready now"
+        reason = "Rows are already up to date."
+    else:
+        status = "Needs review" if blocked else "Not present"
+        reason = f"{blocked} row(s) are blocked." if blocked else "No rows found."
+    return {
+        "area": label,
+        "status": status,
+        "plain_reason": reason,
+        "checked_count": len(key_entries),
+    }
+
+
+def _all_languages_metafield_readiness(entries: list[dict]):
+    technical = set()
+    future = set()
+    for entry in entries or []:
+        if "metafield" not in str(entry.get("field_group") or ""):
+            continue
+        namespace_key = _all_languages_metafield_namespace_key(entry)
+        marker_text = " ".join(
+            str(value or "").lower()
+            for value in (
+                namespace_key,
+                entry.get("context_label"),
+                entry.get("resource_note"),
+                entry.get("key"),
+            )
+        )
+        if any(marker in marker_text for marker in ALL_LANGUAGES_TECHNICAL_METAFIELD_MARKERS):
+            technical.add(namespace_key or "metafield")
+        elif any(
+            marker in marker_text
+            for marker in ALL_LANGUAGES_CUSTOMER_FACING_METAFIELD_MARKERS
+        ):
+            future.add(namespace_key or "metafield")
+    return sorted(technical), sorted(future)
+
+
+def _all_languages_metafield_namespace_key(entry: dict):
+    context = str(entry.get("context_label") or "").strip()
+    if "|" in context:
+        namespace, key = [part.strip() for part in context.split("|", 1)]
+        return f"{namespace}.{key}".strip(".")
+    key = str(entry.get("key") or "").strip()
+    if key.startswith("metafield."):
+        return key.removeprefix("metafield.")
+    return context or key
+
+
+def _all_languages_shopify_gid_type(resource_id: str):
+    prefix = "gid://shopify/"
+    resource_id = str(resource_id or "").strip()
+    if not resource_id.startswith(prefix):
+        return ""
+    return resource_id[len(prefix) :].split("/", 1)[0]
 
 
 def _all_languages_option_shopify_key(entry: dict):

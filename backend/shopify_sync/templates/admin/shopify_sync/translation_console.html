@@ -3268,6 +3268,125 @@
               {% endif %}
             </details>
           {% endif %}
+          {% if all_languages_update_display.translation_readiness_audit %}
+            <details class="tw-shopify-update-details">
+              <summary>Translation readiness audit</summary>
+              <h4>Ready now</h4>
+              <div class="tw-shopify-diagnostic-card-grid">
+                {% for item in all_languages_update_display.translation_readiness_audit.ready_now %}
+                  <article class="tw-shopify-diagnostic-card">
+                    <div class="tw-shopify-diagnostic-title">{{ item.area }}</div>
+                    <div class="tw-shopify-diagnostic-meta">{{ item.status }} - {{ item.checked_count }} checked</div>
+                    <div class="tw-shopify-diagnostic-reason">{{ item.plain_reason }}</div>
+                  </article>
+                {% endfor %}
+              </div>
+              <h4>Needs review</h4>
+              <div class="tw-shopify-diagnostic-card-grid">
+                {% for item in all_languages_update_display.translation_readiness_audit.needs_review %}
+                  <article class="tw-shopify-diagnostic-card">
+                    <div class="tw-shopify-diagnostic-title">{{ item.area }}</div>
+                    <div class="tw-shopify-diagnostic-meta">{{ item.status }} - {{ item.checked_count }} checked</div>
+                    <div class="tw-shopify-diagnostic-reason">{{ item.plain_reason }}</div>
+                  </article>
+                {% endfor %}
+              </div>
+              <h4>Preview only</h4>
+              <div class="tw-shopify-diagnostic-card-grid">
+                {% for item in all_languages_update_display.translation_readiness_audit.preview_only %}
+                  <article class="tw-shopify-diagnostic-card">
+                    <div class="tw-shopify-diagnostic-title">{{ item.area }}</div>
+                    <div class="tw-shopify-diagnostic-meta">{{ item.status }} - {{ item.checked_count }} checked</div>
+                    <div class="tw-shopify-diagnostic-reason">{{ item.plain_reason }}</div>
+                  </article>
+                {% endfor %}
+              </div>
+              <h4>Future candidate</h4>
+              {% if all_languages_update_display.translation_readiness_audit.future_candidate %}
+                <div class="tw-shopify-diagnostic-card-grid">
+                  {% for item in all_languages_update_display.translation_readiness_audit.future_candidate %}
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">{{ item.area }}</div>
+                      <div class="tw-shopify-diagnostic-meta">{{ item.status }}</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ item.plain_reason }}</div>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="tw-shopify-not-updated-note">No future candidates are ready from this report.</p>
+              {% endif %}
+              <h4>Blocked technical fields</h4>
+              {% if all_languages_update_display.translation_readiness_audit.blocked_technical_fields %}
+                <ul class="tw-shopify-success-list">
+                  {% for item in all_languages_update_display.translation_readiness_audit.blocked_technical_fields %}
+                    <li>{{ item.area }}: {{ item.plain_reason }}</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p class="tw-shopify-not-updated-note">No technical metafield rows were classified in this report.</p>
+              {% endif %}
+              {% if all_languages_update_display.media_alt_mapping_audit.row_count %}
+                <h4>Media alt mapping audit</h4>
+                <p class="tw-shopify-not-updated-note">{{ all_languages_update_display.media_alt_mapping_audit.plain_summary }}</p>
+                <div class="tw-shopify-update-kv-grid">
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Media rows checked</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.media_alt_mapping_audit.row_count }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Safe mapping</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.media_alt_mapping_audit.safe_mapping_count }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Readback available</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.media_alt_mapping_audit.readback_method_available_count }}</div>
+                  </div>
+                  <div class="tw-shopify-update-card is-wide">
+                    <div class="tw-shopify-update-label">Recommendation</div>
+                    <div class="tw-shopify-update-value">{{ all_languages_update_display.media_alt_mapping_audit.recommendation }}</div>
+                  </div>
+                </div>
+                <div class="tw-shopify-diagnostic-card-grid">
+                  {% for row in all_languages_update_display.media_alt_mapping_audit.rows %}
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</div>
+                      <div class="tw-shopify-diagnostic-meta">{{ row.classification }}</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ row.plain_reason }}</div>
+                    </article>
+                  {% endfor %}
+                </div>
+                <details class="tw-shopify-update-details">
+                  <summary>Technical media mapping details</summary>
+                  <div class="tw-editor-table-wrap">
+                    <table class="tw-readable-table tw-shopify-diagnostic-table">
+                      <thead>
+                        <tr>
+                          <th>Locale</th>
+                          <th>resource_id</th>
+                          <th>key</th>
+                          <th>digest</th>
+                          <th>Readback</th>
+                          <th>Registration input</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in all_languages_update_display.media_alt_mapping_audit.rows %}
+                          <tr>
+                            <td>{{ row.language_label }}{% if row.locale %} ({{ row.locale }}){% endif %}</td>
+                            <td>{{ row.resource_id }}</td>
+                            <td>{{ row.key }}</td>
+                            <td>{{ row.digest }}</td>
+                            <td>{{ row.readback_method_available }}</td>
+                            <td>{{ row.registration_input_ready }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              {% endif %}
+            </details>
+          {% endif %}
           {% if all_languages_update_display.german_body_html_diagnostic.exists or all_languages_update_display.needs_review_rows or all_languages_update_display.option_mapping_audit.row_count %}
             <details class="tw-shopify-update-details">
               <summary>Remaining field diagnostics</summary>
