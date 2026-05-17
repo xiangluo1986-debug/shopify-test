@@ -578,6 +578,17 @@
   .tw-shopify-apply-panel .tw-job-actions {
     gap: 8px;
   }
+  .tw-shopify-panel-action-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 10px 0 0;
+  }
+  .tw-shopify-panel-action-form .tw-main-action-button {
+    width: auto;
+    min-width: 220px;
+  }
   .tw-shopify-apply-note {
     margin: 6px 0 0;
     color: #7c2d12;
@@ -2821,13 +2832,13 @@
               <input type="hidden" name="target_locale" value="{{ selected_locale }}">
               <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
               <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-              <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active or all_languages_update_display.is_successfully_updated %} disabled{% endif %}>{% if all_languages_update_display.is_successfully_updated %}Shopify updated successfully{% else %}Translate and update Shopify{% endif %}</button>
+              <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active or all_languages_update_display.is_successfully_updated %} disabled{% endif %}>{% if all_languages_update_display.is_successfully_updated %}Translate again / Update again{% elif translation_background_job.show_translation_results %}Update Shopify now{% else %}Translate all languages{% endif %}</button>
             </form>
           {% else %}
-            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate and update Shopify</button>
+            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate all languages</button>
           {% endif %}
-          <span class="tw-compact-safe-text">Only safe fields are updated automatically.</span>
-          <span class="tw-compact-safe-text">{% if translation_background_job.show_translation_results and not translation_background_job.is_active %}Translation is ready. Click the button to validate and update safe fields.{% else %}Translation runs first. Shopify update only runs after an explicit click when results are ready.{% endif %}</span>
+          <span class="tw-compact-safe-text">Safe fields only.</span>
+          <span class="tw-compact-safe-text">{% if translation_background_job.show_translation_results and not translation_background_job.is_active %}Translation is ready. Click Update Shopify now to sync safe translations.{% else %}Translation runs first. Shopify update only runs after an explicit click when results are ready.{% endif %}</span>
         </div>
         <div class="tw-job-pill is-{{ translation_background_job.compact_status_key|default:'not_started' }}" data-job-status-pill>
           <div class="tw-job-pill-head">
@@ -2840,7 +2851,7 @@
             {% elif translation_background_job.show_translation_results %}
               Translation results are ready for review.
             {% else %}
-              {% if selected_product_gid %}Select this product and click Translate and update Shopify.{% else %}Select a product and click Translate and update Shopify.{% endif %}
+              {% if selected_product_gid %}Select this product and click Translate all languages.{% else %}Select a product and click Translate all languages.{% endif %}
             {% endif %}
           </div>
           {% if translation_background_job.exists %}
@@ -2962,7 +2973,7 @@
             <span class="tw-count-badge">Safe fields only</span>
           {% endif %}
         </div>
-        <p class="tw-shopify-apply-note">Only safe fields are updated automatically. Product description updates only when the HTML validation passes.</p>
+        <p class="tw-shopify-apply-note">Safe fields only. Product description updates only if HTML validation passes. Options and variants remain preview-only.</p>
         <div class="tw-job-actions" style="align-items: flex-end;">
           <div>
             <div class="tw-header-status-label">Checked items</div>
@@ -2986,10 +2997,32 @@
           </div>
         </div>
         <div class="tw-shopify-apply-disabled-reason" data-all-languages-update-status hidden>Running validation/update status...</div>
-        {% if all_languages_update_display.result_message %}
+        {% if all_languages_update_display.status == "all_languages_shopify_update_not_submitted" %}
+          <div class="tw-shopify-apply-disabled-reason">
+            <div>Shopify has not been updated yet.</div>
+            <div>Click Update Shopify now to sync safe translations.</div>
+          </div>
+        {% elif all_languages_update_display.result_message %}
           <div class="tw-shopify-apply-disabled-reason">{{ all_languages_update_display.result_message }}</div>
         {% else %}
-          <div class="tw-shopify-apply-disabled-reason">No Shopify update has been run yet.</div>
+          <div class="tw-shopify-apply-disabled-reason">
+            <div>Shopify has not been updated yet.</div>
+            <div>Click Update Shopify now to sync safe translations.</div>
+          </div>
+        {% endif %}
+        {% if not all_languages_update_display.is_successfully_updated %}
+          <form method="post" action="{% url 'shopify_translation_console' %}" class="tw-shopify-panel-action-form" data-job-start-form>
+            {% csrf_token %}
+            <input type="hidden" name="ui_mode" value="editor">
+            <input type="hidden" name="action" value="{{ all_languages_real_write_action_name }}">
+            <input type="hidden" name="product_search" value="{{ product_search_text }}">
+            <input type="hidden" name="selected_product_gid" value="{{ translation_background_job.product_gid|default:selected_product_gid }}">
+            <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+            <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+            <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+            <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Update Shopify now</button>
+            <span class="tw-compact-safe-text">Safe fields only</span>
+          </form>
         {% endif %}
         {% if all_languages_update_display.safe_field_diagnostic_summary and not all_languages_update_display.updated_count %}
           <details class="tw-shopify-update-details" aria-label="Safe field Shopify update diagnostic">
