@@ -45,6 +45,7 @@ TRUSTPILOT_SENT_TAG_ALIASES = [
     "trustpilot",
     "trustpoilt",
 ]
+EBAY_TAG_PROBES = ["ebay", "eBay", "EBAY", "e-bay", "e bay"]
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SECRET_RE = re.compile(
@@ -94,6 +95,8 @@ def _run_django_local_audit() -> dict:
             "TRUSTPILOT_ALIASES = ['1: trustpilot', '1: trustpoilt', '1:trustpilot', '1 : trustpilot', '1:trustpoilt', '1 : trustpoilt', 'trustpilot', 'trustpoilt']",
             "def norm(value):",
             "    return re.sub(r'\\s+', '', str(value or '').strip().lower())",
+            "def norm_ebay(value):",
+            "    return re.sub(r'[\\s_-]+', '', str(value or '').strip().lower())",
             "def split_tags(value):",
             "    return [part.strip()[:120] for part in str(value or '').split(',') if part.strip()]",
             "def has_alias(tags, aliases):",
@@ -103,6 +106,11 @@ def _run_django_local_audit() -> dict:
             "    normalized = {norm(alias) for alias in aliases}",
             "    for tag in tags:",
             "        if norm(tag) in normalized:",
+            "            return tag",
+            "    return ''",
+            "def matched_ebay(tags):",
+            "    for tag in tags:",
+            "        if 'ebay' in norm_ebay(tag):",
             "            return tag",
             "    return ''",
             "columns = {column.name for column in connection.introspection.get_table_description(connection.cursor(), ShopifyOrder._meta.db_table)}",
@@ -118,15 +126,16 @@ def _run_django_local_audit() -> dict:
             "        values.append(TAG_FIELD)",
             "    row = ShopifyOrder.objects.filter(query).values(*values).first()",
             "    if not row:",
-            "        return {'order_name': order_name, 'found': False, 'tag_field_data_available': False, 'tag_field_value_present': False, 'tags': [], 'tags_summary': 'Order not found in local ShopifyOrder data', 'tag_data_missing_source': 'order_not_found_in_local_shopify_order', 'review_request_tag_detected': False, 'matched_review_request_tag_value': ''}",
+            "        return {'order_name': order_name, 'found': False, 'tag_field_data_available': False, 'tag_field_value_present': False, 'tags': [], 'tags_summary': 'Order not found in local ShopifyOrder data', 'tag_data_missing_source': 'order_not_found_in_local_shopify_order', 'review_request_tag_detected': False, 'matched_review_request_tag_value': '', 'delivered_tag_detected': False, 'trustpilot_sent_tag_detected': False, 'ebay_tag_detected': False, 'matched_ebay_tag_value': ''}",
             "    raw_tags = row.get(TAG_FIELD) if db_tag_field_exists else None",
             "    tag_data_available = db_tag_field_exists and raw_tags is not None",
             "    tags = split_tags(raw_tags) if tag_data_available else []",
             "    missing_source = '' if tag_data_available else ('Local ShopifyOrder tag field is missing; apply the shopify_tags migration' if not db_tag_field_exists else 'ShopifyOrder.shopify_tags is not populated by local sync')",
             "    tags_summary = ', '.join(tags) if tags else ('Shopify response had no order tags' if tag_data_available else 'Shopify tag data not loaded')",
-            "    return {'order_name': order_name, 'found': True, 'matched_order_name': row.get('order_name') or '', 'local_order_id': row.get('id') or '', 'tag_field_data_available': tag_data_available, 'tag_field_value_present': bool(str(raw_tags or '').strip()), 'tags': tags, 'tags_summary': tags_summary, 'tag_data_missing_source': missing_source, 'review_request_tag_detected': has_alias(tags, REVIEW_ALIASES), 'matched_review_request_tag_value': matched_alias(tags, REVIEW_ALIASES), 'delivered_tag_detected': has_alias(tags, DELIVERED_ALIASES), 'trustpilot_sent_tag_detected': has_alias(tags, TRUSTPILOT_ALIASES)}",
+            "    ebay_match = matched_ebay(tags)",
+            "    return {'order_name': order_name, 'found': True, 'matched_order_name': row.get('order_name') or '', 'local_order_id': row.get('id') or '', 'tag_field_data_available': tag_data_available, 'tag_field_value_present': bool(str(raw_tags or '').strip()), 'tags': tags, 'tags_summary': tags_summary, 'tag_data_missing_source': missing_source, 'review_request_tag_detected': has_alias(tags, REVIEW_ALIASES), 'matched_review_request_tag_value': matched_alias(tags, REVIEW_ALIASES), 'delivered_tag_detected': has_alias(tags, DELIVERED_ALIASES), 'trustpilot_sent_tag_detected': has_alias(tags, TRUSTPILOT_ALIASES), 'ebay_tag_detected': bool(ebay_match), 'matched_ebay_tag_value': ebay_match}",
             "scan = build_review_request_last_60_days_candidate_scan_report({})",
-            "payload = {'timestamp': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(), 'task': 'shopify_review_request_order_tags_persistence_audit', 'task_name': 'shopify_review_request_order_tags_persistence_audit', 'phase': '5.28G', 'mode': 'dry-run-local-order-tags-persistence-audit', 'command_label': 'shopify_review_request_order_tags_persistence_audit_local_only', 'report_status': 'order_tags_persistence_audit_ready', 'success': True, 'selected_local_tag_field': 'ShopifyOrder.shopify_tags', 'model_tag_field_exists': model_tag_field_exists, 'database_tag_field_exists': db_tag_field_exists, 'order_22530': lookup_order('#22530'), 'order_22562': lookup_order('#22562'), 'order_22530_diagnosis': scan.get('order_22530_diagnosis') or {}, 'order_22562_diagnosis': scan.get('order_22562_diagnosis') or {}, 'eligible_candidate_count_after_tag_availability': int(scan.get('eligible_candidate_count') or 0), 'eligible_candidate_count_total': int(scan.get('eligible_candidate_count_total') or scan.get('eligible_candidate_count') or 0), 'review_queue_batch_size': int(scan.get('review_queue_batch_size') or 20), 'review_queue_visible_count': int(scan.get('review_queue_visible_count') or 0), 'review_queue_overflow_count': int(scan.get('review_queue_overflow_count') or 0), 'review_queue_sort_order': scan.get('review_queue_sort_order') or [], 'review_queue_candidates': scan.get('review_queue_candidates') or [], 'blocked_count_after_tag_availability': int(scan.get('blocked_count') or 0), 'scan_source': scan.get('scan_source', ''), 'coverage_warnings': scan.get('coverage_warnings') or []}",
+            "payload = {'timestamp': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(), 'task': 'shopify_review_request_order_tags_persistence_audit', 'task_name': 'shopify_review_request_order_tags_persistence_audit', 'phase': '5.28G', 'mode': 'dry-run-local-order-tags-persistence-audit', 'command_label': 'shopify_review_request_order_tags_persistence_audit_local_only', 'report_status': 'order_tags_persistence_audit_ready', 'success': True, 'selected_local_tag_field': 'ShopifyOrder.shopify_tags', 'model_tag_field_exists': model_tag_field_exists, 'database_tag_field_exists': db_tag_field_exists, 'order_22530': lookup_order('#22530'), 'order_22562': lookup_order('#22562'), 'order_22530_diagnosis': scan.get('order_22530_diagnosis') or {}, 'order_22562_diagnosis': scan.get('order_22562_diagnosis') or {}, 'eligible_candidate_count_after_tag_availability': int(scan.get('eligible_candidate_count') or 0), 'eligible_candidate_count_total': int(scan.get('eligible_candidate_count_total') or scan.get('eligible_candidate_count') or 0), 'review_queue_batch_size': int(scan.get('review_queue_batch_size') or 20), 'review_queue_visible_count': int(scan.get('review_queue_visible_count') or 0), 'review_queue_overflow_count': int(scan.get('review_queue_overflow_count') or 0), 'review_queue_sort_order': scan.get('review_queue_sort_order') or [], 'review_queue_candidates': scan.get('review_queue_candidates') or [], 'blocked_count_after_tag_availability': int(scan.get('blocked_count') or 0), 'blocked_ebay_order_count': int(scan.get('blocked_ebay_order_count') or 0), 'scan_source': scan.get('scan_source', ''), 'coverage_warnings': scan.get('coverage_warnings') or []}",
             f"print('{JSON_BEGIN}')",
             "print(json.dumps(payload, ensure_ascii=False, sort_keys=True))",
             f"print('{JSON_END}')",
@@ -203,6 +212,7 @@ def _fallback_payload(result: dict) -> dict:
         "review_queue_sort_order": [],
         "review_queue_candidates": [],
         "blocked_count_after_tag_availability": 0,
+        "blocked_ebay_order_count": 0,
         "scan_source": "unavailable",
         "coverage_warnings": ["order_tags_persistence_audit_failed"],
         "django_audit_failure_type": _safe_text(result.get("failure_type", "")),
@@ -264,6 +274,7 @@ def _sqlite_fallback_payload(result: dict) -> dict:
         "review_queue_sort_order": scan.get("review_queue_sort_order") or [],
         "review_queue_candidates": scan.get("review_queue_candidates") or [],
         "blocked_count_after_tag_availability": int(scan.get("blocked_count") or 0),
+        "blocked_ebay_order_count": int(scan.get("blocked_ebay_order_count") or 0),
         "scan_source": scan.get("scan_source", "sqlite_fallback_no_scan_report"),
         "coverage_warnings": scan.get("coverage_warnings") or ["django_audit_unavailable_sqlite_fallback_used"],
         "django_audit_failure_type": _safe_text(result.get("failure_type", "")),
@@ -313,6 +324,8 @@ def _sqlite_order_audit(order_name: str, rows: list[dict], db_tag_field_exists: 
         "matched_review_request_tag_value": _matched_alias(tags, REVIEW_REQUEST_TAG_ALIASES),
         "delivered_tag_detected": _has_alias(tags, DELIVERED_TAG_ALIASES),
         "trustpilot_sent_tag_detected": _has_alias(tags, TRUSTPILOT_SENT_TAG_ALIASES),
+        "ebay_tag_detected": bool(_matched_ebay_tag(tags)),
+        "matched_ebay_tag_value": _matched_ebay_tag(tags),
     }
 
 
@@ -342,6 +355,10 @@ def _empty_order_audit(order_name: str) -> dict:
         "matched_review_request_tag_value": "",
         "delivered_tag_detected": False,
         "trustpilot_sent_tag_detected": False,
+        "ebay_tag_detected": False,
+        "matched_ebay_tag_value": "",
+        "ebay_tag_detected": False,
+        "matched_ebay_tag_value": "",
     }
 
 
@@ -371,6 +388,10 @@ def _tag_alias_detection_results() -> dict:
         "review_request_aliases": _alias_rows(REVIEW_REQUEST_TAG_ALIASES, REVIEW_REQUEST_TAG_ALIASES),
         "delivered_aliases": _alias_rows(DELIVERED_TAG_ALIASES, DELIVERED_TAG_ALIASES),
         "trustpilot_sent_aliases": _alias_rows(TRUSTPILOT_SENT_TAG_ALIASES, TRUSTPILOT_SENT_TAG_ALIASES),
+        "ebay_tag_probes": [
+            {"tag_value": _safe_text(value, 120), "detected": bool(_matched_ebay_tag([value]))}
+            for value in EBAY_TAG_PROBES
+        ],
     }
 
 
@@ -389,6 +410,10 @@ def _normalize_tag(value: str) -> str:
     return re.sub(r"\s+", "", str(value or "").strip().lower())
 
 
+def _normalize_ebay_tag(value: str) -> str:
+    return re.sub(r"[\s_-]+", "", str(value or "").strip().lower())
+
+
 def _has_alias(tags: list[str], aliases: list[str]) -> bool:
     normalized_aliases = {_normalize_tag(alias) for alias in aliases}
     return any(_normalize_tag(tag) in normalized_aliases for tag in tags)
@@ -399,6 +424,13 @@ def _matched_alias(tags: list[str], aliases: list[str]) -> str:
     for tag in tags:
         if _normalize_tag(tag) in normalized_aliases:
             return tag
+    return ""
+
+
+def _matched_ebay_tag(tags: list[str]) -> str:
+    for tag in tags:
+        if "ebay" in _normalize_ebay_tag(tag):
+            return _safe_text(tag, 120)
     return ""
 
 
@@ -494,6 +526,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "review_queue_batch_size": int(payload.get("review_queue_batch_size") or 20),
         "review_queue_visible_count": int(payload.get("review_queue_visible_count") or 0),
         "review_queue_overflow_count": int(payload.get("review_queue_overflow_count") or 0),
+        "blocked_ebay_order_count": int(payload.get("blocked_ebay_order_count") or 0),
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "gmail_api_call_performed": False,
@@ -522,6 +555,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Review batch: {payload.get('review_queue_visible_count', 0)} of "
         f"{payload.get('eligible_candidate_count_total') or payload.get('eligible_candidate_count_after_tag_availability', 0)} "
         f"(batch size {payload.get('review_queue_batch_size', 20)}, overflow {payload.get('review_queue_overflow_count', 0)})\n"
+        f"Blocked eBay orders: {payload.get('blocked_ebay_order_count', 0)}\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"
         "Choose next step:\n"
@@ -561,6 +595,7 @@ def _render_html(payload: dict) -> str:
     <tr><th>Review queue batch size</th><td>{escape(str(payload.get("review_queue_batch_size", 20)))}</td></tr>
     <tr><th>Review queue visible count</th><td>{escape(str(payload.get("review_queue_visible_count", 0)))}</td></tr>
     <tr><th>Review queue overflow count</th><td>{escape(str(payload.get("review_queue_overflow_count", 0)))}</td></tr>
+    <tr><th>Blocked eBay order count</th><td>{escape(str(payload.get("blocked_ebay_order_count", 0)))}</td></tr>
   </tbody></table>
   <h2>Safety</h2>
   <table><tbody>
@@ -584,6 +619,7 @@ def _issue_summary(payload: dict) -> str:
         f"#22530 review tag detected: {order_22530.get('review_request_tag_detected') is True}; "
         f"#22562 review tag detected: {order_22562.get('review_request_tag_detected') is True}; "
         f"eligible candidates after tag availability: {payload.get('eligible_candidate_count_after_tag_availability', 0)}; "
+        f"blocked eBay orders: {payload.get('blocked_ebay_order_count', 0)}; "
         f"review queue showing {payload.get('review_queue_visible_count', 0)} of "
         f"{payload.get('eligible_candidate_count_total') or payload.get('eligible_candidate_count_after_tag_availability', 0)}. "
         "No Shopify, Gmail, Trustpilot, Kudosi, or Ali Reviews API calls or writes were performed."

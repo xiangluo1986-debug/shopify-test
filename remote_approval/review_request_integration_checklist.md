@@ -173,6 +173,26 @@ Phase 0.2 automation decision:
   Shopify write, no Shopify mutation, no external review API, and no raw email
   output.
 
+#### Phase 5.28N eBay Blocker and Trustpilot Post-Send Tag Write
+
+- [x] Block any order/customer with local Shopify tag text matching `ebay`,
+  `eBay`, `EBAY`, `e-bay`, or `e bay` before it can enter Needs review email.
+- [x] Show blocked eBay orders with reason
+  `eBay order — Trustpilot email not allowed.` and include
+  `blocked_ebay_order_count` in scan/audit reports.
+- [x] Add locked task
+  `shopify_review_request_trustpilot_post_send_tag_write` for one successful
+  post-send audited order only, currently `#21225`.
+- [x] Require exact approval env
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE=YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER`
+  before any Shopify API call.
+- [x] With approval, add exact tag `1: trustpilot` and remove review-request
+  trigger aliases `1: review request` and `1: reveiw request` using Shopify
+  tag mutations only; preserve all other tags and never touch `Delivered`.
+- [x] Without approval, report `blocked_missing_tag_write_approval` and perform
+  no Shopify API call, no Shopify write, no Gmail action, and no external
+  review API call.
+
 ### Shopify Admin API Tag Permissions
 
 - [ ] Confirm the app has the required `write_orders` scope before any order tag

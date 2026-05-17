@@ -15,6 +15,7 @@ SOURCE_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_review_and_send_
 TIMEOUT_SECONDS = 180
 JSON_BEGIN = "SHOPIFY_REVIEW_REQUEST_REVIEW_SEND_POST_SEND_AUDIT_JSON_BEGIN"
 JSON_END = "SHOPIFY_REVIEW_REQUEST_REVIEW_SEND_POST_SEND_AUDIT_JSON_END"
+EBAY_BLOCK_REASON = "eBay order — Trustpilot email not allowed."
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SECRET_RE = re.compile(
@@ -157,6 +158,8 @@ def _build_payload(source_report: dict, source_error: str, source_html: str) -> 
     )
     sent_count = _safe_int(source_report.get("sent_count"))
     email_sent_confirmed = source_report.get("email_sent") is True and sent_count == 1
+    ebay_tag_detected = source_report.get("ebay_tag_detected") is True
+    matched_ebay_tag_value = _safe_text(source_report.get("matched_ebay_tag_value"), max_length=120)
     gmail_drafts_create_confirmed = source_report.get("gmail_drafts_create_called") is True
     gmail_drafts_send_confirmed = source_report.get("gmail_drafts_send_called") is True
     gmail_api_call_confirmed = source_report.get("gmail_api_call_performed") is True
@@ -165,12 +168,13 @@ def _build_payload(source_report: dict, source_error: str, source_html: str) -> 
     shopify_tag_write_confirmed_false = source_report.get("shopify_tag_write_performed") is False
     customer_level_sent_record_available = bool(selected_order and email_sent_confirmed)
     should_move_to_already_sent = bool(email_sent_confirmed and sent_count == 1)
-    ready_for_shopify_tag_write_next_phase = should_move_to_already_sent
+    ready_for_shopify_tag_write_next_phase = should_move_to_already_sent and not ebay_tag_detected
     blocking_conditions = _blocking_conditions(
         source_error=source_error,
         selected_order=selected_order,
         email_sent_confirmed=email_sent_confirmed,
         sent_count=sent_count,
+        ebay_tag_detected=ebay_tag_detected,
     )
     audit_status = (
         "review_send_post_send_audit_passed"
@@ -194,6 +198,8 @@ def _build_payload(source_report: dict, source_error: str, source_html: str) -> 
         "source_review_send_html_path": "logs/shopify_review_request_trustpilot_review_and_send_execute.html",
         "source_review_send_html_found": bool(source_html),
         "selected_order": selected_order,
+        "ebay_tag_detected": ebay_tag_detected,
+        "matched_ebay_tag_value": matched_ebay_tag_value,
         "email_sent_confirmed": email_sent_confirmed,
         "gmail_api_call_confirmed": gmail_api_call_confirmed,
         "gmail_drafts_create_confirmed": gmail_drafts_create_confirmed,
@@ -230,6 +236,7 @@ def _blocking_conditions(
     selected_order: str,
     email_sent_confirmed: bool,
     sent_count: int,
+    ebay_tag_detected: bool,
 ) -> list[dict]:
     conditions = []
     if source_error:
@@ -240,6 +247,8 @@ def _blocking_conditions(
         conditions.append({"status": "blocked_email_not_confirmed", "detail": "email_sent=true and sent_count=1 were not both confirmed."})
     if sent_count != 1:
         conditions.append({"status": "blocked_unexpected_sent_count", "detail": "sent_count must equal 1."})
+    if ebay_tag_detected:
+        conditions.append({"status": "blocked_ebay_order", "detail": EBAY_BLOCK_REASON})
     return conditions
 
 
@@ -286,6 +295,8 @@ def _safe_source_fragment(source_report: dict) -> dict:
         "sent_count",
         "shopify_write_performed",
         "shopify_tag_write_performed",
+        "ebay_tag_detected",
+        "matched_ebay_tag_value",
         "privacy_scan_summary",
     )
     return {key: source_report.get(key) for key in safe_keys if key in source_report}
@@ -309,6 +320,8 @@ def _render_html(payload: dict) -> str:
         for label, value in (
             ("Audit status", payload.get("audit_status")),
             ("Selected order", payload.get("selected_order")),
+            ("eBay tag detected", payload.get("ebay_tag_detected")),
+            ("Matched eBay tag value", payload.get("matched_ebay_tag_value")),
             ("Email sent confirmed", payload.get("email_sent_confirmed")),
             ("Gmail API call confirmed from source", payload.get("gmail_api_call_confirmed")),
             ("Gmail drafts.create confirmed", payload.get("gmail_drafts_create_confirmed")),
@@ -359,6 +372,8 @@ def _task_result(payload: dict, json_path, html_path) -> dict:
         "html_review_path": str(html_path),
         "audit_status": payload.get("audit_status"),
         "selected_order": payload.get("selected_order"),
+        "ebay_tag_detected": payload.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": payload.get("matched_ebay_tag_value"),
         "email_sent_confirmed": payload.get("email_sent_confirmed"),
         "gmail_drafts_send_confirmed": payload.get("gmail_drafts_send_confirmed"),
         "sent_count": payload.get("sent_count"),
@@ -374,6 +389,7 @@ def _approval_message(payload: dict, json_path, html_path) -> str:
         "Review & Send post-send audit complete.\n"
         f"Status: {payload.get('audit_status')}\n"
         f"Selected order: {payload.get('selected_order') or 'None'}\n"
+        f"eBay tag detected: {payload.get('ebay_tag_detected') is True}\n"
         f"Email sent confirmed: {payload.get('email_sent_confirmed')}\n"
         f"Gmail drafts.send confirmed: {payload.get('gmail_drafts_send_confirmed')}\n"
         f"Sent count: {payload.get('sent_count')}\n"

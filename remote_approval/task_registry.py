@@ -201,6 +201,9 @@ from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_final_pre
 from remote_approval.tasks.shopify_review_request_trustpilot_tag_write_locked_runner_task import (
     run_shopify_review_request_trustpilot_tag_write_locked_runner_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_post_send_tag_write_task import (
+    run_shopify_review_request_trustpilot_post_send_tag_write_task,
+)
 from remote_approval.tasks.shopify_review_request_unified_decision_engine_dry_run_task import (
     run_shopify_review_request_unified_decision_engine_dry_run_task,
 )
@@ -553,6 +556,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_trustpilot_tag_write_locked_runner": (
         run_shopify_review_request_trustpilot_tag_write_locked_runner_task
+    ),
+    "shopify_review_request_trustpilot_post_send_tag_write": (
+        run_shopify_review_request_trustpilot_post_send_tag_write_task
     ),
     "shopify_review_request_unified_decision_engine_dry_run": (
         run_shopify_review_request_unified_decision_engine_dry_run_task
@@ -1109,6 +1115,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none in Phase 3.19; future Shopify tagsAdd only behind explicit gates",
         "review_file_path": "logs/shopify_review_request_trustpilot_tag_write_locked_runner.json",
+    },
+    "shopify_review_request_trustpilot_post_send_tag_write": {
+        "description": "Write the audited Trustpilot completion tag and remove review-request trigger aliases for one post-send audited order behind exact env approval.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "Shopify tagsAdd/tagsRemove only when SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE matches the exact approval phrase",
+        "review_file_path": "logs/codex_runs/shopify_review_request_trustpilot_post_send_tag_write.json",
     },
     "shopify_review_request_unified_decision_engine_dry_run": {
         "description": "Generate a unified no-write review request decision report from local Phase 1 reports.",

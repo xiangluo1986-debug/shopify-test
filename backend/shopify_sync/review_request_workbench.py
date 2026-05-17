@@ -42,6 +42,7 @@ TRUSTPILOT_TAG_ALIASES = (
     "trustpilot",
     "trustpoilt",
 )
+EBAY_BLOCK_REASON = "eBay order — Trustpilot email not allowed."
 MANUAL_CONFIRMED_ORDER_EVIDENCE = {
     "#22562": {
         "order_name": "#22562",
@@ -101,6 +102,12 @@ REVIEW_SEND_POST_SEND_AUDIT_REPORT_FILENAME = (
 )
 REVIEW_SEND_POST_SEND_AUDIT_HTML_FILENAME = (
     "codex_runs/shopify_review_request_review_send_post_send_audit.html"
+)
+TRUSTPILOT_POST_SEND_TAG_WRITE_REPORT_FILENAME = (
+    "codex_runs/shopify_review_request_trustpilot_post_send_tag_write.json"
+)
+TRUSTPILOT_POST_SEND_TAG_WRITE_HTML_FILENAME = (
+    "codex_runs/shopify_review_request_trustpilot_post_send_tag_write.html"
 )
 LOCAL_REVIEW_SEND_EVIDENCE = "Trustpilot email sent from Review & Send. Shopify tag not written yet."
 LOCAL_REVIEW_SEND_HISTORY_LABEL = "Sent via local Review & Send report"
@@ -501,6 +508,12 @@ REPORT_DEFINITIONS = (
         "Review & Send post-send audit",
         REVIEW_SEND_POST_SEND_AUDIT_REPORT_FILENAME,
         ("audit_status", "report_status", "status"),
+    ),
+    (
+        "trustpilot_post_send_tag_write",
+        "Trustpilot post-send Shopify tag write",
+        TRUSTPILOT_POST_SEND_TAG_WRITE_REPORT_FILENAME,
+        ("tag_write_status", "report_status", "status"),
     ),
     (
         "trustpilot_gmail_draft_package",
@@ -914,6 +927,8 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
         max_length=80,
     )
     result["selected_masked_email"] = candidate.get("masked_customer_label") or candidate.get("customer")
+    result["ebay_tag_detected"] = candidate.get("ebay_tag_detected") is True
+    result["matched_ebay_tag_value"] = _safe_text(candidate.get("matched_ebay_tag_value"), max_length=120)
     result["gmail_scope_status"] = state["gmail_setup"]["scope_status"]
     result["gmail_compose_send_supported"] = bool(
         state["gmail_setup"]["gmail_compose_send_supported"]
@@ -2808,6 +2823,7 @@ def _local_review_send_report_payloads_from_disk():
     for filename, label in (
         (REVIEW_AND_SEND_REPORT_FILENAME, "Trustpilot Review & Send execute"),
         (REVIEW_SEND_POST_SEND_AUDIT_REPORT_FILENAME, "Review & Send post-send audit"),
+        (TRUSTPILOT_POST_SEND_TAG_WRITE_REPORT_FILENAME, "Trustpilot post-send Shopify tag write"),
     ):
         path = _log_dir() / filename
         if not path.exists():
@@ -2843,6 +2859,7 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
         payload.get("shopify_tag_write_performed") is True
         or payload.get("shopify_tag_write_confirmed") is True
         or payload.get("source_shopify_tag_write_performed") is True
+        or payload.get("tag_write_status") == "trustpilot_tag_written_and_review_request_removed"
     )
     masked = (
         mask_email(payload.get("selected_masked_email"))
@@ -2880,6 +2897,8 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
         "source_section": "local_review_send_success",
         "draft_should_not_be_sent": False,
         "prior_trustpilot_order_name": "",
+        "ebay_tag_detected": payload.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": _safe_text(payload.get("matched_ebay_tag_value"), max_length=120),
         "badge_class": "rrw-badge-info" if not shopify_tag_written else "rrw-badge-ok",
         "local_review_send_success": True,
         "shopify_tag_pending": not shopify_tag_written,
@@ -2894,19 +2913,23 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
 
 
 def _dedupe_local_review_send_records(records):
-    seen = set()
-    result = []
+    result_by_key = {}
+    order_keys = []
     for record in records or []:
         key = (
             _canonical_order_name(record.get("order_name")),
             record.get("email_sent") is True,
-            record.get("source_report_path") or "",
         )
-        if not key[0] or key in seen:
+        if not key[0]:
             continue
-        seen.add(key)
-        result.append(record)
-    return result
+        existing = result_by_key.get(key)
+        if not existing:
+            result_by_key[key] = record
+            order_keys.append(key)
+            continue
+        if record.get("shopify_tag_written") is True and existing.get("shopify_tag_written") is not True:
+            result_by_key[key] = record
+    return [result_by_key[key] for key in order_keys]
 
 
 def _ali_reviews_status(history_focus):
@@ -5018,6 +5041,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "blocked_count": scan["blocked_count"],
         "blocked_merged_group_count": scan["blocked_merged_group_count"],
         "blocked_duplicate_customer_count": scan["blocked_duplicate_customer_count"],
+        "blocked_ebay_order_count": scan["blocked_ebay_order_count"],
         "blocked_note_risk_count": scan["blocked_note_risk_count"],
         "first_order_blocked_count": scan["first_order_blocked_count"],
         "prior_trustpilot_customer_blocked_count": scan["prior_trustpilot_customer_blocked_count"],
@@ -5593,6 +5617,8 @@ def _review_send_post_send_audit_payload(
     )
     sent_count = _int_or_zero(source_report.get("sent_count") or source_report.get("source_sent_count"))
     email_sent_confirmed = source_report.get("email_sent") is True and sent_count == 1
+    ebay_tag_detected = source_report.get("ebay_tag_detected") is True
+    matched_ebay_tag_value = _safe_text(source_report.get("matched_ebay_tag_value"), max_length=120)
     should_move_to_already_sent = bool(email_sent_confirmed and sent_count == 1)
     blocking_conditions = []
     if source_error:
@@ -5617,6 +5643,10 @@ def _review_send_post_send_audit_payload(
         blocking_conditions.append(
             {"status": "blocked_unexpected_sent_count", "detail": "sent_count must equal 1."}
         )
+    if ebay_tag_detected:
+        blocking_conditions.append(
+            {"status": "blocked_ebay_order", "detail": EBAY_BLOCK_REASON}
+        )
     audit_status = (
         "review_send_post_send_audit_passed"
         if should_move_to_already_sent and not blocking_conditions
@@ -5639,6 +5669,8 @@ def _review_send_post_send_audit_payload(
         "source_review_send_html_path": _safe_text(source_html_path, max_length=180),
         "source_review_send_html_found": bool(source_html_found),
         "selected_order": selected_order,
+        "ebay_tag_detected": ebay_tag_detected,
+        "matched_ebay_tag_value": matched_ebay_tag_value,
         "email_sent_confirmed": email_sent_confirmed,
         "gmail_api_call_confirmed": source_report.get("gmail_api_call_performed") is True,
         "gmail_drafts_create_confirmed": source_report.get("gmail_drafts_create_called") is True,
@@ -5649,7 +5681,7 @@ def _review_send_post_send_audit_payload(
         "shopify_tag_write_confirmed_false": source_report.get("shopify_tag_write_performed") is False,
         "customer_level_sent_record_available": bool(selected_order and email_sent_confirmed),
         "should_move_to_already_sent": should_move_to_already_sent,
-        "ready_for_shopify_tag_write_next_phase": should_move_to_already_sent,
+        "ready_for_shopify_tag_write_next_phase": should_move_to_already_sent and not ebay_tag_detected,
         "blocking_conditions": blocking_conditions,
         "no_gmail_api_call_in_audit": True,
         "audit_gmail_api_call_performed": False,
@@ -5985,6 +6017,7 @@ def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT
         "blocked_display_limit": BLOCKED_QUEUE_DISPLAY_LIMIT,
         "blocked_overflow_count": max(len(blocked_rows) - len(blocked_visible_rows), 0),
         "duplicate_block_count": scan.get("blocked_duplicate_customer_count", 0),
+        "blocked_ebay_order_count": scan.get("blocked_ebay_order_count", 0),
         "review_send_action_enabled_count": len(needs_review_rows),
         "email_sent_count": scan.get("already_sent_count", 0),
         "merged_group_count": scan.get("blocked_merged_group_count", 0),
@@ -6036,6 +6069,7 @@ def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT
             ),
             "hidden_older_eligible_count": _int_or_zero(scan.get("hidden_older_eligible_count")),
             "blocked_count": scan.get("blocked_count", 0),
+            "blocked_ebay_order_count": scan.get("blocked_ebay_order_count", 0),
             "already_sent_count": scan.get("already_sent_count", 0),
             "window_days": scan.get("window_days", LAST_60_DAY_SCAN_WINDOW_DAYS),
             "scan_source": scan.get("scan_source", "unknown"),
@@ -6224,6 +6258,7 @@ def _last_60_days_candidate_scan(
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if _row_blocked_by_merged_group(row)),
         "blocked_duplicate_customer_count": sum(1 for row in blocked_rows if _row_blocked_by_duplicate(row)),
+        "blocked_ebay_order_count": sum(1 for row in blocked_rows if _row_blocked_by_ebay(row)),
         "blocked_note_risk_count": sum(1 for row in blocked_rows if _row_blocked_by_note_risk(row)),
         "first_order_blocked_count": sum(1 for row in blocked_rows if _row_blocked_by_first_order(row)),
         "prior_trustpilot_customer_blocked_count": sum(
@@ -6430,6 +6465,7 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         or (row or {}).get("tags")
         or []
     )
+    matched_ebay_tags = _matched_ebay_tags(tags)
     final_blockers = _focus_final_blockers(found_locally, row, tag_data_loaded)
     return {
         "order_name": order_name,
@@ -6452,6 +6488,11 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         "selected_local_tag_field": context.get("selected_local_tag_field") or SHOPIFY_ORDER_TAG_FIELD_LABEL,
         "tags_summary": _tags_summary(tags, tag_data_loaded),
         "order_tags_display": tags,
+        "ebay_tag_detected": bool(matched_ebay_tags) or (row or {}).get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": (
+            _safe_text((row or {}).get("matched_ebay_tag_value"), max_length=120)
+            or (matched_ebay_tags[0] if matched_ebay_tags else "")
+        ),
         "tag_data_available": tag_data_loaded,
         "review_request_tag_data_loaded": tag_data_loaded,
         "tag_data_missing_source": ""
@@ -6670,6 +6711,7 @@ def _scan_context_from_local_order(order, source_row, cutoff):
     delivered_confirmed = _scan_delivered_confirmed(tag_source_row, order)
     canonical_tag_present = _scan_canonical_review_request_tag_present(tag_source_row)
     matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_ebay_tags = _matched_ebay_tags(tags)
     note_risk = _note_risk_detection(order)
     identity = _customer_identity_summary(order)
     local_context = {
@@ -6707,6 +6749,8 @@ def _scan_context_from_local_order(order, source_row, cutoff):
         "tag_data_missing_source": tag_data_missing_source,
         "tag_data_recommended_action": tag_data_recommended_action,
         "matched_review_request_tag_value": matched_review_request_tags[0] if matched_review_request_tags else "",
+        "ebay_tag_detected": bool(matched_ebay_tags),
+        "matched_ebay_tag_value": matched_ebay_tags[0] if matched_ebay_tags else "",
         "scan_date_in_window": _datetime_in_window(date_context.get("scan_datetime"), cutoff),
         "scan_date_missing": date_context.get("scan_datetime") is None,
     }
@@ -6718,6 +6762,7 @@ def _scan_context_from_source_row(order_name, source_row, cutoff):
     date_context = _scan_date_context({}, source_row)
     tags = _source_row_tags(source_row)
     matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_ebay_tags = _matched_ebay_tags(tags)
     tag_data_loaded = _tag_data_loaded(source_row, tags)
     note_risk = _note_risk_detection(source_row)
     return {
@@ -6744,6 +6789,8 @@ def _scan_context_from_source_row(order_name, source_row, cutoff):
         "tag_data_missing_source": "" if tag_data_loaded else "Shopify tag data not loaded in local report source",
         "tag_data_recommended_action": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
         "matched_review_request_tag_value": matched_review_request_tags[0] if matched_review_request_tags else "",
+        "ebay_tag_detected": bool(matched_ebay_tags),
+        "matched_ebay_tag_value": matched_ebay_tags[0] if matched_ebay_tags else "",
         "scan_date_in_window": _datetime_in_window(date_context.get("scan_datetime"), cutoff),
         "scan_date_missing": date_context.get("scan_datetime") is None,
         **date_context,
@@ -7007,6 +7054,7 @@ def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
     )
     trustpilot_tags = _matched_trustpilot_tags(row, tags)
     matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_ebay_tags = _matched_ebay_tags(tags)
     blocking_reasons = _dedupe_text(row.get("blocking_reasons") or [])
     if _scan_local_risk_detected(scan_context):
         blocking_reasons.append("blocked_risk_or_ticket")
@@ -7070,6 +7118,8 @@ def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
             "trustpilot_tags": trustpilot_tags,
             "trustpilot_invitation_present": bool(trustpilot_tags)
             or row.get("trustpilot_invitation_present") is True,
+            "ebay_tag_detected": bool(matched_ebay_tags),
+            "matched_ebay_tag_value": matched_ebay_tags[0] if matched_ebay_tags else "",
             "delivered_tag_present": delivered is True,
             "canonical_review_request_tag_present": canonical_tag_present,
             "review_request_tag_present": canonical_tag_present,
@@ -7322,6 +7372,7 @@ def _review_queue_has_clean_tags(row):
         and (row.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags))
         and (row.get("review_request_tag_present") is True or has_review_request_tag(tags))
         and not has_trustpilot_sent_tag(tags)
+        and not has_ebay_tag(tags)
         and not row.get("tag_data_missing_source")
     )
 
@@ -7359,6 +7410,8 @@ def _review_queue_policy_hidden_reason(row):
     tags = _dedupe_text(row.get("order_tags_display") or row.get("tags") or [])
     if row.get("action_state") != "review_send":
         return "not_ready"
+    if row.get("ebay_tag_detected") is True or has_ebay_tag(tags):
+        return "ebay_order_blocked"
     if row.get("customer_history_confirmed") is not True:
         return "customer_history_not_confirmed"
     if _int_or_zero(row.get("customer_history_order_count") or row.get("customer_order_count")) <= 1:
@@ -7448,6 +7501,12 @@ def _row_blocked_by_customer_history_unknown(row):
 def _row_blocked_by_note_risk(row):
     text = _row_block_text(row)
     return row.get("note_risk_detected") is True or "aftersales/ticket note found" in text
+
+
+def _row_blocked_by_ebay(row):
+    text = _row_block_text(row)
+    tags = _dedupe_text(row.get("order_tags_display") or row.get("tags") or [])
+    return row.get("ebay_tag_detected") is True or has_ebay_tag(tags) or "ebay order" in text
 
 
 def _row_blocked_only_by_precision_fix(row):
@@ -7544,6 +7603,8 @@ def _queue_candidate_summary(row):
         "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
         "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "ebay_tag_detected": row.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": _safe_text(row.get("matched_ebay_tag_value"), max_length=120),
         "tag_data_available": row.get("tag_data_available") is True,
         "review_request_tag_present": row.get("review_request_tag_present") is True,
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
@@ -7601,6 +7662,8 @@ def _blocked_candidate_summary(row):
         "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
         "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "ebay_tag_detected": row.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": _safe_text(row.get("matched_ebay_tag_value"), max_length=120),
         "tag_data_available": row.get("tag_data_available") is True,
         "tag_data_missing_source": _safe_text(row.get("tag_data_missing_source"), max_length=240),
         "tag_data_recommended_action": _safe_text(row.get("tag_data_recommended_action"), max_length=300),
@@ -7635,6 +7698,8 @@ def _already_sent_summary(row):
         "shopify_tag_status_label": _safe_text(row.get("shopify_tag_status_label"), max_length=120),
         "evidence": _safe_text(row.get("evidence"), max_length=500),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "ebay_tag_detected": row.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": _safe_text(row.get("matched_ebay_tag_value"), max_length=120),
         "tag_data_available": row.get("tag_data_available") is True,
         "review_request_tag_present": row.get("review_request_tag_present") is True,
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
@@ -7662,6 +7727,8 @@ def _blocked_missing_requirement(row):
     text = _row_block_text(row)
     if row.get("note_risk_detected") is True or "aftersales/ticket note found" in text:
         missing.append("No aftersales/ticket note")
+    if _row_blocked_by_ebay(row):
+        missing.append("Trustpilot email allowed")
     if "gmail" in text:
         missing.append("Gmail permission")
     if "risk" in text or "ticket" in text or "refund" in text or "dispute" in text:
@@ -8435,6 +8502,22 @@ def _needs_review_queue_row(
         gmail_setup=gmail_setup,
         local_context=local_context or {},
     )
+    if row.get("ebay_tag_detected") is True or blockers == [EBAY_BLOCK_REASON]:
+        return _apply_queue_row_context(
+            {
+                "candidate_id": order_name,
+                "order": order_name,
+                "customer": customer,
+                "status": "Not ready",
+                "status_class": "rrw-badge-warn",
+                "reason": EBAY_BLOCK_REASON,
+                "action_state": "not_ready",
+                "source": _safe_text(row.get("source"), max_length=120),
+            },
+            row,
+            local_context or {},
+            action_state="not_ready",
+        )
     if order_name in already_sent_orders or (
         _usable_masked_customer(customer) and customer in already_sent_customers
     ):
@@ -8491,6 +8574,14 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
     blockers = []
     order_name = _safe_text(row.get("order_name"), max_length=80)
     customer = _safe_text(row.get("masked_email"), max_length=120)
+    tags = _dedupe_text(
+        row.get("tags")
+        or row.get("order_tags_display")
+        or local_context.get("order_tags_display")
+        or []
+    )
+    if row.get("ebay_tag_detected") is True or has_ebay_tag(tags):
+        return [EBAY_BLOCK_REASON]
     algorithm_ready = (
         row.get("eligible_for_trustpilot") is True
         or row.get("source_section") == "ready_candidate_queue"
@@ -9387,6 +9478,16 @@ def _apply_queue_row_context(
         or local_context.get("order_tags_display")
         or []
     )
+    matched_ebay_tags = _dedupe_text(
+        [source_row.get("matched_ebay_tag_value"), local_context.get("matched_ebay_tag_value")]
+        + _matched_ebay_tags(tags)
+    )
+    ebay_tag_detected = (
+        source_row.get("ebay_tag_detected") is True
+        or row.get("ebay_tag_detected") is True
+        or local_context.get("ebay_tag_detected") is True
+        or bool(matched_ebay_tags)
+    )
     trustpilot_tags = _dedupe_text(source_row.get("trustpilot_tags") or [])
     delivered = _queue_delivered_status(source_row, tags, row.get("reason", ""))
     review_request_present = _queue_review_request_tag_present(source_row, tags, row.get("reason", ""))
@@ -9519,6 +9620,8 @@ def _apply_queue_row_context(
             "review_request_tag_data_loaded": review_request_tag_data_loaded,
             "matched_review_request_tag_value": matched_review_request_tag_value,
             "review_request_tag_match_detail": _review_request_tag_match_detail(matched_review_request_tag_value),
+            "ebay_tag_detected": ebay_tag_detected,
+            "matched_ebay_tag_value": matched_ebay_tags[0] if matched_ebay_tags else "",
             "review_request_tag_status_label": (
                 "Review request tag found"
                 if review_request_present is True
@@ -9541,7 +9644,21 @@ def _apply_queue_row_context(
             ),
             "local_review_send_success": local_review_send_success,
             "shopify_tag_pending": shopify_tag_pending,
-            "shopify_tag_status_label": "Tag pending" if shopify_tag_pending else "",
+            "shopify_tag_status_label": (
+                "Tag pending"
+                if shopify_tag_pending
+                else (
+                    "Tag written"
+                    if (
+                        has_trustpilot_sent_tag(tags)
+                        or row.get("shopify_tag_written") is True
+                        or source_row.get("shopify_tag_written") is True
+                        or source_row.get("shopify_tag_write_performed") is True
+                        or source_row.get("shopify_tag_write_confirmed") is True
+                    )
+                    else ""
+                )
+            ),
             "customer_history_match_label": _customer_history_match_label(
                 customer_history_source,
                 customer_history_confidence,
@@ -9740,6 +9857,8 @@ def _queue_tag_chips(tags, delivered, review_request_present, trustpilot_sent, a
         )
     if trustpilot_sent:
         chips.append({"label": "Trustpilot sent", "css_class": "rrw-badge-info"})
+    if has_ebay_tag(tags):
+        chips.append({"label": "eBay blocked", "css_class": "rrw-badge-bad"})
     return _dedupe_chip_rows(chips)
 
 
@@ -9751,6 +9870,8 @@ def _queue_tag_css_class(tag):
         return "rrw-badge-ok"
     if normalized in {_normalize_trustpilot_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}:
         return "rrw-badge-info"
+    if "ebay" in _normalize_ebay_tag(tag):
+        return "rrw-badge-bad"
     if re.search(r"(?i)(return|refund|cancel|dispute|chargeback|ticket|complaint)", str(tag or "")):
         return "rrw-badge-bad"
     return "rrw-badge-muted"
@@ -9960,6 +10081,8 @@ def _base_review_and_send_result(selected_order, admin_username, state, request_
         "selected_order_latest_for_customer": False,
         "selected_latest_eligible_order_for_customer": "",
         "selected_masked_email": "",
+        "ebay_tag_detected": False,
+        "matched_ebay_tag_value": "",
         "candidate_verified": False,
         "review_and_send_requested": True,
         "request_method": _safe_text(request_context.get("method"), max_length=20),
@@ -10076,6 +10199,8 @@ def _review_send_readiness_diagnosis(
     candidate_blocked = bool(candidate_found and not candidate_currently_eligible)
     already_sent = bool(candidate.get("action_state") == "already_sent" or prior_trustpilot_found)
     note_risk_found = candidate.get("note_risk_detected") is True
+    tags = _dedupe_text(candidate.get("order_tags_display") or candidate.get("tags") or [])
+    ebay_tag_detected = candidate.get("ebay_tag_detected") is True or has_ebay_tag(tags)
     customer_history_confirmed = candidate.get("customer_history_confirmed") is True
     customer_history_changed = bool(candidate_found and not customer_history_confirmed)
 
@@ -10098,6 +10223,10 @@ def _review_send_readiness_diagnosis(
         blocked_reason = "already sent"
         exact_user_message = "No email was sent. Already sent Trustpilot to this customer."
         recommended_fix = "Do not send another Trustpilot email for this customer unless a separate manual exception is approved."
+    elif ebay_tag_detected:
+        blocked_reason = "eBay order"
+        exact_user_message = EBAY_BLOCK_REASON
+        recommended_fix = "Do not send Trustpilot email for eBay-tagged orders."
     elif note_risk_found:
         blocked_reason = "risk blocker"
         exact_user_message = f"No email was sent. {NOTE_RISK_REASON}."
@@ -10124,6 +10253,8 @@ def _review_send_readiness_diagnosis(
         "prior_trustpilot_found": prior_trustpilot_found,
         "already_sent": already_sent,
         "note_risk_found": note_risk_found,
+        "ebay_tag_detected": ebay_tag_detected,
+        "matched_ebay_tag_value": _safe_text(candidate.get("matched_ebay_tag_value"), max_length=120),
         "risk_blocker": note_risk_found,
         "route_revalidation_blocker": _safe_text(route_revalidation_blocker, max_length=120),
         "gmail_scope_status": gmail_setup.get("scope_status") or "scope_missing",
@@ -10261,6 +10392,13 @@ def _previous_gmail_helper_reuse_blocker(gmail_setup=None):
 def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
     blockers = []
     tags = _dedupe_text(candidate.get("order_tags_display") or candidate.get("tags") or [])
+    if candidate.get("ebay_tag_detected") is True or has_ebay_tag(tags):
+        blockers.append(
+            {
+                "status": "blocked_ebay_order",
+                "detail": f"No email was sent. {EBAY_BLOCK_REASON}",
+            }
+        )
     if not candidate.get("order") or candidate.get("action_state") != "review_send":
         blockers.append(
             {
@@ -11764,6 +11902,10 @@ def has_trustpilot_sent_tag(tags):
     return bool(_matched_trustpilot_tags({}, tags))
 
 
+def has_ebay_tag(tags):
+    return bool(_matched_ebay_tags(tags))
+
+
 def _matched_review_request_tags(tags):
     return _matched_tag_alias_values(tags, REVIEW_REQUEST_TAG_ALIASES)
 
@@ -11799,8 +11941,20 @@ def _matched_trustpilot_tags(item, tags):
     return _dedupe_text(matches)
 
 
+def _matched_ebay_tags(tags):
+    return _dedupe_text(
+        tag
+        for tag in _as_text_list(tags)
+        if "ebay" in _normalize_ebay_tag(tag)
+    )
+
+
 def _normalize_trustpilot_tag(tag):
     return re.sub(r"\s+", "", str(tag or "").strip().lower())
+
+
+def _normalize_ebay_tag(tag):
+    return re.sub(r"[\s_-]+", "", str(tag or "").strip().lower())
 
 
 def _collect_string_list(item, key):

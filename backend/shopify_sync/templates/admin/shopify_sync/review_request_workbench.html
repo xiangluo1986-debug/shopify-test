@@ -663,6 +663,8 @@
                             <span class="rrw-badge {{ row.status_class }}">{{ row.trustpilot_email_status }}</span>
                             {% if row.shopify_tag_pending %}
                                 <span class="rrw-pill rrw-badge-warn">Tag pending</span>
+                            {% elif row.shopify_tag_status_label %}
+                                <span class="rrw-pill rrw-badge-ok">{{ row.shopify_tag_status_label }}</span>
                             {% endif %}
                         </td>
                         <td>{{ row.evidence }}</td>
@@ -681,6 +683,12 @@
 
     <details class="rrw-section">
         <summary><strong>Blocked / Not ready</strong> ({{ dashboard.approval_queue.blocked_count }})</summary>
+        {% if dashboard.approval_queue.blocked_ebay_order_count %}
+            <p class="rrw-muted">
+                eBay blocked: {{ dashboard.approval_queue.blocked_ebay_order_count }}.
+                Reason: eBay order — Trustpilot email not allowed.
+            </p>
+        {% endif %}
         {% if dashboard.approval_queue.blocked_overflow_count > 0 %}
             <p class="rrw-muted">
                 Showing {{ dashboard.approval_queue.blocked_visible_count }} blocked rows here;

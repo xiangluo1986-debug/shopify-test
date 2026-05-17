@@ -57,6 +57,7 @@ TRUSTPILOT_TAG_ALIASES = {
     "trustpilot",
     "trustpoilt",
 }
+EBAY_BLOCK_REASON = "eBay order — Trustpilot email not allowed."
 NOTE_RISK_FIELDS = (
     "shopify_note",
     "shopify_note_attributes",
@@ -307,6 +308,7 @@ def _walk_dict_rows(value):
 def _public_report_row(row: dict, source_name: str, order_name: str) -> dict:
     tags = _collect_tags(row)
     matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_ebay_tags = _matched_ebay_tags(tags)
     blocking_reasons = _collect_list(row.get("blocking_reasons"))
     classification = _safe_text(row.get("classification") or row.get("candidate_status") or row.get("status"))
     if classification.startswith("blocked_"):
@@ -321,6 +323,11 @@ def _public_report_row(row: dict, source_name: str, order_name: str) -> dict:
         "customer_order_count": _int_value(row.get("customer_order_count") or row.get("repeat_customer_count")),
         "repeat_customer_detected": row.get("repeat_customer_detected") is True,
         "tags": _dedupe(tags),
+        "ebay_tag_detected": row.get("ebay_tag_detected") is True or bool(matched_ebay_tags),
+        "matched_ebay_tag_value": (
+            _safe_text(row.get("matched_ebay_tag_value"), 120)
+            or (matched_ebay_tags[0] if matched_ebay_tags else "")
+        ),
         "blocking_reasons": _dedupe(blocking_reasons),
         "status": _safe_text(row.get("status")),
         "classification": classification,
@@ -376,6 +383,7 @@ def _merge_source_rows(left: dict, right: dict) -> dict:
         "reason",
         "created_at",
         "matched_review_request_tag_value",
+        "matched_ebay_tag_value",
         "customer_order_count",
     ):
         if not merged.get(key) and right.get(key):
@@ -386,6 +394,7 @@ def _merge_source_rows(left: dict, right: dict) -> dict:
         "review_request_tag_data_loaded",
         "trustpilot_invitation_present",
         "repeat_customer_detected",
+        "ebay_tag_detected",
     ):
         merged[key] = merged.get(key) is True or right.get(key) is True
     return merged
@@ -607,6 +616,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if row.get("merged_order_group")),
         "blocked_duplicate_customer_count": sum(1 for row in blocked_rows if "prior Trustpilot" in row.get("block_reason", "") or "already" in row.get("block_reason", "").lower()),
+        "blocked_ebay_order_count": sum(1 for row in blocked_rows if row.get("ebay_tag_detected") is True),
         "blocked_note_risk_count": sum(1 for row in blocked_rows if row.get("note_risk_detected") is True),
         "first_order_blocked_count": sum(1 for row in blocked_rows if "first-order customer" in row.get("block_reason", "").lower() or "first order" in row.get("block_reason", "").lower()),
         "prior_trustpilot_customer_blocked_count": sum(1 for row in blocked_rows if row.get("customer_level_trustpilot_already_sent") is True),
@@ -939,6 +949,7 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         source,
     )
     matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_ebay_tags = _matched_ebay_tags(tags)
     masked_customer = source.get("masked_email") or _mask_email(local.get("customer_email"))
     delivered = _sqlite_delivered_confirmed(local, source, tags)
     note_risk = _note_risk_detection(local)
@@ -964,7 +975,10 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         or (masked_customer and masked_customer in already_sent_customers)
     )
     trustpilot_sent = current_order_already_sent or bool(previous_trustpilot_order_names)
+    ebay_blocked = source.get("ebay_tag_detected") is True or bool(matched_ebay_tags)
     blockers = []
+    if ebay_blocked:
+        blockers.append(EBAY_BLOCK_REASON)
     if not history_confirmed:
         blockers.append("Customer history not confirmed.")
     elif history_count <= 1:
@@ -1013,6 +1027,11 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         "note_risk_keywords": note_risk["note_risk_keywords"],
         "note_risk_reason": note_risk["note_risk_reason"],
         "tags": tags,
+        "ebay_tag_detected": ebay_blocked,
+        "matched_ebay_tag_value": (
+            _safe_text(source.get("matched_ebay_tag_value"), 120)
+            or (matched_ebay_tags[0] if matched_ebay_tags else "")
+        ),
         "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
         "tags_summary": _tags_summary(tags, tag_data_loaded),
         "tag_data_available": tag_data_loaded,
@@ -1053,7 +1072,7 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         "customer_identity_source": identity["customer_identity_source"],
         "customer_identity_confidence": identity["customer_identity_confidence"],
         "customer_level_trustpilot_already_sent": bool(previous_trustpilot_order_names),
-        "candidate_status": "already_sent" if current_order_already_sent else status,
+        "candidate_status": "blocked" if ebay_blocked else ("already_sent" if current_order_already_sent else status),
         "block_reason": "; ".join(_dedupe(blockers)) if blockers else "Delivered, tagged, and no duplicate or risk found.",
         "missing_requirement": _missing_requirement(delivered, canonical_tag, trustpilot_sent, blockers),
         "evidence": source.get("reason") or "; ".join(_dedupe(blockers)) or "Local synced order and report evidence.",
@@ -1271,6 +1290,7 @@ def _sqlite_focus_order_diagnosis(order_name, local_by_order, eligible_rows, blo
     else:
         review_request_tag_status = "missing"
     tags = _dedupe(row.get("tags") or local_tags or []) if row or local else []
+    matched_ebay_tags = _matched_ebay_tags(tags)
     return {
         "order_name": order_name,
         "found_in_local_shopify_order": found_locally,
@@ -1292,6 +1312,14 @@ def _sqlite_focus_order_diagnosis(order_name, local_by_order, eligible_rows, blo
         "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
         "tags_summary": _tags_summary(tags, tag_data_loaded),
         "order_tags_display": tags,
+        "ebay_tag_detected": (
+            bool(matched_ebay_tags) or row.get("ebay_tag_detected") is True
+            if row
+            else bool(matched_ebay_tags)
+        ),
+        "matched_ebay_tag_value": (
+            _safe_text(row.get("matched_ebay_tag_value", ""), 120) if row else ""
+        ) or (matched_ebay_tags[0] if matched_ebay_tags else ""),
         "tag_data_available": tag_data_loaded,
         "review_request_tag_data_loaded": tag_data_loaded,
         "tag_data_missing_source": "" if tag_data_loaded else _tag_data_missing_source_for_order(local),
@@ -1436,6 +1464,7 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
         "blocked_count": 0,
         "blocked_merged_group_count": 0,
         "blocked_duplicate_customer_count": 0,
+        "blocked_ebay_order_count": 0,
         "blocked_missing_review_request_tag_count": 0,
         "blocked_not_delivered_count": 0,
         "review_queue_batch_size": REVIEW_QUEUE_BATCH_SIZE,
@@ -1516,6 +1545,7 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "blocked_count": int(payload.get("blocked_count") or 0),
         "blocked_merged_group_count": int(payload.get("blocked_merged_group_count") or 0),
         "blocked_duplicate_customer_count": int(payload.get("blocked_duplicate_customer_count") or 0),
+        "blocked_ebay_order_count": int(payload.get("blocked_ebay_order_count") or 0),
         "blocked_missing_review_request_tag_count": int(
             payload.get("blocked_missing_review_request_tag_count") or 0
         ),
@@ -1544,6 +1574,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"(batch size {payload.get('review_queue_batch_size', REVIEW_QUEUE_BATCH_SIZE)}, overflow {payload.get('review_queue_overflow_count', 0)})\n"
         f"Already sent: {payload.get('already_sent_count', 0)}\n"
         f"Blocked / not ready: {payload.get('blocked_count', 0)}\n"
+        f"Blocked eBay orders: {payload.get('blocked_ebay_order_count', 0)}\n"
         f"Coverage warnings: {', '.join(payload.get('coverage_warnings') or []) or 'none'}\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"
@@ -1585,6 +1616,7 @@ def _render_html(payload: dict) -> str:
     <tr><th>Review queue overflow count</th><td>{escape(str(payload.get("review_queue_overflow_count", 0)))}</td></tr>
     <tr><th>Already sent count</th><td>{escape(str(payload.get("already_sent_count", 0)))}</td></tr>
     <tr><th>Blocked / not ready count</th><td>{escape(str(payload.get("blocked_count", 0)))}</td></tr>
+    <tr><th>Blocked eBay order count</th><td>{escape(str(payload.get("blocked_ebay_order_count", 0)))}</td></tr>
   </tbody></table>
   <h2>Review Queue Batch</h2>
   {_summary_table(payload.get("review_queue_candidates") or [])}
@@ -1781,6 +1813,7 @@ def _review_queue_has_clean_tags(row: dict) -> bool:
         and row.get("delivered_confirmed") is True
         and row.get("canonical_review_request_tag_present") is True
         and not has_trustpilot_sent_tag(tags)
+        and not has_ebay_tag(tags)
     )
 
 
@@ -1806,6 +1839,8 @@ def _review_queue_policy_hidden_reason(row: dict) -> str:
     tags = row.get("tags") or []
     if row.get("candidate_status") != "eligible":
         return "not_ready"
+    if row.get("ebay_tag_detected") is True or has_ebay_tag(tags):
+        return "ebay_order_blocked"
     if row.get("delivered_confirmed") is not True or not has_delivered_tag(tags):
         return "missing_delivered_tag"
     if row.get("canonical_review_request_tag_present") is not True or not has_review_request_tag(tags):
@@ -1875,6 +1910,8 @@ def _eligible_summary(row: dict) -> dict:
         "note_risk_keywords": row.get("note_risk_keywords", []),
         "note_risk_reason": row.get("note_risk_reason", ""),
         "tags": row.get("tags", []),
+        "ebay_tag_detected": row.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": row.get("matched_ebay_tag_value", ""),
         "tag_data_available": row.get("tag_data_available") is True,
         "review_request_tag_present": row.get("canonical_review_request_tag_present") is True,
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
@@ -1921,6 +1958,8 @@ def _blocked_summary(row: dict) -> dict:
         "note_risk_keywords": row.get("note_risk_keywords", []),
         "note_risk_reason": row.get("note_risk_reason", ""),
         "tags": row.get("tags", []),
+        "ebay_tag_detected": row.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": row.get("matched_ebay_tag_value", ""),
         "tag_data_available": row.get("tag_data_available") is True,
         "tag_data_missing_source": row.get("tag_data_missing_source", ""),
         "tag_data_recommended_action": row.get("tag_data_recommended_action", ""),
@@ -1950,6 +1989,8 @@ def _already_sent_public_summary(row: dict) -> dict:
         "trustpilot_email_status": row.get("trustpilot_email_status", "Already sent"),
         "evidence": row.get("evidence", ""),
         "tags": row.get("tags", []),
+        "ebay_tag_detected": row.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": row.get("matched_ebay_tag_value", ""),
         "tag_data_available": row.get("tag_data_available") is True,
         "review_request_tag_present": row.get("canonical_review_request_tag_present") is True,
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
@@ -2086,6 +2127,10 @@ def has_trustpilot_sent_tag(tags: list[str]) -> bool:
     return bool(_matched_trustpilot_tags(tags))
 
 
+def has_ebay_tag(tags: list[str]) -> bool:
+    return bool(_matched_ebay_tags(tags))
+
+
 def _matched_review_request_tags(tags: list[str]) -> list[str]:
     return _matched_tag_alias_values(tags, REVIEW_REQUEST_TAG_ALIASES)
 
@@ -2098,6 +2143,14 @@ def _matched_trustpilot_tags(tags: list[str]) -> list[str]:
     return _matched_tag_alias_values(tags, TRUSTPILOT_TAG_ALIASES)
 
 
+def _matched_ebay_tags(tags: list[str]) -> list[str]:
+    return _dedupe(
+        tag
+        for tag in tags
+        if "ebay" in _normalize_ebay_tag(tag)
+    )
+
+
 def _matched_tag_alias_values(tags: list[str], aliases) -> list[str]:
     normalized = {_normalize_tag(tag) for tag in aliases}
     return [tag for tag in tags if _normalize_tag(tag) in normalized]
@@ -2105,6 +2158,10 @@ def _matched_tag_alias_values(tags: list[str], aliases) -> list[str]:
 
 def _normalize_tag(value: str) -> str:
     return re.sub(r"\s+", "", str(value or "").strip().lower())
+
+
+def _normalize_ebay_tag(value: str) -> str:
+    return re.sub(r"[\s_-]+", "", str(value or "").strip().lower())
 
 
 def _collect_order_name_values(value) -> list[str]:
@@ -2217,6 +2274,8 @@ def _missing_requirement(delivered: bool, canonical_tag: bool, trustpilot_sent: 
         missing.append("Confirmed customer history")
     if "aftersales/ticket note found" in text:
         missing.append("No aftersales/ticket note")
+    if "ebay order" in text:
+        missing.append("Trustpilot email allowed")
     if "merged" in text or "related" in text:
         missing.append("Whole merged/related group ready")
     if "risk" in text or "ticket" in text or "refund" in text or "dispute" in text:

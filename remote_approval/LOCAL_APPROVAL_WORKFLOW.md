@@ -70,6 +70,7 @@ python remote_approval_runner.py --task shopify_review_request_tag_alias_and_can
 python remote_approval_runner.py --task shopify_review_request_customer_history_trustpilot_guard_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_reuse_gmail_helper_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_post_send_audit --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -146,6 +147,28 @@ queue to a 20-candidate batch. The scan report includes the full eligible total,
 visible review batch count, overflow count, sort order, and per-candidate rank
 diagnostics. The admin page should show only the current review batch; any
 Review & Send control is limited to those visible rows.
+
+Phase 5.28N blocks eBay-tagged orders from the Trustpilot send queue and adds
+the locked post-send Shopify tag write task:
+
+```powershell
+python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
+```
+
+Without the exact approval environment value, the task must report
+`blocked_missing_tag_write_approval` and must not call Shopify APIs or write
+Shopify tags. A future approved one-order write for the audited sent order uses:
+
+```powershell
+$env:SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE="YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER"
+python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
+Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE
+```
+
+The task is locked to the successful post-send audited order, currently
+`#21225`. It may add `1: trustpilot` and remove `1: review request` /
+`1: reveiw request` aliases only after the exact approval gate passes. It must
+not call Gmail, Trustpilot, Kudosi, or Ali Reviews APIs.
 
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local

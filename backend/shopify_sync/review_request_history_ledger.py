@@ -260,6 +260,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("audit_status", "report_status", "status"),
     },
     {
+        "key": "trustpilot_post_send_tag_write",
+        "label": "Trustpilot post-send Shopify tag write",
+        "filename": "codex_runs/shopify_review_request_trustpilot_post_send_tag_write.json",
+        "channel": "trustpilot",
+        "event_type": "tag_write_audit",
+        "status_keys": ("tag_write_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_tag_write_design_dry_run",
         "label": "Trustpilot Shopify tag write design dry-run",
         "filename": "shopify_review_request_trustpilot_tag_write_design_dry_run.json",
