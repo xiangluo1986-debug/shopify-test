@@ -1,5 +1,6 @@
 import json
 import hashlib
+import re
 from datetime import datetime, timezone
 from html import escape
 from html.parser import HTMLParser
@@ -48,7 +49,10 @@ ALL_LANGUAGES_BLOCKED_STATUS = "all_languages_shopify_translations_blocked"
 SAFE_WRITE_READINESS_MAX_ENTRY_COUNT = 3
 SAFE_WRITE_READINESS_FIELDS = ("title", "meta_title", "meta_description")
 SAFE_WRITE_READINESS_FIELD_SET = set(SAFE_WRITE_READINESS_FIELDS)
-ALL_LANGUAGES_AUTO_WRITE_FIELDS = SAFE_WRITE_READINESS_FIELDS + ("body_html",)
+ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS = ("option.name", "option.value")
+ALL_LANGUAGES_AUTO_WRITE_FIELDS = (
+    SAFE_WRITE_READINESS_FIELDS + ("body_html",) + ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS
+)
 ALL_LANGUAGES_AUTO_WRITE_FIELD_SET = set(ALL_LANGUAGES_AUTO_WRITE_FIELDS)
 LOCKED_EXECUTION_ALLOWED_FIELDS = SAFE_WRITE_READINESS_FIELDS
 LOCKED_EXECUTION_ALLOWED_FIELD_SET = set(LOCKED_EXECUTION_ALLOWED_FIELDS)
@@ -94,7 +98,6 @@ LOCKED_EXECUTION_FORBIDDEN_PHRASES = (
     "factory direct",
 )
 ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS = {
-    "options",
     "variants",
     "important_metafields",
     "metafields",
@@ -127,6 +130,27 @@ ALL_LANGUAGES_FORBIDDEN_PHRASE_LABELS = (
     ("weltweiter versand", "Weltweiter Versand"),
     ("lieferung weltweit", "Lieferung weltweit"),
 )
+ALL_LANGUAGES_BODY_HTML_REPAIRABLE_FORBIDDEN_PHRASE_LABELS = (
+    ("buy now", "buy now"),
+    ("shop now", "shop now"),
+    ("free shipping", "free shipping"),
+    ("ships worldwide", "ships worldwide"),
+    ("worldwide shipping", "worldwide shipping"),
+    ("versand weltweit", "Versand weltweit"),
+    ("weltweiter versand", "Weltweiter Versand"),
+    ("lieferung weltweit", "Lieferung weltweit"),
+)
+ALL_LANGUAGES_BODY_HTML_REPAIRABLE_BLOCKING_REASONS = {
+    "blocked_forbidden_phrase_detected",
+    "blocked_needs_review_status",
+}
+ALL_LANGUAGES_BODY_HTML_REPAIRABLE_REVIEW_CODES = {
+    "blocked",
+    "draft_needs_manual_review",
+    "forbidden_marketing_or_origin_phrase",
+    "forbidden_marketing_or_shipping_phrase",
+    "needs_review",
+}
 ALL_LANGUAGES_NEUTRAL_REVIEW_CODES = {
     "already_translated_skipped",
     "draft_ready_for_manual_review",
@@ -713,7 +737,6 @@ def build_translation_workspace_all_languages_update_state(
         "locales": list(ALL_LANGUAGES_SUPPORTED_LOCALES),
         "allowed_fields": list(ALL_LANGUAGES_AUTO_WRITE_FIELDS),
         "blocked_fields": [
-            "options",
             "variants",
             "metafields",
             "media_alt_text",
@@ -1022,7 +1045,7 @@ def validate_and_update_all_languages_to_shopify(
             [
                 {
                     "locale": entry.get("locale", ""),
-                    "key": entry.get("key", ""),
+                    "key": _all_languages_shopify_write_key(entry),
                     "value": entry.get("proposed_translation_value", ""),
                     "translatableContentDigest": entry.get("digest", ""),
                 }
@@ -1097,7 +1120,7 @@ def validate_and_update_all_languages_to_shopify(
             for entry in locale_entries:
                 match = _real_write_readback_match(
                     readback_result.get("translations") or [],
-                    key=entry.get("key", ""),
+                    key=_all_languages_shopify_write_key(entry),
                     locale=locale,
                     proposed_translation_value=entry.get("proposed_translation_value", ""),
                 )
@@ -1119,6 +1142,7 @@ def validate_and_update_all_languages_to_shopify(
                     {
                         "entry_id": entry.get("entry_id", ""),
                         "key": entry.get("key", ""),
+                        "shopify_key": _all_languages_shopify_write_key(entry),
                         "readback_matched": matched,
                         "key_exists": match.get("key_exists", False),
                         "locale_matches": match.get("locale_matches", False),
@@ -2170,9 +2194,14 @@ def _selected_apply_payload_preview(selected_entries: list[dict]):
 
 def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
     entry = _safe_write_entry_from_row(row, product_gid=product_gid)
+    _all_languages_maybe_repair_body_html_forbidden_phrase(
+        entry,
+        product_gid=product_gid,
+    )
     field_key = entry.get("key", "")
     group_key = entry.get("field_group", "")
     source_key = str(entry.get("source_key") or field_key)
+    shopify_key = _all_languages_shopify_write_key(entry)
     existing_value = str(entry.get("existing_translation_value") or "")
     proposed_value = str(entry.get("proposed_translation_value") or "")
     existing_current_same = (
@@ -2213,7 +2242,7 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
         "locale": entry.get("locale", ""),
         "key": field_key,
         "source_key": source_key,
-        "shopify_key": source_key,
+        "shopify_key": shopify_key,
         "field_group": group_key,
         "resource_id": entry.get("resource_id", ""),
         "resource_type": entry.get("resource_type", ""),
@@ -2263,6 +2292,20 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
         "source_status": entry.get("status", ""),
         "draft_blocked": bool(entry.get("draft_blocked")),
         "product_identity_mismatch": bool(entry.get("product_identity_mismatch")),
+        "body_html_repair_applied": bool(entry.get("body_html_repair_applied")),
+        "body_html_repair_attempted": bool(entry.get("body_html_repair_attempted")),
+        "body_html_repair_failed_reason": entry.get(
+            "body_html_repair_failed_reason",
+            "",
+        ),
+        "body_html_repaired_forbidden_phrases": entry.get(
+            "body_html_repaired_forbidden_phrases",
+            [],
+        ),
+        "original_proposed_translation_value": entry.get(
+            "original_proposed_translation_value",
+            "",
+        ),
     }
 
 
@@ -2275,12 +2318,15 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
     digest = str(entry.get("digest") or "").strip()
     source_value = str(entry.get("source_value") or "").strip()
     proposed_value = str(entry.get("proposed_translation_value") or "").strip()
+    option_write_candidate = _all_languages_option_write_candidate(entry)
 
     if group_key in ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS:
         reasons.append("blocked_future_write_needs_resource_mapping")
     if group_key in SAFE_WRITE_TECHNICAL_GROUPS:
         reasons.append("blocked_not_customer_write_safe")
-    if not product_gid or (resource_id and resource_id != product_gid):
+    if not product_gid:
+        reasons.append("blocked_missing_selected_product")
+    elif resource_id and resource_id != product_gid and not option_write_candidate:
         reasons.append("blocked_product_gid_mismatch")
     if locale not in LOCKED_EXECUTION_SUPPORTED_LOCALES:
         reasons.append("blocked_target_locale_unsupported")
@@ -2298,15 +2344,20 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_digest_missing")
     if field_key not in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET:
         reasons.append("blocked_field_not_allowed_for_all_languages_update")
-    if group_key not in SAFE_WRITE_READINESS_GROUP_SET:
+    if not _all_languages_auto_write_group_allowed(group_key):
         reasons.append("blocked_scope_group_not_allowed")
+    if option_write_candidate:
+        reasons.extend(_all_languages_option_write_blocking_reasons(entry))
     if field_key == "title" and len(proposed_value) > 80:
         reasons.append("blocked_product_title_over_80_chars")
     if field_key == "meta_title" and len(proposed_value) > 60:
         reasons.append("blocked_seo_title_over_60_chars")
     if field_key == "meta_description" and len(proposed_value) > 160:
         reasons.append("blocked_seo_description_over_160_chars")
-    if _locked_execution_forbidden_phrase_matches(proposed_value):
+    if (
+        _locked_execution_forbidden_phrase_matches(proposed_value)
+        or _all_languages_forbidden_phrase_matches(proposed_value)
+    ):
         reasons.append("blocked_forbidden_phrase_detected")
     if "forbidden" in _safe_write_issue_text(entry):
         reasons.append("blocked_forbidden_phrase_detected")
@@ -2316,6 +2367,77 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
     if field_key == "body_html":
         reasons.extend(_all_languages_body_html_blocking_reasons(entry))
     return _unique_strings(reasons)
+
+
+def _all_languages_auto_write_group_allowed(group_key: str):
+    return str(group_key or "").strip() in SAFE_WRITE_READINESS_GROUP_SET | {"options"}
+
+
+def _all_languages_option_write_candidate(entry: dict):
+    return (
+        str((entry or {}).get("field_group") or "").strip() == "options"
+        and str((entry or {}).get("key") or "").strip()
+        in ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS
+    )
+
+
+def _all_languages_option_write_blocking_reasons(entry: dict):
+    reasons = []
+    resource_id = str(entry.get("resource_id") or "").strip()
+    digest = str(entry.get("digest") or entry.get("source_digest") or "").strip()
+    field_key = str(entry.get("key") or "").strip()
+    shopify_key = _all_languages_option_shopify_key(entry)
+    source_value = str(entry.get("source_value") or "").strip()
+    proposed_value = str(entry.get("proposed_translation_value") or "").strip()
+
+    if field_key not in ALL_LANGUAGES_OPTION_AUTO_WRITE_FIELDS:
+        reasons.append("blocked_field_not_allowed_for_all_languages_update")
+    if not resource_id or resource_id.startswith("visible://"):
+        reasons.append("blocked_resource_id_missing")
+    if shopify_key not in {"name", "value"}:
+        reasons.append("blocked_key_missing")
+    if not digest or entry.get("translation_preview_without_digest"):
+        reasons.append("blocked_digest_missing")
+    if field_key == "option.name" and not (
+        str(entry.get("option_name") or "").strip()
+        or str(entry.get("context_label") or "").strip()
+    ):
+        reasons.append("blocked_option_context_missing")
+    if field_key == "option.value" and not (
+        (
+            str(entry.get("option_name") or "").strip()
+            and str(entry.get("option_value") or "").strip()
+        )
+        or str(entry.get("context_label") or "").strip()
+    ):
+        reasons.append("blocked_option_context_missing")
+    if source_value and _all_languages_option_translation_code_only(proposed_value):
+        reasons.append("blocked_option_translation_code_only")
+    return _unique_strings(reasons)
+
+
+def _all_languages_option_translation_code_only(value: str):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if len(text) <= 2:
+        return True
+    if re.fullmatch(r"[\d\s._:/#-]+", text):
+        return True
+    if re.fullmatch(r"[A-Z0-9][A-Z0-9._:/#-]{1,}", text):
+        return True
+    return not any(char.isalpha() for char in text)
+
+
+def _all_languages_shopify_write_key(entry: dict):
+    if _all_languages_option_write_candidate(entry):
+        return _all_languages_option_shopify_key(entry)
+    return str(
+        (entry or {}).get("shopify_key")
+        or (entry or {}).get("source_key")
+        or (entry or {}).get("key")
+        or ""
+    ).strip()
 
 
 def _all_languages_entry_needs_review(entry: dict):
@@ -2468,6 +2590,211 @@ def _all_languages_body_html_blocking_reasons(entry: dict):
     return _unique_strings(reasons)
 
 
+def _all_languages_maybe_repair_body_html_forbidden_phrase(
+    entry: dict,
+    *,
+    product_gid: str,
+):
+    if str(entry.get("key") or "") != "body_html":
+        return
+    proposed_html = str(entry.get("proposed_translation_value") or "")
+    phrases = _all_languages_repairable_body_html_forbidden_phrase_matches(
+        proposed_html
+    )
+    if not phrases:
+        return
+    if not _all_languages_body_html_forbidden_phrase_is_only_blocker(
+        entry,
+        product_gid=product_gid,
+    ):
+        return
+
+    entry["body_html_repair_attempted"] = True
+    repaired_html, repaired_phrases = _all_languages_repair_body_html_html_text(
+        proposed_html
+    )
+    if repaired_html == proposed_html or not repaired_html.strip():
+        entry["body_html_repair_failed_reason"] = (
+            "Forbidden phrase could not be removed safely."
+        )
+        return
+
+    repaired_entry = dict(entry)
+    repaired_entry["original_proposed_translation_value"] = proposed_html
+    repaired_entry["proposed_translation_value"] = repaired_html
+    repaired_entry["body_html_repaired_forbidden_phrases"] = repaired_phrases
+    _all_languages_clear_repaired_body_html_review_flags(repaired_entry)
+
+    validation_reasons = _all_languages_repaired_body_html_validation_reasons(
+        repaired_entry
+    )
+    if validation_reasons:
+        entry["body_html_repair_failed_reason"] = (
+            _all_languages_blocking_reason_label(validation_reasons[0])
+        )
+        return
+
+    final_reasons = _all_languages_update_blocking_reasons(
+        repaired_entry,
+        product_gid=product_gid,
+    )
+    if final_reasons:
+        entry["body_html_repair_failed_reason"] = (
+            _all_languages_blocking_reason_label(final_reasons[0])
+        )
+        return
+
+    repaired_entry["body_html_repair_applied"] = True
+    repaired_entry["body_html_repair_validation_passed"] = True
+    repaired_entry["body_html_repair_reason"] = (
+        "Forbidden shipping/CTA wording was removed before validation."
+    )
+    entry.update(repaired_entry)
+
+
+def _all_languages_body_html_forbidden_phrase_is_only_blocker(
+    entry: dict,
+    *,
+    product_gid: str,
+):
+    blocking_reasons = _all_languages_update_blocking_reasons(
+        entry,
+        product_gid=product_gid,
+    )
+    if not blocking_reasons:
+        return False
+    if any(
+        reason not in ALL_LANGUAGES_BODY_HTML_REPAIRABLE_BLOCKING_REASONS
+        for reason in blocking_reasons
+    ):
+        return False
+    return all(
+        _all_languages_body_html_review_code_is_repairable(code)
+        for code in _all_languages_entry_review_codes(entry)
+    )
+
+
+def _all_languages_body_html_review_code_is_repairable(code: str):
+    code = _all_languages_normalize_review_code(code)
+    if not code:
+        return True
+    if code in ALL_LANGUAGES_BODY_HTML_REPAIRABLE_REVIEW_CODES:
+        return True
+    if code in ALL_LANGUAGES_NEUTRAL_REVIEW_CODES:
+        return True
+    if code in ALL_LANGUAGES_SOFT_WARNING_CODES:
+        return True
+    return False
+
+
+def _all_languages_repair_body_html_html_text(value: str):
+    parts = re.split(r"(<[^>]+>)", str(value or ""))
+    repaired_parts = []
+    repaired_phrases = []
+    for index, part in enumerate(parts):
+        if index % 2:
+            repaired_parts.append(part)
+            continue
+        repaired_text, phrases = _all_languages_repair_body_html_text_node(part)
+        repaired_parts.append(repaired_text)
+        for phrase in phrases:
+            if phrase not in repaired_phrases:
+                repaired_phrases.append(phrase)
+    return "".join(repaired_parts), repaired_phrases
+
+
+def _all_languages_repair_body_html_text_node(value: str):
+    text = str(value or "")
+    repaired_phrases = []
+    for needle, label in ALL_LANGUAGES_BODY_HTML_REPAIRABLE_FORBIDDEN_PHRASE_LABELS:
+        while needle in text.lower():
+            text = _all_languages_remove_text_around_phrase(text, needle)
+            if label not in repaired_phrases:
+                repaired_phrases.append(label)
+    return _all_languages_normalize_repaired_text_node(text), repaired_phrases
+
+
+def _all_languages_remove_text_around_phrase(text: str, needle: str):
+    lower_text = text.lower()
+    start = lower_text.find(needle)
+    if start < 0:
+        return text
+    end = start + len(needle)
+    boundaries = ".!?;:\n\r。！？"
+    previous = max(text.rfind(boundary, 0, start) for boundary in boundaries)
+    next_positions = [
+        text.find(boundary, end)
+        for boundary in boundaries
+        if text.find(boundary, end) >= 0
+    ]
+    if previous < 0 and not next_positions:
+        remove_start = start
+        remove_end = end
+    else:
+        remove_start = previous + 1 if previous >= 0 else 0
+        remove_end = (min(next_positions) + 1) if next_positions else end
+    return f"{text[:remove_start]} {text[remove_end:]}"
+
+
+def _all_languages_normalize_repaired_text_node(value: str):
+    text = re.sub(r"[ \t]{2,}", " ", str(value or ""))
+    text = re.sub(r"\s+([.,;:!?])", r"\1", text)
+    text = re.sub(r"([(\[{])\s+", r"\1", text)
+    text = re.sub(r"\s+([)\]}])", r"\1", text)
+    return text
+
+
+def _all_languages_clear_repaired_body_html_review_flags(entry: dict):
+    for key in ("blocking_reasons", "seo_warning", "validation_reasons"):
+        entry[key] = _all_languages_remove_repaired_forbidden_review_codes(
+            entry.get(key)
+        )
+    for key, ready_value in (
+        ("status", "draft_ready_for_manual_review"),
+        ("validation_status", "draft_ready_for_manual_review"),
+        ("seo_validation_status", "seo_ready"),
+    ):
+        code = _all_languages_normalize_review_code(entry.get(key))
+        if (
+            code in ALL_LANGUAGES_BODY_HTML_REPAIRABLE_REVIEW_CODES
+            or "forbidden" in code
+        ):
+            entry[key] = ready_value
+    entry["draft_blocked"] = False
+
+
+def _all_languages_remove_repaired_forbidden_review_codes(value):
+    if not value:
+        return value
+    values = _all_languages_split_review_values(value)
+    kept = [
+        item
+        for item in values
+        if not _all_languages_repaired_forbidden_review_code(item)
+    ]
+    if isinstance(value, (list, tuple, set)):
+        return kept
+    return ", ".join(kept)
+
+
+def _all_languages_repaired_forbidden_review_code(value: str):
+    code = _all_languages_normalize_review_code(value)
+    return code in ALL_LANGUAGES_BODY_HTML_REPAIRABLE_REVIEW_CODES or "forbidden" in code
+
+
+def _all_languages_repaired_body_html_validation_reasons(entry: dict):
+    reasons = []
+    proposed_html = str(entry.get("proposed_translation_value") or "")
+    if not proposed_html.strip():
+        reasons.append("blocked_proposed_translation_empty")
+    if _all_languages_forbidden_phrase_matches(proposed_html):
+        reasons.append("blocked_forbidden_phrase_detected")
+    if _all_languages_repairable_body_html_forbidden_phrase_matches(proposed_html):
+        reasons.append("blocked_forbidden_phrase_detected")
+    reasons.extend(_all_languages_body_html_blocking_reasons(entry))
+    return _unique_strings(reasons)
+
+
 def _all_languages_html_structure_notes(source_html: str, proposed_html: str):
     source_snapshot = _AllLanguagesHtmlSnapshot.from_html(source_html)
     if not source_snapshot.tag_counts:
@@ -2551,19 +2878,25 @@ def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | No
         "blocked_field_not_allowed_for_all_languages_update",
     }:
         if group_key == "options":
-            return "Options need extra Shopify mapping."
+            return "Missing Shopify option mapping."
         if group_key == "variants":
             return "Variants need extra Shopify mapping."
         if group_key in {"important_metafields", "metafields", "technical_metafields"}:
-            return "Metafields need extra Shopify mapping."
+            return "Technical field, not updated automatically."
         if group_key in {"media", "media_alt_text"}:
             return "Media alt text update is not enabled yet."
     if (
         field_key in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET
-        and reason
-        in {"blocked_resource_id_missing", "blocked_key_missing", "blocked_digest_missing"}
+        and reason in {
+            "blocked_resource_id_missing",
+            "blocked_key_missing",
+            "blocked_digest_missing",
+            "blocked_option_context_missing",
+        }
     ):
         return "Missing Shopify mapping."
+    if reason == "blocked_option_translation_code_only":
+        return "Technical/code-only option value, not updated automatically."
     return _all_languages_blocking_reason_label(reason)
 
 
@@ -2585,7 +2918,9 @@ def _all_languages_blocking_reason_label(reason: str):
         "blocked_missing_selected_product": "Select one product before updating Shopify.",
         "blocked_needs_review_status": "Needs review before update.",
         "blocked_no_write_ready_candidates": "Needs review before update.",
-        "blocked_not_customer_write_safe": "Needs review before update.",
+        "blocked_not_customer_write_safe": "Technical field, not updated automatically.",
+        "blocked_option_context_missing": "Missing Shopify mapping.",
+        "blocked_option_translation_code_only": "Technical/code-only option value, not updated automatically.",
         "blocked_product_gid_mismatch": "Product/model check failed.",
         "blocked_proposed_translation_empty": "Translation is empty.",
         "blocked_proposed_translation_equals_source": "Needs review before update.",
@@ -2913,6 +3248,28 @@ def _all_languages_recount_payload(payload: dict):
         + int(payload.get("blocked_count") or 0)
         + int(payload.get("write_failed_count") or 0)
     )
+    payload["product_options_updated_count"] = sum(
+        1
+        for entry in entries
+        if _all_languages_option_write_candidate(entry)
+        and _all_languages_entry_updated(entry)
+    )
+    payload["product_options_confirmed_count"] = sum(
+        1
+        for entry in entries
+        if _all_languages_option_write_candidate(entry)
+        and _all_languages_entry_confirmed(entry)
+    )
+    payload["product_descriptions_updated_count"] = sum(
+        1
+        for entry in entries
+        if entry.get("key") == "body_html" and _all_languages_entry_updated(entry)
+    )
+    payload["product_descriptions_confirmed_count"] = sum(
+        1
+        for entry in entries
+        if entry.get("key") == "body_html" and _all_languages_entry_confirmed(entry)
+    )
     payload["per_locale_summary"] = _all_languages_per_locale_summary(entries)
     payload["per_field_summary"] = _all_languages_per_field_summary(entries)
     return payload
@@ -3000,10 +3357,14 @@ def _all_languages_not_updated_category_reason(label: str):
     label = str(label or "")
     if label == "Product description needs review before automatic Shopify update.":
         return "The proposed product description needs manual review before it can be written."
-    if label == "Options need extra Shopify mapping.":
-        return "Option translations exist, but the current all-language writer does not yet write option resources."
+    if label == "Missing Shopify option mapping.":
+        return "Option translations are updated only when resource ID, key, digest, and option context are present."
+    if label == "Technical field, not updated automatically.":
+        return "Technical fields are skipped by the automatic Shopify update."
     if label == "Media alt text update is not enabled yet.":
         return "Media alt translations exist, but automatic media-alt writes are not enabled."
+    if label == "Variants need extra Shopify mapping.":
+        return "Variant translations need extra Shopify mapping before automatic update."
     if label == "Translation is empty.":
         return "No proposed translation was generated for this field."
     if label == "Needs review before update.":
@@ -3080,6 +3441,13 @@ def _all_languages_german_body_html_diagnostic(entries: list[dict]):
         "empty_or_missing_digest": "empty_or_missing_digest" in categories,
         "other": "other" in categories,
         "found_forbidden_phrases": forbidden_phrases,
+        "repair_applied": bool(entry.get("body_html_repair_applied")),
+        "repair_attempted": bool(entry.get("body_html_repair_attempted")),
+        "repair_failed_reason": entry.get("body_html_repair_failed_reason", ""),
+        "repaired_forbidden_phrases": entry.get(
+            "body_html_repaired_forbidden_phrases",
+            [],
+        ),
         "plain_reason": plain_reason,
     }
 
@@ -3122,6 +3490,8 @@ def _all_languages_body_html_blocker_categories(entry: dict):
         categories.append("empty_or_missing_digest")
     if not categories and entry.get("status") in {"blocked", "write_failed"}:
         categories.append("other")
+    if not categories and entry.get("body_html_repair_applied"):
+        categories.append("repaired")
     return _unique_strings(categories)
 
 
@@ -3132,6 +3502,7 @@ def _all_languages_body_html_blocker_label(category: str):
         "forbidden_phrase": "Forbidden phrase",
         "identity_mismatch": "Identity mismatch",
         "empty_or_missing_digest": "Empty translation or missing digest",
+        "repaired": "Forbidden phrase repaired",
         "other": "Other",
     }
     return labels.get(category, "Other")
@@ -3142,6 +3513,18 @@ def _all_languages_german_body_html_plain_reason(
     categories: list[str],
     forbidden_phrases: list[str],
 ):
+    if entry.get("body_html_repair_applied"):
+        repaired = entry.get("body_html_repaired_forbidden_phrases") or forbidden_phrases
+        phrase_text = f": {', '.join(repaired)}" if repaired else ""
+        if entry.get("status") == "written_verified":
+            return (
+                "German product description had forbidden shipping/CTA wording removed "
+                f"before update{phrase_text}; Shopify confirmed the repaired HTML."
+            )
+        return (
+            "German product description had forbidden shipping/CTA wording removed "
+            f"and HTML validation passed{phrase_text}."
+        )
     if "forbidden_phrase" in categories:
         phrase_text = (
             f": {', '.join(forbidden_phrases)}" if forbidden_phrases else ""
@@ -3168,6 +3551,15 @@ def _all_languages_forbidden_phrase_matches(value: str):
     text = str(value or "").lower()
     matches = []
     for needle, label in ALL_LANGUAGES_FORBIDDEN_PHRASE_LABELS:
+        if needle in text and label not in matches:
+            matches.append(label)
+    return matches
+
+
+def _all_languages_repairable_body_html_forbidden_phrase_matches(value: str):
+    text = str(value or "").lower()
+    matches = []
+    for needle, label in ALL_LANGUAGES_BODY_HTML_REPAIRABLE_FORBIDDEN_PHRASE_LABELS:
         if needle in text and label not in matches:
             matches.append(label)
     return matches
@@ -3234,7 +3626,7 @@ def _all_languages_option_mapping_audit(entries: list[dict]):
     if all_future_ready:
         plain_summary = (
             f"Options mapping is safe for {future_ready_count} row(s). "
-            "They are future update-ready, but the current task did not write options."
+            "They are included in the automatic Shopify update."
         )
     elif rows:
         plain_summary = (
@@ -3276,12 +3668,27 @@ def _all_languages_option_mapping_row(entry: dict):
     ):
         missing.append("option value context")
     mapping_safe = not missing
+    status_ready = entry.get("status") in {
+        "write_ready",
+        "written_verified",
+        "readback_mismatch",
+    }
     draft_ready = (
-        str(entry.get("validation_status") or "") == "draft_ready_for_manual_review"
+        (
+            status_ready
+            or str(entry.get("validation_status") or "")
+            == "draft_ready_for_manual_review"
+        )
         and str(entry.get("seo_validation_status") or "") in {"", "seo_ready"}
         and bool(str(entry.get("proposed_translation_value") or "").strip())
         and not entry.get("draft_blocked")
         and not entry.get("product_identity_mismatch")
+        and not _all_languages_option_translation_code_only(
+            entry.get("proposed_translation_value", "")
+        )
+        and not _all_languages_forbidden_phrase_matches(
+            entry.get("proposed_translation_value", "")
+        )
     )
     future_update_ready = mapping_safe and draft_ready
     if future_update_ready:
@@ -3290,6 +3697,14 @@ def _all_languages_option_mapping_row(entry: dict):
         )
     elif missing:
         plain_reason = f"Keep blocked: missing {', '.join(missing)}."
+    elif _all_languages_option_translation_code_only(
+        entry.get("proposed_translation_value", "")
+    ):
+        plain_reason = "Keep blocked: proposed option translation is technical/code-only."
+    elif _all_languages_forbidden_phrase_matches(
+        entry.get("proposed_translation_value", "")
+    ):
+        plain_reason = "Keep blocked: proposed option translation contains blocked wording."
     else:
         plain_reason = "Keep blocked: translation draft still needs review."
     return {
@@ -3312,9 +3727,7 @@ def _all_languages_option_mapping_row(entry: dict):
         "mapping_safe": mapping_safe,
         "future_update_ready": future_update_ready,
         "mapping_status_label": "Safe mapping" if mapping_safe else "Mapping incomplete",
-        "future_update_ready_label": (
-            "Future update-ready" if future_update_ready else "Keep blocked"
-        ),
+        "future_update_ready_label": "Update-ready" if future_update_ready else "Keep blocked",
         "missing_mapping_parts": missing,
         "validation_status": entry.get("validation_status", ""),
         "seo_validation_status": entry.get("seo_validation_status", ""),
@@ -3327,8 +3740,10 @@ def _all_languages_option_shopify_key(entry: dict):
     if source_key:
         return source_key
     display_key = str(entry.get("key") or "")
-    if display_key in {"option.name", "option.value"}:
+    if display_key == "option.name":
         return "name"
+    if display_key == "option.value":
+        return "value"
     return display_key
 
 
@@ -3343,7 +3758,7 @@ def _all_languages_next_enablement_summary(
             rows.append(
                 {
                     "area": "Product options",
-                    "status": "Future update-ready",
+                    "status": "Enabled for update",
                     "plain_reason": option_audit.get("plain_summary", ""),
                 }
             )
@@ -3356,7 +3771,18 @@ def _all_languages_next_enablement_summary(
                 }
             )
     if german_body_html_diagnostic.get("exists"):
-        if german_body_html_diagnostic.get("forbidden_phrase"):
+        if german_body_html_diagnostic.get("repair_applied"):
+            rows.append(
+                {
+                    "area": "German product description",
+                    "status": "Forbidden phrase repaired",
+                    "plain_reason": german_body_html_diagnostic.get(
+                        "plain_reason",
+                        "",
+                    ),
+                }
+            )
+        elif german_body_html_diagnostic.get("forbidden_phrase"):
             rows.append(
                 {
                     "area": "German product description",
@@ -3586,7 +4012,7 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
         diagnostics.append(
             {
                 "field": field,
-                "label": ALL_LANGUAGES_SAFE_FIELD_LABELS.get(field, field),
+                "label": _all_languages_field_label(field),
                 "candidates_found": len(field_entries),
                 "ready_count": _all_languages_entry_status_count(
                     field_entries,
@@ -3642,7 +4068,7 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
     if safe_blocked_reason_summary:
         top_reason = safe_blocked_reason_summary[0]["label"]
     elif not safe_entries:
-        top_reason = "No product title or SEO fields were found in this report."
+        top_reason = "No automatic update fields were found in this report."
     elif already_up_to_date_count and not ready_count and not blocked_count:
         top_reason = "All safe fields are already up to date."
     else:
@@ -4976,8 +5402,10 @@ def _render_all_languages_update_html(payload: dict):
             ("Raw write_ready_count", "write_ready_count"),
             ("Updated in Shopify", "updated_count"),
             ("Confirmed After Update", "verified_count"),
+            ("Product Options Updated", "product_options_updated_count"),
+            ("Product Descriptions Updated", "product_descriptions_updated_count"),
             ("Already Up To Date", "skipped_count"),
-            ("Not Updated", "blocked_count"),
+            ("Not Updated", "not_updated_count"),
             ("Review Notes", "review_note_count"),
             ("Failed", "failed_count"),
             ("Mutation Called", "mutation_called"),
@@ -4996,8 +5424,10 @@ def _render_all_languages_update_html(payload: dict):
   <h2>Success</h2>
   <ul>
     <li>Shopify updated successfully</li>
-    <li>{escape(str(payload.get('updated_count', 0)))} translations updated</li>
-    <li>{escape(str(payload.get('verified_count', 0)))} confirmed after update</li>
+    <li>{escape(str(payload.get('verified_count', 0)))} translations updated and confirmed</li>
+    <li>Product options updated: {escape(str(payload.get('product_options_updated_count', 0)))}</li>
+    <li>Product descriptions updated: {escape(str(payload.get('product_descriptions_updated_count', 0)))}</li>
+    <li>Not updated: {escape(str(payload.get('not_updated_count', 0)))}</li>
     <li>Restore not needed</li>
   </ul>
 """
@@ -5086,6 +5516,7 @@ def _all_languages_update_diagnostic_html(payload: dict):
       <tr><th>Blocker</th><td>{escape(str(german.get('blocker_category_label', '')))}</td></tr>
       <tr><th>Plain Reason</th><td>{escape(str(german.get('plain_reason', '')))}</td></tr>
       <tr><th>Forbidden Phrase(s)</th><td>{escape(german_phrases or 'None detected')}</td></tr>
+      <tr><th>Forbidden Phrase Repair</th><td>{escape('Applied' if german.get('repair_applied') else ('Not applied' if german.get('repair_attempted') else 'Not needed'))}</td></tr>
       <tr><th>HTML Structure Issue</th><td>{escape(str(german.get('html_structure_issue', False)))}</td></tr>
       <tr><th>Link/Image/Video Mismatch</th><td>{escape(str(german.get('link_image_video_mismatch', False)))}</td></tr>
       <tr><th>Identity Mismatch</th><td>{escape(str(german.get('identity_mismatch', False)))}</td></tr>

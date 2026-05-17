@@ -6085,7 +6085,12 @@ def _attach_translation_workspace_row_update_status(row: dict, update_entry: dic
         label = "Ready for Shopify update"
         status_key = "ready"
     elif status == "written_verified":
-        label = "Updated and confirmed"
+        if update_entry.get("field_group") == "options":
+            label = "Product option updated"
+        elif update_entry.get("key") == "body_html":
+            label = "Product description updated"
+        else:
+            label = "Updated and confirmed"
         status_key = "ready"
     elif status == "readback_mismatch":
         label = "Updated, confirmation needs review"

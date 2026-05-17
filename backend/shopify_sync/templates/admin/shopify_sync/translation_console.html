@@ -2973,7 +2973,7 @@
             <span class="tw-count-badge">Safe fields only</span>
           {% endif %}
         </div>
-        <p class="tw-shopify-apply-note">Safe fields only. Product description updates only if HTML validation passes. Options and variants remain preview-only.</p>
+        <p class="tw-shopify-apply-note">Safe fields only. Product descriptions update only if HTML validation passes. Product options update only when Shopify mapping is confirmed. Variants, media alt text, and technical fields stay blocked.</p>
         <div class="tw-job-actions" style="align-items: flex-end;">
           <div>
             <div class="tw-header-status-label">Checked items</div>
@@ -2986,6 +2986,14 @@
           <div>
             <div class="tw-header-status-label">Confirmed after update</div>
             <div class="tw-header-status-value">{{ all_languages_update_display.verified_count|default:0 }}</div>
+          </div>
+          <div>
+            <div class="tw-header-status-label">Product options updated</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
+          </div>
+          <div>
+            <div class="tw-header-status-label">Product descriptions updated</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.product_descriptions_updated_count|default:0 }}</div>
           </div>
           <div>
             <div class="tw-header-status-label">Needs review</div>
@@ -3114,12 +3122,20 @@
                 <h4>Shopify updated successfully</h4>
                 <div class="tw-shopify-success-metrics" aria-label="Shopify update success summary">
                   <div class="tw-shopify-success-metric">
-                    <div class="tw-shopify-success-label">Translations updated</div>
-                    <div class="tw-shopify-success-value">{{ all_languages_update_display.updated_count }}</div>
+                    <div class="tw-shopify-success-label">Translations updated and confirmed</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.verified_count }}</div>
                   </div>
                   <div class="tw-shopify-success-metric">
-                    <div class="tw-shopify-success-label">Confirmed after update</div>
-                    <div class="tw-shopify-success-value">{{ all_languages_update_display.verified_count }}</div>
+                    <div class="tw-shopify-success-label">Product options updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Product descriptions updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.product_descriptions_updated_count|default:0 }}</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Not updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.not_updated_count|default:0 }}</div>
                   </div>
                   <div class="tw-shopify-success-metric">
                     <div class="tw-shopify-success-label">Restore</div>
@@ -3150,6 +3166,14 @@
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Confirmed after update</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.verified_count }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Product options updated</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.product_options_updated_count|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Product descriptions updated</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.product_descriptions_updated_count|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Needs review</div>
@@ -3199,6 +3223,10 @@
                     <div class="tw-shopify-update-value">{% if all_languages_update_display.german_body_html_diagnostic.found_forbidden_phrases %}{{ all_languages_update_display.german_body_html_diagnostic.found_forbidden_phrases|join:", " }}{% else %}None detected{% endif %}</div>
                   </div>
                   <div class="tw-shopify-update-card">
+                    <div class="tw-shopify-update-label">Forbidden phrase repair</div>
+                    <div class="tw-shopify-update-value">{% if all_languages_update_display.german_body_html_diagnostic.repair_applied %}Applied{% elif all_languages_update_display.german_body_html_diagnostic.repair_attempted %}Not applied{% else %}Not needed{% endif %}</div>
+                  </div>
+                  <div class="tw-shopify-update-card">
                     <div class="tw-shopify-update-label">HTML structure issue</div>
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.html_structure_issue }}</div>
                   </div>
@@ -3218,6 +3246,12 @@
                     <div class="tw-shopify-update-label">Plain reason</div>
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.plain_reason }}</div>
                   </div>
+                  {% if all_languages_update_display.german_body_html_diagnostic.repair_failed_reason %}
+                    <div class="tw-shopify-update-card is-wide">
+                      <div class="tw-shopify-update-label">Repair reason</div>
+                      <div class="tw-shopify-update-value">{{ all_languages_update_display.german_body_html_diagnostic.repair_failed_reason }}</div>
+                    </div>
+                  {% endif %}
                 </div>
               {% endif %}
               {% if all_languages_update_display.needs_review_rows %}
@@ -3258,7 +3292,7 @@
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.mapping_safe_count }}</div>
                   </div>
                   <div class="tw-shopify-update-card">
-                    <div class="tw-shopify-update-label">Future update-ready</div>
+                    <div class="tw-shopify-update-label">Update-ready</div>
                     <div class="tw-shopify-update-value">{{ all_languages_update_display.option_mapping_audit.future_update_ready_count }}</div>
                   </div>
                   <div class="tw-shopify-update-card">
