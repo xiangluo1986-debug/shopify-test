@@ -96,6 +96,14 @@ TRUSTPILOT_AUTO_REFRESH_REPORT_FILENAME = "shopify_review_request_trustpilot_aut
 TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME = "shopify_review_request_trustpilot_auto_queue_refresh.html"
 REVIEW_AND_SEND_REPORT_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.json"
 REVIEW_AND_SEND_HTML_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.html"
+REVIEW_SEND_POST_SEND_AUDIT_REPORT_FILENAME = (
+    "codex_runs/shopify_review_request_review_send_post_send_audit.json"
+)
+REVIEW_SEND_POST_SEND_AUDIT_HTML_FILENAME = (
+    "codex_runs/shopify_review_request_review_send_post_send_audit.html"
+)
+LOCAL_REVIEW_SEND_EVIDENCE = "Trustpilot email sent from Review & Send. Shopify tag not written yet."
+LOCAL_REVIEW_SEND_HISTORY_LABEL = "Sent via local Review & Send report"
 TRUSTPILOT_EMAIL_SUBJECT = "How was your Kidstoylover order?"
 TRUSTPILOT_REVIEW_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 PHASE_22621_DRAFTS_SEND_HELPER_MODULE = (
@@ -489,6 +497,12 @@ REPORT_DEFINITIONS = (
         ("dynamic_review_send_audit_status", "report_status", "status"),
     ),
     (
+        "review_send_post_send_audit",
+        "Review & Send post-send audit",
+        REVIEW_SEND_POST_SEND_AUDIT_REPORT_FILENAME,
+        ("audit_status", "report_status", "status"),
+    ),
+    (
         "trustpilot_gmail_draft_package",
         "Trustpilot Gmail draft package",
         "shopify_review_request_trustpilot_gmail_draft_package.json",
@@ -730,6 +744,7 @@ def build_review_request_workbench_context(params=None):
             trustpilot_gmail_scope_compatibility_resolver,
         )
     )
+    queue_trustpilot_email_records = _queue_trustpilot_email_records(history_ledger, reports)
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
         history_ledger["filters"],
@@ -742,7 +757,7 @@ def build_review_request_workbench_context(params=None):
         blocked_orders=blocked_orders,
         all_rows=all_rows,
         history_ledger=history_ledger,
-        trustpilot_email_records=trustpilot_email_records,
+        trustpilot_email_records=queue_trustpilot_email_records,
         ali_reviews_status=ali_reviews_status,
         trustpilot_automation_status=trustpilot_automation_status,
         trustpilot_send_readiness=trustpilot_send_readiness,
@@ -2255,6 +2270,7 @@ def _report_readiness(reports):
         ("trustpilot_one_candidate_draft_create_execute", "One-candidate Gmail draft create execute"),
         ("trustpilot_one_candidate_draft_send_preflight", "One-candidate Gmail send preflight"),
         ("trustpilot_one_candidate_draft_send_execute", "One-candidate Gmail send execute"),
+        ("review_send_post_send_audit", "Review & Send post-send audit"),
         ("customer_level_duplicate_audit", "Customer-level duplicate audit"),
         ("ali_reviews_api_capability_discovery", "Ali Reviews API capability discovery"),
         ("trustpilot_send_audit", "Future send audit"),
@@ -2724,6 +2740,173 @@ def _trustpilot_email_records(events, filters):
             }
         )
     return records[: filters.get("ledger_limit", DEFAULT_LIMIT)]
+
+
+def _queue_trustpilot_email_records(history_ledger, reports):
+    records = _trustpilot_email_records(
+        history_ledger.get("all_events") or [],
+        _unfiltered_trustpilot_record_filters(),
+    )
+    return _merge_trustpilot_email_records(
+        _local_review_send_success_records(reports),
+        records,
+    )
+
+
+def _unfiltered_trustpilot_record_filters():
+    return {
+        "q": "",
+        "channel": "all",
+        "event_type": "all",
+        "ledger_status": "",
+        "order": "",
+        "ledger_limit": MAX_SOURCE_ROWS,
+    }
+
+
+def _merge_trustpilot_email_records(primary_records, secondary_records):
+    records = []
+    seen_sent_orders = set()
+    for record in primary_records or []:
+        order_name = _canonical_order_name(record.get("order_name"))
+        if record.get("email_sent") is True and order_name:
+            seen_sent_orders.add(order_name)
+        records.append(record)
+    for record in secondary_records or []:
+        order_name = _canonical_order_name(record.get("order_name"))
+        if record.get("email_sent") is True and order_name in seen_sent_orders:
+            continue
+        records.append(record)
+    return records[:MAX_SOURCE_ROWS]
+
+
+def _local_review_send_success_records(reports=None):
+    records = []
+    reports = reports or {}
+    for report_key in ("trustpilot_review_and_send_execute", "review_send_post_send_audit"):
+        report = reports.get(report_key) or {}
+        record = _local_review_send_record_from_payload(
+            report.get("data") or {},
+            source_label=report.get("label"),
+            source_path=report.get("relative_path"),
+        )
+        if record:
+            records.append(record)
+    for payload, source_path, source_label in _local_review_send_report_payloads_from_disk():
+        record = _local_review_send_record_from_payload(
+            payload,
+            source_label=source_label,
+            source_path=source_path,
+        )
+        if record:
+            records.append(record)
+    return _dedupe_local_review_send_records(records)
+
+
+def _local_review_send_report_payloads_from_disk():
+    reports = []
+    for filename, label in (
+        (REVIEW_AND_SEND_REPORT_FILENAME, "Trustpilot Review & Send execute"),
+        (REVIEW_SEND_POST_SEND_AUDIT_REPORT_FILENAME, "Review & Send post-send audit"),
+    ):
+        path = _log_dir() / filename
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(payload, dict):
+            reports.append((payload, f"logs/{filename}", label))
+    return reports
+
+
+def _local_review_send_record_from_payload(payload, source_label="", source_path=""):
+    if not isinstance(payload, dict):
+        return {}
+    email_sent = (
+        payload.get("email_sent") is True
+        or payload.get("email_sent_confirmed") is True
+    )
+    sent_count = _int_or_zero(payload.get("sent_count") or payload.get("source_sent_count"))
+    if not (email_sent and sent_count == 1):
+        return {}
+    order_name = _canonical_order_name(
+        payload.get("selected_order")
+        or payload.get("selected_order_name")
+        or payload.get("target_order")
+        or ((payload.get("selected_order") or {}) if isinstance(payload.get("selected_order"), str) else "")
+    )
+    if not order_name:
+        return {}
+    shopify_tag_written = (
+        payload.get("shopify_tag_write_performed") is True
+        or payload.get("shopify_tag_write_confirmed") is True
+        or payload.get("source_shopify_tag_write_performed") is True
+    )
+    masked = (
+        mask_email(payload.get("selected_masked_email"))
+        or mask_email(payload.get("selected_customer"))
+        or "Masked in reports"
+    )
+    source_path = _safe_text(source_path, max_length=180)
+    if not source_path:
+        source_path = f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}"
+    return {
+        "event_time": _safe_text(
+            payload.get("timestamp") or payload.get("report_generated_at"),
+            max_length=80,
+        ),
+        "order_name": order_name,
+        "masked_email": masked,
+        "event_type": "send_execute",
+        "status": _safe_text(
+            payload.get("audit_status")
+            or payload.get("execution_status")
+            or payload.get("report_status")
+            or "trustpilot_email_sent_shopify_tag_not_written",
+            max_length=120,
+        ),
+        "classification": "local_review_send_success",
+        "blocker_reason": "",
+        "gmail_draft_created": payload.get("gmail_drafts_create_confirmed") is True
+        or payload.get("gmail_drafts_create_called") is True
+        or payload.get("gmail_draft_created") is True,
+        "email_sent": True,
+        "partial_draft_id": "",
+        "partial_message_id": "",
+        "source_report_path": source_path,
+        "source_report_label": _safe_text(source_label or "Trustpilot Review & Send execute", max_length=120),
+        "source_section": "local_review_send_success",
+        "draft_should_not_be_sent": False,
+        "prior_trustpilot_order_name": "",
+        "badge_class": "rrw-badge-info" if not shopify_tag_written else "rrw-badge-ok",
+        "local_review_send_success": True,
+        "shopify_tag_pending": not shopify_tag_written,
+        "shopify_tag_written": shopify_tag_written,
+        "evidence_message": (
+            LOCAL_REVIEW_SEND_EVIDENCE
+            if not shopify_tag_written
+            else "Trustpilot email sent from Review & Send and Shopify tag write is recorded."
+        ),
+        "trustpilot_history_label": LOCAL_REVIEW_SEND_HISTORY_LABEL,
+    }
+
+
+def _dedupe_local_review_send_records(records):
+    seen = set()
+    result = []
+    for record in records or []:
+        key = (
+            _canonical_order_name(record.get("order_name")),
+            record.get("email_sent") is True,
+            record.get("source_report_path") or "",
+        )
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        result.append(record)
+    return result
 
 
 def _ali_reviews_status(history_focus):
@@ -4734,7 +4917,11 @@ def _build_review_send_state(params=None):
     blocked_orders = _blocked_rows(reports, all_rows)
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
-        history_ledger["filters"],
+        _unfiltered_trustpilot_record_filters(),
+    )
+    trustpilot_email_records = _merge_trustpilot_email_records(
+        _local_review_send_success_records(reports),
+        trustpilot_email_records,
     )
     gmail_setup = _gmail_setup_from_reports(reports)
     last_60_days_scan = _last_60_days_candidate_scan(
@@ -4780,7 +4967,11 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
     blocked_orders = _blocked_rows(reports, all_rows)
     trustpilot_email_records = _trustpilot_email_records(
         history_ledger["all_events"],
-        history_ledger["filters"],
+        _unfiltered_trustpilot_record_filters(),
+    )
+    trustpilot_email_records = _merge_trustpilot_email_records(
+        _local_review_send_success_records(reports),
+        trustpilot_email_records,
     )
     gmail_setup = _gmail_setup_from_reports(reports)
     scan = _last_60_days_candidate_scan(
@@ -5369,6 +5560,116 @@ def build_review_request_dynamic_review_send_audit_report(params=None):
         "detected_issue_summary": (
             "Dynamic Review & Send audit completed without Gmail, Shopify, external review API, "
             "or translationsRegister calls. The visible send queue is latest-customer only."
+        ),
+    }
+
+
+def build_review_request_review_send_post_send_audit_report(params=None):
+    reports = _load_known_reports()
+    report = reports.get("trustpilot_review_and_send_execute") or {}
+    source_report = report.get("data") or {}
+    source_error = "" if report.get("loaded") else report.get("status") or "source_review_send_report_missing"
+    return _review_send_post_send_audit_payload(
+        source_report=source_report,
+        source_error=source_error,
+        source_json_path=report.get("relative_path") or f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}",
+        source_html_path=f"logs/{REVIEW_AND_SEND_HTML_FILENAME}",
+        source_html_found=(_log_dir() / REVIEW_AND_SEND_HTML_FILENAME).exists(),
+    )
+
+
+def _review_send_post_send_audit_payload(
+    source_report,
+    source_error,
+    source_json_path,
+    source_html_path,
+    source_html_found=False,
+):
+    source_report = source_report if isinstance(source_report, dict) else {}
+    selected_order = _canonical_order_name(
+        source_report.get("selected_order")
+        or source_report.get("selected_order_name")
+        or source_report.get("target_order")
+    )
+    sent_count = _int_or_zero(source_report.get("sent_count") or source_report.get("source_sent_count"))
+    email_sent_confirmed = source_report.get("email_sent") is True and sent_count == 1
+    should_move_to_already_sent = bool(email_sent_confirmed and sent_count == 1)
+    blocking_conditions = []
+    if source_error:
+        blocking_conditions.append(
+            {
+                "status": _safe_text(source_error, max_length=120),
+                "detail": "Latest Review & Send report was not available.",
+            }
+        )
+    if not selected_order:
+        blocking_conditions.append(
+            {"status": "blocked_missing_selected_order", "detail": "No selected order was found."}
+        )
+    if not email_sent_confirmed:
+        blocking_conditions.append(
+            {
+                "status": "blocked_email_not_confirmed",
+                "detail": "email_sent=true and sent_count=1 were not both confirmed.",
+            }
+        )
+    if sent_count != 1:
+        blocking_conditions.append(
+            {"status": "blocked_unexpected_sent_count", "detail": "sent_count must equal 1."}
+        )
+    audit_status = (
+        "review_send_post_send_audit_passed"
+        if should_move_to_already_sent and not blocking_conditions
+        else "blocked_send_not_confirmed"
+    )
+    if source_error:
+        audit_status = _safe_text(source_error, max_length=120)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "report_generated_at": datetime.now(timezone.utc).isoformat(),
+        "task": REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME,
+        "task_name": REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME,
+        "phase": "5.28M",
+        "mode": "dry-run-local-post-send-audit",
+        "audit_status": audit_status,
+        "report_status": audit_status,
+        "success": audit_status == "review_send_post_send_audit_passed",
+        "source_review_send_report_found": bool(source_report),
+        "source_review_send_json_path": _safe_text(source_json_path, max_length=180),
+        "source_review_send_html_path": _safe_text(source_html_path, max_length=180),
+        "source_review_send_html_found": bool(source_html_found),
+        "selected_order": selected_order,
+        "email_sent_confirmed": email_sent_confirmed,
+        "gmail_api_call_confirmed": source_report.get("gmail_api_call_performed") is True,
+        "gmail_drafts_create_confirmed": source_report.get("gmail_drafts_create_called") is True,
+        "gmail_drafts_send_confirmed": source_report.get("gmail_drafts_send_called") is True,
+        "gmail_messages_send_confirmed_false": source_report.get("gmail_messages_send_called") is False,
+        "sent_count": sent_count,
+        "shopify_write_confirmed_false": source_report.get("shopify_write_performed") is False,
+        "shopify_tag_write_confirmed_false": source_report.get("shopify_tag_write_performed") is False,
+        "customer_level_sent_record_available": bool(selected_order and email_sent_confirmed),
+        "should_move_to_already_sent": should_move_to_already_sent,
+        "ready_for_shopify_tag_write_next_phase": should_move_to_already_sent,
+        "blocking_conditions": blocking_conditions,
+        "no_gmail_api_call_in_audit": True,
+        "audit_gmail_api_call_performed": False,
+        "audit_gmail_draft_create_performed": False,
+        "audit_gmail_drafts_send_performed": False,
+        "audit_shopify_api_call_performed": False,
+        "audit_shopify_write_performed": False,
+        "audit_shopify_tag_write_performed": False,
+        "audit_external_review_api_call_performed": False,
+        "audit_translations_register_called": False,
+        "next_step": "Next step: run Shopify tag write after post-send audit.",
+        "detected_issue_summary": (
+            f"{selected_order} is confirmed sent by the local Review & Send report. "
+            "Move it to Already sent with Shopify tag pending. No Gmail API call or Shopify write was performed by this audit."
+            if audit_status == "review_send_post_send_audit_passed"
+            else (
+                f"Post-send audit blocked. selected_order={selected_order or 'missing'}; "
+                f"email_sent_confirmed={email_sent_confirmed}; sent_count={sent_count}. "
+                "No Gmail API call or Shopify write was performed by this audit."
+            )
         ),
     }
 
@@ -7221,6 +7522,7 @@ def _queue_candidate_summary(row):
         ),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
+        "customer_history_match_label": _safe_text(row.get("customer_history_match_label"), max_length=160),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
         "customer_history_matched_order_names": _dedupe_order_names(
             row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
@@ -7277,6 +7579,7 @@ def _blocked_candidate_summary(row):
         ),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
+        "customer_history_match_label": _safe_text(row.get("customer_history_match_label"), max_length=160),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
         "customer_history_matched_order_names": _dedupe_order_names(
             row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
@@ -7324,9 +7627,12 @@ def _already_sent_summary(row):
         "customer_history_order_count": _int_or_zero(row.get("customer_history_order_count")),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
+        "customer_history_match_label": _safe_text(row.get("customer_history_match_label"), max_length=160),
         "previous_trustpilot_order_names": _dedupe_order_names(row.get("previous_trustpilot_order_names") or []),
         "previous_trustpilot_tag_values": _dedupe_text(row.get("previous_trustpilot_tag_values") or []),
         "trustpilot_email_status": _safe_text(row.get("trustpilot_email_status"), max_length=120),
+        "shopify_tag_pending": row.get("shopify_tag_pending") is True,
+        "shopify_tag_status_label": _safe_text(row.get("shopify_tag_status_label"), max_length=120),
         "evidence": _safe_text(row.get("evidence"), max_length=500),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
         "tag_data_available": row.get("tag_data_available") is True,
@@ -8322,16 +8628,25 @@ def _already_sent_rows(focus, trustpilot_email_records, invitation_history, bloc
         order_name = _safe_text(record.get("order_name"), max_length=80)
         if not order_name:
             continue
+        local_review_send_success = record.get("local_review_send_success") is True
+        shopify_tag_pending = record.get("shopify_tag_pending") is True
+        evidence_label = (
+            _safe_text(record.get("evidence_message"), max_length=500)
+            or _record_evidence_label(record)
+        )
         rows.append(
             {
                 "order": order_name,
                 "customer": record.get("masked_email") or "Masked in reports",
-                "status": "Already sent",
-                "status_class": "rrw-badge-ok",
-                "evidence": _record_evidence_label(record),
-                "reason": _record_evidence_label(record),
+                "status": "Sent, tag pending" if shopify_tag_pending else "Already sent",
+                "status_class": "rrw-badge-info" if shopify_tag_pending else "rrw-badge-ok",
+                "evidence": evidence_label,
+                "reason": evidence_label,
                 "action_state": "already_sent",
                 "prior_trustpilot_order_name": order_name,
+                "local_review_send_success": local_review_send_success,
+                "shopify_tag_pending": shopify_tag_pending,
+                "shopify_tag_written": record.get("shopify_tag_written") is True,
             }
         )
     for row in invitation_history or []:
@@ -8468,9 +8783,10 @@ def _local_order_contexts(order_names):
         return {}
 
     contexts_by_lookup_key = {}
+    local_sent_records = _local_review_send_success_order_map()
     for order in selected_orders:
         email = _safe_runtime_email(order.get("customer_email"))
-        history = _customer_history_for_order(order, history_orders_by_identity)
+        history = _customer_history_for_order(order, history_orders_by_identity, local_sent_records)
         identity = _customer_identity_summary(order)
         tags = _shopify_tags_from_order(order)
         tag_data_loaded = _shopify_tags_loaded_from_order(order)
@@ -8811,7 +9127,7 @@ def _name_history_identity_from_key(identity):
     return ""
 
 
-def _customer_history_for_order(order, history_orders_by_identity):
+def _customer_history_for_order(order, history_orders_by_identity, local_sent_records=None):
     identity = _customer_history_identity(order)
     identity_key = identity.get("key", "")
     history_entry = history_orders_by_identity.get(identity_key) or {}
@@ -8836,7 +9152,7 @@ def _customer_history_for_order(order, history_orders_by_identity):
     sequence = _customer_order_sequence(order, customer_orders) if confirmed else 0
     historical_order_names = exact_order_names if confirmed else []
     previous_order_names, previous_tag_values = (
-        _previous_trustpilot_history(order, customer_orders) if confirmed else ([], [])
+        _previous_trustpilot_history(order, customer_orders, local_sent_records or {}) if confirmed else ([], [])
     )
     confidence = identity.get("confidence") if confirmed else ("low" if excluded_weak_order_names else "unknown")
     before_precision_names = _dedupe_order_names(exact_order_names + excluded_weak_order_names)
@@ -8885,9 +9201,10 @@ def _customer_history_order_sort_key(order):
     return (parsed, _int_or_zero((order or {}).get("id")))
 
 
-def _previous_trustpilot_history(order, customer_orders):
+def _previous_trustpilot_history(order, customer_orders, local_sent_records=None):
     current_id = (order or {}).get("id")
     current_name = _canonical_order_name((order or {}).get("order_name"))
+    local_sent_records = local_sent_records or {}
     previous_order_names = []
     previous_tag_values = []
     for history_order in customer_orders or []:
@@ -8897,12 +9214,24 @@ def _previous_trustpilot_history(order, customer_orders):
         if current_name and history_name == current_name:
             continue
         matched_tags = _matched_trustpilot_tags({}, _shopify_tags_from_order(history_order))
+        local_sent_record = local_sent_records.get(history_name) if history_name else None
+        if local_sent_record:
+            matched_tags.append(LOCAL_REVIEW_SEND_HISTORY_LABEL)
         if not matched_tags:
             continue
         if history_name:
             previous_order_names.append(history_name)
         previous_tag_values.extend(matched_tags)
     return _dedupe_order_names(previous_order_names), _dedupe_text(previous_tag_values)
+
+
+def _local_review_send_success_order_map():
+    records = _local_review_send_success_records({})
+    return {
+        _canonical_order_name(record.get("order_name")): record
+        for record in records
+        if _canonical_order_name(record.get("order_name"))
+    }
 
 
 def _customer_order_sequence(order, customer_orders):
@@ -9088,6 +9417,25 @@ def _apply_queue_row_context(
         trustpilot_tags,
         prior_order_name,
     ) or bool(previous_trustpilot_order_names)
+    local_review_send_success = (
+        row.get("local_review_send_success") is True
+        or source_row.get("local_review_send_success") is True
+        or local_context.get("local_review_send_success") is True
+    )
+    shopify_tag_pending = (
+        row.get("shopify_tag_pending") is True
+        or source_row.get("shopify_tag_pending") is True
+        or (
+            local_review_send_success
+            and not (
+                row.get("shopify_tag_written") is True
+                or source_row.get("shopify_tag_written") is True
+                or source_row.get("shopify_tag_write_performed") is True
+            )
+        )
+    )
+    if has_trustpilot_sent_tag(tags):
+        shopify_tag_pending = False
     history_label = _trustpilot_history_label(
         order_name=order_name,
         action_state=action_state,
@@ -9187,7 +9535,16 @@ def _apply_queue_row_context(
             "prior_trustpilot_order_name": prior_order_name,
             "trustpilot_history_label": history_label,
             "trustpilot_email_status": (
-                "Already sent" if trustpilot_sent else "No previous Trustpilot email found"
+                "Sent" if local_review_send_success else (
+                    "Already sent" if trustpilot_sent else "No previous Trustpilot email found"
+                )
+            ),
+            "local_review_send_success": local_review_send_success,
+            "shopify_tag_pending": shopify_tag_pending,
+            "shopify_tag_status_label": "Tag pending" if shopify_tag_pending else "",
+            "customer_history_match_label": _customer_history_match_label(
+                customer_history_source,
+                customer_history_confidence,
             ),
             "eligibility_status": _queue_eligibility_status(action_state),
             "eligibility_status_label": _queue_eligibility_status_label(action_state),
@@ -9231,6 +9588,19 @@ def _customer_orders_display(order_count, sequence_label, related_order_names, h
         noun = "order" if count == 1 else "orders"
         return f"{count} {noun}; {sequence_label}"
     return sequence_label or "Order count unknown"
+
+
+def _customer_history_match_label(source, confidence):
+    source_text = _safe_text(source, max_length=80) or "unavailable"
+    confidence_text = _safe_text(confidence, max_length=80) or "unknown"
+    source_label = {
+        "shopify_customer_id": "customer_id",
+        "customer_email": "customer_email",
+        "name_shipping_phone": "shipping_fallback",
+        "name_shipping_address_postcode": "shipping_fallback",
+        "name_only": "name_only_manual_review",
+    }.get(source_text, source_text)
+    return f"Match: {source_label}; confidence: {confidence_text}"
 
 
 def _ordinal(value):

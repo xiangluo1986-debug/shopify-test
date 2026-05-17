@@ -69,6 +69,7 @@ python remote_approval_runner.py --task shopify_review_request_order_tags_persis
 python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_customer_history_trustpilot_guard_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_reuse_gmail_helper_audit --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_review_send_post_send_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -536,6 +537,14 @@ eligible rows, the `#22530`/`#22562` decision, dynamic helper readiness,
 `#21075` readiness, visible Review & Send count, and latest-only queue status.
 It does not call Gmail, create drafts, send email, call Shopify, write tags,
 call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
+Phase 5.28M adds `shopify_review_request_review_send_post_send_audit`. It reads
+the latest local Review & Send JSON/HTML report, confirms `email_sent=true`
+with `sent_count=1`, and writes a local post-send audit under
+`logs/codex_runs/`. It does not call Gmail, create drafts, send email, call
+Shopify, write tags, call Trustpilot/Kudosi/Ali Reviews, or call
+`translationsRegister`. A confirmed local Review & Send success counts as
+Trustpilot sent history until the later Shopify tag-write phase is approved.
 
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 

@@ -1203,3 +1203,22 @@ Future tracking design note:
   latest-filter counts, hidden older eligible count, the `#22530`/`#22562`
   latest decision, helper readiness, `#21075` readiness, visible send count,
   latest-only queue status, and no-write safety flags.
+
+## Phase 5.28M Post-Send Audit And Local Sent Ledger
+
+- [x] Added `shopify_review_request_review_send_post_send_audit` to read the
+  latest local Review & Send JSON/HTML report and confirm `email_sent=true`
+  with `sent_count=1`.
+- [x] The post-send audit writes local runner reports under `logs/codex_runs/`
+  and performs no Gmail API call, Shopify API call, Shopify write, external
+  review API call, or `translationsRegister` call.
+- [x] A locally confirmed Review & Send success is now Trustpilot sent evidence
+  before Shopify tag write. The order/customer moves out of Needs review email
+  and appears in Already sent with `Sent` and `Tag pending` status.
+- [x] Customer lifetime order count and Trustpilot history are resolved from all
+  matching local ShopifyOrder rows by high/medium confidence identity. Weak
+  name-only matching remains blocked/manual-review only.
+- [x] Customer-level Trustpilot history includes local Review & Send reports in
+  addition to Shopify tag aliases such as `1: trustpilot`, `1: trustpoilt`,
+  `trustpilot`, `trustpoilt`, and spacing/case variants.
+- [x] Shopify tag write remains a later phase after post-send audit.

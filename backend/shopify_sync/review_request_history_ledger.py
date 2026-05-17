@@ -252,6 +252,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("dynamic_review_send_audit_status", "report_status", "status"),
     },
     {
+        "key": "review_send_post_send_audit",
+        "label": "Review & Send post-send audit",
+        "filename": "codex_runs/shopify_review_request_review_send_post_send_audit.json",
+        "channel": "trustpilot",
+        "event_type": "send_execute",
+        "status_keys": ("audit_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_tag_write_design_dry_run",
         "label": "Trustpilot Shopify tag write design dry-run",
         "filename": "shopify_review_request_trustpilot_tag_write_design_dry_run.json",
@@ -631,6 +639,7 @@ def _event_from_mapping(report, item, event_type, source_section):
         (
             "order_name",
             "name",
+            "selected_order",
             "selected_candidate_order_name",
             "selected_order_name",
             "next_candidate_order_name",
@@ -640,7 +649,13 @@ def _event_from_mapping(report, item, event_type, source_section):
     if not order_name and source_section == "report_summary":
         order_name = _first_text(
             data,
-            ("selected_candidate_order_name", "selected_order_name", "next_candidate_order_name", "audit_order_a"),
+            (
+                "selected_order",
+                "selected_candidate_order_name",
+                "selected_order_name",
+                "next_candidate_order_name",
+                "audit_order_a",
+            ),
         )
     masked_email = _first_text(
         item,
@@ -706,17 +721,27 @@ def _event_from_mapping(report, item, event_type, source_section):
         "classification": _safe_text(classification),
         "blocker_reason": _safe_text(blocker_reason),
         "success": _bool_or_none(item.get("success") if "success" in item else data.get("success")),
-        "email_sent": _source_bool(item, data, ("email_sent", "gmail_send_performed")),
+        "email_sent": _source_bool(
+            item,
+            data,
+            ("email_sent", "email_sent_confirmed", "gmail_send_performed"),
+        ),
         "gmail_draft_created": _source_bool(
             item,
             data,
-            ("gmail_draft_created", "draft_created_confirmed", "real_gmail_draft_create_executed"),
+            (
+                "gmail_draft_created",
+                "gmail_drafts_create_confirmed",
+                "draft_created_confirmed",
+                "real_gmail_draft_create_executed",
+            ),
         ),
         "shopify_tag_written": _source_bool(
             item,
             data,
             (
                 "shopify_tag_written",
+                "shopify_tag_write_confirmed",
                 "shopify_write_performed",
                 "shopify_tag_write_performed",
                 "source_shopify_write_performed",
