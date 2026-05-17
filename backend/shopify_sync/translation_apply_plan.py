@@ -103,6 +103,53 @@ ALL_LANGUAGES_SAFE_FIELD_LABELS = {
     "meta_title": "SEO title",
     "meta_description": "SEO description",
 }
+ALL_LANGUAGES_NEUTRAL_REVIEW_CODES = {
+    "already_translated_skipped",
+    "draft_ready_for_manual_review",
+    "existing_translation_current",
+    "missing_translation",
+    "missing_translation_draft_ready",
+    "outdated_translation",
+    "outdated_translation_update_draft_ready",
+    "preview_only",
+    "seo_ready",
+    "skipped",
+}
+ALL_LANGUAGES_SOFT_WARNING_CODES = {
+    "existing_translation_outdated",
+    "future_write_needs_resource_mapping",
+    "keyword_stuffing_or_duplicate",
+    "missing_core_keyword",
+    "missing_model",
+    "missing_part_type",
+    "missing_replacement_part_meaning",
+    "missing_use_case",
+    "missing_value_point",
+    "needs_review",
+    "outdated",
+    "seo_could_be_improved",
+    "seo_needs_manual_review",
+    "seo_not_ready",
+    "seo_warning",
+    "too_short_for_seo",
+}
+ALL_LANGUAGES_HARD_REVIEW_REASON_MAP = {
+    "body_html_structure_broken": "blocked_body_html_structure_broken",
+    "blocked": "blocked_needs_review_status",
+    "draft_blocked": "blocked_needs_review_status",
+    "draft_empty": "blocked_proposed_translation_empty",
+    "draft_equals_source": "blocked_proposed_translation_equals_source",
+    "draft_needs_manual_review_empty": "blocked_proposed_translation_empty",
+    "forbidden_marketing_or_origin_phrase": "blocked_forbidden_phrase_detected",
+    "forbidden_marketing_or_shipping_phrase": "blocked_forbidden_phrase_detected",
+    "html_media_or_link_tag_broken": "blocked_html_media_or_link_tag_broken",
+    "manual_review_required": "blocked_needs_review_status",
+    "openai_invalid_translation_response": "blocked_needs_review_status",
+    "product_identity_mismatch": "blocked_identity_review_required",
+    "product_title_over_80_chars": "blocked_product_title_over_80_chars",
+    "seo_description_over_160_chars": "blocked_seo_description_over_160_chars",
+    "seo_title_over_60_chars": "blocked_seo_title_over_60_chars",
+}
 ALL_LANGUAGES_STATUS_LABELS = {
     "all_languages_shopify_update_not_submitted": "No Shopify update has been run yet.",
     ALL_LANGUAGES_WRITTEN_AND_VERIFIED_STATUS: "Shopify updated successfully",
@@ -656,6 +703,7 @@ def build_translation_workspace_all_languages_update_state(
         "verified_count": 0,
         "skipped_count": _all_languages_entry_status_count(entries, "skipped"),
         "blocked_count": _all_languages_entry_status_count(entries, "blocked"),
+        "review_note_count": _all_languages_entry_soft_warning_count(entries),
         "failed_count": 0,
         "per_locale_summary": _all_languages_per_locale_summary(entries, report),
         "per_field_summary": _all_languages_per_field_summary(entries),
@@ -733,6 +781,7 @@ def validate_and_update_all_languages_to_shopify(
         "verified_count": 0,
         "skipped_count": 0,
         "blocked_count": 0,
+        "review_note_count": state.get("review_note_count", 0),
         "failed_count": 0,
         "per_locale_summary": [],
         "per_field_summary": [],
@@ -740,6 +789,7 @@ def validate_and_update_all_languages_to_shopify(
             "candidate_count": state.get("candidate_count", 0),
             "write_ready_count": len(write_ready_entries),
             "blocked_count": state.get("blocked_count", 0),
+            "review_note_count": state.get("review_note_count", 0),
             "skipped_count": state.get("skipped_count", 0),
             "per_locale_summary": state.get("per_locale_summary", []),
             "per_field_summary": state.get("per_field_summary", []),
@@ -1956,6 +2006,11 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
             status = "write_ready"
             blocking_reason = ""
             human_blocking_reasons = []
+    soft_warning_reasons = _all_languages_update_soft_warning_reasons(entry)
+    human_soft_warnings = [
+        _all_languages_soft_warning_label(reason)
+        for reason in soft_warning_reasons
+    ]
     return {
         "entry_id": entry.get("entry_id", ""),
         "locale": entry.get("locale", ""),
@@ -1978,6 +2033,8 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
         "blocking_reason": blocking_reason,
         "blocking_reasons": blocking_reasons,
         "human_blocking_reasons": human_blocking_reasons,
+        "soft_warning_reasons": soft_warning_reasons,
+        "human_soft_warnings": human_soft_warnings,
         "readback_value": "",
         "readback_matched": False,
         "rollback_needed": False,
@@ -2010,8 +2067,6 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_product_gid_mismatch")
     if locale not in LOCKED_EXECUTION_SUPPORTED_LOCALES:
         reasons.append("blocked_target_locale_unsupported")
-    if _all_languages_entry_needs_review(entry):
-        reasons.append("blocked_needs_review_status")
     if not source_value:
         reasons.append("blocked_source_empty")
     if not proposed_value:
@@ -2042,25 +2097,143 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_forbidden_phrase_detected")
     if entry.get("product_identity_mismatch"):
         reasons.append("blocked_identity_review_required")
+    reasons.extend(_all_languages_hard_review_blocking_reasons(entry))
     if field_key == "body_html":
         reasons.extend(_all_languages_body_html_blocking_reasons(entry))
     return _unique_strings(reasons)
 
 
 def _all_languages_entry_needs_review(entry: dict):
-    if entry.get("draft_blocked") or entry.get("product_identity_mismatch"):
-        return True
-    validation_status = str(entry.get("validation_status") or "").strip()
-    if validation_status and validation_status != "draft_ready_for_manual_review":
-        return True
-    seo_validation_status = str(entry.get("seo_validation_status") or "").strip()
-    if seo_validation_status and seo_validation_status != "seo_ready":
-        return True
-    status_text = " ".join(
-        str(entry.get(key) or "")
-        for key in ("status", "blocking_reasons", "seo_warning")
-    ).lower()
-    return "needs_review" in status_text or "needs review" in status_text
+    return bool(_all_languages_hard_review_blocking_reasons(entry))
+
+
+def _all_languages_hard_review_blocking_reasons(entry: dict):
+    field_key = str(entry.get("key") or "").strip()
+    codes = _all_languages_entry_review_codes(entry)
+    reasons = []
+    for code in codes:
+        if code == "draft_over_max_chars":
+            if field_key == "title":
+                reasons.append("blocked_product_title_over_80_chars")
+            elif field_key == "meta_title":
+                reasons.append("blocked_seo_title_over_60_chars")
+            elif field_key == "meta_description":
+                reasons.append("blocked_seo_description_over_160_chars")
+            else:
+                reasons.append("blocked_needs_review_status")
+            continue
+        mapped_reason = ALL_LANGUAGES_HARD_REVIEW_REASON_MAP.get(code)
+        if mapped_reason:
+            reasons.append(mapped_reason)
+            continue
+        if code in ALL_LANGUAGES_SOFT_WARNING_CODES or code in ALL_LANGUAGES_NEUTRAL_REVIEW_CODES:
+            continue
+        if code in {"draft_needs_manual_review", "draft_needs_review"}:
+            reasons.append("blocked_needs_review_status")
+            continue
+        if code.startswith("blocked_"):
+            reasons.append("blocked_needs_review_status")
+    validation_status = _all_languages_normalize_review_code(
+        entry.get("validation_status")
+    )
+    if (
+        validation_status
+        and validation_status not in ALL_LANGUAGES_NEUTRAL_REVIEW_CODES
+        and validation_status != "draft_ready_for_manual_review"
+        and not _all_languages_review_codes_are_soft_only(codes)
+    ):
+        reasons.append("blocked_needs_review_status")
+    if entry.get("draft_blocked"):
+        reasons.append("blocked_needs_review_status")
+    return _unique_strings(reasons)
+
+
+def _all_languages_update_soft_warning_reasons(entry: dict):
+    reasons = []
+    field_key = str(entry.get("key") or "").strip()
+    group_key = str(entry.get("field_group") or "").strip()
+    codes = _all_languages_entry_review_codes(entry)
+    for code in codes:
+        if code in ALL_LANGUAGES_SOFT_WARNING_CODES:
+            if code == "future_write_needs_resource_mapping" and group_key in SAFE_WRITE_READINESS_GROUP_SET:
+                continue
+            reasons.append(code)
+    if _safe_write_bool(entry.get("existing_translation_outdated")):
+        reasons.append("existing_translation_outdated")
+    seo_validation_status = _all_languages_normalize_review_code(
+        entry.get("seo_validation_status")
+    )
+    if (
+        field_key in {"meta_title", "meta_description"}
+        and seo_validation_status
+        and seo_validation_status != "seo_ready"
+        and not _all_languages_hard_review_blocking_reasons(entry)
+    ):
+        reasons.append("seo_could_be_improved")
+    if (
+        _all_languages_entry_has_needs_review_label(entry)
+        and not _all_languages_hard_review_blocking_reasons(entry)
+    ):
+        reasons.append("needs_review")
+    return _unique_strings(reasons)
+
+
+def _all_languages_review_codes_are_soft_only(codes: list[str]):
+    useful_codes = [
+        code
+        for code in codes or []
+        if code and code not in ALL_LANGUAGES_NEUTRAL_REVIEW_CODES
+    ]
+    if not useful_codes:
+        return False
+    return all(code in ALL_LANGUAGES_SOFT_WARNING_CODES for code in useful_codes)
+
+
+def _all_languages_entry_has_needs_review_label(entry: dict):
+    for key in ("status", "blocking_reasons", "seo_warning", "seo_validation_status"):
+        text = str(entry.get(key) or "").lower()
+        if "needs_review" in text or "needs review" in text:
+            return True
+    return False
+
+
+def _all_languages_entry_review_codes(entry: dict):
+    codes = []
+    for key in (
+        "seo_warning",
+        "blocking_reasons",
+        "validation_reasons",
+        "validation_status",
+        "seo_validation_status",
+        "status",
+    ):
+        for value in _all_languages_split_review_values(entry.get(key)):
+            code = _all_languages_normalize_review_code(value)
+            if code:
+                codes.append(code)
+    return _unique_strings(codes)
+
+
+def _all_languages_split_review_values(value):
+    if not value:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        values = []
+        for item in value:
+            values.extend(_all_languages_split_review_values(item))
+        return values
+    return [
+        item.strip()
+        for item in str(value).replace(";", ",").split(",")
+        if item.strip()
+    ]
+
+
+def _all_languages_normalize_review_code(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    return text.replace("-", "_").replace(" ", "_")
 
 
 def _all_languages_body_html_blocking_reasons(entry: dict):
@@ -2264,6 +2437,10 @@ def _all_languages_entry_status_count(entries: list[dict], *statuses: str):
     return sum(1 for entry in entries or [] if entry.get("status") in status_set)
 
 
+def _all_languages_entry_soft_warning_count(entries: list[dict]):
+    return sum(1 for entry in entries or [] if entry.get("soft_warning_reasons"))
+
+
 def _all_languages_per_locale_summary(entries: list[dict], report: dict | None = None):
     report = report or {}
     locale_statuses = {
@@ -2299,6 +2476,7 @@ def _all_languages_per_locale_summary(entries: list[dict], report: dict | None =
                 locale_entries,
                 "blocked",
             ),
+            "review_note_count": _all_languages_entry_soft_warning_count(locale_entries),
             "failed_count": _all_languages_entry_status_count(
                 locale_entries,
                 "write_failed",
@@ -2362,6 +2540,9 @@ def _all_languages_per_field_summary(entries: list[dict]):
             "blocked_count": _all_languages_entry_status_count(
                 grouped.get(field) or [],
                 "blocked",
+            ),
+            "review_note_count": _all_languages_entry_soft_warning_count(
+                grouped.get(field) or []
             ),
             "failed_count": _all_languages_entry_status_count(
                 grouped.get(field) or [],
@@ -2464,13 +2645,21 @@ def _all_languages_refresh_entry_human_reasons(entry: dict):
             if entry["human_blocking_reasons"]
             else entry.get("blocking_reason", "")
         )
+    entry["soft_warning_reasons"] = _unique_strings(
+        entry.get("soft_warning_reasons") or []
+    )
+    entry["human_soft_warnings"] = [
+        _all_languages_soft_warning_label(reason)
+        for reason in entry.get("soft_warning_reasons") or []
+        if reason
+    ]
 
 
 def _all_languages_blocked_reason_summary(entries: list[dict], blocking_conditions: list[str]):
     counts = {}
     raw_reasons = {}
     for entry in entries or []:
-        if entry.get("status") not in {"blocked", "skipped"}:
+        if entry.get("status") != "blocked":
             continue
         labels = entry.get("human_blocking_reasons") or []
         if not labels and entry.get("blocking_reason"):
@@ -2504,6 +2693,7 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
     for field in SAFE_WRITE_READINESS_FIELDS:
         field_entries = [entry for entry in safe_entries if entry.get("key") == field]
         reason_summary = _all_languages_safe_field_reason_summary(field_entries)
+        soft_warning_summary = _all_languages_safe_field_soft_warning_summary(field_entries)
         diagnostics.append(
             {
                 "field": field,
@@ -2517,6 +2707,13 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
                     field_entries,
                     "blocked",
                 ),
+                "hard_blocked_count": _all_languages_entry_status_count(
+                    field_entries,
+                    "blocked",
+                ),
+                "soft_warning_count": _all_languages_entry_soft_warning_count(
+                    field_entries
+                ),
                 "already_up_to_date_count": _all_languages_entry_status_count(
                     field_entries,
                     "skipped",
@@ -2529,11 +2726,29 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
                     empty="No blocked fields.",
                 ),
                 "reason_summary": reason_summary,
+                "top_soft_warning": (
+                    soft_warning_summary[0]["label"]
+                    if soft_warning_summary
+                    else "No review notes."
+                ),
+                "soft_warning_summary_text": _all_languages_reason_summary_text(
+                    soft_warning_summary,
+                    empty="No review notes.",
+                ),
+                "soft_warning_summary": soft_warning_summary,
+                "plain_reason": _all_languages_safe_field_plain_reason(
+                    field_entries,
+                    field,
+                    reason_summary,
+                    soft_warning_summary,
+                ),
             }
         )
     safe_blocked_reason_summary = _all_languages_safe_field_reason_summary(safe_entries)
+    safe_soft_warning_summary = _all_languages_safe_field_soft_warning_summary(safe_entries)
     ready_count = _all_languages_entry_status_count(safe_entries, "write_ready")
     blocked_count = _all_languages_entry_status_count(safe_entries, "blocked")
+    soft_warning_count = _all_languages_entry_soft_warning_count(safe_entries)
     already_up_to_date_count = _all_languages_entry_status_count(safe_entries, "skipped")
     if safe_blocked_reason_summary:
         top_reason = safe_blocked_reason_summary[0]["label"]
@@ -2543,6 +2758,10 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
         top_reason = "All safe fields are already up to date."
     else:
         top_reason = "No blocked safe fields."
+    if safe_soft_warning_summary:
+        top_soft_warning = safe_soft_warning_summary[0]["label"]
+    else:
+        top_soft_warning = "No review notes."
     summary = {
         "product_title_candidates_found": next(
             item["candidates_found"] for item in diagnostics if item["field"] == "title"
@@ -2557,8 +2776,15 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
         ),
         "safe_fields_ready": ready_count,
         "safe_fields_blocked": blocked_count,
+        "safe_fields_hard_blocked": blocked_count,
+        "safe_fields_soft_warning": soft_warning_count,
         "safe_fields_already_up_to_date": already_up_to_date_count,
         "top_block_reason_for_safe_fields": top_reason,
+        "top_hard_block_reason_for_safe_fields": top_reason,
+        "top_soft_warning_reason_for_safe_fields": top_soft_warning,
+        "safe_field_plain_reasons": [
+            item["plain_reason"] for item in diagnostics if item.get("plain_reason")
+        ],
     }
     return diagnostics, summary
 
@@ -2594,6 +2820,82 @@ def _all_languages_safe_field_reason_summary(entries: list[dict]):
         }
         for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _all_languages_safe_field_soft_warning_summary(entries: list[dict]):
+    counts = {}
+    raw_reasons = {}
+    for entry in entries or []:
+        labels = entry.get("human_soft_warnings") or [
+            _all_languages_soft_warning_label(reason)
+            for reason in entry.get("soft_warning_reasons") or []
+        ]
+        for label in labels:
+            if not label:
+                continue
+            counts[label] = counts.get(label, 0) + 1
+            raw_reasons.setdefault(label, [])
+            raw_reasons[label].extend(entry.get("soft_warning_reasons") or [])
+    return [
+        {
+            "label": label,
+            "count": count,
+            "raw_reasons": _unique_strings(raw_reasons.get(label) or []),
+        }
+        for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _all_languages_safe_field_plain_reason(
+    entries: list[dict],
+    field: str,
+    reason_summary: list[dict],
+    soft_warning_summary: list[dict],
+):
+    label = ALL_LANGUAGES_SAFE_FIELD_LABELS.get(field, field)
+    if not entries:
+        return f"{label}: blocked because no candidate rows were found."
+    ready_count = _all_languages_entry_status_count(entries, "write_ready")
+    if ready_count:
+        return f"{label}: ready to update for {ready_count} row(s)."
+    skipped_count = _all_languages_entry_status_count(entries, "skipped")
+    if skipped_count and skipped_count == len(entries):
+        return f"{label}: not updated because Shopify already has the same current value."
+    if reason_summary:
+        return (
+            f"{label}: blocked because "
+            f"{_all_languages_reason_summary_text(reason_summary, empty='no hard blockers')}"
+            "."
+        )
+    if soft_warning_summary:
+        return (
+            f"{label}: not blocked; review notes only: "
+            f"{_all_languages_reason_summary_text(soft_warning_summary, empty='no review notes')}"
+            "."
+        )
+    return f"{label}: blocked because no ready row was found."
+
+
+def _all_languages_soft_warning_label(reason: str):
+    labels = {
+        "existing_translation_outdated": "Existing Shopify translation is outdated.",
+        "future_write_needs_resource_mapping": "Mapping notice applies to non-writable groups.",
+        "keyword_stuffing_or_duplicate": "SEO wording could be improved.",
+        "missing_core_keyword": "SEO could include a stronger keyword.",
+        "missing_model": "SEO could include the model more clearly.",
+        "missing_part_type": "SEO could include the part type more clearly.",
+        "missing_replacement_part_meaning": "SEO could make the replacement-part meaning clearer.",
+        "missing_use_case": "SEO could describe the use case more clearly.",
+        "missing_value_point": "SEO may be missing a value point.",
+        "needs_review": "Needs review label is only a soft review note.",
+        "outdated": "Existing Shopify translation is outdated.",
+        "seo_could_be_improved": "SEO could be improved.",
+        "seo_needs_manual_review": "SEO review note.",
+        "seo_not_ready": "SEO review note.",
+        "seo_warning": "SEO review note.",
+        "too_short_for_seo": "SEO text is shorter than recommended.",
+    }
+    return labels.get(reason, reason)
 
 
 def _safe_write_issue_text(entry: dict):
@@ -3572,6 +3874,7 @@ def _finalize_all_languages_update_payload(
     )
     payload["skipped_count"] = _all_languages_entry_status_count(entries, "skipped")
     payload["blocked_count"] = _all_languages_entry_status_count(entries, "blocked")
+    payload["review_note_count"] = _all_languages_entry_soft_warning_count(entries)
     payload["failed_count"] = _all_languages_entry_status_count(
         entries,
         "write_failed",
@@ -3781,6 +4084,7 @@ def _render_all_languages_update_html(payload: dict):
             ("Verified Count", "verified_count"),
             ("Skipped Count", "skipped_count"),
             ("Blocked Count", "blocked_count"),
+            ("Review Note Count", "review_note_count"),
             ("Failed Count", "failed_count"),
             ("Mutation Called", "mutation_called"),
             ("translationsRegister Called", "translations_register_called"),
@@ -3818,12 +4122,12 @@ def _render_all_languages_update_html(payload: dict):
   <table border="1" cellspacing="0" cellpadding="6"><tbody>{summary_rows}</tbody></table>
   <h2>Per Locale Summary</h2>
   <table border="1" cellspacing="0" cellpadding="6">
-    <thead><tr><th>Locale</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Failed</th></tr></thead>
+    <thead><tr><th>Locale</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Review Notes</th><th>Failed</th></tr></thead>
     <tbody>{locale_rows}</tbody>
   </table>
   <h2>Per Field Summary</h2>
   <table border="1" cellspacing="0" cellpadding="6">
-    <thead><tr><th>Field</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Failed</th></tr></thead>
+    <thead><tr><th>Field</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Review Notes</th><th>Failed</th></tr></thead>
     <tbody>{field_rows}</tbody>
   </table>
   <h2>Entries</h2>
@@ -3867,6 +4171,7 @@ def _all_languages_summary_row(item, key_name):
         f"<td>{escape(str(item.get('verified_count', 0)))}</td>"
         f"<td>{escape(str(item.get('skipped_count', 0)))}</td>"
         f"<td>{escape(str(item.get('blocked_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('review_note_count', 0)))}</td>"
         f"<td>{escape(str(item.get('failed_count', 0)))}</td>"
         "</tr>"
     )

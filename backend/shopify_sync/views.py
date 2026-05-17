@@ -2415,6 +2415,10 @@ def translation_console(request):
                 "verified_count": all_languages_update_result.get("verified_count", 0),
                 "skipped_count": all_languages_update_result.get("skipped_count", 0),
                 "blocked_count": all_languages_update_result.get("blocked_count", 0),
+                "review_note_count": all_languages_update_result.get(
+                    "review_note_count",
+                    0,
+                ),
                 "failed_count": all_languages_update_result.get("failed_count", 0),
                 "status_label": all_languages_update_result.get("status_label", ""),
                 "result_message": all_languages_update_result.get("result_message", ""),
@@ -2425,6 +2429,10 @@ def translation_console(request):
                 "safe_field_diagnostic_summary": all_languages_update_result.get(
                     "safe_field_diagnostic_summary",
                     {},
+                ),
+                "safe_field_diagnostics": all_languages_update_result.get(
+                    "safe_field_diagnostics",
+                    [],
                 ),
                 "blocked_reason_summary": all_languages_update_result.get(
                     "blocked_reason_summary",

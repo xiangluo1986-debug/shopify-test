@@ -2934,6 +2934,10 @@
               <div class="tw-header-status-value">{{ all_languages_update_display.write_ready_count|default:0 }}</div>
             </div>
             <div>
+              <div class="tw-header-status-label">Review notes</div>
+              <div class="tw-header-status-value">{{ all_languages_update_display.review_note_count|default:0 }}</div>
+            </div>
+            <div>
               <div class="tw-header-status-label">Not updated</div>
               <div class="tw-header-status-value">{{ all_languages_update_display.blocked_count|default:0 }}</div>
             </div>
@@ -2967,23 +2971,40 @@
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.safe_fields_ready|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Safe fields not updated</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.safe_fields_blocked|default:0 }}</div>
+                <div class="tw-shopify-update-label">Hard-blocked safe fields</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.safe_fields_hard_blocked|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Review notes</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.safe_fields_soft_warning|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card is-wide">
-                <div class="tw-shopify-update-label">Main reason safe fields were not updated</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.top_block_reason_for_safe_fields|default:"No blocked safe fields." }}</div>
+                <div class="tw-shopify-update-label">Top hard-block reason</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.top_hard_block_reason_for_safe_fields|default:"No blocked safe fields." }}</div>
+              </div>
+              <div class="tw-shopify-update-card is-wide">
+                <div class="tw-shopify-update-label">Top review note</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.top_soft_warning_reason_for_safe_fields|default:"No review notes." }}</div>
               </div>
             </div>
+            {% if all_languages_update_display.safe_field_diagnostic_summary.safe_field_plain_reasons %}
+              <ul class="tw-shopify-reason-list">
+                {% for reason in all_languages_update_display.safe_field_diagnostic_summary.safe_field_plain_reasons %}
+                  <li>{{ reason }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
             <table class="tw-shopify-diagnostic-table">
               <thead>
                 <tr>
                   <th>Field</th>
                   <th>Checked</th>
                   <th>Ready to update</th>
-                  <th>Not updated</th>
+                  <th>Hard-blocked</th>
+                  <th>Review notes</th>
                   <th>Already up to date</th>
-                  <th>Reason</th>
+                  <th>Hard-block reasons</th>
+                  <th>Review note reasons</th>
                 </tr>
               </thead>
               <tbody>
@@ -2992,12 +3013,14 @@
                     <td>{{ item.label }}</td>
                     <td>{{ item.candidates_found }}</td>
                     <td>{{ item.ready_count }}</td>
-                    <td>{{ item.blocked_count }}</td>
+                    <td>{{ item.hard_blocked_count }}</td>
+                    <td>{{ item.soft_warning_count }}</td>
                     <td>{{ item.already_up_to_date_count }}</td>
                     <td>{{ item.reason_summary_text }}</td>
+                    <td>{{ item.soft_warning_summary_text }}</td>
                   </tr>
                 {% empty %}
-                  <tr><td colspan="6">No title or SEO fields were found in this report.</td></tr>
+                  <tr><td colspan="8">No title or SEO fields were found in this report.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
@@ -3033,6 +3056,10 @@
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Not updated</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.blocked_count }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Review notes</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.review_note_count|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Failed</div>
@@ -3089,6 +3116,10 @@
                   <div class="tw-shopify-language-count">
                     <div class="tw-shopify-language-count-label">Not updated</div>
                     <div class="tw-shopify-language-count-value">{{ item.blocked_count }}</div>
+                  </div>
+                  <div class="tw-shopify-language-count">
+                    <div class="tw-shopify-language-count-label">Review notes</div>
+                    <div class="tw-shopify-language-count-value">{{ item.review_note_count|default:0 }}</div>
                   </div>
                   <div class="tw-shopify-language-count">
                     <div class="tw-shopify-language-count-label">Failed</div>
