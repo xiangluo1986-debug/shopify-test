@@ -3923,7 +3923,7 @@
       <ol>
         <li>Choose product and language.</li>
         <li>Click Translate and update Shopify.</li>
-        <li>Review original vs translation results on this page.</li>
+        <li>Review the result cards in the Translation results area.</li>
         <li>Review any item that was not updated.</li>
       </ol>
     </div>
@@ -4919,8 +4919,8 @@
     </div>
   </details>
 
-  <div class="module" data-workspace-section="technical" style="padding: 12px; margin-bottom: 16px;">
-    <h2>Original vs translation</h2>
+  <details class="module tw-advanced-details" data-workspace-section="technical" style="padding: 12px; margin-bottom: 16px;">
+    <summary>Legacy comparison view</summary>
     <p class="tw-muted">Showing {{ editor_view.editor_locale_label }} ({{ selected_locale }}) for the selected product.</p>
     {% if editor_view.editor_empty_message %}
       <div class="tw-empty-state">{{ editor_view.editor_empty_message }}</div>
@@ -5049,7 +5049,7 @@
       {% endif %}
     {% endfor %}
     {% endif %}
-  </div>
+  </details>
 
   <div class="module" data-workspace-section="technical" style="padding: 12px; margin-bottom: 16px;">
     <details class="tw-advanced-details">
