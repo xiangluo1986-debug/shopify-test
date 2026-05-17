@@ -100,10 +100,14 @@ REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
     "orders_review_request_60",
     "orders_review_request_manual",
 )
+SHOPIFY_ORDER_TAG_FIELD = "shopify_tags"
+SHOPIFY_ORDER_TAG_FIELD_LABEL = "ShopifyOrder.shopify_tags"
 REVIEW_REQUEST_FOCUS_ORDER_NAMES = ("#22530", "#22562", "#22581", "#22582", "#22620", "#22621")
-SHOPIFY_ORDER_TAGS_MISSING_SOURCE = "Shopify tags not stored in local ShopifyOrder model"
+SHOPIFY_ORDER_TAGS_MISSING_SOURCE = "ShopifyOrder.shopify_tags is not populated by local sync"
+SHOPIFY_ORDER_TAGS_FIELD_MISSING_SOURCE = "Local ShopifyOrder tag field is missing; apply the shopify_tags migration"
+SHOPIFY_ORDER_TAGS_EMPTY_SOURCE = "Shopify response had no order tags"
 SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION = (
-    "Update sync/model/report source to persist tags, or derive tags from an available local report source."
+    "Run the Review Request Shopify order sync after applying the shopify_tags migration."
 )
 MERGED_ORDER_REFERENCE_RE = re.compile(r"#?\d{3,}")
 MERGED_ORDER_KEYWORDS = (
@@ -212,6 +216,12 @@ REPORT_DEFINITIONS = (
         "tag_alias_and_candidate_correction_audit",
         "Review-request tag alias and #22562 correction audit",
         "shopify_review_request_tag_alias_and_candidate_correction_audit.json",
+        ("report_status", "status"),
+    ),
+    (
+        "order_tags_persistence_audit",
+        "Shopify order tags persistence audit",
+        "shopify_review_request_order_tags_persistence_audit.json",
         ("report_status", "status"),
     ),
     (
@@ -1375,11 +1385,13 @@ def _local_order_stats():
             "order_created_at",
             "fulfillment_status",
             "financial_status",
+            SHOPIFY_ORDER_TAG_FIELD,
         )[:10]
         return {
             "available": True,
             "total_orders": orders.count(),
             "orders_with_email": with_email.count(),
+            "orders_with_shopify_tag_data": orders.filter(shopify_tags__isnull=False).count(),
             "recent_orders": [
                 {
                     "order_name": _safe_text(row.get("order_name")),
@@ -1387,12 +1399,16 @@ def _local_order_stats():
                     "order_created_at": _safe_text(row.get("order_created_at")),
                     "fulfillment_status": _safe_text(row.get("fulfillment_status")),
                     "financial_status": _safe_text(row.get("financial_status")),
+                    "tags_summary": _tags_summary(
+                        _shopify_tags_from_order(row),
+                        _shopify_tags_loaded_from_order(row),
+                    ),
                 }
                 for row in latest
             ],
             "note": (
-                "Local ShopifyOrder rows do not store Shopify order tags; tag sections "
-                "come from local review-request reports when present."
+                "Local ShopifyOrder rows store Shopify order tags in ShopifyOrder.shopify_tags "
+                "after the Review Request sync is rerun."
             ),
         }
     except Exception as exc:  # pragma: no cover - defensive admin display path.
@@ -4419,6 +4435,11 @@ def _dashboard_order_data_coverage(scan):
         "local_data_source_label": source_label,
         "last_shopify_order_sync_window": sync_window or "Unknown",
         "latest_review_request_sync_finished_at": latest_sync or "Unknown",
+        "selected_local_tag_field": _safe_text(
+            coverage.get("selected_local_tag_field") or SHOPIFY_ORDER_TAG_FIELD_LABEL,
+            max_length=120,
+        ),
+        "local_orders_with_shopify_tag_data": _int_or_zero(coverage.get("local_orders_with_shopify_tag_data")),
         "order_22530_found_label": "Yes" if coverage.get("order_22530_found") is True else "No",
         "candidate_scan_freshness": freshness or "Unknown",
         "coverage_warnings": warnings,
@@ -4565,7 +4586,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "task": LAST_60_DAY_SCAN_TASK_NAME,
         "task_name": LAST_60_DAY_SCAN_TASK_NAME,
-        "phase": "5.28E",
+        "phase": "5.28F",
         "mode": "dry-run-local-synced-order-scan",
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "report_status": "last_60_days_candidate_scan_ready",
@@ -5108,6 +5129,8 @@ def _order_data_coverage_summary(scan_contexts, source_by_order, cutoff, local_d
         "last_shopify_order_sync_window": "Unknown",
         "latest_review_request_sync_finished_at": "",
         "latest_review_request_sync_task_name": "",
+        "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
+        "local_orders_with_shopify_tag_data": 0,
         "local_last_60_days_order_count": 0,
         "local_last_60_days_shenzhen_order_count": 0,
         "local_last_60_days_non_shenzhen_order_count": 0,
@@ -5136,6 +5159,7 @@ def _order_data_coverage_summary(scan_contexts, source_by_order, cutoff, local_d
         )
         local_queryset = ShopifyOrder.objects.filter(query)
         coverage["local_last_60_days_order_count"] = local_queryset.count()
+        coverage["local_orders_with_shopify_tag_data"] = local_queryset.filter(shopify_tags__isnull=False).count()
         shenzhen_query = Q(is_shenzhen_order=True) | Q(current_location__in=["shenzhen", "mixed"])
         coverage["local_last_60_days_shenzhen_order_count"] = local_queryset.filter(shenzhen_query).count()
         coverage["local_last_60_days_non_shenzhen_order_count"] = max(
@@ -5248,6 +5272,12 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         review_request_tag_status = "present"
     else:
         review_request_tag_status = "missing"
+    tags = _dedupe_text(
+        context.get("order_tags_display")
+        or (row or {}).get("order_tags_display")
+        or (row or {}).get("tags")
+        or []
+    )
     final_blockers = _focus_final_blockers(found_locally, row, tag_data_loaded)
     return {
         "order_name": order_name,
@@ -5267,10 +5297,19 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         "scan_date_basis": _safe_text(context.get("scan_date_basis"), max_length=80),
         "delivered_confirmed": context.get("delivered_confirmed"),
         "delivered_or_fulfilled_detected": context.get("delivered_confirmed") is True,
+        "selected_local_tag_field": context.get("selected_local_tag_field") or SHOPIFY_ORDER_TAG_FIELD_LABEL,
+        "tags_summary": _tags_summary(tags, tag_data_loaded),
+        "order_tags_display": tags,
         "tag_data_available": tag_data_loaded,
         "review_request_tag_data_loaded": tag_data_loaded,
-        "tag_data_missing_source": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_MISSING_SOURCE,
-        "tag_data_recommended_action": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
+        "tag_data_missing_source": ""
+        if tag_data_loaded
+        else _safe_text(context.get("tag_data_missing_source"), max_length=240)
+        or SHOPIFY_ORDER_TAGS_MISSING_SOURCE,
+        "tag_data_recommended_action": ""
+        if tag_data_loaded
+        else _safe_text(context.get("tag_data_recommended_action"), max_length=300)
+        or SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
         "review_request_tag_status": review_request_tag_status,
         "review_request_tag_present": review_request_tag_present,
         "matched_review_request_tag_value": _safe_text(
@@ -5365,6 +5404,7 @@ def _last_60_day_order_scan_contexts(source_by_order, cutoff):
         "settlement_status",
         "shopify_note",
         "shopify_note_attributes",
+        SHOPIFY_ORDER_TAG_FIELD,
         "warehouse_note",
         "transfer_note",
     )
@@ -5421,11 +5461,14 @@ def _ensure_current_focus_scan_contexts(scan_contexts, source_by_order, cutoff):
 def _scan_context_from_local_order(order, source_row, cutoff):
     order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
     date_context = _scan_date_context(order, source_row)
-    delivered_confirmed = _scan_delivered_confirmed(source_row, order)
-    canonical_tag_present = _scan_canonical_review_request_tag_present(source_row)
-    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    tags, tag_data_loaded, tag_data_missing_source, tag_data_recommended_action = _effective_order_tags(
+        order,
+        source_row,
+    )
+    tag_source_row = _source_row_with_effective_tags(source_row, tags, tag_data_loaded)
+    delivered_confirmed = _scan_delivered_confirmed(tag_source_row, order)
+    canonical_tag_present = _scan_canonical_review_request_tag_present(tag_source_row)
     matched_review_request_tags = _matched_review_request_tags(tags)
-    tag_data_loaded = _tag_data_loaded(source_row, tags)
     local_context = {
         "order_name": order_name,
         "matched_order_name": order_name,
@@ -5445,10 +5488,13 @@ def _scan_context_from_local_order(order, source_row, cutoff):
         "local_order_source": "ShopifyOrder",
         "delivered_confirmed": delivered_confirmed,
         "canonical_review_request_tag_present": canonical_tag_present,
+        "order_tags_display": tags,
+        "tags_summary": _tags_summary(tags, tag_data_loaded),
+        "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
         "tag_data_available": tag_data_loaded,
         "review_request_tag_data_loaded": tag_data_loaded,
-        "tag_data_missing_source": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_MISSING_SOURCE,
-        "tag_data_recommended_action": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
+        "tag_data_missing_source": tag_data_missing_source,
+        "tag_data_recommended_action": tag_data_recommended_action,
         "matched_review_request_tag_value": matched_review_request_tags[0] if matched_review_request_tags else "",
         "scan_date_in_window": _datetime_in_window(date_context.get("scan_datetime"), cutoff),
         "scan_date_missing": date_context.get("scan_datetime") is None,
@@ -5459,7 +5505,7 @@ def _scan_context_from_local_order(order, source_row, cutoff):
 
 def _scan_context_from_source_row(order_name, source_row, cutoff):
     date_context = _scan_date_context({}, source_row)
-    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    tags = _source_row_tags(source_row)
     matched_review_request_tags = _matched_review_request_tags(tags)
     tag_data_loaded = _tag_data_loaded(source_row, tags)
     return {
@@ -5474,6 +5520,8 @@ def _scan_context_from_source_row(order_name, source_row, cutoff):
         "local_order_source": "local_review_request_report",
         "delivered_confirmed": _scan_delivered_confirmed(source_row, {}),
         "canonical_review_request_tag_present": _scan_canonical_review_request_tag_present(source_row),
+        "order_tags_display": tags,
+        "tags_summary": _tags_summary(tags, tag_data_loaded),
         "tag_data_available": tag_data_loaded,
         "review_request_tag_data_loaded": tag_data_loaded,
         "tag_data_missing_source": "" if tag_data_loaded else "Shopify tag data not loaded in local report source",
@@ -5483,6 +5531,75 @@ def _scan_context_from_source_row(order_name, source_row, cutoff):
         "scan_date_missing": date_context.get("scan_datetime") is None,
         **date_context,
     }
+
+
+def _effective_order_tags(order, source_row):
+    if _shopify_tags_loaded_from_order(order):
+        tags = _shopify_tags_from_order(order)
+        return tags, True, "", ""
+
+    source_tags = _source_row_tags(source_row)
+    if _tag_data_loaded(source_row, source_tags):
+        return source_tags, True, "", ""
+
+    return (
+        [],
+        False,
+        _tag_data_missing_source_for_order(order),
+        SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
+    )
+
+
+def _source_row_with_effective_tags(source_row, tags, tag_data_loaded):
+    row = dict(source_row or {})
+    row["tags"] = tags
+    row["order_tags_display"] = tags
+    row["review_request_tag_data_loaded"] = tag_data_loaded
+    row["tag_data_available"] = tag_data_loaded
+    return row
+
+
+def _source_row_tags(source_row):
+    source_row = source_row or {}
+    return _dedupe_text(
+        _collect_tag_values(source_row.get("tags"), split_strings=True)
+        + _collect_tag_values(source_row.get("order_tags_display"))
+    )
+
+
+def _shopify_tags_loaded_from_order(order):
+    return isinstance(order, dict) and SHOPIFY_ORDER_TAG_FIELD in order and order.get(SHOPIFY_ORDER_TAG_FIELD) is not None
+
+
+def _shopify_tags_from_order(order):
+    if not _shopify_tags_loaded_from_order(order):
+        return []
+    return _split_shopify_tag_string(order.get(SHOPIFY_ORDER_TAG_FIELD))
+
+
+def _split_shopify_tag_string(value):
+    if isinstance(value, (list, tuple, set)):
+        return _dedupe_text(_safe_text(item, max_length=120) for item in value if _safe_text(item, max_length=120))
+    return _dedupe_text(
+        _safe_text(part, max_length=120)
+        for part in str(value or "").split(",")
+        if _safe_text(part, max_length=120)
+    )
+
+
+def _tag_data_missing_source_for_order(order):
+    if not isinstance(order, dict) or SHOPIFY_ORDER_TAG_FIELD not in order:
+        return SHOPIFY_ORDER_TAGS_FIELD_MISSING_SOURCE
+    return SHOPIFY_ORDER_TAGS_MISSING_SOURCE
+
+
+def _tags_summary(tags, tag_data_loaded):
+    safe_tags = _dedupe_text(tags or [])
+    if safe_tags:
+        return ", ".join(safe_tags)
+    if tag_data_loaded:
+        return SHOPIFY_ORDER_TAGS_EMPTY_SOURCE
+    return "Shopify tag data not loaded"
 
 
 def _order_note_present(order):
@@ -5566,7 +5683,7 @@ def _datetime_in_window(value, cutoff):
 
 
 def _scan_delivered_confirmed(source_row, order):
-    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    tags = _source_row_tags(source_row)
     if source_row.get("delivered_tag_present") is True or has_delivered_tag(tags) or "妥投" in tags:
         return True
     fulfillment_values = {
@@ -5597,7 +5714,7 @@ def _scan_delivered_confirmed(source_row, order):
 
 
 def _scan_canonical_review_request_tag_present(source_row):
-    tags = _dedupe_text(source_row.get("tags") or source_row.get("order_tags_display") or [])
+    tags = _source_row_tags(source_row)
     tags_loaded = _tag_data_loaded(source_row, tags)
     if source_row.get("canonical_review_request_tag_present") is True:
         return True
@@ -5621,7 +5738,12 @@ def _scan_canonical_review_request_tag_present(source_row):
 
 
 def _tag_data_loaded(source_row, tags):
+    source_row = source_row or {}
     if tags:
+        return True
+    if source_row.get("review_request_tag_data_loaded") is True:
+        return True
+    if source_row.get("tag_data_available") is True:
         return True
     return any(
         _tag_payload_available(source_row.get(key))
@@ -5661,7 +5783,11 @@ def _tag_payload_available(value):
 
 def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
     row = dict(source_row or {})
-    tags = _dedupe_text(row.get("tags") or row.get("order_tags_display") or [])
+    tags = _source_row_tags(row) or _dedupe_text(
+        scan_context.get("order_tags_display")
+        or local_context.get("order_tags_display")
+        or []
+    )
     trustpilot_tags = _matched_trustpilot_tags(row, tags)
     matched_review_request_tags = _matched_review_request_tags(tags)
     blocking_reasons = _dedupe_text(row.get("blocking_reasons") or [])
@@ -6861,6 +6987,7 @@ def _local_order_contexts(order_names):
                 "customer_name",
                 "customer_email",
                 "order_created_at",
+                SHOPIFY_ORDER_TAG_FIELD,
             )[:MAX_SOURCE_ROWS]
         )
         customer_emails = sorted(
@@ -6897,6 +7024,8 @@ def _local_order_contexts(order_names):
             for item in customer_orders_for_email
             if _safe_text(item.get("order_name"), max_length=80)
         ]
+        tags = _shopify_tags_from_order(order)
+        tag_data_loaded = _shopify_tags_loaded_from_order(order)
         context = {
             "customer_display_name": _safe_customer_display_name(order.get("customer_name")),
             "masked_email": mask_email(email),
@@ -6908,6 +7037,12 @@ def _local_order_contexts(order_names):
                 repeat_detected=order_count > 1,
             ),
             "customer_order_names": order_names_for_email[:5],
+            "order_tags_display": tags,
+            "tags_summary": _tags_summary(tags, tag_data_loaded),
+            "tag_data_available": tag_data_loaded,
+            "review_request_tag_data_loaded": tag_data_loaded,
+            "tag_data_missing_source": "" if tag_data_loaded else _tag_data_missing_source_for_order(order),
+            "tag_data_recommended_action": "" if tag_data_loaded else SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION,
         }
         for key in _order_lookup_keys(
             order.get("order_name"),
@@ -6982,7 +7117,11 @@ def _apply_queue_row_context(
     related_order_names = explicit_related_order_names or _dedupe_order_names(
         source_row.get("related_order_names") or []
     )
-    tags = _dedupe_text(source_row.get("tags") or row.get("order_tags_display") or [])
+    tags = _source_row_tags(source_row) or _dedupe_text(
+        row.get("order_tags_display")
+        or local_context.get("order_tags_display")
+        or []
+    )
     trustpilot_tags = _dedupe_text(source_row.get("trustpilot_tags") or [])
     delivered = _queue_delivered_status(source_row, tags, row.get("reason", ""))
     review_request_present = _queue_review_request_tag_present(source_row, tags, row.get("reason", ""))
@@ -6993,6 +7132,8 @@ def _apply_queue_row_context(
     )
     review_request_tag_data_loaded = (
         source_row.get("review_request_tag_data_loaded") is True
+        or row.get("review_request_tag_data_loaded") is True
+        or local_context.get("review_request_tag_data_loaded") is True
         or _tag_data_loaded(source_row, tags)
     )
     prior_order_name = (
@@ -7040,12 +7181,14 @@ def _apply_queue_row_context(
                 ""
                 if review_request_tag_data_loaded
                 else _safe_text(source_row.get("tag_data_missing_source"), max_length=240)
+                or _safe_text(local_context.get("tag_data_missing_source"), max_length=240)
                 or SHOPIFY_ORDER_TAGS_MISSING_SOURCE
             ),
             "tag_data_recommended_action": (
                 ""
                 if review_request_tag_data_loaded
                 else _safe_text(source_row.get("tag_data_recommended_action"), max_length=300)
+                or _safe_text(local_context.get("tag_data_recommended_action"), max_length=300)
                 or SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION
             ),
             "tag_chips": _queue_tag_chips(
@@ -7054,6 +7197,7 @@ def _apply_queue_row_context(
                 review_request_present=review_request_present,
                 trustpilot_sent=trustpilot_sent,
                 action_state=action_state,
+                tag_data_loaded=review_request_tag_data_loaded,
             ),
             "delivered_status_label": _queue_delivered_status_label(delivered),
             "delivered_status_class": _queue_status_css_class(delivered),
@@ -7223,13 +7367,20 @@ def _trustpilot_history_label(
     return "Previous Trustpilot status unknown"
 
 
-def _queue_tag_chips(tags, delivered, review_request_present, trustpilot_sent, action_state):
+def _queue_tag_chips(tags, delivered, review_request_present, trustpilot_sent, action_state, tag_data_loaded=False):
     chips = [
         {"label": tag, "css_class": _queue_tag_css_class(tag)}
         for tag in tags
     ]
     if not chips:
-        chips.append({"label": "Shopify tag data not loaded", "css_class": "rrw-badge-muted"})
+        chips.append(
+            {
+                "label": SHOPIFY_ORDER_TAGS_EMPTY_SOURCE
+                if tag_data_loaded
+                else "Shopify tag data not loaded",
+                "css_class": "rrw-badge-muted",
+            }
+        )
     if delivered is True:
         chips.append({"label": "Delivered", "css_class": "rrw-badge-ok"})
     elif delivered is False and action_state != "already_sent":

@@ -552,6 +552,9 @@ def _review_request_order_defaults(
         "order_created_at": _parse_shopify_datetime(order_data.get("created_at")) or synced_at,
         "shopify_note": order_data.get("note"),
         "shopify_note_attributes": order_data.get("note_attributes") or [],
+        "shopify_tags": _shopify_tags_to_storage(order_data.get("tags"))
+        if "tags" in order_data
+        else None,
         "last_order_synced_at": synced_at,
     }
     if update_fulfillment_location:
@@ -610,6 +613,14 @@ def _split_shopify_tags(value):
     if isinstance(value, (list, tuple, set)):
         return [str(item).strip() for item in value if str(item).strip()]
     return [part.strip() for part in str(value or "").split(",") if part.strip()]
+
+
+def _shopify_tags_to_storage(value):
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return ", ".join(str(item).strip() for item in value if str(item).strip())
+    return str(value)
 
 
 def _has_alias_tag(tags, aliases):

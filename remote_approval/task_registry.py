@@ -39,6 +39,18 @@ from remote_approval.tasks.shopify_review_request_manual_action_csv_export_task 
 from remote_approval.tasks.shopify_review_request_next_repeat_customer_candidate_scan_task import (
     run_shopify_review_request_next_repeat_customer_candidate_scan_task,
 )
+from remote_approval.tasks.shopify_review_request_last_60_days_candidate_scan_task import (
+    run_shopify_review_request_last_60_days_candidate_scan_task,
+)
+from remote_approval.tasks.shopify_review_request_shopify_order_sync_coverage_task import (
+    run_shopify_review_request_shopify_order_sync_coverage_task,
+)
+from remote_approval.tasks.shopify_review_request_order_tags_persistence_audit_task import (
+    run_shopify_review_request_order_tags_persistence_audit_task,
+)
+from remote_approval.tasks.shopify_review_request_tag_alias_and_candidate_correction_audit_task import (
+    run_shopify_review_request_tag_alias_and_candidate_correction_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task import (
     run_shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task,
 )
@@ -365,6 +377,18 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_manual_action_package": run_shopify_review_request_manual_action_package_task,
     "shopify_review_request_next_repeat_customer_candidate_scan": (
         run_shopify_review_request_next_repeat_customer_candidate_scan_task
+    ),
+    "shopify_review_request_last_60_days_candidate_scan": (
+        run_shopify_review_request_last_60_days_candidate_scan_task
+    ),
+    "shopify_review_request_shopify_order_sync_coverage": (
+        run_shopify_review_request_shopify_order_sync_coverage_task
+    ),
+    "shopify_review_request_order_tags_persistence_audit": (
+        run_shopify_review_request_order_tags_persistence_audit_task
+    ),
+    "shopify_review_request_tag_alias_and_candidate_correction_audit": (
+        run_shopify_review_request_tag_alias_and_candidate_correction_audit_task
     ),
     "shopify_review_request_trustpilot_one_candidate_gmail_draft_package": (
         run_shopify_review_request_trustpilot_one_candidate_gmail_draft_package_task
@@ -725,6 +749,30 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none",
         "review_file_path": "logs/shopify_review_request_next_repeat_customer_candidate_scan.json",
+    },
+    "shopify_review_request_last_60_days_candidate_scan": {
+        "description": "Scan synced local Shopify orders from the last 60 days for actually reviewable Trustpilot candidates without APIs or writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local synced order/report scan only",
+        "review_file_path": "logs/shopify_review_request_last_60_days_candidate_scan.json",
+    },
+    "shopify_review_request_shopify_order_sync_coverage": {
+        "description": "Check local Shopify order coverage for Review Requests and prepare safe 60-day / 3-day sync commands without calling Shopify.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local coverage check and report-only candidate scan",
+        "review_file_path": "logs/shopify_review_request_shopify_order_sync_coverage.json",
+    },
+    "shopify_review_request_order_tags_persistence_audit": {
+        "description": "Audit persisted local Shopify order tags for Review Request scans without Shopify, Gmail, or external review API calls.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local ShopifyOrder tag storage and report-only candidate scan",
+        "review_file_path": "logs/shopify_review_request_order_tags_persistence_audit.json",
+    },
+    "shopify_review_request_tag_alias_and_candidate_correction_audit": {
+        "description": "Audit review-request tag alias detection and #22562 eligibility correction without APIs or writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local workbench/report audit only",
+        "review_file_path": "logs/shopify_review_request_tag_alias_and_candidate_correction_audit.json",
     },
     "shopify_review_request_trustpilot_one_candidate_gmail_draft_package": {
         "description": "Generate a local one-candidate Trustpilot Gmail draft preview from the Phase 4.0 candidate scan without APIs or writes.",

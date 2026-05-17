@@ -65,6 +65,7 @@ python remote_approval_runner.py --task shopify_review_request_ali_reviews_capab
 python remote_approval_runner.py --task shopify_review_request_candidate_scan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_last_60_days_candidate_scan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_order_sync_coverage --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_order_tags_persistence_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
@@ -115,20 +116,27 @@ review APIs.
 Initial setup command prepared by the task:
 
 ```powershell
-docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --apply-local --skip-fulfillment-orders
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --request-delay 1.0 --apply-local --skip-fulfillment-orders
 ```
 
 Daily refresh command:
 
 ```powershell
-docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --apply-local --skip-fulfillment-orders
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --request-delay 1.0 --apply-local --skip-fulfillment-orders
 ```
 
 Run the dry-run preview first when validating credentials or coverage:
 
 ```powershell
-docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --dry-run --skip-fulfillment-orders
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --request-delay 1.0 --dry-run --skip-fulfillment-orders
 ```
+
+`shopify_review_request_order_tags_persistence_audit` is a Phase 5.28F
+local-only audit for `ShopifyOrder.shopify_tags`. It reports whether the model
+and database field are present, whether #22530 and #22562 have persisted tag
+data, the safe tag summaries, review-request alias matches, and the candidate
+count after local tag availability. It does not call Shopify, Gmail, Trustpilot,
+Kudosi, or Ali Reviews APIs and does not write Shopify data.
 
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local

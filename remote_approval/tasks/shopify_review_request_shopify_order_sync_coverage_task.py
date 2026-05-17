@@ -21,6 +21,8 @@ SQLITE_DB_PATH = PROJECT_ROOT / "backend" / "db.sqlite3"
 TIMEOUT_SECONDS = 120
 JSON_BEGIN = "SHOPIFY_REVIEW_REQUEST_ORDER_SYNC_COVERAGE_JSON_BEGIN"
 JSON_END = "SHOPIFY_REVIEW_REQUEST_ORDER_SYNC_COVERAGE_JSON_END"
+SHOPIFY_ORDER_TAG_FIELD = "shopify_tags"
+SHOPIFY_ORDER_TAG_FIELD_LABEL = "ShopifyOrder.shopify_tags"
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SECRET_RE = re.compile(
     r"(?i)(bearer\s+[A-Za-z0-9._-]{8,}|ya29\.[A-Za-z0-9._-]+|shpat_[A-Za-z0-9_]+|"
@@ -62,6 +64,8 @@ def _load_local_coverage() -> dict:
         "coverage_status": "coverage_check_failed",
         "scan_source": "fallback_report_only",
         "local_last_60_days_order_count": 0,
+        "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
+        "local_orders_with_shopify_tag_data": 0,
         "order_22530_found": False,
         "order_22562_found": False,
         "failure_type": django_result.get("failure_type") or sqlite_result.get("failure_type") or "unknown",
@@ -104,6 +108,8 @@ def _load_coverage_via_django() -> dict:
             "    'coverage_check_source': 'django',",
             "    'scan_source': 'full_shopify_orders' if state and state.last_success_at else ('shenzhen_only_orders' if qs.count() and qs.exclude(shenzhen_q).count() == 0 else 'fallback_report_only'),",
             "    'local_last_60_days_order_count': qs.count(),",
+            f"    'selected_local_tag_field': '{SHOPIFY_ORDER_TAG_FIELD_LABEL}',",
+            "    'local_orders_with_shopify_tag_data': qs.filter(shopify_tags__isnull=False).count(),",
             "    'local_last_60_days_shenzhen_order_count': qs.filter(shenzhen_q).count(),",
             "    'local_last_60_days_non_shenzhen_order_count': qs.exclude(shenzhen_q).count(),",
             "    'order_22530_found': found('#22530'),",
@@ -183,11 +189,22 @@ def _load_coverage_via_sqlite() -> dict:
             if "order_created_at" not in columns:
                 return {"success": False, "failure_type": "sqlite_order_columns_missing", "stderr": "Order date column missing."}
             cutoff = datetime.now(timezone.utc) - timedelta(days=60)
+            selected_columns = [
+                "order_name",
+                "order_number",
+                "shopify_order_id",
+                "order_created_at",
+                "fulfilled_at",
+                "updated_at",
+                "current_location",
+                "is_shenzhen_order",
+            ]
+            if SHOPIFY_ORDER_TAG_FIELD in columns:
+                selected_columns.append(SHOPIFY_ORDER_TAG_FIELD)
             rows = [
                 dict(row)
                 for row in connection.execute(
-                    "SELECT order_name, order_number, shopify_order_id, order_created_at, fulfilled_at, updated_at, current_location, is_shenzhen_order "
-                    "FROM shopify_sync_shopifyorder"
+                    "SELECT " + ", ".join(selected_columns) + " FROM shopify_sync_shopifyorder"
                 ).fetchall()
             ]
         finally:
@@ -208,6 +225,10 @@ def _load_coverage_via_sqlite() -> dict:
         "coverage_status": "coverage_checked",
         "coverage_check_source": "sqlite",
         "scan_source": "sqlite_report_fallback",
+        "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
+        "local_orders_with_shopify_tag_data": sum(
+            1 for row in window_rows if SHOPIFY_ORDER_TAG_FIELD in row and row.get(SHOPIFY_ORDER_TAG_FIELD) is not None
+        ),
         "local_last_60_days_order_count": len(window_rows),
         "local_last_60_days_shenzhen_order_count": len(shenzhen_rows),
         "local_last_60_days_non_shenzhen_order_count": max(len(window_rows) - len(shenzhen_rows), 0),
@@ -244,7 +265,7 @@ def _build_payload(before, after, candidate_result, candidate_payload, duration_
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28E",
+        "phase": "5.28F",
         "mode": "dry-run-local-coverage-check",
         "command_label": COMMAND_LABEL,
         "report_status": "shopify_order_sync_coverage_checked",
@@ -261,6 +282,8 @@ def _build_payload(before, after, candidate_result, candidate_payload, duration_
         "local_order_source_after": after.get("scan_source", "unknown"),
         "last_60_days_local_order_count_before": int(before.get("local_last_60_days_order_count") or 0),
         "last_60_days_local_order_count_after": int(after.get("local_last_60_days_order_count") or 0),
+        "selected_local_tag_field": after.get("selected_local_tag_field") or SHOPIFY_ORDER_TAG_FIELD_LABEL,
+        "local_orders_with_shopify_tag_data_after": int(after.get("local_orders_with_shopify_tag_data") or 0),
         "order_22530_found_before": before.get("order_22530_found") is True,
         "order_22530_found_after": after.get("order_22530_found") is True,
         "order_22562_found_before": before.get("order_22562_found") is True,
@@ -299,6 +322,7 @@ def _build_payload(before, after, candidate_result, candidate_payload, duration_
     payload["detected_issue_summary"] = (
         f"Coverage source after check: {payload['local_order_source_after']}; "
         f"last-60-days local orders: {payload['last_60_days_local_order_count_after']}; "
+        f"orders with local tag data: {payload['local_orders_with_shopify_tag_data_after']}; "
         f"#22530 found: {payload['order_22530_found_after']}; "
         f"#22562 found: {payload['order_22562_found_after']}; "
         f"candidate scan source: {payload['candidate_scan_source']}; "
@@ -321,10 +345,10 @@ def _coverage_warnings_from_coverage(coverage, scan_source):
 def _sync_commands():
     base = "docker compose exec -T web python manage.py sync_review_request_shopify_orders"
     return {
-        "initial_60_day_dry_run_command": f"{base} --days 60 --dry-run",
-        "initial_60_day_apply_command": f"{base} --days 60 --apply-local",
-        "daily_3_day_dry_run_command": f"{base} --days 3 --dry-run",
-        "daily_3_day_apply_command": f"{base} --days 3 --apply-local",
+        "initial_60_day_dry_run_command": f"{base} --days 60 --request-delay 1.0 --skip-fulfillment-orders --dry-run",
+        "initial_60_day_apply_command": f"{base} --days 60 --request-delay 1.0 --skip-fulfillment-orders --apply-local",
+        "daily_3_day_dry_run_command": f"{base} --days 3 --request-delay 1.0 --skip-fulfillment-orders --dry-run",
+        "daily_3_day_apply_command": f"{base} --days 3 --request-delay 1.0 --skip-fulfillment-orders --apply-local",
     }
 
 
@@ -354,6 +378,8 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "sync_run": payload.get("sync_run") is True,
         "local_order_source_after": payload.get("local_order_source_after", ""),
         "last_60_days_local_order_count_after": payload.get("last_60_days_local_order_count_after", 0),
+        "selected_local_tag_field": payload.get("selected_local_tag_field", ""),
+        "local_orders_with_shopify_tag_data_after": payload.get("local_orders_with_shopify_tag_data_after", 0),
         "order_22530_found_after": payload.get("order_22530_found_after") is True,
         "order_22562_found_after": payload.get("order_22562_found_after") is True,
         "candidate_scan_source": payload.get("candidate_scan_source", ""),
@@ -379,6 +405,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Sync run: {payload.get('sync_run') is True}\n"
         f"Local source after: {payload.get('local_order_source_after')}\n"
         f"Last 60 days local orders: {payload.get('last_60_days_local_order_count_after', 0)}\n"
+        f"Local tag field: {payload.get('selected_local_tag_field')}\n"
+        f"Orders with local tag data: {payload.get('local_orders_with_shopify_tag_data_after', 0)}\n"
         f"#22530 found: {payload.get('order_22530_found_after') is True}\n"
         f"#22562 found: {payload.get('order_22562_found_after') is True}\n"
         f"Candidate scan source: {payload.get('candidate_scan_source')}\n"
@@ -416,6 +444,8 @@ def _render_html(payload: dict) -> str:
     <tr><th>Sync not run reason</th><td>{escape(str(payload.get("sync_not_run_reason", "")))}</td></tr>
     <tr><th>Local source after</th><td>{escape(str(payload.get("local_order_source_after", "")))}</td></tr>
     <tr><th>Last 60 days local order count</th><td>{escape(str(payload.get("last_60_days_local_order_count_after", 0)))}</td></tr>
+    <tr><th>Local tag field</th><td>{escape(str(payload.get("selected_local_tag_field", "")))}</td></tr>
+    <tr><th>Orders with local tag data</th><td>{escape(str(payload.get("local_orders_with_shopify_tag_data_after", 0)))}</td></tr>
     <tr><th>#22530 found</th><td>{escape(str(payload.get("order_22530_found_after") is True))}</td></tr>
     <tr><th>#22562 found</th><td>{escape(str(payload.get("order_22562_found_after") is True))}</td></tr>
     <tr><th>#22530 diagnosis</th><td>{escape(str((payload.get("order_22530_diagnosis") or {}).get("message", "")))}</td></tr>

@@ -103,6 +103,7 @@ class ShopifyOrder(models.Model):
     order_created_at = models.DateTimeField()
     shopify_note = models.TextField(blank=True, null=True)
     shopify_note_attributes = models.JSONField(default=list, blank=True)
+    shopify_tags = models.TextField(blank=True, null=True)
     
     # Location information (normalized)
     original_location_raw = models.CharField(max_length=255, blank=True, null=True)

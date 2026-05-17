@@ -381,6 +381,8 @@
         {% endif %}
         <p>Last Shopify order sync window: {{ dashboard.order_data_coverage.last_shopify_order_sync_window }}</p>
         <p>Local data source: {{ dashboard.order_data_coverage.local_data_source_label }}</p>
+        <p>Local tag field: {{ dashboard.order_data_coverage.selected_local_tag_field }}</p>
+        <p>Orders with local tag data: {{ dashboard.order_data_coverage.local_orders_with_shopify_tag_data }}</p>
         <p>#22530 found: {{ dashboard.order_data_coverage.order_22530_found_label }}</p>
         <p>Candidate scan freshness: {{ dashboard.order_data_coverage.candidate_scan_freshness }}</p>
         <p>Coverage warnings: {{ dashboard.order_data_coverage.warning_label }}</p>
@@ -512,6 +514,7 @@
                 <tr>
                     <th>Order/group</th>
                     <th>Customer</th>
+                    <th>Tags</th>
                     <th>Block reason</th>
                     <th>Missing requirement</th>
                     <th>Evidence</th>
@@ -533,6 +536,11 @@
                             {% if row.masked_customer_label %}
                                 <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
                             {% endif %}
+                        </td>
+                        <td>
+                            {% for chip in row.tag_chips %}
+                                <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
+                            {% endfor %}
                         </td>
                         <td>{{ row.eligibility_reason_plain }}</td>
                         <td>
@@ -556,7 +564,7 @@
                         </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="5" class="rrw-muted">No blocked or not-ready orders are listed right now.</td></tr>
+                    <tr><td colspan="6" class="rrw-muted">No blocked or not-ready orders are listed right now.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

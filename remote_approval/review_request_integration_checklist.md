@@ -1023,9 +1023,9 @@ Future tracking design note:
   Shenzhen-only settlement data, before the candidate list can be trusted.
 - [x] The initial setup path should sync the last 60 days of Shopify orders into
   local `ShopifyOrder` rows using
-  `docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --apply-local --skip-fulfillment-orders`.
+  `docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --request-delay 1.0 --apply-local --skip-fulfillment-orders`.
 - [x] The daily refresh path should sync the latest 3 days with
-  `docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --apply-local --skip-fulfillment-orders`.
+  `docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --request-delay 1.0 --apply-local --skip-fulfillment-orders`.
 - [x] The candidate scan now reports `scan_source` as `full_shopify_orders`,
   `shenzhen_only_orders`, `fallback_report_only`, or `sqlite_report_fallback`.
 - [x] Coverage warnings include `incomplete_local_order_source`,
@@ -1063,5 +1063,28 @@ Future tracking design note:
   detail evidence is treated as uncertain local coverage, not as a fatal sync
   error.
 - [x] Phase 5.28D performs no Shopify writes, tag mutations, Gmail API calls,
+  email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
+  `translationsRegister` calls.
+
+## Phase 5.28F Shopify Order Tags Persistence
+
+- [x] Local Review Request sync persists Shopify REST order `tags` into
+  nullable `ShopifyOrder.shopify_tags`; `NULL` means the row has not been
+  populated by the tag-aware sync yet, while an empty string means Shopify
+  returned no order tags.
+- [x] Candidate scanning reads persisted local tags first, then falls back to
+  existing local report evidence only when the local tag field is unavailable.
+- [x] Review-request detection accepts `1: review request`, legacy typo
+  `1: reveiw request`, and spacing/case variants; Trustpilot sent detection
+  accepts `1: trustpilot`, legacy typo `1: trustpoilt`, and spacing/case
+  variants; Delivered detection accepts `Delivered` and `delivered`.
+- [x] `#22530` diagnosis now reports the selected local tag field, safe tags
+  summary, tag data availability, matched review-request tag value, and exact
+  local reason when tags are unavailable or empty.
+- [x] Added `shopify_review_request_order_tags_persistence_audit` to report the
+  selected tag field, migration presence, #22530/#22562 safe tag summaries,
+  alias detection, candidate count after tag availability, and no-write safety
+  flags.
+- [x] Phase 5.28F performs no Shopify writes, tag mutations, Gmail API calls,
   email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
   `translationsRegister` calls.
