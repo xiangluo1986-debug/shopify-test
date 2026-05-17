@@ -187,6 +187,11 @@ fails, no Shopify tag write is attempted. The manual runner above still
 requires the approval environment value and is used for existing Sent / Tag
 pending rows.
 
+Phase 5.29B fixes the manual post-send tag-write runner shell payload. The
+runner passes source audit data into Django shell as a JSON string and parses it
+with `json.loads(...)`, so generated Python code does not contain raw JSON
+`true` / `false` literals. The approval gate is unchanged.
+
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local
 candidate scan can use Shopify order tags, `fulfillment_status`, notes, and

@@ -222,6 +222,10 @@ Phase 0.2 automation decision:
 - [x] The no-approval run remains no-write: no Shopify API call, no Shopify tag
   write, no Gmail action, no external review API call, and no
   `translationsRegister`.
+- [x] Phase 5.29B fixes the manual post-send tag-write runner shell payload:
+  source audit data is passed as a JSON string and parsed with `json.loads(...)`
+  inside Django shell, so generated code does not inject JSON `true` / `false`
+  literals into Python.
 
 ### Shopify Admin API Tag Permissions
 

@@ -581,14 +581,14 @@ def _execute_shopify_tag_write(order_name: str, source_report: dict) -> dict:
 
 
 def _shopify_tag_write_script(order_name: str, source_report: dict) -> str:
-    audit_literal = json.dumps(source_report if isinstance(source_report, dict) else {})
+    audit_json = json.dumps(source_report if isinstance(source_report, dict) else {}, ensure_ascii=True)
     template = r'''
 import json
 
 from shopify_sync.review_request_workbench import execute_trustpilot_post_send_tag_write
 
 selected_order = __ORDER_NAME_LITERAL__
-audit_data = __AUDIT_DATA_LITERAL__
+audit_data = json.loads(__AUDIT_DATA_JSON_LITERAL__)
 result = execute_trustpilot_post_send_tag_write(
     selected_order=selected_order,
     verified_post_send_audit_data=audit_data,
@@ -600,7 +600,7 @@ raise SystemExit(0 if result.get("tag_write_status") == "trustpilot_tag_written_
 '''
     return (
         template.replace("__ORDER_NAME_LITERAL__", json.dumps(order_name))
-        .replace("__AUDIT_DATA_LITERAL__", audit_literal)
+        .replace("__AUDIT_DATA_JSON_LITERAL__", json.dumps(audit_json))
     )
 
 
@@ -637,7 +637,7 @@ def _build_payload(
         "report_generated_at": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28O",
+        "phase": "5.29B",
         "mode": write_result.get("mode", "dry-run-approval-missing"),
         "command_label": COMMAND_LABEL,
         "tag_write_status": status,
