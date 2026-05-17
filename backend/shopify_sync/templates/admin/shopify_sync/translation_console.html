@@ -207,9 +207,7 @@
     font-size: 12px;
   }
   .tw-workspace-header {
-    position: sticky;
-    top: 0;
-    z-index: 20;
+    position: static;
     padding: 6px 8px;
     margin-bottom: 6px;
   }
@@ -411,9 +409,7 @@
     margin-bottom: 16px;
   }
   .tw-workspace-nav {
-    position: sticky;
-    top: 128px;
-    z-index: 15;
+    position: static;
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -569,9 +565,7 @@
     margin-top: 10px;
   }
   .tw-shopify-apply-panel {
-    position: sticky;
-    top: 72px;
-    z-index: 14;
+    position: static;
     margin: 10px 0;
     border: 1px solid #f59e0b;
     border-radius: 8px;
@@ -3085,13 +3079,29 @@
             {% if all_languages_update_display.is_successfully_updated %}
               <div class="tw-shopify-success-summary" role="status">
                 <h4>Shopify updated successfully</h4>
-                <p>{{ all_languages_update_display.verified_count }} translations updated and confirmed.</p>
+                <div class="tw-shopify-success-metrics" aria-label="Shopify update success summary">
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Translations updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.updated_count }}</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Confirmed after update</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.verified_count }}</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Restore</div>
+                    <div class="tw-shopify-success-value">{% if all_languages_update_display.rollback_needed %}Review required{% else %}Not needed{% endif %}</div>
+                  </div>
+                </div>
                 {% if all_languages_update_display.updated_field_labels %}
-                  <ul class="tw-shopify-success-list">
-                    {% for field_label in all_languages_update_display.updated_field_labels %}
-                      <li>{{ field_label }}</li>
-                    {% endfor %}
-                  </ul>
+                  <details class="tw-shopify-update-details">
+                    <summary>Updated fields</summary>
+                    <ul class="tw-shopify-success-list">
+                      {% for field_label in all_languages_update_display.updated_field_labels %}
+                        <li>{{ field_label }}</li>
+                      {% endfor %}
+                    </ul>
+                  </details>
                 {% endif %}
               </div>
             {% endif %}
@@ -3118,23 +3128,28 @@
               </div>
             </div>
           </div>
-          {% if all_languages_update_display.not_updated_explanation %}
-            <p class="tw-shopify-not-updated-note">{{ all_languages_update_display.not_updated_explanation }}</p>
-          {% endif %}
-          {% if all_languages_update_display.not_updated_breakdown %}
-            <h4>Why items were not updated</h4>
-            <ul class="tw-shopify-reason-list">
-              {% for item in all_languages_update_display.not_updated_breakdown %}
-                <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}</li>
-              {% endfor %}
-            </ul>
-          {% elif all_languages_update_display.blocked_count and all_languages_update_display.blocked_reason_summary %}
-            <h4>Why items were not updated</h4>
-            <ul class="tw-shopify-reason-list">
-              {% for item in all_languages_update_display.blocked_reason_summary %}
-                <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}</li>
-              {% endfor %}
-            </ul>
+          {% if all_languages_update_display.not_updated_explanation or all_languages_update_display.not_updated_breakdown or all_languages_update_display.blocked_count and all_languages_update_display.blocked_reason_summary %}
+            <details class="tw-shopify-update-details">
+              <summary>Not updated details</summary>
+              {% if all_languages_update_display.not_updated_explanation %}
+                <p class="tw-shopify-not-updated-note">{{ all_languages_update_display.not_updated_explanation }}</p>
+              {% endif %}
+              {% if all_languages_update_display.not_updated_breakdown %}
+                <h4>Why items were not updated</h4>
+                <ul class="tw-shopify-reason-list">
+                  {% for item in all_languages_update_display.not_updated_breakdown %}
+                    <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}</li>
+                  {% endfor %}
+                </ul>
+              {% elif all_languages_update_display.blocked_count and all_languages_update_display.blocked_reason_summary %}
+                <h4>Why items were not updated</h4>
+                <ul class="tw-shopify-reason-list">
+                  {% for item in all_languages_update_display.blocked_reason_summary %}
+                    <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </details>
           {% endif %}
           <details class="tw-shopify-update-details">
           <summary>Update report details</summary>
