@@ -134,7 +134,7 @@ def _fallback_payload(result: dict) -> dict:
         "report_generated_at": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28J",
+        "phase": "5.28K",
         "mode": "dry-run-local-review-send-failure-audit-fallback",
         "review_send_failure_audit_status": "review_send_failure_audit_ready_from_fallback",
         "report_status": "review_send_failure_audit_ready_from_fallback",
@@ -152,12 +152,24 @@ def _fallback_payload(result: dict) -> dict:
         "gmail_scope_status": gmail_status["gmail_scope_status"],
         "gmail_scope_missing": gmail_status["gmail_scope_missing"],
         "gmail_scope_compose_only": gmail_status["gmail_scope_compose_only"],
-        "gmail_send_path_requires_gmail_send": True,
+        "gmail_send_path_requires_gmail_send": False,
         "gmail_send_permission_ready": gmail_status["gmail_send_permission_ready"],
         "gmail_helper_ready": gmail_status["gmail_helper_ready"],
         "gmail_credentials_missing": gmail_status["gmail_credentials_missing"],
         "direct_send_supported_by_current_helper": False,
         "draft_send_supported_by_existing_locked_helper": True,
+        "previous_gmail_draft_send_helper_found": True,
+        "helper_module": (
+            "remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_execute_task"
+        ),
+        "helper_supports_dynamic_order": False,
+        "helper_requires_remote_approval_runner": True,
+        "can_be_called_from_admin_post": False,
+        "drafts_send_path_available": True,
+        "blocker_if_not_reusable": (
+            "Previous #22621 drafts.send helper is hard-coded to #22621 and a fixed draft identity; "
+            "it cannot create or send for a dynamic admin-selected order."
+        ),
         "blocked_reason": blocked_reason,
         "exact_user_message": exact_user_message,
         "recommended_fix": recommended_fix,
@@ -305,15 +317,15 @@ def _fallback_diagnosis_message(
         )
     if gmail_status["gmail_scope_compose_only"]:
         return (
-            "Gmail scope compose-only",
-            "No email was sent. Gmail currently has draft permission only; direct send requires gmail.send permission.",
-            "Grant gmail.send for direct admin sending, or build a reviewed dynamic drafts.create plus drafts.send path.",
+            "Previous Gmail helper not reusable",
+            "No email was sent. The previous Gmail send helper is not reusable from this admin action yet.",
+            "Run the helper reuse audit and build a reviewed dynamic drafts.create plus drafts.send path.",
         )
     if not gmail_status["gmail_send_permission_ready"]:
         return (
             "Gmail scope missing",
-            latest_message or "No email was sent. Gmail send permission is missing; direct send requires gmail.send permission.",
-            "Configure Gmail send permission before retrying direct Review & Send.",
+            latest_message or "No email was sent. Gmail compose/send permission is missing.",
+            "Configure Gmail compose permission for the reviewed drafts.create plus drafts.send path.",
         )
     if not gmail_status["gmail_helper_ready"]:
         return (
@@ -322,9 +334,9 @@ def _fallback_diagnosis_message(
             "Configure Gmail OAuth helper readiness without exposing secret values.",
         )
     return (
-        "Gmail helper not configured",
-        "No email was sent. The Gmail send helper is not ready.",
-        "Enable a reviewed direct-send helper before retrying Review & Send.",
+        "Previous Gmail helper not reusable",
+        "No email was sent. The previous Gmail send helper is not reusable from this admin action yet.",
+        "Enable a reviewed dynamic draft-create plus drafts.send helper before retrying Review & Send.",
     )
 
 

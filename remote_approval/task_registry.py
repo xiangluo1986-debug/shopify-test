@@ -24,6 +24,9 @@ from remote_approval.tasks.shopify_review_request_customer_history_precision_aud
 from remote_approval.tasks.shopify_review_request_review_send_failure_audit_task import (
     run_shopify_review_request_review_send_failure_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_review_send_reuse_gmail_helper_audit_task import (
+    run_shopify_review_request_review_send_reuse_gmail_helper_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
     run_shopify_review_request_gmail_readiness_package_task,
 )
@@ -386,6 +389,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_review_send_failure_audit": (
         run_shopify_review_request_review_send_failure_audit_task
     ),
+    "shopify_review_request_review_send_reuse_gmail_helper_audit": (
+        run_shopify_review_request_review_send_reuse_gmail_helper_audit_task
+    ),
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
     "shopify_review_request_gmail_oauth_setup_helper": run_shopify_review_request_gmail_oauth_setup_helper_task,
     "shopify_review_request_history_ledger_audit": run_shopify_review_request_history_ledger_audit_task,
@@ -737,6 +743,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local report audit only",
         "review_file_path": "logs/shopify_review_request_review_send_failure_audit.json",
+    },
+    "shopify_review_request_review_send_reuse_gmail_helper_audit": {
+        "description": "Audit whether the proven #22621 Gmail drafts.send helper can be reused by admin Review & Send without Gmail or Shopify calls.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; source inspection only, no Gmail/Shopify/API calls",
+        "review_file_path": "logs/codex_runs/shopify_review_request_review_send_reuse_gmail_helper_audit.json",
     },
     "shopify_review_request_gmail_readiness_package": {
         "description": "Generate a docs-only Gmail send permission readiness package for review requests.",

@@ -93,6 +93,13 @@ TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME = "shopify_review_request_trustpilot_auto_
 REVIEW_AND_SEND_REPORT_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.json"
 REVIEW_AND_SEND_HTML_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.html"
 TRUSTPILOT_EMAIL_SUBJECT = "How was your Kidstoylover order?"
+PHASE_22621_DRAFTS_SEND_HELPER_MODULE = (
+    "remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_execute_task"
+)
+REVIEW_SEND_REUSE_GMAIL_HELPER_AUDIT_TASK_NAME = (
+    "shopify_review_request_review_send_reuse_gmail_helper_audit"
+)
+REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME = "shopify_review_request_review_send_post_send_audit"
 GMAIL_SEND_FROM = "info@kidstoylover.com"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
@@ -893,18 +900,20 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
         result["blocking_conditions"].extend(runtime_blockers)
         return _finalize_review_and_send_result(result)
 
-    result["execution_status"] = "blocked_phase_5_28j_direct_send_not_enabled"
-    result["blocking_status"] = "blocked_phase_5_28j_direct_send_not_enabled"
-    result["blocking_detail"] = (
-        "No email was sent. The Gmail send helper is not ready."
-    )
+    helper_blocker = _previous_gmail_helper_reuse_blocker()
+    result["execution_status"] = helper_blocker["status"]
+    result["blocking_status"] = helper_blocker["status"]
+    result["blocking_detail"] = helper_blocker["detail"]
     result["blocking_conditions"].append(
         {
-            "status": "blocked_phase_5_28j_direct_send_not_enabled",
+            "status": helper_blocker["status"],
             "detail": result["blocking_detail"],
         }
     )
-    result["next_admin_action"] = "Review the candidate on the page; direct sending remains locked."
+    result["next_admin_action"] = (
+        "Run the helper reuse audit, then implement a reviewed dynamic draft-create plus "
+        "drafts.send integration before retrying Review & Send."
+    )
     return _finalize_review_and_send_result(result)
 
 
@@ -5145,7 +5154,7 @@ def build_review_request_review_send_failure_audit_report(params=None):
         "report_generated_at": datetime.now(timezone.utc).isoformat(),
         "task": "shopify_review_request_review_send_failure_audit",
         "task_name": "shopify_review_request_review_send_failure_audit",
-        "phase": "5.28J",
+        "phase": "5.28K",
         "mode": "dry-run-local-review-send-failure-audit",
         "review_send_failure_audit_status": "review_send_failure_audit_ready",
         "report_status": "review_send_failure_audit_ready",
@@ -5169,6 +5178,20 @@ def build_review_request_review_send_failure_audit_report(params=None):
         "draft_send_supported_by_existing_locked_helper": diagnosis[
             "draft_send_supported_by_existing_locked_helper"
         ],
+        "previous_gmail_draft_send_helper_found": diagnosis[
+            "previous_gmail_draft_send_helper_found"
+        ],
+        "helper_module": diagnosis["helper_module"],
+        "helper_supports_dynamic_order": diagnosis["helper_supports_dynamic_order"],
+        "helper_requires_remote_approval_runner": diagnosis[
+            "helper_requires_remote_approval_runner"
+        ],
+        "can_be_called_from_admin_post": diagnosis["can_be_called_from_admin_post"],
+        "drafts_send_path_available": diagnosis["drafts_send_path_available"],
+        "blocker_if_not_reusable": diagnosis["blocker_if_not_reusable"],
+        "recommended_integration_path": diagnosis["recommended_integration_path"],
+        "reuse_gmail_helper_audit_task_name": REVIEW_SEND_REUSE_GMAIL_HELPER_AUDIT_TASK_NAME,
+        "post_send_audit_task_name": REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME,
         "route_revalidation_blocker": diagnosis["route_revalidation_blocker"],
         "blocked_reason": blocked_reason,
         "exact_user_message": exact_user_message,
@@ -9146,7 +9169,7 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "report_generated_at": datetime.now(timezone.utc).isoformat(),
         "task": "shopify_review_request_trustpilot_review_and_send_execute",
         "task_name": "shopify_review_request_trustpilot_review_and_send_execute",
-        "phase": "5.28J",
+        "phase": "5.28K",
         "mode": "admin_review_and_send",
         "execution_status": "blocked_not_started",
         "success": False,
@@ -9174,6 +9197,26 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "draft_send_supported_by_existing_locked_helper": bool(
             gmail_setup.get("locked_draft_send_helper_available")
         ),
+        "previous_gmail_draft_send_helper_found": bool(
+            gmail_setup.get("previous_gmail_draft_send_helper_found")
+        ),
+        "helper_module": _safe_text(gmail_setup.get("helper_module"), max_length=180),
+        "helper_supports_dynamic_order": bool(gmail_setup.get("helper_supports_dynamic_order")),
+        "helper_requires_remote_approval_runner": bool(
+            gmail_setup.get("helper_requires_remote_approval_runner")
+        ),
+        "can_be_called_from_admin_post": bool(gmail_setup.get("can_be_called_from_admin_post")),
+        "drafts_send_path_available": bool(gmail_setup.get("drafts_send_path_available")),
+        "blocker_if_not_reusable": _safe_text(
+            gmail_setup.get("blocker_if_not_reusable"),
+            max_length=500,
+        ),
+        "recommended_integration_path": _safe_text(
+            gmail_setup.get("recommended_integration_path"),
+            max_length=500,
+        ),
+        "reuse_gmail_helper_audit_task_name": REVIEW_SEND_REUSE_GMAIL_HELPER_AUDIT_TASK_NAME,
+        "post_send_audit_task_name": REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME,
         "gmail_api_call_performed": False,
         "gmail_draft_create_attempted": False,
         "gmail_draft_created": False,
@@ -9292,7 +9335,7 @@ def _review_send_readiness_diagnosis(
         "gmail_scope_compose_only": (gmail_setup.get("scope_status") == "gmail_compose_only"),
         "gmail_scope_send_available": bool(gmail_setup.get("real_send_scope_available")),
         "gmail_send_permission_ready": bool(gmail_setup.get("real_send_scope_available")),
-        "gmail_send_path_requires_gmail_send": True,
+        "gmail_send_path_requires_gmail_send": False,
         "gmail_helper_ready": bool(gmail_setup.get("gmail_helper_ready")),
         "gmail_credentials_missing": not bool(gmail_setup.get("gmail_credentials_ready")),
         "direct_send_supported_by_current_helper": bool(
@@ -9300,6 +9343,24 @@ def _review_send_readiness_diagnosis(
         ),
         "draft_send_supported_by_existing_locked_helper": bool(
             gmail_setup.get("locked_draft_send_helper_available")
+        ),
+        "previous_gmail_draft_send_helper_found": bool(
+            gmail_setup.get("previous_gmail_draft_send_helper_found")
+        ),
+        "helper_module": _safe_text(gmail_setup.get("helper_module"), max_length=180),
+        "helper_supports_dynamic_order": bool(gmail_setup.get("helper_supports_dynamic_order")),
+        "helper_requires_remote_approval_runner": bool(
+            gmail_setup.get("helper_requires_remote_approval_runner")
+        ),
+        "can_be_called_from_admin_post": bool(gmail_setup.get("can_be_called_from_admin_post")),
+        "drafts_send_path_available": bool(gmail_setup.get("drafts_send_path_available")),
+        "blocker_if_not_reusable": _safe_text(
+            gmail_setup.get("blocker_if_not_reusable"),
+            max_length=500,
+        ),
+        "recommended_integration_path": _safe_text(
+            gmail_setup.get("recommended_integration_path"),
+            max_length=500,
         ),
         "blocked_reason": blocked_reason,
         "exact_user_message": exact_user_message,
@@ -9322,9 +9383,21 @@ def _apply_review_send_diagnosis(result, diagnosis):
     result["draft_send_supported_by_existing_locked_helper"] = (
         diagnosis.get("draft_send_supported_by_existing_locked_helper") is True
     )
+    for key in (
+        "previous_gmail_draft_send_helper_found",
+        "helper_supports_dynamic_order",
+        "helper_requires_remote_approval_runner",
+        "can_be_called_from_admin_post",
+        "drafts_send_path_available",
+    ):
+        result[key] = diagnosis.get(key) is True
+    for key in ("helper_module", "blocker_if_not_reusable", "recommended_integration_path"):
+        result[key] = diagnosis.get(key, "")
 
 
 def _review_send_plain_blocked_reason(status):
+    if status == "blocked_previous_gmail_send_helper_not_reusable":
+        return "Previous Gmail helper not reusable"
     if status == "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send":
         return "Gmail scope compose-only"
     if status == "blocked_missing_gmail_send_scope":
@@ -9337,10 +9410,15 @@ def _review_send_plain_blocked_reason(status):
 
 
 def _review_send_gmail_recommended_fix(status):
+    if status == "blocked_previous_gmail_send_helper_not_reusable":
+        return (
+            "Run the helper reuse audit and extract a reviewed dynamic admin-safe draft-create "
+            "plus drafts.send integration before allowing Review & Send to send email."
+        )
     if status == "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send":
         return (
-            "Grant gmail.send for direct admin sending, or build a separately reviewed "
-            "dynamic drafts.create plus drafts.send path before allowing compose-only sends."
+            "Build a reviewed dynamic drafts.create plus drafts.send path before allowing "
+            "compose-only Review & Send."
         )
     if status == "blocked_missing_gmail_send_scope":
         return "Configure Gmail send permission before retrying direct Review & Send."
@@ -9350,6 +9428,8 @@ def _review_send_gmail_recommended_fix(status):
 
 
 def _review_send_gmail_blocker(gmail_setup):
+    if gmail_setup.get("can_be_called_from_admin_post") is not True:
+        return _previous_gmail_helper_reuse_blocker(gmail_setup)
     scope_status = gmail_setup.get("scope_status") or "scope_missing"
     compose_only = scope_status == "gmail_compose_only" or (
         gmail_setup.get("compose_scope_present") is True
@@ -9379,6 +9459,15 @@ def _review_send_gmail_blocker(gmail_setup):
             "detail": "No email was sent. The Gmail send helper is not ready.",
         }
     return None
+
+
+def _previous_gmail_helper_reuse_blocker(gmail_setup=None):
+    gmail_setup = gmail_setup or {}
+    return {
+        "status": "blocked_previous_gmail_send_helper_not_reusable",
+        "detail": "No email was sent. The previous Gmail send helper is not reusable from this admin action yet.",
+        "technical_detail": _safe_text(gmail_setup.get("blocker_if_not_reusable"), max_length=500),
+    }
 
 
 def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
@@ -9536,6 +9625,20 @@ def _render_review_and_send_html(payload):
             "shopify_tag_write_performed",
         )
     )
+    helper_rows = "\n".join(
+        f"<tr><th>{escape(key)}</th><td>{escape(str(payload.get(key, '')))}</td></tr>"
+        for key in (
+            "previous_gmail_draft_send_helper_found",
+            "helper_module",
+            "helper_supports_dynamic_order",
+            "helper_requires_remote_approval_runner",
+            "can_be_called_from_admin_post",
+            "drafts_send_path_available",
+            "blocker_if_not_reusable",
+            "reuse_gmail_helper_audit_task_name",
+            "post_send_audit_task_name",
+        )
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -9564,6 +9667,8 @@ def _render_review_and_send_html(payload):
   </tbody></table>
   <h2>Blocking Conditions</h2>
   <table><thead><tr><th>Status</th><th>Detail</th></tr></thead><tbody>{blocking_rows}</tbody></table>
+  <h2>Gmail Helper Reuse</h2>
+  <table><tbody>{helper_rows}</tbody></table>
   <h2>Safety Flags</h2>
   <table><tbody>{safety_rows}</tbody></table>
 </body>
@@ -9653,6 +9758,19 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         gmail_helper.get("required_scope_expected") or "https://www.googleapis.com/auth/gmail.send",
         max_length=120,
     )
+    previous_helper_found = True
+    helper_supports_dynamic_order = False
+    helper_requires_remote_approval_runner = True
+    can_be_called_from_admin_post = False
+    drafts_send_path_available = True
+    blocker_if_not_reusable = (
+        "Previous #22621 drafts.send helper is fixed to #22621, a protected draft-source report, "
+        "and runner ACK variables; it cannot create or send for a dynamic admin-selected order."
+    )
+    recommended_integration_path = (
+        "Run `shopify_review_request_review_send_reuse_gmail_helper_audit`, then extract a reviewed "
+        "dynamic draft-create plus drafts.send helper for exactly one server-revalidated admin candidate."
+    )
     scope_status = _safe_text(scope_resolver.get("scope_resolver_status"), max_length=120)
     env_audit_status = _safe_text(env_loading_audit.get("env_loading_audit_status"), max_length=120)
     env_audit_message = _safe_text(env_loading_audit.get("dashboard_message"), max_length=300)
@@ -9664,7 +9782,10 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_message = "Gmail permission is not configured yet."
     elif env_audit_status == "gmail_compose_scope_available_in_runner_env":
         status_value = "Draft only"
-        status_message = "Gmail draft permission is available, but direct Review & Send requires gmail.send."
+        status_message = (
+            "Gmail draft permission is available, but the previous #22621 drafts.send helper is "
+            "not reusable from this admin action yet."
+        )
     elif env_audit_status == "gmail_send_scope_available_in_runner_env":
         status_value = "Ready"
         status_message = "Gmail send permission is available. Final approval is still required before sending."
@@ -9682,7 +9803,10 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         status_message = "Gmail permission is not configured yet."
     elif compose_scope_present and not real_send_scope_available:
         status_value = "Draft only"
-        status_message = "Gmail draft permission is available, but direct Review & Send requires gmail.send."
+        status_message = (
+            "Gmail draft permission is available, but the previous #22621 drafts.send helper is "
+            "not reusable from this admin action yet."
+        )
     elif real_send_scope_available:
         status_value = "Ready"
         status_message = "Gmail send permission is available. Final approval is still required before sending."
@@ -9702,7 +9826,16 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         "gmail_credentials_ready": credentials_ready,
         "gmail_helper_ready": gmail_helper_ready,
         "admin_direct_send_helper_supported": False,
+        "admin_drafts_send_helper_supported": can_be_called_from_admin_post,
         "locked_draft_send_helper_available": True,
+        "previous_gmail_draft_send_helper_found": previous_helper_found,
+        "helper_module": PHASE_22621_DRAFTS_SEND_HELPER_MODULE,
+        "helper_supports_dynamic_order": helper_supports_dynamic_order,
+        "helper_requires_remote_approval_runner": helper_requires_remote_approval_runner,
+        "can_be_called_from_admin_post": can_be_called_from_admin_post,
+        "drafts_send_path_available": drafts_send_path_available,
+        "blocker_if_not_reusable": blocker_if_not_reusable,
+        "recommended_integration_path": recommended_integration_path,
         "scope_status": (
             "gmail_compose_only"
             if compose_scope_present and not real_send_scope_available
@@ -9765,6 +9898,10 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
                 "value": _admin_status_label(
                     compatibility_audit.get("compatibility_audit_status") or "missing"
                 ),
+            },
+            {
+                "label": "#22621 drafts.send helper",
+                "value": "Found, not admin-reusable",
             },
         ],
     }
@@ -9885,8 +10022,8 @@ def _setup_checklist(
                     else "Gmail permission has not been checked yet."
                 ),
                 "action": (
-                    "Add Gmail scope to the environment. Use `gmail.compose` for draft-only mode, "
-                    "or `gmail.send` for direct sending later."
+                    "Add Gmail scope to the environment. Use `gmail.compose` for the reviewed "
+                    "draft-create plus drafts.send path, or `gmail.send` only for a separate direct-send implementation."
                 ),
             },
             {

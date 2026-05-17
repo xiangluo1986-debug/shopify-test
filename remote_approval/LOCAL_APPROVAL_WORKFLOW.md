@@ -68,6 +68,7 @@ python remote_approval_runner.py --task shopify_review_request_shopify_order_syn
 python remote_approval_runner.py --task shopify_review_request_order_tags_persistence_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_customer_history_trustpilot_guard_audit --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_review_send_reuse_gmail_helper_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -502,6 +503,16 @@ prior Trustpilot evidence, and note-risk state. The page defaults to 25 visible
 eligible candidates and supports `?page=` / `?page_size=` with 25, 50, and 100.
 Direct admin sending remains blocked unless Gmail permission and helper
 compatibility are both confirmed; no Shopify tag write happens in this phase.
+
+Phase 5.28K adds
+`shopify_review_request_review_send_reuse_gmail_helper_audit`. It inspects the
+previous successful `#22621` Gmail `drafts.send` path and reports whether that
+helper can be reused from the current admin `Review & Send` POST. The audit is
+source-inspection only: it does not read secrets, call Gmail, create drafts,
+send email, call Shopify, write tags, call Trustpilot/Kudosi/Ali Reviews, or
+call `translationsRegister`. If the helper is not dynamic/admin-callable, the
+admin page must show the plain blocker that no email was sent because the
+previous Gmail send helper is not reusable from this admin action yet.
 
 The `Review & Send` admin POST verifies the
 selected order against the current eligible queue and returns a no-send blocker;

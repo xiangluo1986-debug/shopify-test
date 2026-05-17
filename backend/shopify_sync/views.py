@@ -1144,8 +1144,9 @@ def review_request_workbench(request):
         if result.get("email_sent") is True:
             messages.success(
                 request,
-                "Email sent. Shopify tag write will happen after post-send audit.",
+                "Trustpilot email sent. Shopify tag has not been written yet.",
             )
+            messages.info(request, "Run post-send audit before writing Shopify tag.")
         else:
             messages.warning(
                 request,

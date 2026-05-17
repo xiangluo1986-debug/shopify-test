@@ -1165,3 +1165,22 @@ Future tracking design note:
 - [x] No Shopify tag write, Shopify mutation, external review API call,
   Gmail API call, email send, or `translationsRegister` call is performed by
   this phase. Direct send depends on Gmail permission and helper compatibility.
+
+## Phase 5.28K Review Send Gmail Helper Reuse Audit
+
+- [x] Added `shopify_review_request_review_send_reuse_gmail_helper_audit` to
+  inspect the proven `#22621` Gmail `drafts.send` path without Gmail, Shopify,
+  Trustpilot/Kudosi/Ali Reviews, or `translationsRegister` calls.
+- [x] The previous `#22621` `drafts.send` helper was found, but it is
+  hard-coded to a fixed order/draft identity and local runner ACK flow, so the
+  current admin `Review & Send` POST cannot safely reuse it for dynamic rows
+  such as `#21075` yet.
+- [x] `Review & Send` no longer reports the misleading blocker that
+  `gmail.send` is required when the real missing step is a reviewed dynamic
+  `drafts.create` plus `drafts.send` integration.
+- [x] Admin `Review & Send` still requires staff POST, CSRF, current eligible
+  queue membership, server-side revalidation, repeat-customer confirmation,
+  duplicate suppression, risk checks, delivered/review-request tags, merged
+  group readiness, and one-send limit enforcement before any future send.
+- [x] Shopify tag write remains a separate post-send audit/tag-write phase.
+  No automatic sending is enabled by this phase.
