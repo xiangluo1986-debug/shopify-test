@@ -2,6 +2,7 @@ import json
 import hashlib
 from datetime import datetime, timezone
 from html import escape
+from html.parser import HTMLParser
 from pathlib import Path
 
 import requests
@@ -21,6 +22,7 @@ SAFE_WRITE_READINESS_ACTION_NAME = "prepare_translation_safe_write_readiness_pac
 LOCKED_EXECUTION_ACTION_NAME = "prepare_translation_locked_execution_shell"
 REAL_WRITE_ACTION_NAME = "execute_translation_single_locked_write"
 SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME = "apply_selected_translations_to_shopify"
+ALL_LANGUAGES_REAL_WRITE_ACTION_NAME = "validate_and_update_all_languages_to_shopify"
 LOCKED_EXECUTION_ACK_PHRASE = "I UNDERSTAND THIS WILL WRITE ONE SHOPIFY TRANSLATION"
 SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE = (
     "I UNDERSTAND THIS WILL WRITE SELECTED SHOPIFY TRANSLATIONS"
@@ -37,12 +39,21 @@ SELECTED_TRANSLATIONS_WRITTEN_AND_VERIFIED_STATUS = (
 SELECTED_TRANSLATIONS_WRITE_PARTIAL_STATUS = "selected_shopify_translations_write_partial"
 SELECTED_TRANSLATIONS_WRITE_FAILED_STATUS = "selected_shopify_translations_write_failed"
 SELECTED_TRANSLATIONS_BLOCKED_STATUS = "selected_shopify_translations_blocked"
+ALL_LANGUAGES_WRITTEN_AND_VERIFIED_STATUS = (
+    "all_languages_shopify_translations_written_and_verified"
+)
+ALL_LANGUAGES_WRITE_PARTIAL_STATUS = "all_languages_shopify_translations_write_partial"
+ALL_LANGUAGES_WRITE_FAILED_STATUS = "all_languages_shopify_translations_write_failed"
+ALL_LANGUAGES_BLOCKED_STATUS = "all_languages_shopify_translations_blocked"
 SAFE_WRITE_READINESS_MAX_ENTRY_COUNT = 3
 SAFE_WRITE_READINESS_FIELDS = ("title", "meta_title", "meta_description")
 SAFE_WRITE_READINESS_FIELD_SET = set(SAFE_WRITE_READINESS_FIELDS)
+ALL_LANGUAGES_AUTO_WRITE_FIELDS = SAFE_WRITE_READINESS_FIELDS
+ALL_LANGUAGES_AUTO_WRITE_FIELD_SET = set(ALL_LANGUAGES_AUTO_WRITE_FIELDS)
 LOCKED_EXECUTION_ALLOWED_FIELDS = SAFE_WRITE_READINESS_FIELDS
 LOCKED_EXECUTION_ALLOWED_FIELD_SET = set(LOCKED_EXECUTION_ALLOWED_FIELDS)
-LOCKED_EXECUTION_SUPPORTED_LOCALES = {"de", "es", "fr", "it", "ja"}
+ALL_LANGUAGES_SUPPORTED_LOCALES = ("ja", "de", "fr", "es", "it")
+LOCKED_EXECUTION_SUPPORTED_LOCALES = set(ALL_LANGUAGES_SUPPORTED_LOCALES)
 LOCKED_EXECUTION_LOCALE_LABEL_ALIASES = {
     "japanese": "ja",
     "german": "de",
@@ -75,6 +86,30 @@ LOCKED_EXECUTION_FORBIDDEN_PHRASES = (
     "ships from china",
     "factory direct",
 )
+ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS = {
+    "options",
+    "variants",
+    "important_metafields",
+    "metafields",
+    "media",
+    "media_alt_text",
+}
+ALL_LANGUAGES_MAPPING_BLOCKED_REASON = (
+    "Can review now; Shopify update support needs extra mapping."
+)
+ALL_LANGUAGES_BODY_HTML_LINK_MEDIA_TAGS = {"a", "img", "iframe", "source", "video"}
+ALL_LANGUAGES_SAFE_FIELD_LABELS = {
+    "title": "Product title",
+    "meta_title": "SEO title",
+    "meta_description": "SEO description",
+}
+ALL_LANGUAGES_STATUS_LABELS = {
+    "all_languages_shopify_update_not_submitted": "No Shopify update has been run yet.",
+    ALL_LANGUAGES_WRITTEN_AND_VERIFIED_STATUS: "Shopify updated successfully",
+    ALL_LANGUAGES_WRITE_PARTIAL_STATUS: "Shopify was partly updated",
+    ALL_LANGUAGES_WRITE_FAILED_STATUS: "Shopify update failed",
+    ALL_LANGUAGES_BLOCKED_STATUS: "No safe translations were updated",
+}
 SAFE_WRITE_READINESS_GROUPS = ("product_basics", "seo")
 SAFE_WRITE_READINESS_GROUP_SET = set(SAFE_WRITE_READINESS_GROUPS)
 SAFE_WRITE_READINESS_READY_JOB_STATUSES = {"completed", "partial"}
@@ -560,6 +595,345 @@ def apply_selected_translations_to_shopify(
     payload["audit_status"] = payload["status"]
     return _finalize_selected_translations_payload(
         payload,
+        json_path,
+        html_path,
+        write_reports,
+    )
+
+
+def build_translation_workspace_all_languages_update_state(
+    background_report: dict | None,
+    *,
+    selected_product_gid: str = "",
+):
+    report = dict(background_report or {})
+    product_gid = str(selected_product_gid or "").strip()
+    report_product_gid = str(report.get("product_gid") or "").strip()
+    report_detail_summary = report.get("report_detail_summary") or {}
+    entries = [
+        _all_languages_update_entry_from_row(row, product_gid=product_gid)
+        for row in (report.get("review_rows") or [])
+        if isinstance(row, dict)
+    ]
+    blocking_conditions = _all_languages_state_blocking_conditions(
+        report=report,
+        product_gid=product_gid,
+        report_product_gid=report_product_gid,
+    )
+    if blocking_conditions:
+        _all_languages_apply_global_blockers(entries, blocking_conditions)
+    write_ready_entries = [
+        entry for entry in entries if entry.get("status") == "write_ready"
+    ]
+    if not write_ready_entries:
+        blocking_conditions.append("blocked_no_write_ready_candidates")
+    blocking_conditions = _unique_strings(blocking_conditions)
+    state = {
+        "status": "all_languages_shopify_update_not_submitted",
+        "report_exists": bool(report.get("exists") or report.get("job_id")),
+        "report_status": report.get("status", ""),
+        "report_status_label": report.get("status_label") or report.get("status", ""),
+        "report_path": report.get("report_path", ""),
+        "job_id": report.get("job_id", ""),
+        "product_gid": product_gid,
+        "report_product_gid": report_product_gid,
+        "product_title": report.get("product_title")
+        or report_detail_summary.get("product_title", ""),
+        "locales": list(ALL_LANGUAGES_SUPPORTED_LOCALES),
+        "allowed_fields": list(ALL_LANGUAGES_AUTO_WRITE_FIELDS),
+        "blocked_fields": [
+            "body_html",
+            "options",
+            "variants",
+            "metafields",
+            "media_alt_text",
+            "technical_fields",
+        ],
+        "entries": entries,
+        "candidate_count": len(entries),
+        "write_ready_count": len(write_ready_entries),
+        "updated_count": 0,
+        "verified_count": 0,
+        "skipped_count": _all_languages_entry_status_count(entries, "skipped"),
+        "blocked_count": _all_languages_entry_status_count(entries, "blocked"),
+        "failed_count": 0,
+        "per_locale_summary": _all_languages_per_locale_summary(entries, report),
+        "per_field_summary": _all_languages_per_field_summary(entries),
+        "blocking_conditions": blocking_conditions,
+        "can_submit": not blocking_conditions and bool(write_ready_entries),
+        "mutation_called": False,
+        "translations_register_called": False,
+        "shopify_write_performed": False,
+        "shopify_api_call_performed": False,
+        "mutation_performed": False,
+        "readback_performed": False,
+        "rollback_needed": False,
+        "rollback_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "real_apply_performed": False,
+        "json_report_path": "",
+        "html_report_path": "",
+        "sanitized_errors": [],
+    }
+    return _all_languages_attach_plain_language(state)
+
+
+def validate_and_update_all_languages_to_shopify(
+    background_report: dict | None,
+    *,
+    installation=None,
+    selected_product_gid: str = "",
+    write_reports: bool = True,
+):
+    state = build_translation_workspace_all_languages_update_state(
+        background_report,
+        selected_product_gid=selected_product_gid,
+    )
+    product_gid = str(state.get("product_gid") or "").strip()
+    generated_at = _utc_now()
+    json_path, html_path = _all_languages_update_report_paths(
+        product_gid,
+        generated_at,
+    )
+    write_ready_entries = [
+        dict(entry)
+        for entry in state.get("entries") or []
+        if entry.get("status") == "write_ready"
+    ]
+    request_blockers = _all_languages_request_blocking_conditions(
+        write_ready_entries=write_ready_entries,
+        installation=installation,
+    )
+    blocking_conditions = _unique_strings(
+        list(state.get("blocking_conditions") or []) + request_blockers
+    )
+    if request_blockers:
+        _all_languages_apply_global_blockers(
+            state.get("entries") or [],
+            request_blockers,
+        )
+        write_ready_entries = []
+    payload = {
+        "action_name": ALL_LANGUAGES_REAL_WRITE_ACTION_NAME,
+        "status": "",
+        "audit_status": "",
+        "generated_at": generated_at,
+        "product_gid": product_gid,
+        "product_title": state.get("product_title", ""),
+        "report_exists": state.get("report_exists", False),
+        "locales": list(ALL_LANGUAGES_SUPPORTED_LOCALES),
+        "allowed_auto_write_fields": list(ALL_LANGUAGES_AUTO_WRITE_FIELDS),
+        "blocked_auto_write_fields": state.get("blocked_fields", []),
+        "source_background_report_path": state.get("report_path", ""),
+        "source_background_report_status": state.get("report_status", ""),
+        "candidate_count": state.get("candidate_count", 0),
+        "write_ready_count": len(write_ready_entries),
+        "updated_count": 0,
+        "verified_count": 0,
+        "skipped_count": 0,
+        "blocked_count": 0,
+        "failed_count": 0,
+        "per_locale_summary": [],
+        "per_field_summary": [],
+        "preflight_summary": {
+            "candidate_count": state.get("candidate_count", 0),
+            "write_ready_count": len(write_ready_entries),
+            "blocked_count": state.get("blocked_count", 0),
+            "skipped_count": state.get("skipped_count", 0),
+            "per_locale_summary": state.get("per_locale_summary", []),
+            "per_field_summary": state.get("per_field_summary", []),
+            "blocking_conditions": blocking_conditions,
+        },
+        "entries": [dict(entry) for entry in state.get("entries") or []],
+        "mutation_called": False,
+        "translations_register_called": False,
+        "shopify_write_performed": False,
+        "shopify_api_call_performed": False,
+        "mutation_performed": False,
+        "readback_performed": False,
+        "rollback_needed": False,
+        "rollback_performed": False,
+        "publish_performed": False,
+        "apply_performed": False,
+        "real_apply_performed": False,
+        "blocking_conditions": blocking_conditions,
+        "sanitized_errors": [],
+        "mutation_summary": {},
+        "readback_summary": {},
+        "json_report_path": json_path.as_posix(),
+        "html_report_path": html_path.as_posix(),
+        "shopify_read_only": True,
+        "no_new_shopify_writes_performed": True,
+        "all_new_actions_no_write_confirmed": True,
+    }
+    if blocking_conditions:
+        payload["status"] = ALL_LANGUAGES_BLOCKED_STATUS
+        payload["audit_status"] = ALL_LANGUAGES_BLOCKED_STATUS
+        return _finalize_all_languages_update_payload(
+            payload,
+            background_report or {},
+            json_path,
+            html_path,
+            write_reports,
+        )
+
+    entries_by_id = {
+        entry.get("entry_id", ""): entry
+        for entry in payload["entries"]
+        if entry.get("entry_id")
+    }
+    by_resource_id = {}
+    for entry in write_ready_entries:
+        by_resource_id.setdefault(entry.get("resource_id", ""), []).append(entry)
+
+    mutation_summaries = {}
+    successful_resource_entries = {}
+    for resource_id, resource_entries in by_resource_id.items():
+        mutation_result = _real_write_translations_register(
+            installation,
+            resource_id,
+            [
+                {
+                    "locale": entry.get("locale", ""),
+                    "key": entry.get("key", ""),
+                    "value": entry.get("proposed_translation_value", ""),
+                    "translatableContentDigest": entry.get("digest", ""),
+                }
+                for entry in resource_entries
+            ],
+        )
+        payload["mutation_called"] = (
+            payload["mutation_called"] or mutation_result.get("called", False)
+        )
+        payload["translations_register_called"] = (
+            payload["translations_register_called"]
+            or mutation_result.get("called", False)
+        )
+        payload["mutation_performed"] = (
+            payload["mutation_performed"] or mutation_result.get("called", False)
+        )
+        payload["shopify_api_call_performed"] = (
+            payload["shopify_api_call_performed"]
+            or mutation_result.get("called", False)
+        )
+        payload["sanitized_errors"].extend(
+            mutation_result.get("sanitized_errors") or []
+        )
+        mutation_failed = bool(
+            mutation_result.get("request_failed")
+            or mutation_result.get("user_errors")
+            or mutation_result.get("sanitized_errors")
+        )
+        mutation_summaries[resource_id] = {
+            "http_status": mutation_result.get("http_status"),
+            "request_failed": mutation_result.get("request_failed", False),
+            "user_errors_count": len(mutation_result.get("user_errors") or []),
+            "translation_count": len(mutation_result.get("translations") or []),
+            "write_ready_entry_count": len(resource_entries),
+            "mutation_failed": mutation_failed,
+        }
+        if mutation_failed:
+            for entry in resource_entries:
+                payload_entry = entries_by_id.get(entry.get("entry_id", ""))
+                if payload_entry:
+                    payload_entry["status"] = "write_failed"
+                    payload_entry["blocking_reason"] = "translationsRegister failed"
+                    payload_entry["blocking_reasons"] = ["translations_register_failed"]
+            continue
+        payload["shopify_write_performed"] = True
+        payload["real_apply_performed"] = True
+        successful_resource_entries[resource_id] = resource_entries
+
+    payload["mutation_summary"] = mutation_summaries
+    readback_summaries = {}
+    for resource_id, resource_entries in successful_resource_entries.items():
+        entries_by_locale = {}
+        for entry in resource_entries:
+            entries_by_locale.setdefault(entry.get("locale", ""), []).append(entry)
+        for locale, locale_entries in entries_by_locale.items():
+            readback_result = _real_write_readback(installation, resource_id, locale)
+            payload["readback_performed"] = (
+                payload["readback_performed"] or readback_result.get("called", False)
+            )
+            payload["shopify_api_call_performed"] = True
+            payload["sanitized_errors"].extend(
+                readback_result.get("sanitized_errors") or []
+            )
+            summary_key = f"{resource_id}|{locale}"
+            readback_summaries[summary_key] = {
+                "resource_id": resource_id,
+                "locale": locale,
+                "request_failed": readback_result.get("request_failed", False),
+                "http_status": readback_result.get("http_status"),
+                "entries": [],
+            }
+            for entry in locale_entries:
+                match = _real_write_readback_match(
+                    readback_result.get("translations") or [],
+                    key=entry.get("key", ""),
+                    locale=locale,
+                    proposed_translation_value=entry.get("proposed_translation_value", ""),
+                )
+                matched = bool(match.get("matched")) and not readback_result.get(
+                    "request_failed"
+                )
+                payload_entry = entries_by_id.get(entry.get("entry_id", ""))
+                if payload_entry:
+                    payload_entry["readback_value"] = match.get("readback_value", "")
+                    payload_entry["readback_matched"] = matched
+                    payload_entry["status"] = (
+                        "written_verified" if matched else "readback_mismatch"
+                    )
+                    payload_entry["blocking_reason"] = (
+                        "" if matched else "Readback did not match proposed translation"
+                    )
+                    payload_entry["rollback_needed"] = not matched
+                readback_summaries[summary_key]["entries"].append(
+                    {
+                        "entry_id": entry.get("entry_id", ""),
+                        "key": entry.get("key", ""),
+                        "readback_matched": matched,
+                        "key_exists": match.get("key_exists", False),
+                        "locale_matches": match.get("locale_matches", False),
+                        "value_matches": match.get("value_matches", False),
+                        "outdated_acceptable": match.get("outdated_acceptable", False),
+                    }
+                )
+    payload["readback_summary"] = readback_summaries
+    payload["rollback_needed"] = any(
+        bool(entry.get("rollback_needed")) for entry in payload["entries"]
+    )
+    payload["updated_count"] = _all_languages_entry_status_count(
+        payload["entries"],
+        "written_verified",
+        "readback_mismatch",
+    )
+    payload["verified_count"] = _all_languages_entry_status_count(
+        payload["entries"],
+        "written_verified",
+    )
+    payload["failed_count"] = _all_languages_entry_status_count(
+        payload["entries"],
+        "write_failed",
+        "readback_mismatch",
+    )
+    if (
+        payload["updated_count"]
+        and payload["verified_count"] == payload["updated_count"]
+        and payload["failed_count"] == 0
+    ):
+        payload["status"] = ALL_LANGUAGES_WRITTEN_AND_VERIFIED_STATUS
+    elif payload["updated_count"] or payload["verified_count"]:
+        payload["status"] = ALL_LANGUAGES_WRITE_PARTIAL_STATUS
+    elif payload["mutation_called"]:
+        payload["status"] = ALL_LANGUAGES_WRITE_FAILED_STATUS
+    else:
+        payload["status"] = ALL_LANGUAGES_BLOCKED_STATUS
+    payload["audit_status"] = payload["status"]
+    return _finalize_all_languages_update_payload(
+        payload,
+        background_report or {},
         json_path,
         html_path,
         write_reports,
@@ -1548,6 +1922,680 @@ def _selected_apply_payload_preview(selected_entries: list[dict]):
     ]
 
 
+def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
+    entry = _safe_write_entry_from_row(row, product_gid=product_gid)
+    field_key = entry.get("key", "")
+    group_key = entry.get("field_group", "")
+    existing_value = str(entry.get("existing_translation_value") or "")
+    proposed_value = str(entry.get("proposed_translation_value") or "")
+    existing_current_same = (
+        bool(entry.get("existing_translation_present"))
+        and not _safe_write_bool(entry.get("existing_translation_outdated"))
+        and existing_value.strip()
+        and proposed_value.strip()
+        and existing_value.strip() == proposed_value.strip()
+    )
+    if existing_current_same:
+        status = "skipped"
+        blocking_reasons = ["existing_translation_current_same_value"]
+        human_blocking_reasons = ["This field is already up to date."]
+        blocking_reason = human_blocking_reasons[0]
+    else:
+        blocking_reasons = _all_languages_update_blocking_reasons(
+            entry,
+            product_gid=product_gid,
+        )
+        human_blocking_reasons = [
+            _all_languages_blocking_reason_label_for_entry(reason, entry)
+            for reason in blocking_reasons
+        ]
+        if blocking_reasons:
+            status = "blocked"
+            blocking_reason = human_blocking_reasons[0]
+        else:
+            status = "write_ready"
+            blocking_reason = ""
+            human_blocking_reasons = []
+    return {
+        "entry_id": entry.get("entry_id", ""),
+        "locale": entry.get("locale", ""),
+        "key": field_key,
+        "field_group": group_key,
+        "resource_id": entry.get("resource_id", ""),
+        "digest": entry.get("digest", ""),
+        "source_value": entry.get("source_value", ""),
+        "previous_translation_value": existing_value,
+        "previous_translation_existed": bool(existing_value.strip()),
+        "previous_translation_outdated": entry.get("existing_translation_outdated"),
+        "proposed_translation_value": proposed_value,
+        "manual_edit_used": bool(entry.get("using_manual_edit")),
+        "manual_edit_value": entry.get("manual_edit_value", ""),
+        "openai_original_proposed_translation": entry.get(
+            "openai_original_proposed_translation",
+            "",
+        ),
+        "status": status,
+        "blocking_reason": blocking_reason,
+        "blocking_reasons": blocking_reasons,
+        "human_blocking_reasons": human_blocking_reasons,
+        "readback_value": "",
+        "readback_matched": False,
+        "rollback_needed": False,
+        "restore_candidate": existing_value,
+        "context_label": entry.get("context_label", ""),
+        "validation_status": entry.get("validation_status", ""),
+        "seo_validation_status": entry.get("seo_validation_status", ""),
+        "seo_warning": entry.get("seo_warning", ""),
+        "source_status": entry.get("status", ""),
+        "draft_blocked": bool(entry.get("draft_blocked")),
+        "product_identity_mismatch": bool(entry.get("product_identity_mismatch")),
+    }
+
+
+def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
+    reasons = []
+    field_key = str(entry.get("key") or "").strip()
+    group_key = str(entry.get("field_group") or "").strip()
+    locale = _safe_write_canonical_locale(entry.get("locale"))
+    resource_id = str(entry.get("resource_id") or "").strip()
+    digest = str(entry.get("digest") or "").strip()
+    source_value = str(entry.get("source_value") or "").strip()
+    proposed_value = str(entry.get("proposed_translation_value") or "").strip()
+
+    if group_key in ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS:
+        reasons.append("blocked_future_write_needs_resource_mapping")
+    if group_key in SAFE_WRITE_TECHNICAL_GROUPS:
+        reasons.append("blocked_not_customer_write_safe")
+    if not product_gid or (resource_id and resource_id != product_gid):
+        reasons.append("blocked_product_gid_mismatch")
+    if locale not in LOCKED_EXECUTION_SUPPORTED_LOCALES:
+        reasons.append("blocked_target_locale_unsupported")
+    if _all_languages_entry_needs_review(entry):
+        reasons.append("blocked_needs_review_status")
+    if not source_value:
+        reasons.append("blocked_source_empty")
+    if not proposed_value:
+        reasons.append("blocked_proposed_translation_empty")
+    if proposed_value and source_value and locale != "en" and proposed_value == source_value:
+        reasons.append("blocked_proposed_translation_equals_source")
+    if not resource_id:
+        reasons.append("blocked_resource_id_missing")
+    if not field_key:
+        reasons.append("blocked_key_missing")
+    if not digest:
+        reasons.append("blocked_digest_missing")
+    if field_key == "body_html":
+        reasons.append("blocked_body_html_auto_update_disabled")
+    elif field_key not in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET:
+        reasons.append("blocked_field_not_allowed_for_all_languages_update")
+    if group_key not in SAFE_WRITE_READINESS_GROUP_SET:
+        reasons.append("blocked_scope_group_not_allowed")
+    if field_key == "title" and len(proposed_value) > 80:
+        reasons.append("blocked_product_title_over_80_chars")
+    if field_key == "meta_title" and len(proposed_value) > 60:
+        reasons.append("blocked_seo_title_over_60_chars")
+    if field_key == "meta_description" and len(proposed_value) > 160:
+        reasons.append("blocked_seo_description_over_160_chars")
+    if _locked_execution_forbidden_phrase_matches(proposed_value):
+        reasons.append("blocked_forbidden_phrase_detected")
+    if "forbidden" in _safe_write_issue_text(entry):
+        reasons.append("blocked_forbidden_phrase_detected")
+    if entry.get("product_identity_mismatch"):
+        reasons.append("blocked_identity_review_required")
+    if field_key == "body_html":
+        reasons.extend(_all_languages_body_html_blocking_reasons(entry))
+    return _unique_strings(reasons)
+
+
+def _all_languages_entry_needs_review(entry: dict):
+    if entry.get("draft_blocked") or entry.get("product_identity_mismatch"):
+        return True
+    validation_status = str(entry.get("validation_status") or "").strip()
+    if validation_status and validation_status != "draft_ready_for_manual_review":
+        return True
+    seo_validation_status = str(entry.get("seo_validation_status") or "").strip()
+    if seo_validation_status and seo_validation_status != "seo_ready":
+        return True
+    status_text = " ".join(
+        str(entry.get(key) or "")
+        for key in ("status", "blocking_reasons", "seo_warning")
+    ).lower()
+    return "needs_review" in status_text or "needs review" in status_text
+
+
+def _all_languages_body_html_blocking_reasons(entry: dict):
+    reasons = []
+    source_html = str(entry.get("source_value") or "")
+    proposed_html = str(entry.get("proposed_translation_value") or "")
+    issue_text = _safe_write_issue_text(entry)
+    if "body_html_structure_broken" in issue_text:
+        reasons.append("blocked_body_html_structure_broken")
+    if "html_media_or_link_tag_broken" in issue_text:
+        reasons.append("blocked_html_media_or_link_tag_broken")
+    html_notes = _all_languages_html_structure_notes(source_html, proposed_html)
+    if "body_html_structure_broken" in html_notes:
+        reasons.append("blocked_body_html_structure_broken")
+    if "html_media_or_link_tag_broken" in html_notes:
+        reasons.append("blocked_html_media_or_link_tag_broken")
+    return _unique_strings(reasons)
+
+
+def _all_languages_html_structure_notes(source_html: str, proposed_html: str):
+    source_snapshot = _AllLanguagesHtmlSnapshot.from_html(source_html)
+    if not source_snapshot.tag_counts:
+        return []
+    proposed_snapshot = _AllLanguagesHtmlSnapshot.from_html(proposed_html)
+    notes = []
+    if not proposed_snapshot.tag_counts:
+        return ["body_html_structure_broken"]
+    for tag, source_count in source_snapshot.tag_counts.items():
+        if proposed_snapshot.tag_counts.get(tag, 0) < source_count:
+            notes.append("body_html_structure_broken")
+            break
+    for tag in ALL_LANGUAGES_BODY_HTML_LINK_MEDIA_TAGS:
+        if proposed_snapshot.tag_counts.get(tag, 0) < source_snapshot.tag_counts.get(tag, 0):
+            notes.append("html_media_or_link_tag_broken")
+            break
+    for tag, attr_name, attr_value in source_snapshot.link_media_attrs:
+        if attr_value and (tag, attr_name, attr_value) not in proposed_snapshot.link_media_attrs:
+            notes.append("html_media_or_link_tag_broken")
+            break
+    return _unique_strings(notes)
+
+
+class _AllLanguagesHtmlSnapshot(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tag_counts = {}
+        self.link_media_attrs = []
+
+    @classmethod
+    def from_html(cls, value: str):
+        parser = cls()
+        try:
+            parser.feed(str(value or ""))
+            parser.close()
+        except Exception:
+            parser.tag_counts = {}
+            parser.link_media_attrs = []
+        return parser
+
+    def handle_starttag(self, tag, attrs):
+        self._record_tag(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._record_tag(tag, attrs)
+
+    def _record_tag(self, tag, attrs):
+        tag = str(tag or "").lower()
+        self.tag_counts[tag] = self.tag_counts.get(tag, 0) + 1
+        if tag not in ALL_LANGUAGES_BODY_HTML_LINK_MEDIA_TAGS:
+            return
+        attrs_dict = {str(key).lower(): str(value or "") for key, value in attrs or []}
+        for attr_name in ("href", "src"):
+            if attrs_dict.get(attr_name):
+                self.link_media_attrs.append((tag, attr_name, attrs_dict[attr_name]))
+
+
+def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | None = None):
+    entry = entry or {}
+    field_key = str(entry.get("key") or "").strip()
+    group_key = str(entry.get("field_group") or "").strip()
+    if reason in {
+        "blocked_future_write_needs_resource_mapping",
+        "blocked_scope_group_not_allowed",
+        "blocked_field_not_allowed_for_all_languages_update",
+    }:
+        if field_key == "body_html":
+            return "Product description is not enabled for automatic Shopify update yet."
+        if group_key == "options":
+            return "Options need extra Shopify mapping before update."
+        if group_key == "variants":
+            return "Variants need extra Shopify mapping before update."
+        if group_key in {"important_metafields", "metafields", "technical_metafields"}:
+            return "Metafields need extra Shopify mapping before update."
+        if group_key in {"media", "media_alt_text"}:
+            return "Media alt text needs extra Shopify mapping before update."
+    if (
+        field_key in SAFE_WRITE_READINESS_FIELD_SET
+        and reason
+        in {"blocked_resource_id_missing", "blocked_key_missing", "blocked_digest_missing"}
+    ):
+        return "Re-run translation for this product to create Shopify update-ready data."
+    return _all_languages_blocking_reason_label(reason)
+
+
+def _all_languages_blocking_reason_label(reason: str):
+    if reason == "blocked_future_write_needs_resource_mapping":
+        return "Missing Shopify write mapping."
+    labels = {
+        "blocked_background_draft_report_not_completed_or_partial": "Latest translation report is not completed or partial.",
+        "blocked_body_html_auto_update_disabled": "Product description is not enabled for automatic Shopify update yet.",
+        "blocked_body_html_structure_broken": "Product description HTML structure needs review.",
+        "blocked_digest_missing": "Missing Shopify write mapping.",
+        "blocked_existing_current_translation": "This field is already up to date.",
+        "blocked_field_not_allowed_for_all_languages_update": "Missing Shopify write mapping.",
+        "blocked_forbidden_phrase_detected": "Forbidden phrase found.",
+        "blocked_html_media_or_link_tag_broken": "HTML links, images, video, or iframe tags need review.",
+        "blocked_identity_review_required": "Product identity check failed.",
+        "blocked_key_missing": "Missing Shopify write mapping.",
+        "blocked_missing_background_draft_report": "No completed translation report was found for this product.",
+        "blocked_missing_selected_product": "Select one product before updating Shopify.",
+        "blocked_needs_review_status": "This translation needs review before Shopify update.",
+        "blocked_no_write_ready_candidates": "No title or SEO fields are ready to update.",
+        "blocked_not_customer_write_safe": "This row is not enabled for Shopify update.",
+        "blocked_product_gid_mismatch": "This row belongs to another product and cannot be updated.",
+        "blocked_proposed_translation_empty": "Translation is empty.",
+        "blocked_proposed_translation_equals_source": "Translation matches the source text.",
+        "blocked_resource_id_missing": "Missing Shopify write mapping.",
+        "blocked_scope_group_not_allowed": "Missing Shopify write mapping.",
+        "blocked_selected_product_report_mismatch": "Latest report belongs to another product.",
+        "blocked_target_locale_unsupported": "This language is not supported.",
+        "blocked_product_title_over_80_chars": "Translation is too long.",
+        "blocked_seo_title_over_60_chars": "Translation is too long.",
+        "blocked_seo_description_over_160_chars": "Translation is too long.",
+        "blocked_shopify_installation_missing": "Shopify installation is missing.",
+        "blocked_shopify_installation_incomplete": "Shopify installation is incomplete.",
+        "blocked_source_empty": "Original source is empty.",
+        "existing_translation_current_same_value": "This field is already up to date.",
+        "readback_mismatch": "Shopify confirmation check did not match.",
+        "translations_register_failed": "Shopify returned an update error.",
+    }
+    return labels.get(reason, reason)
+
+
+def _all_languages_state_blocking_conditions(
+    *,
+    report: dict,
+    product_gid: str,
+    report_product_gid: str,
+):
+    conditions = []
+    if not (report.get("exists") or report.get("job_id")):
+        conditions.append("blocked_missing_background_draft_report")
+    if report.get("status") not in SAFE_WRITE_READINESS_READY_JOB_STATUSES:
+        conditions.append("blocked_background_draft_report_not_completed_or_partial")
+    if not product_gid:
+        conditions.append("blocked_missing_selected_product")
+    if report_product_gid and product_gid and report_product_gid != product_gid:
+        conditions.append("blocked_selected_product_report_mismatch")
+    return _unique_strings(conditions)
+
+
+def _all_languages_apply_global_blockers(entries: list[dict], blockers: list[str]):
+    blocker = _unique_strings(blockers)[0] if blockers else ""
+    if not blocker:
+        return
+    for entry in entries or []:
+        if entry.get("status") != "write_ready":
+            continue
+        entry["status"] = "blocked"
+        entry["blocking_reasons"] = _unique_strings(
+            list(entry.get("blocking_reasons") or []) + [blocker]
+        )
+        entry["human_blocking_reasons"] = [
+            _all_languages_blocking_reason_label_for_entry(reason, entry)
+            for reason in entry.get("blocking_reasons") or []
+        ]
+        entry["blocking_reason"] = (
+            entry["human_blocking_reasons"][0]
+            if entry["human_blocking_reasons"]
+            else _all_languages_blocking_reason_label(blocker)
+        )
+
+
+def _all_languages_request_blocking_conditions(*, write_ready_entries: list[dict], installation):
+    conditions = []
+    if not write_ready_entries:
+        conditions.append("blocked_no_write_ready_candidates")
+    if installation is None:
+        conditions.append("blocked_shopify_installation_missing")
+    elif not getattr(installation, "shop", "") or not getattr(
+        installation,
+        "access_token",
+        "",
+    ):
+        conditions.append("blocked_shopify_installation_incomplete")
+    return _unique_strings(conditions)
+
+
+def _all_languages_entry_status_count(entries: list[dict], *statuses: str):
+    status_set = set(statuses)
+    return sum(1 for entry in entries or [] if entry.get("status") in status_set)
+
+
+def _all_languages_per_locale_summary(entries: list[dict], report: dict | None = None):
+    report = report or {}
+    locale_statuses = {
+        _safe_write_canonical_locale(row.get("locale")): row
+        for row in (report.get("per_locale_status") or [])
+        if isinstance(row, dict)
+    }
+    summary = []
+    for locale in ALL_LANGUAGES_SUPPORTED_LOCALES:
+        locale_entries = [entry for entry in entries or [] if entry.get("locale") == locale]
+        locale_status = locale_statuses.get(locale) or {}
+        row = {
+            "locale": locale,
+            "candidate_count": len(locale_entries),
+            "write_ready_count": _all_languages_entry_status_count(
+                locale_entries,
+                "write_ready",
+            ),
+            "updated_count": _all_languages_entry_status_count(
+                locale_entries,
+                "written_verified",
+                "readback_mismatch",
+            ),
+            "verified_count": _all_languages_entry_status_count(
+                locale_entries,
+                "written_verified",
+            ),
+            "skipped_count": _all_languages_entry_status_count(
+                locale_entries,
+                "skipped",
+            ),
+            "blocked_count": _all_languages_entry_status_count(
+                locale_entries,
+                "blocked",
+            ),
+            "failed_count": _all_languages_entry_status_count(
+                locale_entries,
+                "write_failed",
+                "readback_mismatch",
+            ),
+            "report_locale_status": locale_status.get("status", ""),
+            "blocking_reasons": _all_languages_reason_counts(locale_entries),
+        }
+        if not locale_entries:
+            row["blocking_reasons"].append(
+                {"reason": "blocked_no_report_rows_for_locale", "count": 1}
+            )
+        elif (
+            locale_status
+            and locale_status.get("status") not in {"completed", "partial", "skipped"}
+            and not row["write_ready_count"]
+        ):
+            row["blocking_reasons"].append(
+                {"reason": "blocked_locale_report_not_complete", "count": 1}
+            )
+        summary.append(row)
+    return summary
+
+
+def _all_languages_per_field_summary(entries: list[dict]):
+    field_order = list(ALL_LANGUAGES_AUTO_WRITE_FIELDS) + [
+        "options",
+        "variants",
+        "metafields",
+        "media_alt_text",
+        "technical_fields",
+    ]
+    grouped = {}
+    for entry in entries or []:
+        key = entry.get("key") or entry.get("field_group") or "unknown"
+        if entry.get("field_group") in ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS:
+            key = entry.get("field_group")
+        grouped.setdefault(key, []).append(entry)
+    fields = list(dict.fromkeys(field_order + sorted(grouped)))
+    return [
+        {
+            "field": field,
+            "candidate_count": len(grouped.get(field) or []),
+            "write_ready_count": _all_languages_entry_status_count(
+                grouped.get(field) or [],
+                "write_ready",
+            ),
+            "updated_count": _all_languages_entry_status_count(
+                grouped.get(field) or [],
+                "written_verified",
+                "readback_mismatch",
+            ),
+            "verified_count": _all_languages_entry_status_count(
+                grouped.get(field) or [],
+                "written_verified",
+            ),
+            "skipped_count": _all_languages_entry_status_count(
+                grouped.get(field) or [],
+                "skipped",
+            ),
+            "blocked_count": _all_languages_entry_status_count(
+                grouped.get(field) or [],
+                "blocked",
+            ),
+            "failed_count": _all_languages_entry_status_count(
+                grouped.get(field) or [],
+                "write_failed",
+                "readback_mismatch",
+            ),
+        }
+        for field in fields
+        if grouped.get(field)
+    ]
+
+
+def _all_languages_reason_counts(entries: list[dict]):
+    counts = {}
+    for entry in entries or []:
+        for reason in entry.get("blocking_reasons") or []:
+            if not reason:
+                continue
+            counts[reason] = counts.get(reason, 0) + 1
+    return [
+        {"reason": reason, "count": count}
+        for reason, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _all_languages_attach_plain_language(payload: dict):
+    entries = payload.get("entries") or []
+    for entry in entries:
+        _all_languages_refresh_entry_human_reasons(entry)
+    payload["status_label"] = _all_languages_status_label(payload)
+    payload["result_message"] = _all_languages_result_message(payload)
+    payload["shopify_update_label"] = (
+        "Shopify was updated"
+        if payload.get("shopify_write_performed")
+        else "Shopify was not updated"
+    )
+    payload["shopify_confirmation_check_label"] = (
+        "Confirmation check was run"
+        if payload.get("readback_performed")
+        else "Confirmation check was not run"
+    )
+    payload["restore_needed_label"] = (
+        "Restore may be needed"
+        if payload.get("rollback_needed")
+        else "Restore is not needed"
+    )
+    payload["blocked_reason_summary"] = _all_languages_blocked_reason_summary(
+        entries,
+        payload.get("blocking_conditions") or [],
+    )
+    safe_diagnostics, safe_summary = _all_languages_safe_field_diagnostics(entries)
+    payload["safe_field_diagnostics"] = safe_diagnostics
+    payload["safe_field_diagnostic_summary"] = safe_summary
+    return payload
+
+
+def _all_languages_status_label(payload: dict):
+    status = str(payload.get("status") or "")
+    return ALL_LANGUAGES_STATUS_LABELS.get(status, _all_languages_blocking_reason_label(status))
+
+
+def _all_languages_result_message(payload: dict):
+    if payload.get("status") == "all_languages_shopify_update_not_submitted":
+        return "No Shopify update has been run yet."
+    if not payload.get("report_exists"):
+        return "No Shopify update has been run yet."
+    updated_count = int(payload.get("updated_count") or 0)
+    verified_count = int(payload.get("verified_count") or 0)
+    failed_count = int(payload.get("failed_count") or 0)
+    blocked_count = int(payload.get("blocked_count") or 0)
+    if updated_count > 0 and verified_count == updated_count and failed_count == 0:
+        return "Shopify updated successfully. All updated fields were confirmed."
+    if updated_count > 0 and (failed_count > 0 or verified_count != updated_count):
+        return "Shopify was partly updated. Some fields need review."
+    if updated_count == 0 and blocked_count > 0:
+        return "No translations were updated. The system did not find any safe fields to update."
+    return "No Shopify update has been run yet."
+
+
+def _all_languages_refresh_entry_human_reasons(entry: dict):
+    reasons = list(entry.get("blocking_reasons") or [])
+    status = entry.get("status")
+    if status == "skipped" and not reasons:
+        reasons = ["existing_translation_current_same_value"]
+    elif status == "write_failed" and not reasons:
+        reasons = ["translations_register_failed"]
+    elif status == "readback_mismatch" and not reasons:
+        reasons = ["readback_mismatch"]
+    labels = [
+        _all_languages_blocking_reason_label_for_entry(reason, entry)
+        for reason in reasons
+        if reason
+    ]
+    if not labels and entry.get("blocking_reason"):
+        labels = [str(entry.get("blocking_reason"))]
+    entry["human_blocking_reasons"] = _unique_strings(labels)
+    if entry.get("status") in {"blocked", "skipped", "write_failed", "readback_mismatch"}:
+        entry["blocking_reason"] = (
+            entry["human_blocking_reasons"][0]
+            if entry["human_blocking_reasons"]
+            else entry.get("blocking_reason", "")
+        )
+
+
+def _all_languages_blocked_reason_summary(entries: list[dict], blocking_conditions: list[str]):
+    counts = {}
+    raw_reasons = {}
+    for entry in entries or []:
+        if entry.get("status") not in {"blocked", "skipped"}:
+            continue
+        labels = entry.get("human_blocking_reasons") or []
+        if not labels and entry.get("blocking_reason"):
+            labels = [entry.get("blocking_reason")]
+        if not labels:
+            continue
+        label = str(labels[0])
+        counts[label] = counts.get(label, 0) + 1
+        raw_reasons.setdefault(label, [])
+        raw_reasons[label].extend(entry.get("blocking_reasons") or [])
+    if not counts:
+        for condition in blocking_conditions or []:
+            label = _all_languages_blocking_reason_label(condition)
+            counts[label] = counts.get(label, 0) + 1
+            raw_reasons.setdefault(label, []).append(condition)
+    return [
+        {
+            "label": label,
+            "count": count,
+            "raw_reasons": _unique_strings(raw_reasons.get(label) or []),
+        }
+        for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _all_languages_safe_field_diagnostics(entries: list[dict]):
+    diagnostics = []
+    safe_entries = [
+        entry for entry in entries or [] if entry.get("key") in SAFE_WRITE_READINESS_FIELD_SET
+    ]
+    for field in SAFE_WRITE_READINESS_FIELDS:
+        field_entries = [entry for entry in safe_entries if entry.get("key") == field]
+        reason_summary = _all_languages_safe_field_reason_summary(field_entries)
+        diagnostics.append(
+            {
+                "field": field,
+                "label": ALL_LANGUAGES_SAFE_FIELD_LABELS.get(field, field),
+                "candidates_found": len(field_entries),
+                "ready_count": _all_languages_entry_status_count(
+                    field_entries,
+                    "write_ready",
+                ),
+                "blocked_count": _all_languages_entry_status_count(
+                    field_entries,
+                    "blocked",
+                ),
+                "already_up_to_date_count": _all_languages_entry_status_count(
+                    field_entries,
+                    "skipped",
+                ),
+                "top_block_reason": (
+                    reason_summary[0]["label"] if reason_summary else "No blocked fields."
+                ),
+                "reason_summary_text": _all_languages_reason_summary_text(
+                    reason_summary,
+                    empty="No blocked fields.",
+                ),
+                "reason_summary": reason_summary,
+            }
+        )
+    safe_blocked_reason_summary = _all_languages_safe_field_reason_summary(safe_entries)
+    ready_count = _all_languages_entry_status_count(safe_entries, "write_ready")
+    blocked_count = _all_languages_entry_status_count(safe_entries, "blocked")
+    already_up_to_date_count = _all_languages_entry_status_count(safe_entries, "skipped")
+    if safe_blocked_reason_summary:
+        top_reason = safe_blocked_reason_summary[0]["label"]
+    elif not safe_entries:
+        top_reason = "No product title or SEO fields were found in this report."
+    elif already_up_to_date_count and not ready_count and not blocked_count:
+        top_reason = "All safe fields are already up to date."
+    else:
+        top_reason = "No blocked safe fields."
+    summary = {
+        "product_title_candidates_found": next(
+            item["candidates_found"] for item in diagnostics if item["field"] == "title"
+        ),
+        "seo_title_candidates_found": next(
+            item["candidates_found"] for item in diagnostics if item["field"] == "meta_title"
+        ),
+        "seo_description_candidates_found": next(
+            item["candidates_found"]
+            for item in diagnostics
+            if item["field"] == "meta_description"
+        ),
+        "safe_fields_ready": ready_count,
+        "safe_fields_blocked": blocked_count,
+        "safe_fields_already_up_to_date": already_up_to_date_count,
+        "top_block_reason_for_safe_fields": top_reason,
+    }
+    return diagnostics, summary
+
+
+def _all_languages_reason_summary_text(reason_summary: list[dict], *, empty: str):
+    if not reason_summary:
+        return empty
+    return "; ".join(
+        f"{item.get('label', '')} ({item.get('count', 0)})"
+        for item in reason_summary
+        if item.get("label")
+    )
+
+
+def _all_languages_safe_field_reason_summary(entries: list[dict]):
+    counts = {}
+    raw_reasons = {}
+    for entry in entries or []:
+        if entry.get("status") != "blocked":
+            continue
+        labels = entry.get("human_blocking_reasons") or []
+        if not labels and entry.get("blocking_reason"):
+            labels = [entry.get("blocking_reason")]
+        for label in labels:
+            counts[label] = counts.get(label, 0) + 1
+            raw_reasons.setdefault(label, [])
+            raw_reasons[label].extend(entry.get("blocking_reasons") or [])
+    return [
+        {
+            "label": label,
+            "count": count,
+            "raw_reasons": _unique_strings(raw_reasons.get(label) or []),
+        }
+        for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def _safe_write_issue_text(entry: dict):
     return " ".join(
         str(entry.get(key) or "").lower()
@@ -2494,6 +3542,60 @@ def _finalize_selected_translations_payload(
     return payload
 
 
+def _finalize_all_languages_update_payload(
+    payload: dict,
+    background_report: dict,
+    json_path: Path,
+    html_path: Path,
+    write_reports: bool,
+):
+    payload["blocking_conditions"] = _unique_strings(
+        payload.get("blocking_conditions") or []
+    )
+    payload["sanitized_errors"] = _real_write_unique_errors(
+        payload.get("sanitized_errors") or []
+    )
+    entries = payload.get("entries") or []
+    payload["candidate_count"] = len(entries)
+    payload["write_ready_count"] = _all_languages_entry_status_count(
+        entries,
+        "write_ready",
+    )
+    payload["updated_count"] = _all_languages_entry_status_count(
+        entries,
+        "written_verified",
+        "readback_mismatch",
+    )
+    payload["verified_count"] = _all_languages_entry_status_count(
+        entries,
+        "written_verified",
+    )
+    payload["skipped_count"] = _all_languages_entry_status_count(entries, "skipped")
+    payload["blocked_count"] = _all_languages_entry_status_count(entries, "blocked")
+    payload["failed_count"] = _all_languages_entry_status_count(
+        entries,
+        "write_failed",
+        "readback_mismatch",
+    )
+    payload["per_locale_summary"] = _all_languages_per_locale_summary(
+        entries,
+        background_report,
+    )
+    payload["per_field_summary"] = _all_languages_per_field_summary(entries)
+    payload["rollback_needed"] = bool(
+        payload.get("rollback_needed")
+        or any(bool(entry.get("rollback_needed")) for entry in entries)
+    )
+    mutation_called = bool(payload.get("mutation_called"))
+    payload["shopify_read_only"] = not mutation_called
+    payload["no_new_shopify_writes_performed"] = not mutation_called
+    payload["all_new_actions_no_write_confirmed"] = not mutation_called
+    _all_languages_attach_plain_language(payload)
+    if write_reports:
+        _write_all_languages_update_reports(payload, json_path, html_path)
+    return payload
+
+
 def _real_write_report_paths(product_gid: str, locale: str, generated_at: str):
     product_token = _safe_write_product_token(product_gid)
     locale_token = _safe_write_filename_token(locale or "locale")
@@ -2520,6 +3622,16 @@ def _selected_translations_report_paths(
     )
 
 
+def _all_languages_update_report_paths(product_gid: str, generated_at: str):
+    product_token = _safe_write_product_token(product_gid)
+    stamp = _safe_write_timestamp_token(generated_at)
+    base = f"translation_all_languages_update_{product_token}_{stamp}"
+    return (
+        REAL_WRITE_REPORT_DIR / f"{base}.json",
+        REAL_WRITE_REPORT_DIR / f"{base}.html",
+    )
+
+
 def _write_real_write_reports(payload: dict, json_path: Path, html_path: Path):
     json_path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
@@ -2534,6 +3646,14 @@ def _write_selected_translations_reports(payload: dict, json_path: Path, html_pa
     json.loads(text)
     json_path.write_text(text, encoding="utf-8")
     html_path.write_text(_render_selected_translations_html(payload), encoding="utf-8")
+
+
+def _write_all_languages_update_reports(payload: dict, json_path: Path, html_path: Path):
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
+    json.loads(text)
+    json_path.write_text(text, encoding="utf-8")
+    html_path.write_text(_render_all_languages_update_html(payload), encoding="utf-8")
 
 
 def _render_real_write_html(payload: dict):
@@ -2644,6 +3764,112 @@ def _render_selected_translations_html(payload: dict):
 </body>
 </html>
 """
+
+
+def _render_all_languages_update_html(payload: dict):
+    summary_rows = "\n".join(
+        _row(label, payload.get(key))
+        for label, key in [
+            ("Action Name", "action_name"),
+            ("Status", "status"),
+            ("Product GID", "product_gid"),
+            ("Product Title", "product_title"),
+            ("Locales", "locales"),
+            ("Candidate Count", "candidate_count"),
+            ("Write Ready Count", "write_ready_count"),
+            ("Updated Count", "updated_count"),
+            ("Verified Count", "verified_count"),
+            ("Skipped Count", "skipped_count"),
+            ("Blocked Count", "blocked_count"),
+            ("Failed Count", "failed_count"),
+            ("Mutation Called", "mutation_called"),
+            ("translationsRegister Called", "translations_register_called"),
+            ("Shopify Write Performed", "shopify_write_performed"),
+            ("Readback Performed", "readback_performed"),
+            ("Rollback Needed", "rollback_needed"),
+            ("Blocking Conditions", "blocking_conditions"),
+            ("JSON Report Path", "json_report_path"),
+            ("HTML Report Path", "html_report_path"),
+        ]
+    )
+    entry_rows = "\n".join(
+        _all_languages_update_entry_row(entry)
+        for entry in payload.get("entries", [])
+    ) or "<tr><td colspan='9'>No entries</td></tr>"
+    locale_rows = "\n".join(
+        _all_languages_summary_row(item, "locale")
+        for item in payload.get("per_locale_summary", [])
+    ) or "<tr><td colspan='8'>No locale summary</td></tr>"
+    field_rows = "\n".join(
+        _all_languages_summary_row(item, "field")
+        for item in payload.get("per_field_summary", [])
+    ) or "<tr><td colspan='8'>No field summary</td></tr>"
+    error_rows = "\n".join(
+        _real_write_error_row(error)
+        for error in payload.get("sanitized_errors", [])
+    ) or "<tr><td colspan='3'>No sanitized errors recorded</td></tr>"
+    return f"""<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>All Languages Shopify Translation Update Audit</title></head>
+<body>
+  <h1>All Languages Shopify Translation Update Audit</h1>
+  <p><strong>No automatic rollback is performed. Restore candidates are included for manual rollback planning if needed.</strong></p>
+  <h2>Summary</h2>
+  <table border="1" cellspacing="0" cellpadding="6"><tbody>{summary_rows}</tbody></table>
+  <h2>Per Locale Summary</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Locale</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Failed</th></tr></thead>
+    <tbody>{locale_rows}</tbody>
+  </table>
+  <h2>Per Field Summary</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Field</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Failed</th></tr></thead>
+    <tbody>{field_rows}</tbody>
+  </table>
+  <h2>Entries</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Locale</th><th>Key</th><th>Resource ID</th><th>Digest</th><th>Manual edit</th><th>Status</th><th>Blocking reason</th><th>Readback matched</th><th>Rollback needed</th></tr></thead>
+    <tbody>{entry_rows}</tbody>
+  </table>
+  <h2>Sanitized Errors</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Stage</th><th>Type</th><th>Message</th></tr></thead>
+    <tbody>{error_rows}</tbody>
+  </table>
+</body>
+</html>
+"""
+
+
+def _all_languages_update_entry_row(entry):
+    return (
+        "<tr>"
+        f"<td>{escape(str(entry.get('locale', '')))}</td>"
+        f"<td>{escape(str(entry.get('key', '')))}</td>"
+        f"<td>{escape(str(entry.get('resource_id', '')))}</td>"
+        f"<td>{escape(str(entry.get('digest', '')))}</td>"
+        f"<td>{escape(str(entry.get('manual_edit_used', '')))}</td>"
+        f"<td>{escape(str(entry.get('status', '')))}</td>"
+        f"<td>{escape(str(entry.get('blocking_reason', '')))}</td>"
+        f"<td>{escape(str(entry.get('readback_matched', '')))}</td>"
+        f"<td>{escape(str(entry.get('rollback_needed', '')))}</td>"
+        "</tr>"
+    )
+
+
+def _all_languages_summary_row(item, key_name):
+    return (
+        "<tr>"
+        f"<td>{escape(str(item.get(key_name, '')))}</td>"
+        f"<td>{escape(str(item.get('candidate_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('write_ready_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('updated_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('verified_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('skipped_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('blocked_count', 0)))}</td>"
+        f"<td>{escape(str(item.get('failed_count', 0)))}</td>"
+        "</tr>"
+    )
 
 
 def _selected_translations_entry_row(entry):

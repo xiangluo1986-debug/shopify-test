@@ -2375,29 +2375,25 @@ def translation_console(request):
             selected_product_gid=translation_job_product_id,
         )
         if all_languages_update_result.get("blocking_conditions"):
+            reason_summary = all_languages_update_result.get("blocked_reason_summary") or []
+            first_reason = (
+                reason_summary[0].get("label", "")
+                if reason_summary and isinstance(reason_summary[0], dict)
+                else ""
+            )
             all_languages_update_error_message = (
-                "All-language Shopify translation update blocked: "
-                + ", ".join(all_languages_update_result.get("blocking_conditions") or [])
+                all_languages_update_result.get("result_message")
+                or first_reason
+                or "No translations were updated."
             )
         all_languages_update_state = all_languages_update_result
         update_status = all_languages_update_result.get("status", "")
-        if (
-            update_status
+        update_message = all_languages_update_result.get("result_message") or (
+            "Shopify updated successfully. All updated fields were confirmed."
+            if update_status
             == "all_languages_shopify_translations_written_and_verified"
-        ):
-            update_message = (
-                "Shopify updated. Safe translations for all eligible languages were written and verified."
-            )
-        elif update_status == "all_languages_shopify_translations_write_partial":
-            update_message = (
-                "Shopify was updated, but one or more translations failed readback verification."
-            )
-        elif update_status == "all_languages_shopify_translations_write_failed":
-            update_message = (
-                "All-language Shopify translation update failed. No automatic rollback was run."
-            )
-        else:
-            update_message = "No safe translations were written."
+            else "No translations were updated. The system did not find any safe fields to update."
+        )
         mutation_called = all_languages_update_result.get("mutation_called", False)
         safe_action_result = _translation_console_safe_action_result(
             action=post_action,
@@ -2420,6 +2416,20 @@ def translation_console(request):
                 "skipped_count": all_languages_update_result.get("skipped_count", 0),
                 "blocked_count": all_languages_update_result.get("blocked_count", 0),
                 "failed_count": all_languages_update_result.get("failed_count", 0),
+                "status_label": all_languages_update_result.get("status_label", ""),
+                "result_message": all_languages_update_result.get("result_message", ""),
+                "shopify_update_label": all_languages_update_result.get(
+                    "shopify_update_label",
+                    "",
+                ),
+                "safe_field_diagnostic_summary": all_languages_update_result.get(
+                    "safe_field_diagnostic_summary",
+                    {},
+                ),
+                "blocked_reason_summary": all_languages_update_result.get(
+                    "blocked_reason_summary",
+                    [],
+                ),
                 "mutation_called": all_languages_update_result.get(
                     "mutation_called",
                     False,
