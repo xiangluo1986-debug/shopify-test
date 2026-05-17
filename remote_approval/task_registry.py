@@ -24,6 +24,9 @@ from remote_approval.tasks.shopify_review_request_customer_history_precision_aud
 from remote_approval.tasks.shopify_review_request_review_send_failure_audit_task import (
     run_shopify_review_request_review_send_failure_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_dynamic_review_send_audit_task import (
+    run_shopify_review_request_dynamic_review_send_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_review_send_reuse_gmail_helper_audit_task import (
     run_shopify_review_request_review_send_reuse_gmail_helper_audit_task,
 )
@@ -389,6 +392,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_review_send_failure_audit": (
         run_shopify_review_request_review_send_failure_audit_task
     ),
+    "shopify_review_request_dynamic_review_send_audit": (
+        run_shopify_review_request_dynamic_review_send_audit_task
+    ),
     "shopify_review_request_review_send_reuse_gmail_helper_audit": (
         run_shopify_review_request_review_send_reuse_gmail_helper_audit_task
     ),
@@ -743,6 +749,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local report audit only",
         "review_file_path": "logs/shopify_review_request_review_send_failure_audit.json",
+    },
+    "shopify_review_request_dynamic_review_send_audit": {
+        "description": "Audit latest-customer filtering and dynamic Review & Send Gmail readiness without Gmail or Shopify calls.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local report audit only, no Gmail/Shopify/API calls",
+        "review_file_path": "logs/shopify_review_request_dynamic_review_send_audit.json",
     },
     "shopify_review_request_review_send_reuse_gmail_helper_audit": {
         "description": "Audit whether the proven #22621 Gmail drafts.send helper can be reused by admin Review & Send without Gmail or Shopify calls.",

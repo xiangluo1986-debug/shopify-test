@@ -244,6 +244,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("review_send_failure_audit_status", "report_status", "status"),
     },
     {
+        "key": "dynamic_review_send_audit",
+        "label": "Dynamic Review & Send audit",
+        "filename": "shopify_review_request_dynamic_review_send_audit.json",
+        "channel": "trustpilot",
+        "event_type": "send_execute",
+        "status_keys": ("dynamic_review_send_audit_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_tag_write_design_dry_run",
         "label": "Trustpilot Shopify tag write design dry-run",
         "filename": "shopify_review_request_trustpilot_tag_write_design_dry_run.json",

@@ -523,6 +523,20 @@ If the selected order is not eligible, no Gmail call occurs. Shopify tag writes
 remain disabled until a later post-send audit and separate approved tag-write
 phase.
 
+Phase 5.28L adds latest-customer queue filtering and a dynamic admin
+`Review & Send` Gmail helper. The send path is still staff POST + CSRF only,
+server-revalidates the selected row, requires the row to be the latest eligible
+order for that precise customer identity, requires repeat-customer and risk
+checks to pass, and sends at most one Trustpilot email through Gmail
+`drafts.create` plus `drafts.send`. Shopify tag writes remain disabled.
+
+`shopify_review_request_dynamic_review_send_audit` is the no-send audit task
+for Phase 5.28L. It reports latest-filter before/after counts, hidden older
+eligible rows, the `#22530`/`#22562` decision, dynamic helper readiness,
+`#21075` readiness, visible Review & Send count, and latest-only queue status.
+It does not call Gmail, create drafts, send email, call Shopify, write tags,
+call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 
 `shopify_review_request_trustpilot_gmail_draft_only_preflight` is a Phase

@@ -1,6 +1,10 @@
+import base64
+import hashlib
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from html import escape
 from pathlib import Path
 from urllib.parse import urlencode
@@ -93,9 +97,11 @@ TRUSTPILOT_AUTO_REFRESH_HTML_FILENAME = "shopify_review_request_trustpilot_auto_
 REVIEW_AND_SEND_REPORT_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.json"
 REVIEW_AND_SEND_HTML_FILENAME = "shopify_review_request_trustpilot_review_and_send_execute.html"
 TRUSTPILOT_EMAIL_SUBJECT = "How was your Kidstoylover order?"
+TRUSTPILOT_REVIEW_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 PHASE_22621_DRAFTS_SEND_HELPER_MODULE = (
     "remote_approval.tasks.shopify_review_request_trustpilot_gmail_one_draft_send_execute_task"
 )
+DYNAMIC_REVIEW_SEND_HELPER_MODULE = "backend.shopify_sync.review_request_workbench"
 REVIEW_SEND_REUSE_GMAIL_HELPER_AUDIT_TASK_NAME = (
     "shopify_review_request_review_send_reuse_gmail_helper_audit"
 )
@@ -114,6 +120,7 @@ REVIEW_QUEUE_SORT_ORDER = (
     "no_duplicate_risk",
     "order_number_descending",
 )
+OLDER_ELIGIBLE_ORDER_REASON = "A newer eligible order exists for this customer."
 LAST_60_DAY_SCAN_TASK_NAME = "shopify_review_request_last_60_days_candidate_scan"
 REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
     "orders_review_request_3",
@@ -476,6 +483,12 @@ REPORT_DEFINITIONS = (
         ("review_send_failure_audit_status", "report_status", "status"),
     ),
     (
+        "dynamic_review_send_audit",
+        "Dynamic Review & Send audit",
+        "shopify_review_request_dynamic_review_send_audit.json",
+        ("dynamic_review_send_audit_status", "report_status", "status"),
+    ),
+    (
         "trustpilot_gmail_draft_package",
         "Trustpilot Gmail draft package",
         "shopify_review_request_trustpilot_gmail_draft_package.json",
@@ -832,10 +845,11 @@ def build_review_request_workbench_context(params=None):
     }
 
 
-def review_request_review_and_send(order_identifier, admin_username="", params=None):
+def review_request_review_and_send(order_identifier, admin_username="", params=None, request_context=None):
     state = _build_review_send_state(params)
     selected_order = _safe_text(order_identifier, max_length=80)
-    result = _base_review_and_send_result(selected_order, admin_username, state)
+    request_context = request_context or {}
+    result = _base_review_and_send_result(selected_order, admin_username, state, request_context)
     selected_rows = _review_send_selected_rows(state["approval_queue"], selected_order)
     matches = [
         row
@@ -879,12 +893,25 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
     result["selected_merged_group_prior_trustpilot_sent"] = (
         candidate.get("group_prior_trustpilot_sent") is True
     )
+    result["selected_order_latest_for_customer"] = candidate.get("selected_order_latest_for_customer") is True
+    result["selected_latest_eligible_order_for_customer"] = _safe_text(
+        candidate.get("latest_eligible_order_for_customer") or candidate.get("order"),
+        max_length=80,
+    )
+    result["selected_masked_email"] = candidate.get("masked_customer_label") or candidate.get("customer")
     result["gmail_scope_status"] = state["gmail_setup"]["scope_status"]
     result["gmail_compose_send_supported"] = bool(
         state["gmail_setup"]["gmail_compose_send_supported"]
     )
     result["template_status"] = "approved_trustpilot_template"
     result["template_subject"] = TRUSTPILOT_EMAIL_SUBJECT
+
+    route_blockers = _runtime_review_send_route_blockers(result, candidate)
+    if route_blockers:
+        result["execution_status"] = route_blockers[0]["status"]
+        result["blocking_detail"] = route_blockers[0]["detail"]
+        result["blocking_conditions"].extend(route_blockers)
+        return _finalize_review_and_send_result(result)
 
     group_blockers = _runtime_review_send_group_blockers(candidate)
     if group_blockers:
@@ -900,20 +927,22 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
         result["blocking_conditions"].extend(runtime_blockers)
         return _finalize_review_and_send_result(result)
 
-    helper_blocker = _previous_gmail_helper_reuse_blocker()
-    result["execution_status"] = helper_blocker["status"]
-    result["blocking_status"] = helper_blocker["status"]
-    result["blocking_detail"] = helper_blocker["detail"]
-    result["blocking_conditions"].append(
-        {
-            "status": helper_blocker["status"],
-            "detail": result["blocking_detail"],
-        }
-    )
-    result["next_admin_action"] = (
-        "Run the helper reuse audit, then implement a reviewed dynamic draft-create plus "
-        "drafts.send integration before retrying Review & Send."
-    )
+    send_result = _send_dynamic_trustpilot_gmail(candidate)
+    result.update(send_result)
+    result["execution_status"] = send_result["execution_status"]
+    if send_result.get("email_sent") is True:
+        result["success"] = True
+        result["exact_user_message"] = "Trustpilot email sent. Shopify tag has not been written yet."
+        result["next_admin_action"] = "Run post-send audit before writing Shopify tag."
+    else:
+        result["blocking_status"] = send_result["execution_status"]
+        result["blocking_detail"] = send_result.get("gmail_error_sanitized") or "No email was sent. Gmail send failed."
+        result["blocking_conditions"].append(
+            {
+                "status": send_result["execution_status"],
+                "detail": result["blocking_detail"],
+            }
+        )
     return _finalize_review_and_send_result(result)
 
 
@@ -4786,6 +4815,12 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "order_22562_diagnosis": scan["order_22562_diagnosis"],
         "scanned_order_count": scan["scanned_order_count"],
         "delivered_order_count": scan["delivered_order_count"],
+        "eligible_candidate_count_before_latest_filter": scan["eligible_candidate_count_before_latest_filter"],
+        "eligible_candidate_count_after_latest_filter": scan["eligible_candidate_count_after_latest_filter"],
+        "hidden_older_eligible_count": scan["hidden_older_eligible_count"],
+        "hidden_older_eligible_summary": scan["hidden_older_eligible_summary"],
+        "latest_candidate_per_customer_count": scan["latest_candidate_per_customer_count"],
+        "focus_22530_22562_latest_decision": scan["focus_22530_22562_latest_decision"],
         "eligible_candidate_count": scan["eligible_candidate_count"],
         "eligible_candidate_count_total": scan["eligible_candidate_count_total"],
         "already_sent_count": scan["already_sent_count"],
@@ -5231,6 +5266,113 @@ def build_review_request_review_send_failure_audit_report(params=None):
     }
 
 
+def build_review_request_dynamic_review_send_audit_report(params=None):
+    state = _build_review_send_state(params)
+    scan = state["last_60_days_scan"]
+    queue = state["approval_queue"]
+    gmail_setup = state["gmail_setup"]
+    row_21075, section_21075 = _find_scan_order_row(
+        {
+            "eligible_queue_rows": scan.get("eligible_queue_rows") or [],
+            "blocked_queue_rows": scan.get("blocked_queue_rows") or [],
+            "already_sent_queue_rows": scan.get("already_sent_queue_rows") or [],
+        },
+        "#21075",
+    )
+    diagnosis_21075 = _review_send_readiness_diagnosis(
+        "#21075",
+        row_21075 or {},
+        gmail_setup,
+        candidate_found=bool(row_21075),
+        candidate_currently_eligible=section_21075 == "eligible",
+        route_revalidation_blocker="" if section_21075 == "eligible" else section_21075,
+    )
+    visible_rows = queue.get("needs_review_rows") or []
+    latest_only_failures = [
+        _safe_text(row.get("order"), max_length=80)
+        for row in visible_rows
+        if row.get("action_state") == "review_send"
+        and row.get("selected_order_latest_for_customer") is not True
+    ]
+    dynamic_helper_ready = bool(
+        gmail_setup.get("helper_supports_dynamic_order") is True
+        and gmail_setup.get("can_be_called_from_admin_post") is True
+        and gmail_setup.get("admin_drafts_send_helper_supported") is True
+        and gmail_setup.get("drafts_send_path_available") is True
+    )
+    visible_review_send_count = sum(1 for row in visible_rows if row.get("action_state") == "review_send")
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "report_generated_at": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_dynamic_review_send_audit",
+        "task_name": "shopify_review_request_dynamic_review_send_audit",
+        "phase": "5.28L",
+        "mode": "dry-run-local-dynamic-review-send-audit",
+        "dynamic_review_send_audit_status": "dynamic_review_send_audit_ready",
+        "report_status": "dynamic_review_send_audit_ready",
+        "success": True,
+        "eligible_candidate_count_before_latest_filter": scan.get(
+            "eligible_candidate_count_before_latest_filter", scan.get("eligible_candidate_count", 0)
+        ),
+        "eligible_candidate_count_after_latest_filter": scan.get(
+            "eligible_candidate_count_after_latest_filter", scan.get("eligible_candidate_count", 0)
+        ),
+        "eligible_candidate_count_total": scan.get("eligible_candidate_count_total", 0),
+        "hidden_older_eligible_count": scan.get("hidden_older_eligible_count", 0),
+        "hidden_older_eligible_summary": scan.get("hidden_older_eligible_summary") or [],
+        "latest_candidate_per_customer_count": scan.get("latest_candidate_per_customer_count", 0),
+        "focus_22530_22562_latest_decision": scan.get("focus_22530_22562_latest_decision") or {},
+        "dynamic_gmail_helper_ready": dynamic_helper_ready,
+        "helper_supports_dynamic_order": gmail_setup.get("helper_supports_dynamic_order") is True,
+        "can_be_called_from_admin_post": gmail_setup.get("can_be_called_from_admin_post") is True,
+        "drafts_send_path_available": gmail_setup.get("drafts_send_path_available") is True,
+        "gmail_scope_status": gmail_setup.get("scope_status") or "scope_missing",
+        "gmail_compose_send_supported": gmail_setup.get("gmail_compose_send_supported") is True,
+        "order_21075_current_send_readiness": {
+            "candidate_found": bool(row_21075),
+            "candidate_section": section_21075,
+            "candidate_currently_eligible": section_21075 == "eligible",
+            "selected_order_latest_for_customer": (row_21075 or {}).get("selected_order_latest_for_customer") is True,
+            "blocked_reason": diagnosis_21075.get("blocked_reason", ""),
+            "exact_user_message": diagnosis_21075.get("exact_user_message", ""),
+            "gmail_scope_status": diagnosis_21075.get("gmail_scope_status", ""),
+        },
+        "current_visible_review_send_count": visible_review_send_count,
+        "latest_only_queue_check": {
+            "passed": not latest_only_failures,
+            "non_latest_visible_review_send_orders": latest_only_failures,
+        },
+        "review_queue_visible_count": queue.get("review_queue_visible_count", 0),
+        "review_queue_page": queue.get("review_queue_page", 1),
+        "review_queue_page_size": queue.get("review_queue_page_size", DEFAULT_LIMIT),
+        "no_gmail_call_during_audit": True,
+        "gmail_api_call_performed": False,
+        "gmail_drafts_create_called": False,
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "email_sent": False,
+        "sent_count": 0,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "shopify_tag_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "translations_register_called": False,
+        "raw_customer_email_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+        "detected_issue_summary": (
+            "Dynamic Review & Send audit completed without Gmail, Shopify, external review API, "
+            "or translationsRegister calls. The visible send queue is latest-customer only."
+        ),
+    }
+
+
 def _candidate_22562_alias_audit_from_scan(scan):
     row, section = _find_scan_order_row(scan, "#22562")
     if not row:
@@ -5546,6 +5688,18 @@ def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT
         "email_sent_count": scan.get("already_sent_count", 0),
         "merged_group_count": scan.get("blocked_merged_group_count", 0),
         "merged_groups": merged_groups,
+        "eligible_candidate_count_before_latest_filter": _int_or_zero(
+            scan.get("eligible_candidate_count_before_latest_filter") or eligible_total
+        ),
+        "eligible_candidate_count_after_latest_filter": _int_or_zero(
+            scan.get("eligible_candidate_count_after_latest_filter") or eligible_total
+        ),
+        "hidden_older_eligible_count": _int_or_zero(scan.get("hidden_older_eligible_count")),
+        "hidden_older_eligible_summary": scan.get("hidden_older_eligible_summary") or [],
+        "latest_candidate_per_customer_count": _int_or_zero(
+            scan.get("latest_candidate_per_customer_count") or eligible_total
+        ),
+        "focus_22530_22562_latest_decision": scan.get("focus_22530_22562_latest_decision") or {},
         "eligible_candidate_count_total": eligible_total,
         "review_queue_batch_size": pagination["page_size"],
         "review_queue_page_size": pagination["page_size"],
@@ -5573,6 +5727,13 @@ def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT
             "scanned_order_count": scan.get("scanned_order_count", 0),
             "delivered_order_count": scan.get("delivered_order_count", 0),
             "eligible_candidate_count": eligible_total,
+            "eligible_candidate_count_before_latest_filter": _int_or_zero(
+                scan.get("eligible_candidate_count_before_latest_filter") or eligible_total
+            ),
+            "eligible_candidate_count_after_latest_filter": _int_or_zero(
+                scan.get("eligible_candidate_count_after_latest_filter") or eligible_total
+            ),
+            "hidden_older_eligible_count": _int_or_zero(scan.get("hidden_older_eligible_count")),
             "blocked_count": scan.get("blocked_count", 0),
             "already_sent_count": scan.get("already_sent_count", 0),
             "window_days": scan.get("window_days", LAST_60_DAY_SCAN_WINDOW_DAYS),
@@ -5692,6 +5853,11 @@ def _last_60_days_candidate_scan(
     blocked_rows = [
         row for row in queue_rows if row.get("action_state") != "review_send"
     ]
+    eligible_candidate_count_before_latest_filter = len(eligible_rows)
+    eligible_rows, hidden_older_eligible_rows, latest_filter_summary = (
+        _apply_latest_eligible_customer_filter(eligible_rows)
+    )
+    blocked_rows.extend(hidden_older_eligible_rows)
     eligible_rows, review_queue_rows = _apply_review_queue_selection(eligible_rows)
     blocked_rows.sort(key=_blocked_queue_sort_key)
     already_sent_rows.sort(key=_already_sent_sort_key)
@@ -5741,6 +5907,16 @@ def _last_60_days_candidate_scan(
         "local_db_error_sanitized": local_db_error,
         "scanned_order_count": len(scan_contexts),
         "delivered_order_count": delivered_count,
+        "eligible_candidate_count_before_latest_filter": eligible_candidate_count_before_latest_filter,
+        "eligible_candidate_count_after_latest_filter": latest_filter_summary[
+            "eligible_candidate_count_after_latest_filter"
+        ],
+        "hidden_older_eligible_count": latest_filter_summary["hidden_older_eligible_count"],
+        "hidden_older_eligible_summary": latest_filter_summary["hidden_older_eligible_summary"],
+        "latest_candidate_per_customer_count": latest_filter_summary["latest_candidate_per_customer_count"],
+        "focus_22530_22562_latest_decision": latest_filter_summary[
+            "focus_22530_22562_latest_decision"
+        ],
         "eligible_candidate_count": eligible_candidate_count_total,
         "eligible_candidate_count_total": eligible_candidate_count_total,
         "already_sent_count": len(already_sent_rows),
@@ -6194,6 +6370,7 @@ def _scan_context_from_local_order(order, source_row, cutoff):
     canonical_tag_present = _scan_canonical_review_request_tag_present(tag_source_row)
     matched_review_request_tags = _matched_review_request_tags(tags)
     note_risk = _note_risk_detection(order)
+    identity = _customer_identity_summary(order)
     local_context = {
         "order_name": order_name,
         "matched_order_name": order_name,
@@ -6202,6 +6379,9 @@ def _scan_context_from_local_order(order, source_row, cutoff):
         "shopify_order_id": _safe_text(order.get("shopify_order_id"), max_length=120),
         "customer_display_name": _safe_customer_display_name(order.get("customer_name")),
         "masked_email": mask_email(_safe_runtime_email(order.get("customer_email"))),
+        "customer_identity_key": identity["customer_identity_key"],
+        "customer_identity_source": identity["customer_identity_source"],
+        "customer_identity_confidence": identity["customer_identity_confidence"],
         "financial_status": _safe_text(order.get("financial_status"), max_length=80),
         "fulfillment_status": _safe_text(order.get("fulfillment_status"), max_length=80),
         "fulfillment_status_raw": _safe_text(order.get("fulfillment_status_raw"), max_length=120),
@@ -6555,6 +6735,21 @@ def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
             ),
             "customer_order_count": _int_or_zero(local_context.get("customer_order_count"))
             or _int_or_zero(row.get("customer_order_count")),
+            "customer_identity_key": (
+                _safe_text(scan_context.get("customer_identity_key"), max_length=120)
+                or _safe_text(local_context.get("customer_identity_key"), max_length=120)
+                or _safe_text(row.get("customer_identity_key"), max_length=120)
+            ),
+            "customer_identity_source": (
+                _safe_text(scan_context.get("customer_identity_source"), max_length=80)
+                or _safe_text(local_context.get("customer_identity_source"), max_length=80)
+                or _safe_text(row.get("customer_identity_source"), max_length=80)
+            ),
+            "customer_identity_confidence": (
+                _safe_text(scan_context.get("customer_identity_confidence"), max_length=80)
+                or _safe_text(local_context.get("customer_identity_confidence"), max_length=80)
+                or _safe_text(row.get("customer_identity_confidence"), max_length=80)
+            ),
             "local_order_id": scan_context.get("local_order_id", ""),
             "matched_order_name": scan_context.get("matched_order_name") or order_name,
             "order_number": scan_context.get("order_number", ""),
@@ -6673,6 +6868,131 @@ def _apply_review_queue_selection(eligible_rows, batch_size=REVIEW_QUEUE_BATCH_S
     return rows, visible_rows
 
 
+def _apply_latest_eligible_customer_filter(eligible_rows):
+    rows = list(_dedupe_queue_rows(eligible_rows))
+    groups = {}
+    ungrouped_rows = []
+    for row in rows:
+        customer_key = _review_queue_customer_key(row)
+        if not customer_key:
+            row["selected_order_latest_for_customer"] = True
+            row["latest_eligible_order_for_customer"] = row.get("order", "")
+            ungrouped_rows.append(row)
+            continue
+        groups.setdefault(customer_key, []).append(row)
+
+    kept_rows = list(ungrouped_rows)
+    hidden_rows = []
+    hidden_summary = []
+    focus_rows = {}
+    for group_rows in groups.values():
+        sorted_group = sorted(group_rows, key=_latest_eligible_candidate_sort_key, reverse=True)
+        latest_row = sorted_group[0]
+        latest_order = _safe_text(latest_row.get("order"), max_length=80)
+        latest_row["selected_order_latest_for_customer"] = True
+        latest_row["latest_eligible_order_for_customer"] = latest_order
+        kept_rows.append(latest_row)
+        for older_row in sorted_group[1:]:
+            hidden_row = _older_eligible_blocked_row(older_row, latest_order)
+            hidden_rows.append(hidden_row)
+            hidden_summary.append(_hidden_older_eligible_summary(hidden_row, latest_order))
+        for row in group_rows:
+            order_name = _safe_text(row.get("order"), max_length=80)
+            if order_name in {"#22530", "#22562"}:
+                focus_rows[order_name] = row
+
+    latest_candidate_per_customer_count = len(groups) + len(ungrouped_rows)
+    summary = {
+        "eligible_candidate_count_before_latest_filter": len(rows),
+        "eligible_candidate_count_after_latest_filter": len(kept_rows),
+        "hidden_older_eligible_count": len(hidden_rows),
+        "hidden_older_eligible_summary": hidden_summary,
+        "latest_candidate_per_customer_count": latest_candidate_per_customer_count,
+        "focus_22530_22562_latest_decision": _focus_latest_candidate_decision(focus_rows),
+    }
+    return kept_rows, hidden_rows, summary
+
+
+def _latest_eligible_candidate_sort_key(row):
+    return (
+        _order_number_value(row.get("order") or row.get("order_number")),
+        _review_queue_date_value(row),
+        _safe_text(row.get("order"), max_length=80),
+    )
+
+
+def _older_eligible_blocked_row(row, latest_order):
+    blocked = dict(row or {})
+    reason = f"A newer eligible order exists for this customer: {latest_order}."
+    blocked.update(
+        {
+            "status": "Not ready",
+            "status_class": "rrw-badge-warn",
+            "reason": reason,
+            "evidence": reason,
+            "eligibility_reason_plain": reason,
+            "action_state": "not_ready",
+            "action_status": "Not ready",
+            "candidate_status": "blocked",
+            "block_reason": reason,
+            "visible_in_review_batch": False,
+            "hidden_reason": "newer_eligible_order_exists_for_customer",
+            "selected_order_latest_for_customer": False,
+            "latest_eligible_order_for_customer": latest_order,
+            "blocked_by_latest_customer_filter": True,
+        }
+    )
+    return blocked
+
+
+def _hidden_older_eligible_summary(row, latest_order):
+    return {
+        "order": _safe_text(row.get("order"), max_length=80),
+        "kept_latest_order": _safe_text(latest_order, max_length=80),
+        "reason": _safe_text(row.get("eligibility_reason_plain"), max_length=240),
+        "customer_history_source": _safe_text(row.get("customer_history_source"), max_length=80),
+        "customer_history_confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
+    }
+
+
+def _focus_latest_candidate_decision(focus_rows):
+    row_22530 = focus_rows.get("#22530") or {}
+    row_22562 = focus_rows.get("#22562") or {}
+    if not row_22530 and not row_22562:
+        return {
+            "orders_present": False,
+            "orders_same_customer": False,
+            "kept_order": "",
+            "hidden_order": "",
+            "reason": "Focus orders were not both eligible in the current latest-customer filter input.",
+        }
+    key_22530 = _review_queue_customer_key(row_22530)
+    key_22562 = _review_queue_customer_key(row_22562)
+    same_customer = bool(key_22530 and key_22562 and key_22530 == key_22562)
+    kept = ""
+    hidden = ""
+    reason = ""
+    if same_customer:
+        candidates = sorted(
+            [row for row in (row_22530, row_22562) if row],
+            key=_latest_eligible_candidate_sort_key,
+            reverse=True,
+        )
+        kept = _safe_text(candidates[0].get("order"), max_length=80)
+        hidden = _safe_text(candidates[1].get("order"), max_length=80) if len(candidates) > 1 else ""
+        if hidden:
+            reason = f"A newer eligible order exists for this customer: {kept}."
+    else:
+        reason = "Focus orders are not confirmed as the same eligible customer by the precision identity rules."
+    return {
+        "orders_present": bool(row_22530 and row_22562),
+        "orders_same_customer": same_customer,
+        "kept_order": kept,
+        "hidden_order": hidden,
+        "reason": reason,
+    }
+
+
 def _review_queue_sort_key(row):
     return (
         -_review_queue_date_value(row),
@@ -6776,12 +7096,13 @@ def _review_queue_display_context_available(row):
 
 
 def _review_queue_customer_key(row):
+    identity_key = _safe_text(row.get("customer_identity_key"), max_length=120)
+    identity_confidence = _safe_text(row.get("customer_identity_confidence"), max_length=80)
+    if identity_key and identity_confidence in {"high", "medium"}:
+        return identity_key
     masked = _safe_text(row.get("masked_customer_label"), max_length=120)
-    if _usable_masked_customer(masked):
-        return masked.lower()
-    customer = _safe_text(row.get("customer_display_name"), max_length=120)
-    if customer and customer != "Masked in reports":
-        return re.sub(r"\s+", " ", customer).strip().lower()
+    if _usable_masked_customer(masked) and row.get("customer_history_confirmed") is True:
+        return _hash_customer_identity("masked_email", masked.lower())
     return ""
 
 
@@ -8150,12 +8471,16 @@ def _local_order_contexts(order_names):
     for order in selected_orders:
         email = _safe_runtime_email(order.get("customer_email"))
         history = _customer_history_for_order(order, history_orders_by_identity)
+        identity = _customer_identity_summary(order)
         tags = _shopify_tags_from_order(order)
         tag_data_loaded = _shopify_tags_loaded_from_order(order)
         note_risk = _note_risk_detection(order)
         context = {
             "customer_display_name": _safe_customer_display_name(order.get("customer_name")),
             "masked_email": mask_email(email),
+            "customer_identity_key": identity["customer_identity_key"],
+            "customer_identity_source": identity["customer_identity_source"],
+            "customer_identity_confidence": identity["customer_identity_confidence"],
             "customer_order_count": history["customer_history_order_count"],
             "customer_history_order_count": history["customer_history_order_count"],
             "customer_history_order_count_before_precision": history[
@@ -8249,6 +8574,30 @@ def _customer_history_orders_for_selected(selected_orders, value_fields):
             elif _order_matches_customer_history_name_identity(history_order, identity):
                 entry["weak"].append(history_order)
     return orders_by_identity
+
+
+def _customer_identity_summary(order):
+    identity = _customer_history_identity(order)
+    if identity.get("confidence") not in {"high", "medium"}:
+        return {
+            "customer_identity_key": "",
+            "customer_identity_source": identity.get("source") or "unavailable",
+            "customer_identity_confidence": identity.get("confidence") or "unknown",
+        }
+    return {
+        "customer_identity_key": _hash_customer_identity(identity.get("source"), identity.get("key")),
+        "customer_identity_source": identity.get("source") or "unavailable",
+        "customer_identity_confidence": identity.get("confidence") or "unknown",
+    }
+
+
+def _hash_customer_identity(source, value):
+    safe_source = re.sub(r"[^a-z0-9_:-]+", "_", str(source or "identity").strip().lower())
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    return f"{safe_source}:{digest}"
 
 
 def _customer_history_identity(order):
@@ -8660,6 +9009,23 @@ def _apply_queue_row_context(
         or _safe_text(source_row.get("customer_history_match_method"), max_length=80)
         or customer_history_source
     )
+    customer_identity_key = (
+        _safe_text(local_context.get("customer_identity_key"), max_length=120)
+        or _safe_text(source_row.get("customer_identity_key"), max_length=120)
+        or _safe_text(row.get("customer_identity_key"), max_length=120)
+    )
+    customer_identity_source = (
+        _safe_text(local_context.get("customer_identity_source"), max_length=80)
+        or _safe_text(source_row.get("customer_identity_source"), max_length=80)
+        or _safe_text(row.get("customer_identity_source"), max_length=80)
+        or customer_history_source
+    )
+    customer_identity_confidence = (
+        _safe_text(local_context.get("customer_identity_confidence"), max_length=80)
+        or _safe_text(source_row.get("customer_identity_confidence"), max_length=80)
+        or _safe_text(row.get("customer_identity_confidence"), max_length=80)
+        or customer_history_confidence
+    )
     customer_history_before_precision = (
         _int_or_zero(local_context.get("customer_history_order_count_before_precision"))
         or _int_or_zero(source_row.get("customer_history_order_count_before_precision"))
@@ -8756,6 +9122,9 @@ def _apply_queue_row_context(
             "customer_history_source": customer_history_source,
             "customer_history_confidence": customer_history_confidence,
             "customer_history_confirmed": history_confirmed,
+            "customer_identity_key": customer_identity_key,
+            "customer_identity_source": customer_identity_source,
+            "customer_identity_confidence": customer_identity_confidence,
             "customer_level_trustpilot_already_sent": bool(previous_trustpilot_order_names),
             "note_risk_detected": note_risk["note_risk_detected"],
             "note_risk_field": note_risk["note_risk_field"],
@@ -9130,6 +9499,43 @@ def _review_send_selection_blocker(selected_order, selected_rows):
     }
 
 
+def _runtime_review_send_route_blockers(result, candidate):
+    blockers = []
+    if result.get("admin_post_request_confirmed") is not True:
+        blockers.append(
+            {
+                "status": "blocked_admin_post_required",
+                "detail": "No email was sent. Review & Send must be submitted by admin POST.",
+            }
+        )
+    if result.get("staff_admin_route_confirmed") is not True:
+        blockers.append(
+            {
+                "status": "blocked_staff_admin_required",
+                "detail": "No email was sent. Review & Send is staff/admin only.",
+            }
+        )
+    if result.get("csrf_protection_enabled") is not True:
+        blockers.append(
+            {
+                "status": "blocked_csrf_protection_required",
+                "detail": "No email was sent. CSRF protection is required.",
+            }
+        )
+    if candidate.get("selected_order_latest_for_customer") is not True:
+        latest_order = _safe_text(candidate.get("latest_eligible_order_for_customer"), max_length=80)
+        detail = "No email was sent. This order is not the latest eligible order for this customer."
+        if latest_order:
+            detail = f"No email was sent. A newer eligible order exists for this customer: {latest_order}."
+        blockers.append(
+            {
+                "status": "blocked_newer_eligible_order_exists_for_customer",
+                "detail": detail,
+            }
+        )
+    return blockers
+
+
 def _runtime_review_send_group_blockers(candidate):
     if not candidate.get("merged_order_group"):
         return []
@@ -9161,15 +9567,16 @@ def _runtime_review_send_group_blockers(candidate):
     return blockers
 
 
-def _base_review_and_send_result(selected_order, admin_username, state):
+def _base_review_and_send_result(selected_order, admin_username, state, request_context=None):
     queue = state["approval_queue"]
     gmail_setup = state["gmail_setup"]
+    request_context = request_context or {}
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "report_generated_at": datetime.now(timezone.utc).isoformat(),
         "task": "shopify_review_request_trustpilot_review_and_send_execute",
         "task_name": "shopify_review_request_trustpilot_review_and_send_execute",
-        "phase": "5.28K",
+        "phase": "5.28L",
         "mode": "admin_review_and_send",
         "execution_status": "blocked_not_started",
         "success": False,
@@ -9180,16 +9587,33 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "selected_merged_group_eligible_for_review_send": False,
         "selected_merged_group_block_reasons": [],
         "selected_merged_group_prior_trustpilot_sent": False,
+        "selected_order_latest_for_customer": False,
+        "selected_latest_eligible_order_for_customer": "",
+        "selected_masked_email": "",
         "candidate_verified": False,
         "review_and_send_requested": True,
+        "request_method": _safe_text(request_context.get("method"), max_length=20),
+        "admin_post_request_confirmed": request_context.get("method") == "POST",
+        "staff_admin_route_confirmed": request_context.get("is_staff_admin") is True,
+        "csrf_protection_enabled": request_context.get("csrf_protection_enabled") is True,
         "admin_user": _safe_text(admin_username, max_length=120),
+        "eligible_candidate_count_before_latest_filter": queue.get(
+            "eligible_candidate_count_before_latest_filter", queue.get("eligible_candidate_count_total", 0)
+        ),
+        "eligible_candidate_count_after_latest_filter": queue.get(
+            "eligible_candidate_count_after_latest_filter", queue.get("eligible_candidate_count_total", 0)
+        ),
+        "hidden_older_eligible_count": queue.get("hidden_older_eligible_count", 0),
+        "hidden_older_eligible_summary": queue.get("hidden_older_eligible_summary", []),
+        "latest_candidate_per_customer_count": queue.get("latest_candidate_per_customer_count", 0),
+        "focus_22530_22562_latest_decision": queue.get("focus_22530_22562_latest_decision", {}),
         "needs_review_count": queue["needs_review_count"],
         "already_sent_count": queue["already_sent_count"],
         "ready_to_send_count": queue["ready_to_send_count"],
         "not_ready_count": queue["not_ready_count"],
         "gmail_scope_status": gmail_setup.get("scope_status") or "scope_missing",
         "gmail_compose_send_supported": bool(gmail_setup.get("gmail_compose_send_supported")),
-        "gmail_send_permission_ready": bool(gmail_setup.get("real_send_scope_available")),
+        "gmail_send_permission_ready": bool(gmail_setup.get("gmail_compose_send_supported")),
         "gmail_helper_ready": bool(gmail_setup.get("gmail_helper_ready")),
         "direct_send_supported_by_current_helper": bool(
             gmail_setup.get("admin_direct_send_helper_supported")
@@ -9219,6 +9643,7 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "post_send_audit_task_name": REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME,
         "gmail_api_call_performed": False,
         "gmail_draft_create_attempted": False,
+        "gmail_drafts_create_called": False,
         "gmail_draft_created": False,
         "gmail_draft_id_partial": "",
         "gmail_draft_send_attempted": False,
@@ -9228,6 +9653,7 @@ def _base_review_and_send_result(selected_order, admin_username, state):
         "gmail_message_id_partial": "",
         "email_sent": False,
         "sent_count": 0,
+        "one_send_limit_enforced": True,
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "shopify_tag_write_performed": False,
@@ -9315,9 +9741,9 @@ def _review_send_readiness_diagnosis(
         exact_user_message = gmail_blocker["detail"]
         recommended_fix = _review_send_gmail_recommended_fix(gmail_blocker["status"])
     else:
-        blocked_reason = "gmail helper not configured"
-        exact_user_message = "No email was sent. The Gmail send helper is not ready."
-        recommended_fix = "Enable a reviewed Gmail direct-send helper before allowing admin Review & Send to send real email."
+        blocked_reason = ""
+        exact_user_message = "Ready for admin Review & Send."
+        recommended_fix = "Admin may use Review & Send for this latest eligible candidate."
 
     return {
         "target_order": _canonical_order_name(target_order),
@@ -9334,7 +9760,7 @@ def _review_send_readiness_diagnosis(
         "gmail_scope_missing": (gmail_setup.get("scope_status") or "scope_missing") == "scope_missing",
         "gmail_scope_compose_only": (gmail_setup.get("scope_status") == "gmail_compose_only"),
         "gmail_scope_send_available": bool(gmail_setup.get("real_send_scope_available")),
-        "gmail_send_permission_ready": bool(gmail_setup.get("real_send_scope_available")),
+        "gmail_send_permission_ready": bool(gmail_setup.get("gmail_compose_send_supported")),
         "gmail_send_path_requires_gmail_send": False,
         "gmail_helper_ready": bool(gmail_setup.get("gmail_helper_ready")),
         "gmail_credentials_missing": not bool(gmail_setup.get("gmail_credentials_ready")),
@@ -9396,10 +9822,10 @@ def _apply_review_send_diagnosis(result, diagnosis):
 
 
 def _review_send_plain_blocked_reason(status):
-    if status == "blocked_previous_gmail_send_helper_not_reusable":
-        return "Previous Gmail helper not reusable"
-    if status == "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send":
-        return "Gmail scope compose-only"
+    if status == "blocked_gmail_drafts_send_helper_not_enabled":
+        return "Gmail drafts.send helper not configured"
+    if status == "blocked_missing_gmail_compose_scope":
+        return "Gmail compose permission missing"
     if status == "blocked_missing_gmail_send_scope":
         return "Gmail scope missing"
     if status == "blocked_gmail_credentials_missing":
@@ -9410,16 +9836,10 @@ def _review_send_plain_blocked_reason(status):
 
 
 def _review_send_gmail_recommended_fix(status):
-    if status == "blocked_previous_gmail_send_helper_not_reusable":
-        return (
-            "Run the helper reuse audit and extract a reviewed dynamic admin-safe draft-create "
-            "plus drafts.send integration before allowing Review & Send to send email."
-        )
-    if status == "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send":
-        return (
-            "Build a reviewed dynamic drafts.create plus drafts.send path before allowing "
-            "compose-only Review & Send."
-        )
+    if status == "blocked_gmail_drafts_send_helper_not_enabled":
+        return "Enable the reviewed dynamic drafts.create plus drafts.send helper before retrying."
+    if status == "blocked_missing_gmail_compose_scope":
+        return "Configure Gmail compose permission before retrying Review & Send."
     if status == "blocked_missing_gmail_send_scope":
         return "Configure Gmail send permission before retrying direct Review & Send."
     if status == "blocked_gmail_credentials_missing":
@@ -9431,32 +9851,30 @@ def _review_send_gmail_blocker(gmail_setup):
     if gmail_setup.get("can_be_called_from_admin_post") is not True:
         return _previous_gmail_helper_reuse_blocker(gmail_setup)
     scope_status = gmail_setup.get("scope_status") or "scope_missing"
-    compose_only = scope_status == "gmail_compose_only" or (
+    runtime_gmail_env = _dynamic_gmail_env()
+    compose_available = (
         gmail_setup.get("compose_scope_present") is True
-        and gmail_setup.get("real_send_scope_available") is not True
+        or gmail_setup.get("broad_mail_scope_present") is True
+        or runtime_gmail_env["compose_path_available"] is True
+        or scope_status in {"gmail_compose_only", "broad_mail_scope_available"}
     )
-    if compose_only:
+    if not compose_available:
         return {
-            "status": "blocked_gmail_scope_compose_only_direct_send_requires_gmail_send",
+            "status": "blocked_missing_gmail_compose_scope",
             "detail": (
-                "No email was sent. Gmail currently has draft permission only; "
-                "direct send requires gmail.send permission."
+                "No email was sent. Gmail compose permission is missing; "
+                "Review & Send uses drafts.create plus drafts.send."
             ),
         }
-    if gmail_setup.get("real_send_scope_available") is not True:
-        return {
-            "status": "blocked_missing_gmail_send_scope",
-            "detail": "No email was sent. Gmail send permission is missing; direct send requires gmail.send permission.",
-        }
-    if gmail_setup.get("gmail_credentials_ready") is not True:
+    if gmail_setup.get("gmail_credentials_ready") is not True and runtime_gmail_env["oauth_present"] is not True:
         return {
             "status": "blocked_gmail_credentials_missing",
             "detail": "No email was sent. Gmail credentials are missing.",
         }
-    if gmail_setup.get("admin_direct_send_helper_supported") is not True:
+    if gmail_setup.get("admin_drafts_send_helper_supported") is not True:
         return {
-            "status": "blocked_gmail_direct_send_helper_not_enabled",
-            "detail": "No email was sent. The Gmail send helper is not ready.",
+            "status": "blocked_gmail_drafts_send_helper_not_enabled",
+            "detail": "No email was sent. The dynamic Gmail drafts.send helper is not ready.",
         }
     return None
 
@@ -9472,6 +9890,7 @@ def _previous_gmail_helper_reuse_blocker(gmail_setup=None):
 
 def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
     blockers = []
+    tags = _dedupe_text(candidate.get("order_tags_display") or candidate.get("tags") or [])
     if not candidate.get("order") or candidate.get("action_state") != "review_send":
         blockers.append(
             {
@@ -9484,6 +9903,20 @@ def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
             {
                 "status": "blocked_simulator_candidate",
                 "detail": "No email was sent. Simulator candidates cannot send real email.",
+            }
+        )
+    if not (candidate.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags)):
+        blockers.append(
+            {
+                "status": "blocked_missing_delivered_tag",
+                "detail": "No email was sent. Delivered tag is missing.",
+            }
+        )
+    if not (candidate.get("review_request_tag_present") is True or has_review_request_tag(tags)):
+        blockers.append(
+            {
+                "status": "blocked_missing_review_request_tag",
+                "detail": "No email was sent. Review request tag alias is missing.",
             }
         )
     if candidate.get("customer_history_confirmed") is not True:
@@ -9520,10 +9953,227 @@ def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
                 "detail": f"No email was sent. {NOTE_RISK_REASON}.",
             }
         )
+    if _row_has_returned_package(candidate) or _row_has_risk_or_ticket(candidate):
+        blockers.append(
+            {
+                "status": "blocked_risk_or_ticket",
+                "detail": "No email was sent. Refund, return, cancel, dispute, chargeback, shipping, or ticket risk found.",
+            }
+        )
     gmail_blocker = _review_send_gmail_blocker(gmail_setup)
     if gmail_blocker:
         blockers.append(gmail_blocker)
     return blockers
+
+
+def _send_dynamic_trustpilot_gmail(candidate):
+    result = {
+        "execution_status": "blocked_gmail_send_not_started",
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_drafts_create_called": False,
+        "gmail_draft_created": False,
+        "gmail_draft_id_partial": "",
+        "gmail_draft_send_attempted": False,
+        "gmail_drafts_send_called": False,
+        "gmail_messages_send_called": False,
+        "gmail_send_performed": False,
+        "gmail_message_id_partial": "",
+        "email_sent": False,
+        "sent_count": 0,
+        "gmail_error_sanitized": "",
+        "gmail_scope_status": "scope_missing",
+        "one_send_limit_enforced": True,
+    }
+    recipient = _resolve_review_send_recipient(candidate)
+    if not recipient.get("email"):
+        result["execution_status"] = "blocked_missing_customer_email"
+        result["gmail_error_sanitized"] = "No email was sent. Customer email could not be resolved from the protected local order lookup."
+        return result
+
+    gmail_env = _dynamic_gmail_env()
+    result["gmail_scope_status"] = gmail_env["scope_status"]
+    if not gmail_env["oauth_present"]:
+        result["execution_status"] = "blocked_missing_gmail_oauth"
+        result["gmail_error_sanitized"] = "No email was sent. Gmail OAuth settings are missing."
+        return result
+    if not gmail_env["compose_path_available"]:
+        result["execution_status"] = "blocked_missing_gmail_compose_scope"
+        result["gmail_error_sanitized"] = "No email was sent. Gmail compose permission is missing."
+        return result
+
+    message = _build_trustpilot_email_message(
+        send_from=gmail_env["send_from"],
+        recipient_email=recipient["email"],
+        first_name=recipient["first_name"],
+    )
+    try:
+        result["gmail_api_call_performed"] = True
+        service = _build_dynamic_gmail_service(gmail_env)
+        result["gmail_draft_create_attempted"] = True
+        result["gmail_drafts_create_called"] = True
+        draft_response = (
+            service.users()
+            .drafts()
+            .create(userId="me", body={"message": {"raw": message["raw"]}})
+            .execute()
+        )
+        draft_id = _safe_text(draft_response.get("id"), max_length=200)
+        result["gmail_draft_id_partial"] = _partial_gmail_id(draft_id)
+        if not draft_id:
+            result["execution_status"] = "blocked_gmail_draft_create_failed"
+            result["gmail_error_sanitized"] = "No email was sent. Gmail draft creation did not return a draft id."
+            return result
+        result["gmail_draft_created"] = True
+        result["gmail_draft_send_attempted"] = True
+        result["gmail_drafts_send_called"] = True
+        send_response = (
+            service.users()
+            .drafts()
+            .send(userId="me", body={"id": draft_id})
+            .execute()
+        )
+        result["execution_status"] = "trustpilot_email_sent_shopify_tag_not_written"
+        result["gmail_send_performed"] = True
+        result["email_sent"] = True
+        result["sent_count"] = 1
+        result["gmail_message_id_partial"] = _partial_gmail_id(send_response.get("id", ""))
+        return result
+    except Exception as exc:  # pragma: no cover - real Gmail calls are not exercised in no-send validation.
+        result["execution_status"] = "blocked_gmail_draft_send_failed"
+        result["gmail_error_sanitized"] = _safe_exception_summary(exc)
+        result["gmail_send_performed"] = False
+        result["email_sent"] = False
+        result["sent_count"] = 0
+        return result
+
+
+def _resolve_review_send_recipient(candidate):
+    order_name = _canonical_order_name(candidate.get("order"))
+    if not order_name:
+        return {"email": "", "masked_email": "", "first_name": "there"}
+    query_names = set()
+    query_numbers = set()
+    query_shopify_ids = set()
+    _collect_order_lookup_values(order_name, "", query_names, query_numbers, query_shopify_ids)
+    query = Q()
+    if query_names:
+        query |= Q(order_name__in=query_names)
+    if query_numbers:
+        query |= Q(order_number__in=query_numbers)
+    if query_shopify_ids:
+        query |= Q(shopify_order_id__in=query_shopify_ids)
+    if not query:
+        return {"email": "", "masked_email": "", "first_name": "there"}
+    try:
+        order = (
+            ShopifyOrder.objects.filter(query)
+            .values("order_name", "order_number", "customer_name", "shipping_name", "customer_email")
+            .order_by("-updated_at", "-id")
+            .first()
+        )
+    except Exception:
+        return {"email": "", "masked_email": "", "first_name": "there"}
+    if not order:
+        return {"email": "", "masked_email": "", "first_name": "there"}
+    email = _safe_runtime_email(order.get("customer_email"))
+    return {
+        "email": email,
+        "masked_email": mask_email(email),
+        "first_name": _safe_first_name(order.get("customer_name") or order.get("shipping_name")),
+    }
+
+
+def _safe_first_name(value):
+    display = _safe_customer_display_name(value)
+    if not display:
+        return "there"
+    first = re.split(r"\s+", display.strip(), maxsplit=1)[0]
+    first = re.sub(r"[^A-Za-z0-9' -]", "", first).strip()
+    return first[:40] or "there"
+
+
+def _dynamic_gmail_env():
+    send_from = (os.environ.get("GMAIL_SEND_FROM") or GMAIL_SEND_FROM).strip()
+    client_id = (os.environ.get("GOOGLE_GMAIL_CLIENT_ID") or "").strip()
+    client_secret = (os.environ.get("GOOGLE_GMAIL_CLIENT_SECRET") or "").strip()
+    refresh_token = (os.environ.get("GOOGLE_GMAIL_REFRESH_TOKEN") or "").strip()
+    scopes = _split_runtime_scopes(os.environ.get("GOOGLE_GMAIL_SCOPES") or "")
+    compose_path_available = bool(
+        set(scopes)
+        & {
+            GMAIL_COMPOSE_SCOPE,
+            GMAIL_BROAD_SCOPE,
+        }
+    )
+    scope_status = _runtime_scope_status(
+        GMAIL_COMPOSE_SCOPE in scopes,
+        GMAIL_SEND_SCOPE in scopes,
+        GMAIL_BROAD_SCOPE in scopes,
+    )
+    return {
+        "send_from": send_from,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "refresh_token": refresh_token,
+        "scopes": scopes,
+        "compose_path_available": compose_path_available,
+        "scope_status": scope_status,
+        "oauth_present": bool(
+            send_from == GMAIL_SEND_FROM
+            and client_id
+            and client_secret
+            and refresh_token
+            and scopes
+        ),
+    }
+
+
+def _build_trustpilot_email_message(send_from, recipient_email, first_name):
+    body = (
+        f"Hi {first_name},\n\n"
+        "Thank you for your recent order with Kidstoylover.\n\n"
+        "If everything arrived safely, we would really appreciate it if you could share your experience on Trustpilot:\n\n"
+        f"{TRUSTPILOT_REVIEW_LINK}\n\n"
+        "Your feedback helps other customers and helps us improve our service.\n\n"
+        "Kind regards,\n"
+        "Kidstoylover\n"
+    )
+    email = EmailMessage()
+    email["To"] = recipient_email
+    email["From"] = send_from
+    email["Subject"] = TRUSTPILOT_EMAIL_SUBJECT
+    email.set_content(body)
+    return {
+        "raw": base64.urlsafe_b64encode(email.as_bytes()).decode("ascii"),
+        "subject": TRUSTPILOT_EMAIL_SUBJECT,
+    }
+
+
+def _build_dynamic_gmail_service(gmail_env):
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=gmail_env["refresh_token"],
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=gmail_env["client_id"],
+        client_secret=gmail_env["client_secret"],
+        scopes=gmail_env["scopes"],
+    )
+    credentials.refresh(Request())
+    return build("gmail", "v1", credentials=credentials, cache_discovery=False)
+
+
+def _partial_gmail_id(value):
+    text = _safe_text(value, max_length=200)
+    if not text:
+        return ""
+    if len(text) <= 10:
+        return "[present]"
+    return f"{text[:4]}...{text[-4:]}"
 
 
 def _split_runtime_scopes(value):
@@ -9549,6 +10199,7 @@ def _safe_runtime_email(value):
 
 def _safe_exception_summary(exc):
     text = str(exc or "")
+    text = EMAIL_RE.sub(lambda match: mask_email(match.group(0)), text)
     text = re.sub(r"(?i)(/drafts/)[A-Za-z0-9_-]{8,}", r"\1[redacted-gmail-draft-id]", text)
     text = re.sub(r"(?i)(/messages/)[A-Za-z0-9_-]{8,}", r"\1[redacted-gmail-message-id]", text)
     text = re.sub(
@@ -9619,6 +10270,7 @@ def _render_review_and_send_html(payload):
         for key in (
             "gmail_api_call_performed",
             "gmail_draft_create_attempted",
+            "gmail_drafts_create_called",
             "gmail_draft_send_attempted",
             "email_sent",
             "shopify_write_performed",
@@ -9658,6 +10310,7 @@ def _render_review_and_send_html(payload):
   <table><tbody>
     <tr><th>Selected order</th><td>{escape(payload.get("selected_order", ""))}</td></tr>
     <tr><th>Selected customer</th><td>{escape(payload.get("selected_customer", ""))}</td></tr>
+    <tr><th>Latest eligible order for customer</th><td>{escape(str(payload.get("selected_order_latest_for_customer") is True))}</td></tr>
     <tr><th>Candidate verified</th><td>{escape(str(payload.get("candidate_verified") is True))}</td></tr>
     <tr><th>Gmail scope status</th><td><code>{escape(payload.get("gmail_scope_status", ""))}</code></td></tr>
     <tr><th>Blocked reason</th><td>{escape(payload.get("blocked_reason", ""))}</td></tr>
@@ -9742,9 +10395,7 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         or scope_resolver.get("compose_scope_available") is True
         or env_loading_audit.get("os_environ_compose_scope_detected") is True
     )
-    gmail_compose_send_supported = (
-        compose_scope_present or real_send_scope_available or broad_mail_scope_present
-    )
+    gmail_compose_send_supported = compose_scope_present or broad_mail_scope_present
     new_config_ready = new_file_paths_ready and gmail_compose_send_supported
     legacy_config_ready = legacy_config_detected and gmail_compose_send_supported
     env_scope_ready = (
@@ -9759,17 +10410,14 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         max_length=120,
     )
     previous_helper_found = True
-    helper_supports_dynamic_order = False
-    helper_requires_remote_approval_runner = True
-    can_be_called_from_admin_post = False
+    helper_supports_dynamic_order = True
+    helper_requires_remote_approval_runner = False
+    can_be_called_from_admin_post = True
     drafts_send_path_available = True
-    blocker_if_not_reusable = (
-        "Previous #22621 drafts.send helper is fixed to #22621, a protected draft-source report, "
-        "and runner ACK variables; it cannot create or send for a dynamic admin-selected order."
-    )
+    blocker_if_not_reusable = ""
     recommended_integration_path = (
-        "Run `shopify_review_request_review_send_reuse_gmail_helper_audit`, then extract a reviewed "
-        "dynamic draft-create plus drafts.send helper for exactly one server-revalidated admin candidate."
+        "Use the dynamic admin-safe drafts.create plus drafts.send helper for exactly one "
+        "server-revalidated latest eligible candidate."
     )
     scope_status = _safe_text(scope_resolver.get("scope_resolver_status"), max_length=120)
     env_audit_status = _safe_text(env_loading_audit.get("env_loading_audit_status"), max_length=120)
@@ -9783,8 +10431,7 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
     elif env_audit_status == "gmail_compose_scope_available_in_runner_env":
         status_value = "Draft only"
         status_message = (
-            "Gmail draft permission is available, but the previous #22621 drafts.send helper is "
-            "not reusable from this admin action yet."
+            "Gmail draft permission is available. Review & Send uses drafts.create plus drafts.send."
         )
     elif env_audit_status == "gmail_send_scope_available_in_runner_env":
         status_value = "Ready"
@@ -9804,8 +10451,7 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
     elif compose_scope_present and not real_send_scope_available:
         status_value = "Draft only"
         status_message = (
-            "Gmail draft permission is available, but the previous #22621 drafts.send helper is "
-            "not reusable from this admin action yet."
+            "Gmail draft permission is available. Review & Send uses drafts.create plus drafts.send."
         )
     elif real_send_scope_available:
         status_value = "Ready"
@@ -9829,7 +10475,8 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
         "admin_drafts_send_helper_supported": can_be_called_from_admin_post,
         "locked_draft_send_helper_available": True,
         "previous_gmail_draft_send_helper_found": previous_helper_found,
-        "helper_module": PHASE_22621_DRAFTS_SEND_HELPER_MODULE,
+        "previous_helper_module": PHASE_22621_DRAFTS_SEND_HELPER_MODULE,
+        "helper_module": DYNAMIC_REVIEW_SEND_HELPER_MODULE,
         "helper_supports_dynamic_order": helper_supports_dynamic_order,
         "helper_requires_remote_approval_runner": helper_requires_remote_approval_runner,
         "can_be_called_from_admin_post": can_be_called_from_admin_post,
@@ -9900,8 +10547,8 @@ def _gmail_setup_summary(gmail_helper, compatibility_audit=None, scope_resolver=
                 ),
             },
             {
-                "label": "#22621 drafts.send helper",
-                "value": "Found, not admin-reusable",
+                "label": "Dynamic drafts.send helper",
+                "value": "Ready" if can_be_called_from_admin_post else "Not ready",
             },
         ],
     }

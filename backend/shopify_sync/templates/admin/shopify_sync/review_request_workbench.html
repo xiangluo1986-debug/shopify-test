@@ -494,6 +494,9 @@
             <div class="rrw-card">
                 <div class="rrw-card-title">Eligible total</div>
                 <div class="rrw-card-value">{{ dashboard.approval_queue.eligible_candidate_count_total }}</div>
+                <div class="rrw-card-note">
+                    Before latest-customer filter: {{ dashboard.approval_queue.eligible_candidate_count_before_latest_filter }}
+                </div>
             </div>
             <div class="rrw-card">
                 <div class="rrw-card-title">Showing now</div>
@@ -508,7 +511,20 @@
                 <div class="rrw-card-title">Blocked / not ready</div>
                 <div class="rrw-card-value">{{ dashboard.approval_queue.blocked_count }}</div>
             </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Older eligible hidden</div>
+                <div class="rrw-card-value">{{ dashboard.approval_queue.hidden_older_eligible_count }}</div>
+                <div class="rrw-card-note">Only the latest eligible order per customer is sendable.</div>
+            </div>
         </div>
+        {% if dashboard.approval_queue.focus_22530_22562_latest_decision.orders_present %}
+            <div class="rrw-note">
+                #22530 / #22562 latest decision:
+                kept {{ dashboard.approval_queue.focus_22530_22562_latest_decision.kept_order|default:"-" }};
+                hidden {{ dashboard.approval_queue.focus_22530_22562_latest_decision.hidden_order|default:"-" }}.
+                {{ dashboard.approval_queue.focus_22530_22562_latest_decision.reason }}
+            </div>
+        {% endif %}
         <div class="rrw-table-scroll">
         <table class="rrw-table rrw-table-compact rrw-review-table">
             <thead>

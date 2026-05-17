@@ -1,4 +1,5 @@
 import json
+import hashlib
 import re
 import sqlite3
 import subprocess
@@ -498,6 +499,9 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     candidate_rows = _apply_known_merged_group(candidate_rows)
     eligible_rows = [row for row in candidate_rows if row["candidate_status"] == "eligible"]
     blocked_rows = [row for row in candidate_rows if row["candidate_status"] != "eligible"]
+    eligible_candidate_count_before_latest_filter = len(eligible_rows)
+    eligible_rows, hidden_older_eligible_rows, latest_filter_summary = _apply_latest_eligible_customer_filter(eligible_rows)
+    blocked_rows.extend(hidden_older_eligible_rows)
     eligible_rows, review_queue_rows = _apply_review_queue_selection(eligible_rows)
     blocked_rows.sort(key=lambda row: (0 if "#22582" in row.get("group_order_names", [row["order"]]) else 1, row["order"]))
     already_sent_rows = _dedupe_summary_rows(already_sent_rows)
@@ -591,6 +595,12 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "scan_window_ended_at": now.isoformat(),
         "scanned_order_count": len(order_names),
         "delivered_order_count": sum(1 for row in candidate_rows + already_sent_rows if row.get("delivered_confirmed")),
+        "eligible_candidate_count_before_latest_filter": eligible_candidate_count_before_latest_filter,
+        "eligible_candidate_count_after_latest_filter": latest_filter_summary["eligible_candidate_count_after_latest_filter"],
+        "hidden_older_eligible_count": latest_filter_summary["hidden_older_eligible_count"],
+        "hidden_older_eligible_summary": latest_filter_summary["hidden_older_eligible_summary"],
+        "latest_candidate_per_customer_count": latest_filter_summary["latest_candidate_per_customer_count"],
+        "focus_22530_22562_latest_decision": latest_filter_summary["focus_22530_22562_latest_decision"],
         "eligible_candidate_count": eligible_candidate_count_total,
         "eligible_candidate_count_total": eligible_candidate_count_total,
         "already_sent_count": len(already_sent_rows),
@@ -799,6 +809,29 @@ def _dedupe_history_orders(orders):
     return result
 
 
+def _sqlite_customer_identity_summary(order: dict) -> dict:
+    identity = _sqlite_customer_history_identity(order or {})
+    if identity.get("confidence") not in {"high", "medium"}:
+        return {
+            "customer_identity_key": "",
+            "customer_identity_source": identity.get("source") or "unavailable",
+            "customer_identity_confidence": identity.get("confidence") or "unknown",
+        }
+    return {
+        "customer_identity_key": _hash_customer_identity(identity.get("source"), identity.get("key")),
+        "customer_identity_source": identity.get("source") or "unavailable",
+        "customer_identity_confidence": identity.get("confidence") or "unknown",
+    }
+
+
+def _hash_customer_identity(source: str, value: str) -> str:
+    safe_source = re.sub(r"[^a-z0-9_:-]+", "_", str(source or "identity").strip().lower())
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    return f"{safe_source}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:24]}"
+
+
 def _sqlite_customer_history_identity(order):
     name = _sqlite_name_identity(order)
     email = _normalize_email(order.get("customer_email"))
@@ -962,6 +995,7 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
     if _local_risk(local, source):
         blockers.append("Risk, ticket, refund, cancel, return, or dispute evidence is present.")
     status = "eligible" if not blockers else "blocked"
+    identity = _sqlite_customer_identity_summary(local)
     return {
         "order": order_name,
         "customer": source.get("customer_display_name") or _safe_name(local.get("customer_name")) or "Masked in reports",
@@ -1015,6 +1049,9 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         "customer_history_source": history.get("customer_history_source", "unavailable"),
         "customer_history_confidence": history.get("customer_history_confidence", "unknown"),
         "customer_history_confirmed": history_confirmed,
+        "customer_identity_key": identity["customer_identity_key"],
+        "customer_identity_source": identity["customer_identity_source"],
+        "customer_identity_confidence": identity["customer_identity_confidence"],
         "customer_level_trustpilot_already_sent": bool(previous_trustpilot_order_names),
         "candidate_status": "already_sent" if current_order_already_sent else status,
         "block_reason": "; ".join(_dedupe(blockers)) if blockers else "Delivered, tagged, and no duplicate or risk found.",
@@ -1381,6 +1418,18 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
         },
         "scanned_order_count": 0,
         "delivered_order_count": 0,
+        "eligible_candidate_count_before_latest_filter": 0,
+        "eligible_candidate_count_after_latest_filter": 0,
+        "hidden_older_eligible_count": 0,
+        "hidden_older_eligible_summary": [],
+        "latest_candidate_per_customer_count": 0,
+        "focus_22530_22562_latest_decision": {
+            "orders_present": False,
+            "orders_same_customer": False,
+            "kept_order": "",
+            "hidden_order": "",
+            "reason": "Candidate scan failed before latest-customer filtering.",
+        },
         "eligible_candidate_count": 0,
         "eligible_candidate_count_total": 0,
         "already_sent_count": 0,
@@ -1448,6 +1497,14 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "coverage_warnings": payload.get("coverage_warnings", []),
         "scanned_order_count": int(payload.get("scanned_order_count") or 0),
         "delivered_order_count": int(payload.get("delivered_order_count") or 0),
+        "eligible_candidate_count_before_latest_filter": int(
+            payload.get("eligible_candidate_count_before_latest_filter") or 0
+        ),
+        "eligible_candidate_count_after_latest_filter": int(
+            payload.get("eligible_candidate_count_after_latest_filter") or payload.get("eligible_candidate_count") or 0
+        ),
+        "hidden_older_eligible_count": int(payload.get("hidden_older_eligible_count") or 0),
+        "focus_22530_22562_latest_decision": payload.get("focus_22530_22562_latest_decision") or {},
         "eligible_candidate_count": int(payload.get("eligible_candidate_count") or 0),
         "eligible_candidate_count_total": int(
             payload.get("eligible_candidate_count_total") or payload.get("eligible_candidate_count") or 0
@@ -1519,6 +1576,9 @@ def _render_html(payload: dict) -> str:
     <tr><th>#22530 diagnosis</th><td>{escape(str((payload.get("order_22530_diagnosis") or {}).get("message", "")))}</td></tr>
     <tr><th>Scanned order count</th><td>{escape(str(payload.get("scanned_order_count", 0)))}</td></tr>
     <tr><th>Delivered order count</th><td>{escape(str(payload.get("delivered_order_count", 0)))}</td></tr>
+    <tr><th>Eligible before latest filter</th><td>{escape(str(payload.get("eligible_candidate_count_before_latest_filter", 0)))}</td></tr>
+    <tr><th>Eligible after latest filter</th><td>{escape(str(payload.get("eligible_candidate_count_after_latest_filter", payload.get("eligible_candidate_count", 0))))}</td></tr>
+    <tr><th>Hidden older eligible</th><td>{escape(str(payload.get("hidden_older_eligible_count", 0)))}</td></tr>
     <tr><th>Eligible candidate count</th><td>{escape(str(payload.get("eligible_candidate_count", 0)))}</td></tr>
     <tr><th>Review queue batch size</th><td>{escape(str(payload.get("review_queue_batch_size", REVIEW_QUEUE_BATCH_SIZE)))}</td></tr>
     <tr><th>Review queue visible count</th><td>{escape(str(payload.get("review_queue_visible_count", 0)))}</td></tr>
@@ -1589,6 +1649,111 @@ def _apply_review_queue_selection(eligible_rows: list[dict], batch_size: int = R
         if customer_key:
             seen_customers.add(customer_key)
     return rows, visible_rows
+
+
+def _apply_latest_eligible_customer_filter(eligible_rows: list[dict]) -> tuple[list[dict], list[dict], dict]:
+    rows = list(_dedupe_summary_rows(eligible_rows))
+    groups = {}
+    ungrouped = []
+    for row in rows:
+        key = _review_queue_customer_key(row)
+        if not key:
+            row["selected_order_latest_for_customer"] = True
+            row["latest_eligible_order_for_customer"] = row.get("order", "")
+            ungrouped.append(row)
+            continue
+        groups.setdefault(key, []).append(row)
+
+    kept = list(ungrouped)
+    hidden = []
+    hidden_summary = []
+    focus_rows = {}
+    for group_rows in groups.values():
+        sorted_group = sorted(group_rows, key=_latest_eligible_candidate_sort_key, reverse=True)
+        latest = sorted_group[0]
+        latest_order = _safe_text(latest.get("order"), 80)
+        latest["selected_order_latest_for_customer"] = True
+        latest["latest_eligible_order_for_customer"] = latest_order
+        kept.append(latest)
+        for older in sorted_group[1:]:
+            hidden_row = dict(older)
+            reason = f"A newer eligible order exists for this customer: {latest_order}."
+            hidden_row.update(
+                {
+                    "candidate_status": "blocked",
+                    "block_reason": reason,
+                    "evidence": reason,
+                    "hidden_reason": "newer_eligible_order_exists_for_customer",
+                    "visible_in_review_batch": False,
+                    "selected_order_latest_for_customer": False,
+                    "latest_eligible_order_for_customer": latest_order,
+                }
+            )
+            hidden.append(hidden_row)
+            hidden_summary.append(
+                {
+                    "order": _safe_text(hidden_row.get("order"), 80),
+                    "kept_latest_order": latest_order,
+                    "reason": reason,
+                    "customer_history_source": _safe_text(hidden_row.get("customer_history_source"), 80),
+                    "customer_history_confidence": _safe_text(hidden_row.get("customer_history_confidence"), 80),
+                }
+            )
+        for row in group_rows:
+            if row.get("order") in {"#22530", "#22562"}:
+                focus_rows[row["order"]] = row
+    return kept, hidden, {
+        "eligible_candidate_count_before_latest_filter": len(rows),
+        "eligible_candidate_count_after_latest_filter": len(kept),
+        "hidden_older_eligible_count": len(hidden),
+        "hidden_older_eligible_summary": hidden_summary,
+        "latest_candidate_per_customer_count": len(groups) + len(ungrouped),
+        "focus_22530_22562_latest_decision": _focus_latest_candidate_decision(focus_rows),
+    }
+
+
+def _latest_eligible_candidate_sort_key(row: dict) -> tuple:
+    return (
+        _order_number_value(row.get("order") or row.get("order_number")),
+        _review_queue_date_value(row),
+        _safe_text(row.get("order"), 80),
+    )
+
+
+def _focus_latest_candidate_decision(focus_rows: dict) -> dict:
+    row_22530 = focus_rows.get("#22530") or {}
+    row_22562 = focus_rows.get("#22562") or {}
+    if not row_22530 and not row_22562:
+        return {
+            "orders_present": False,
+            "orders_same_customer": False,
+            "kept_order": "",
+            "hidden_order": "",
+            "reason": "Focus orders were not both eligible in the current latest-customer filter input.",
+        }
+    same_customer = bool(
+        _review_queue_customer_key(row_22530)
+        and _review_queue_customer_key(row_22530) == _review_queue_customer_key(row_22562)
+    )
+    kept = ""
+    hidden = ""
+    reason = "Focus orders are not confirmed as the same eligible customer by the precision identity rules."
+    if same_customer:
+        candidates = sorted(
+            [row for row in (row_22530, row_22562) if row],
+            key=_latest_eligible_candidate_sort_key,
+            reverse=True,
+        )
+        kept = _safe_text(candidates[0].get("order"), 80)
+        hidden = _safe_text(candidates[1].get("order"), 80) if len(candidates) > 1 else ""
+        reason = f"A newer eligible order exists for this customer: {kept}." if hidden else ""
+    return {
+        "orders_present": bool(row_22530 and row_22562),
+        "orders_same_customer": same_customer,
+        "kept_order": kept,
+        "hidden_order": hidden,
+        "reason": reason,
+    }
 
 
 def _review_queue_sort_key(row: dict) -> tuple:
@@ -1665,12 +1830,13 @@ def _review_queue_display_context_available(row: dict) -> bool:
 
 
 def _review_queue_customer_key(row: dict) -> str:
+    identity_key = _safe_text(row.get("customer_identity_key"), 120)
+    identity_confidence = _safe_text(row.get("customer_identity_confidence"), 80)
+    if identity_key and identity_confidence in {"high", "medium"}:
+        return identity_key
     masked = _safe_text(row.get("masked_customer"), 120)
-    if "***" in masked and "@" in masked:
-        return masked.lower()
-    customer = _safe_text(row.get("customer"), 120)
-    if customer and customer != "Masked in reports":
-        return re.sub(r"\s+", " ", customer).strip().lower()
+    if "***" in masked and "@" in masked and row.get("customer_history_confirmed") is True:
+        return _hash_customer_identity("masked_email", masked.lower())
     return ""
 
 

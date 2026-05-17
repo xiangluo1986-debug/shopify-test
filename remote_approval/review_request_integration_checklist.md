@@ -1184,3 +1184,22 @@ Future tracking design note:
   group readiness, and one-send limit enforcement before any future send.
 - [x] Shopify tag write remains a separate post-send audit/tag-write phase.
   No automatic sending is enabled by this phase.
+
+## Phase 5.28L Dynamic Review Send And Latest-Customer Queue
+
+- [x] Needs review email queue now keeps only the latest eligible order per
+  precise customer identity. Latest means highest numeric order number first,
+  then newest local order date when an order number is unavailable.
+- [x] Older eligible rows for the same confirmed customer are blocked with the
+  plain reason `A newer eligible order exists for this customer: #...`.
+- [x] Customer grouping uses protected high/medium confidence identity keys
+  derived from Shopify customer ID/email or the Phase 5.28H medium-confidence
+  shipping fallbacks; weak name-only matches are not grouped for sending.
+- [x] Admin `Review & Send` now has a dynamic Gmail `drafts.create` plus
+  `drafts.send` helper for one server-revalidated latest eligible order.
+- [x] The dynamic send path keeps Shopify tag writes disabled and never calls
+  Gmail during audits or blocked route checks.
+- [x] Added `shopify_review_request_dynamic_review_send_audit` to report
+  latest-filter counts, hidden older eligible count, the `#22530`/`#22562`
+  latest decision, helper readiness, `#21075` readiness, visible send count,
+  latest-only queue status, and no-write safety flags.

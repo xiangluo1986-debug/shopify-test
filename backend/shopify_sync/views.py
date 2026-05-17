@@ -1140,6 +1140,11 @@ def review_request_workbench(request):
             request.POST.get("candidate_id"),
             admin_username=request.user.get_username(),
             params=request.GET,
+            request_context={
+                "method": request.method,
+                "is_staff_admin": _user_has_review_request_admin_access(request),
+                "csrf_protection_enabled": True,
+            },
         )
         if result.get("email_sent") is True:
             messages.success(
