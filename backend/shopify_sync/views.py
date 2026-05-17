@@ -57,11 +57,13 @@ from .translation_apply_plan import (
     APPLY_PLAN_JSON_PATH,
     LOCKED_EXECUTION_ACK_PHRASE,
     LOCKED_EXECUTION_ACTION_NAME,
+    ALL_LANGUAGES_REAL_WRITE_ACTION_NAME,
     REAL_WRITE_ACTION_NAME,
     SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE,
     SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME,
     SAFE_WRITE_READINESS_ACTION_NAME,
     apply_selected_translations_to_shopify,
+    build_translation_workspace_all_languages_update_state,
     build_translation_workspace_selected_apply_state,
     build_translation_workspace_locked_execution_package,
     build_translation_workspace_safe_write_readiness_package,
@@ -69,12 +71,16 @@ from .translation_apply_plan import (
     build_selected_product_translation_apply_plan,
     execute_translation_workspace_single_locked_write,
     load_translation_workspace_locked_execution_package,
+    validate_and_update_all_languages_to_shopify,
 )
 from .translation_drafts import (
     ALL_ELIGIBLE_DRAFT_SCOPES,
     DEFAULT_FIELDS as TRANSLATION_DRAFT_FIELDS,
     DEFAULT_TARGET_LOCALES as TRANSLATION_DRAFT_TARGET_LOCALES,
     FORBIDDEN_OUTPUT_RE,
+    OPENAI_INVALID_TRANSLATION_RESPONSE,
+    OPENAI_TRANSLATION_GENERATION_STAGE,
+    OPENAI_TRANSLATIONS_MISSING_MESSAGE,
     TRANSLATE_ALL_ACTION_NAME,
     build_product_identity_context,
     generate_selected_product_missing_translation_draft_package,
@@ -323,6 +329,7 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "existing_translation_current": "Already up to date",
     "manual_review_required": "Needs manual review",
     "no_generated_draft": "No automatic translation was generated",
+    "openai_invalid_translation_response": "OpenAI returned an invalid response format",
     "body_html_structure_broken": "Product description HTML structure needs review",
     "draft_equals_source": "Translation is unchanged from the source",
     "missing_translation_not_requested": "Not translated automatically in this run",
@@ -390,6 +397,7 @@ TRANSLATION_WORKSPACE_REVIEW_REASON_CODES = {
     "missing_replacement_part_meaning",
     "missing_use_case",
     "needs_review",
+    "openai_invalid_translation_response",
     "product_identity_mismatch",
     "product_title_over_80_chars",
     "seo_description_over_160_chars",
@@ -450,6 +458,7 @@ TRANSLATION_WORKSPACE_JOB_ID_RE = re.compile(
     r"^translation_workspace_job_[a-f0-9]{16}_\d{8}T\d{6}Z_[a-f0-9]{8}$"
 )
 TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME = "save_translation_manual_edit"
+TRANSLATION_WORKSPACE_RETRY_LOCALE_ACTION_NAME = "retry_failed_translation_language"
 TRANSLATION_WORKSPACE_JOB_DETAIL_PREVIEW_LIMIT = 60
 TRANSLATION_WORKSPACE_JOB_REVIEW_ROW_LIMIT = 1000
 TRANSLATION_WORKSPACE_JOB_ERROR_LIMIT = 20
@@ -1162,6 +1171,9 @@ def translation_console(request):
     is_selected_translations_real_write_post = (
         post_action == SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME
     )
+    is_all_languages_real_write_post = (
+        post_action == ALL_LANGUAGES_REAL_WRITE_ACTION_NAME
+    )
     is_manual_translation_edit_post = (
         post_action == TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME
     )
@@ -1180,6 +1192,9 @@ def translation_console(request):
     )
     is_multi_locale_draft_post = post_action == "generate_multi_locale_drafts"
     is_translate_all_post = post_action == TRANSLATE_ALL_ACTION_NAME
+    is_retry_failed_language_post = (
+        post_action == TRANSLATION_WORKSPACE_RETRY_LOCALE_ACTION_NAME
+    )
     is_draft_post = post_action in {
         "generate_missing_translation_drafts",
         "generate_draft_dry_run",
@@ -1200,6 +1215,7 @@ def translation_console(request):
         is_draft_post
         or is_multi_locale_draft_post
         or is_translate_all_post
+        or is_retry_failed_language_post
         or is_apply_plan_post
         or is_final_review_post
         or is_readiness_post
@@ -1211,6 +1227,7 @@ def translation_console(request):
         or is_workspace_locked_execution_post
         or is_workspace_real_write_post
         or is_selected_translations_real_write_post
+        or is_all_languages_real_write_post
         or is_manual_translation_edit_post
         or is_status_only_safe_action_post
         or is_locked_package_preview_post
@@ -1389,6 +1406,9 @@ def translation_console(request):
     selected_translations_apply_state = {}
     selected_translations_apply_result = None
     selected_translations_apply_error_message = ""
+    all_languages_update_state = {}
+    all_languages_update_result = None
+    all_languages_update_error_message = ""
     workspace_locked_execution_result = None
     workspace_locked_execution_error_message = ""
     workspace_real_write_result = None
@@ -1405,8 +1425,10 @@ def translation_console(request):
             request.method == "POST"
             and not is_status_only_safe_action_post
             and not is_translate_all_post
+            and not is_retry_failed_language_post
             and not is_workspace_real_write_post
             and not is_selected_translations_real_write_post
+            and not is_all_languages_real_write_post
         )
         or request.GET.get("fetch_read_only") == "1"
         or (request.method == "GET" and ui_mode == "editor")
@@ -1916,6 +1938,10 @@ def translation_console(request):
         selected_product_gid=translation_job_product_id,
         selected_locale=selected_apply_locale,
     )
+    all_languages_update_state = build_translation_workspace_all_languages_update_state(
+        translation_background_job,
+        selected_product_gid=translation_job_product_id,
+    )
     _attach_translation_workspace_safe_write_ui(
         translation_background_job,
         safe_write_readiness_state,
@@ -2341,6 +2367,118 @@ def translation_console(request):
                 ),
             }
         )
+    elif is_all_languages_real_write_post:
+        installation = ShopifyInstallation.objects.first()
+        all_languages_update_result = validate_and_update_all_languages_to_shopify(
+            translation_background_job,
+            installation=installation,
+            selected_product_gid=translation_job_product_id,
+        )
+        if all_languages_update_result.get("blocking_conditions"):
+            all_languages_update_error_message = (
+                "All-language Shopify translation update blocked: "
+                + ", ".join(all_languages_update_result.get("blocking_conditions") or [])
+            )
+        all_languages_update_state = all_languages_update_result
+        update_status = all_languages_update_result.get("status", "")
+        if (
+            update_status
+            == "all_languages_shopify_translations_written_and_verified"
+        ):
+            update_message = (
+                "Shopify updated. Safe translations for all eligible languages were written and verified."
+            )
+        elif update_status == "all_languages_shopify_translations_write_partial":
+            update_message = (
+                "Shopify was updated, but one or more translations failed readback verification."
+            )
+        elif update_status == "all_languages_shopify_translations_write_failed":
+            update_message = (
+                "All-language Shopify translation update failed. No automatic rollback was run."
+            )
+        else:
+            update_message = "No safe translations were written."
+        mutation_called = all_languages_update_result.get("mutation_called", False)
+        safe_action_result = _translation_console_safe_action_result(
+            action=post_action,
+            action_status=update_status,
+            message=update_message,
+            summary={
+                "product_gid": all_languages_update_result.get("product_gid", ""),
+                "product_title": all_languages_update_result.get("product_title", ""),
+                "locales": all_languages_update_result.get("locales", []),
+                "candidate_count": all_languages_update_result.get(
+                    "candidate_count",
+                    0,
+                ),
+                "write_ready_count": all_languages_update_result.get(
+                    "write_ready_count",
+                    0,
+                ),
+                "updated_count": all_languages_update_result.get("updated_count", 0),
+                "verified_count": all_languages_update_result.get("verified_count", 0),
+                "skipped_count": all_languages_update_result.get("skipped_count", 0),
+                "blocked_count": all_languages_update_result.get("blocked_count", 0),
+                "failed_count": all_languages_update_result.get("failed_count", 0),
+                "mutation_called": all_languages_update_result.get(
+                    "mutation_called",
+                    False,
+                ),
+                "translations_register_called": all_languages_update_result.get(
+                    "translations_register_called",
+                    False,
+                ),
+                "shopify_write_performed": all_languages_update_result.get(
+                    "shopify_write_performed",
+                    False,
+                ),
+                "readback_performed": all_languages_update_result.get(
+                    "readback_performed",
+                    False,
+                ),
+                "rollback_needed": all_languages_update_result.get(
+                    "rollback_needed",
+                    False,
+                ),
+                "json_report_path": all_languages_update_result.get(
+                    "json_report_path",
+                    "",
+                ),
+                "html_report_path": all_languages_update_result.get(
+                    "html_report_path",
+                    "",
+                ),
+                "blocking_conditions": all_languages_update_result.get(
+                    "blocking_conditions",
+                    [],
+                ),
+            },
+        )
+        safe_action_result.update(
+            {
+                "read_only": not mutation_called,
+                "no_write_from_page": not mutation_called,
+                "shopify_write_performed": all_languages_update_result.get(
+                    "shopify_write_performed",
+                    False,
+                ),
+                "mutation_performed": all_languages_update_result.get(
+                    "mutation_performed",
+                    False,
+                ),
+                "translations_register_called": all_languages_update_result.get(
+                    "translations_register_called",
+                    False,
+                ),
+                "rollback_performed": False,
+                "publish_performed": False,
+                "apply_performed": False,
+                "real_apply_performed": all_languages_update_result.get(
+                    "real_apply_performed",
+                    False,
+                ),
+            }
+        )
     elif is_locked_package_preview_post and safe_action_result is None:
         apply_plan_preview_result = _empty_apply_plan_preview_result(
             "generate_draft_dry_run_first"
@@ -2434,6 +2572,81 @@ def translation_console(request):
                         editor_search_query=editor_search_query,
                     )
                 )
+    elif is_retry_failed_language_post and safe_action_result is None:
+        selected_background_product_gid = normalize_product_gid(
+            action_product_query or selected_product_gid or ""
+        ) or ""
+        retry_locale = locale if locale in SUPPORTED_TRANSLATION_LOCALES else ""
+        if not selected_background_product_gid:
+            safe_action_result = _translation_console_safe_action_result(
+                action=post_action,
+                action_status="translation_draft_job_blocked",
+                message="Select one product before retrying this language.",
+                summary={
+                    "blocking_conditions": ["missing_selected_product"],
+                    "shopify_write_performed": False,
+                    "mutation_performed": False,
+                    "translations_register_called": False,
+                },
+            )
+        elif not retry_locale:
+            safe_action_result = _translation_console_safe_action_result(
+                action=post_action,
+                action_status="translation_draft_job_blocked",
+                message="Choose a supported language before retrying.",
+                summary={
+                    "blocking_conditions": ["unsupported_target_language"],
+                    "shopify_write_performed": False,
+                    "mutation_performed": False,
+                    "translations_register_called": False,
+                },
+            )
+        else:
+            installation = ShopifyInstallation.objects.first()
+            if installation is None:
+                safe_action_result = _translation_console_safe_action_result(
+                    action=post_action,
+                    action_status="translation_draft_job_blocked",
+                    message=f"Shopify installation not found for {shop_domain}.",
+                    summary={
+                        "blocking_conditions": ["missing_shopify_installation"],
+                        "shopify_write_performed": False,
+                        "mutation_performed": False,
+                        "translations_register_called": False,
+                    },
+                )
+            else:
+                start_result = start_translation_workspace_background_job(
+                    installation_id=installation.pk,
+                    product_gid=selected_background_product_gid,
+                    product_title=(
+                        (product_selector.get("selected_product") or {}).get("title", "")
+                    ),
+                    product_search_text=product_search_text,
+                    selected_locale=retry_locale,
+                    selected_locales=[retry_locale],
+                    editor_filter=editor_filter,
+                    editor_search_query=editor_search_query,
+                )
+                translation_background_job = start_result["job_status"]
+                safe_action_result = _translation_console_safe_action_result(
+                    action=post_action,
+                    action_status=start_result["action_status"],
+                    message=start_result["message"],
+                    summary=_translation_workspace_job_safe_summary(
+                        translation_background_job
+                    ),
+                )
+                return HttpResponseRedirect(
+                    _translation_console_editor_redirect_url(
+                        request,
+                        selected_product_gid=selected_background_product_gid,
+                        product_search_text=product_search_text,
+                        locale=retry_locale,
+                        editor_filter=editor_filter,
+                        editor_search_query=editor_search_query,
+                    )
+                )
     elif post_action == "generate_multi_locale_drafts" and safe_action_result is None:
         blocked_message = _translation_workspace_multi_locale_blocked_message(
             has_product=bool(action_product_query),
@@ -2521,6 +2734,7 @@ def translation_console(request):
     selected_translations_apply_display = (
         selected_translations_apply_result or selected_translations_apply_state
     )
+    all_languages_update_display = all_languages_update_result or all_languages_update_state
     workspace_locked_execution_display = workspace_locked_execution_result or {}
     workspace_real_write_display = workspace_real_write_result or {}
     workspace_real_write_can_submit = (
@@ -2599,6 +2813,10 @@ def translation_console(request):
             "selected_translations_apply_result": selected_translations_apply_result,
             "selected_translations_apply_display": selected_translations_apply_display,
             "selected_translations_apply_error_message": selected_translations_apply_error_message,
+            "all_languages_update_state": all_languages_update_state,
+            "all_languages_update_result": all_languages_update_result,
+            "all_languages_update_display": all_languages_update_display,
+            "all_languages_update_error_message": all_languages_update_error_message,
             "workspace_locked_execution_result": workspace_locked_execution_result,
             "workspace_locked_execution_display": workspace_locked_execution_display,
             "workspace_locked_execution_error_message": workspace_locked_execution_error_message,
@@ -2609,6 +2827,8 @@ def translation_console(request):
             "locked_execution_ack_phrase": LOCKED_EXECUTION_ACK_PHRASE,
             "translation_single_locked_write_action_name": REAL_WRITE_ACTION_NAME,
             "selected_translations_real_write_action_name": SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME,
+            "all_languages_real_write_action_name": ALL_LANGUAGES_REAL_WRITE_ACTION_NAME,
+            "translation_workspace_retry_locale_action_name": TRANSLATION_WORKSPACE_RETRY_LOCALE_ACTION_NAME,
             "selected_translations_real_write_ack_phrase": SELECTED_TRANSLATIONS_REAL_WRITE_ACK_PHRASE,
             "manual_translation_edit_action_name": TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME,
             "draft_target_locales": TRANSLATION_DRAFT_TARGET_LOCALES,
@@ -4090,6 +4310,7 @@ def start_translation_workspace_background_job(
     product_title: str = "",
     product_search_text: str = "",
     selected_locale: str = "",
+    selected_locales: list[str] | tuple[str, ...] | None = None,
     editor_filter: str = "all",
     editor_search_query: str = "",
 ):
@@ -4127,6 +4348,7 @@ def start_translation_workspace_background_job(
         product_title=product_title,
         product_search_text=product_search_text,
         selected_locale=selected_locale,
+        selected_locales=selected_locales,
         editor_filter=editor_filter,
         editor_search_query=editor_search_query,
     )
@@ -4269,6 +4491,7 @@ def _translation_workspace_initial_job_status(
     product_title: str = "",
     product_search_text: str = "",
     selected_locale: str = "",
+    selected_locales: list[str] | tuple[str, ...] | None = None,
     editor_filter: str = "all",
     editor_search_query: str = "",
 ):
@@ -4278,6 +4501,7 @@ def _translation_workspace_initial_job_status(
         product_title=product_title,
         status="pending",
         message="Translation is pending.",
+        selected_locales=selected_locales,
     )
     status.update(
         {
@@ -4306,8 +4530,9 @@ def _translation_workspace_empty_job_status(
     product_title: str = "",
     status: str = "pending",
     message: str = "",
+    selected_locales: list[str] | tuple[str, ...] | None = None,
 ):
-    selected_locales = list(SUPPORTED_TRANSLATION_LOCALES)
+    selected_locales = _translation_workspace_normalized_job_locales(selected_locales)
     selected_groups = list(TRANSLATION_WORKSPACE_DEFAULT_DRAFT_GROUPS)
     return {
         "job_id": "",
@@ -4341,6 +4566,15 @@ def _translation_workspace_empty_job_status(
         "safety_flags": _translation_workspace_job_safety_flags(),
         **_translation_workspace_job_safety_flags(),
     }
+
+
+def _translation_workspace_normalized_job_locales(selected_locales):
+    locales = []
+    for raw_locale in selected_locales or SUPPORTED_TRANSLATION_LOCALES:
+        locale = _translation_editor_canonical_locale(raw_locale)
+        if locale in SUPPORTED_TRANSLATION_LOCALES and locale not in locales:
+            locales.append(locale)
+    return locales or list(SUPPORTED_TRANSLATION_LOCALES)
 
 
 def _translation_workspace_empty_job_counts(selected_locales):
@@ -4389,6 +4623,11 @@ def _translation_workspace_empty_locale_status(locale: str):
         "generated_draft_count": 0,
         "message": "Waiting to start.",
         "error_message": "",
+        "failure_type": "",
+        "failed_stage": "",
+        "sanitized_error": "",
+        "retry_attempted": False,
+        "retry_succeeded": False,
         "blocking_conditions": [],
     }
 
@@ -4508,14 +4747,30 @@ def _translation_workspace_apply_locale_job_result(
         if locale_failed
         else ("skipped" if source_rows_checked == 0 else "completed")
     )
+    failure_type = str((draft_result or {}).get("failure_type") or "")
+    failed_stage = str((draft_result or {}).get("failed_stage") or "")
+    sanitized_error = _translation_workspace_safe_text(
+        (draft_result or {}).get("sanitized_error") or "",
+        500,
+    )
+    retry_attempted = bool((draft_result or {}).get("retry_attempted"))
+    retry_succeeded = bool((draft_result or {}).get("retry_succeeded"))
     locale_error_message = ""
     if locale_status == "failed":
-        locale_error_message = _translation_workspace_safe_text(
-            (draft_result or {}).get("error")
-            or ", ".join(blocking_conditions)
-            or f"Translation failed for {locale_label}.",
-            500,
-        )
+        if failure_type == OPENAI_INVALID_TRANSLATION_RESPONSE:
+            locale_error_message = (
+                f"{locale_label} translation failed because OpenAI returned an invalid response format. "
+                "Retry this language."
+            )
+            failed_stage = failed_stage or OPENAI_TRANSLATION_GENERATION_STAGE
+            sanitized_error = sanitized_error or OPENAI_TRANSLATIONS_MISSING_MESSAGE
+        else:
+            locale_error_message = _translation_workspace_safe_text(
+                (draft_result or {}).get("error")
+                or ", ".join(blocking_conditions)
+                or f"Translation failed for {locale_label}.",
+                500,
+            )
     locale_row.update(
         {
             "status": locale_status,
@@ -4536,6 +4791,16 @@ def _translation_workspace_apply_locale_job_result(
             "blocked_count": blocked_count,
             "generated_draft_count": missing_count + outdated_count,
             "openai_call_count": openai_call_count,
+            "openai_retry_attempt_count": int(
+                summary.get("openai_retry_attempt_count")
+                or (draft_result or {}).get("openai_retry_attempt_count")
+                or 0
+            ),
+            "openai_retry_success_count": int(
+                summary.get("openai_retry_success_count")
+                or (draft_result or {}).get("openai_retry_success_count")
+                or 0
+            ),
             "reused_cache_count": reused_cache_count,
             "skipped_existing_count": skipped_existing_count,
             "skipped_technical_count": skipped_technical_count,
@@ -4547,6 +4812,11 @@ def _translation_workspace_apply_locale_job_result(
                 locale_label=locale_label,
             ),
             "error_message": locale_error_message,
+            "failure_type": failure_type,
+            "failed_stage": failed_stage,
+            "sanitized_error": sanitized_error,
+            "retry_attempted": retry_attempted,
+            "retry_succeeded": retry_succeeded,
         }
     )
     if (draft_result or {}).get("product_title") and not status.get("product_title"):
@@ -4560,8 +4830,10 @@ def _translation_workspace_apply_locale_job_result(
     if locale_failed:
         _translation_workspace_append_job_error(
             status,
-            f"locale_{locale}",
+            failed_stage or f"locale_{locale}",
             locale_error_message or "Locale draft generation failed.",
+            locale=locale,
+            reason=failure_type,
         )
     _translation_workspace_touch_job(status)
 
@@ -5309,6 +5581,11 @@ def _translation_workspace_language_empty_message(locale_status: dict):
     if status_value == "running":
         return "Translation is still running for this language."
     if status_value == "failed":
+        if (locale_status or {}).get("failure_type") == OPENAI_INVALID_TRANSLATION_RESPONSE:
+            return (
+                f"{locale_label} translation failed because OpenAI returned an invalid response format. "
+                "Retry this language."
+            )
         return f"Translation failed for {locale_label}. Retry this language."
     if status_value == "stale":
         return (
@@ -6695,7 +6972,13 @@ def _translation_workspace_translate_all_locale_result(
     blocking_conditions = list(draft_result.get("blocking_conditions") or [])
     if blocking_conditions:
         status = "failed"
-        message = "Translation did not complete for this language."
+        if draft_result.get("failure_type") == OPENAI_INVALID_TRANSLATION_RESPONSE:
+            message = (
+                f"{_translation_editor_locale_label(locale)} translation failed because OpenAI returned an invalid response format. "
+                "Retry this language."
+            )
+        else:
+            message = "Translation did not complete for this language."
     elif needs_review_count:
         status = "needs review"
         message = "Translation results are ready, but some rows need review."
@@ -6895,6 +7178,12 @@ def _translation_workspace_draft_locale_summary(
     if failure_type == "missing_openai_api_key" or draft_status == "blocked_missing_openai_api_key":
         status = "needs configuration"
         message = "Translation could not run because OpenAI configuration is missing."
+    elif failure_type == OPENAI_INVALID_TRANSLATION_RESPONSE:
+        status = "failed"
+        message = (
+            f"{_translation_editor_locale_label(locale)} translation failed because OpenAI returned an invalid response format. "
+            "Retry this language."
+        )
     elif blocking_conditions:
         status = "failed"
         message = "Translation did not complete for this language."
@@ -7011,6 +7300,8 @@ def _translation_workspace_failure_reason(draft_result: dict | None):
         return "OpenAI configuration is missing."
     if failure_type == "openai_request_failed":
         return "OpenAI translation generation failed. Try again after checking configuration."
+    if failure_type == OPENAI_INVALID_TRANSLATION_RESPONSE:
+        return "OpenAI returned an invalid translation response format."
     if failure_type == "openai_response_invalid":
         return "OpenAI returned an unexpected translation response."
     if failure_type == "shopify_read_query_failed":

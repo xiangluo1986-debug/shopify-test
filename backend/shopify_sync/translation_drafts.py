@@ -223,6 +223,11 @@ TRANSLATION_CACHE_MAX_ENTRIES = 2000
 OPENAI_PROMPT_COMPACT = "compact"
 OPENAI_PROMPT_RICH = "rich"
 OPENAI_PROMPT_HTML_TEXT_NODES = "html_text_nodes"
+OPENAI_INVALID_TRANSLATION_RESPONSE = "openai_invalid_translation_response"
+OPENAI_TRANSLATIONS_MISSING_MESSAGE = (
+    "OpenAI response did not include a translations object."
+)
+OPENAI_TRANSLATION_GENERATION_STAGE = "openai_translation_generation"
 HTML_UNCHANGED_TEXT_TAGS = {"script", "style", "iframe", "video", "source"}
 TECHNICAL_SKIP_REASONS = {
     "technical_or_internal_field",
@@ -653,6 +658,11 @@ def _empty_result(product_id, target_locales, fields):
         "shopify_api_call_performed": False,
         "openai_call_performed": False,
         "openai_call_count": 0,
+        "openai_retry_attempt_count": 0,
+        "openai_retry_success_count": 0,
+        "openai_invalid_translation_response_count": 0,
+        "openai_missing_translation_field_count": 0,
+        "openai_response_recovery_events": [],
         "reused_cache_count": 0,
         "skipped_existing_count": 0,
         "skipped_technical_count": 0,
@@ -710,6 +720,10 @@ def _empty_result(product_id, target_locales, fields):
         "translate_all_summary": _empty_translate_all_summary(),
         "blocking_conditions": [],
         "failure_type": "",
+        "failed_stage": "",
+        "sanitized_error": "",
+        "retry_attempted": False,
+        "retry_succeeded": False,
         "query_failure_type": "",
         "error": "",
         "draft_package_only": True,
@@ -1621,6 +1635,9 @@ def _request_openai(locale, missing_entries, result):
         entries_by_cache_key[cache_key] = [entry]
         pending_entries.append(entry)
 
+    invalid_response_count_before = int(
+        result.get("openai_invalid_translation_response_count") or 0
+    )
     for prompt_profile, profile_entries in _openai_entries_by_prompt_profile(
         pending_entries
     ).items():
@@ -1635,6 +1652,9 @@ def _request_openai(locale, missing_entries, result):
         )
         if parsed is None:
             return None
+        profile_invalid_response = bool(
+            parsed.get("_openai_invalid_translation_response")
+        )
         profile_translations = _translations_from_openai_response(
             parsed,
             profile_entries,
@@ -1643,9 +1663,12 @@ def _request_openai(locale, missing_entries, result):
         )
         if profile_translations is None:
             return None
+        profile_generated_value = False
         for entry in profile_entries:
             draft_key = entry.get("draft_key") or entry.get("field")
             value = str(profile_translations.get(draft_key) or "").strip()
+            if value:
+                profile_generated_value = True
             cache_key = entry.get("translation_cache_key") or _translation_cache_key(
                 locale,
                 entry,
@@ -1658,6 +1681,29 @@ def _request_openai(locale, missing_entries, result):
                     "field"
                 )
                 translations[duplicate_key] = value
+        if profile_invalid_response and not profile_generated_value:
+            _record_openai_invalid_response(
+                result,
+                locale,
+                retry_attempted=True,
+                retry_succeeded=False,
+                blocking=False,
+            )
+
+    if (
+        int(result.get("openai_invalid_translation_response_count") or 0)
+        > invalid_response_count_before
+        and not any(str(value or "").strip() for value in translations.values())
+        and pending_entries
+    ):
+        _record_openai_invalid_response(
+            result,
+            locale,
+            retry_attempted=True,
+            retry_succeeded=False,
+            blocking=True,
+            count=False,
+        )
 
     if cache_dirty:
         _save_translation_cache(cache)
@@ -1666,20 +1712,7 @@ def _request_openai(locale, missing_entries, result):
 
 
 def _request_openai_profile(locale, entries, result, api_key, prompt_profile):
-    prompt = _openai_prompt(locale, entries, prompt_profile=prompt_profile)
-    system_content = (
-        "You are a careful ecommerce localization translator. Return valid JSON only."
-        if prompt_profile != OPENAI_PROMPT_HTML_TEXT_NODES
-        else "You translate only visible ecommerce HTML text nodes and return valid JSON only."
-    )
-    payload = {
-        "model": OPENAI_MODEL,
-        "input": [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
-        ],
-        "text": {"format": {"type": "json_object"}},
-    }
+    payload = _openai_translation_payload(locale, entries, prompt_profile)
     data = _post_openai_payload(
         payload,
         api_key,
@@ -1689,22 +1722,281 @@ def _request_openai_profile(locale, entries, result, api_key, prompt_profile):
     )
     if data is None:
         return None
-    try:
-        parsed = json.loads(_output_text_from_openai(data))
-    except Exception as exc:
-        result["draft_status"] = "blocked_openai_draft_generation_failed"
-        result["failure_type"] = "openai_response_invalid"
-        result["error"] = f"{type(exc).__name__}: OpenAI response was not valid JSON."
-        result["blocking_conditions"].append("blocked_openai_draft_generation_failed")
+    parsed, parse_error = _parse_openai_translation_response(
+        data,
+        entries,
+        prompt_profile,
+    )
+    if parsed is not None:
+        return parsed
+
+    _record_openai_retry_attempt(result, locale, prompt_profile, parse_error)
+    retry_payload = _openai_translation_payload(
+        locale,
+        entries,
+        prompt_profile,
+        repair=True,
+    )
+    retry_data = _post_openai_payload(
+        retry_payload,
+        api_key,
+        result,
+        f"draft generation repair ({prompt_profile})",
+        locale=locale,
+    )
+    if retry_data is None:
         return None
-    translations = parsed.get("translations")
-    if not isinstance(translations, dict):
-        result["draft_status"] = "blocked_openai_draft_generation_failed"
-        result["failure_type"] = "openai_response_invalid"
-        result["error"] = "OpenAI response did not include a translations object."
-        result["blocking_conditions"].append("blocked_openai_draft_generation_failed")
+    retry_parsed, retry_error = _parse_openai_translation_response(
+        retry_data,
+        entries,
+        prompt_profile,
+    )
+    if retry_parsed is not None:
+        _record_openai_retry_success(result, locale, prompt_profile)
+        return retry_parsed
+
+    _record_openai_response_recovery_event(
+        result,
+        locale,
+        prompt_profile,
+        retry_attempted=True,
+        retry_succeeded=False,
+        sanitized_error=retry_error or OPENAI_TRANSLATIONS_MISSING_MESSAGE,
+    )
+    return {
+        "translations": {},
+        "_openai_invalid_translation_response": True,
+        "_openai_invalid_translation_error": retry_error
+        or OPENAI_TRANSLATIONS_MISSING_MESSAGE,
+    }
+
+
+def _openai_translation_payload(locale, entries, prompt_profile, repair=False):
+    prompt = _openai_prompt(locale, entries, prompt_profile=prompt_profile)
+    if repair:
+        prompt["strict_output_reminder"] = (
+            "Return only valid JSON with top-level translations object. "
+            "Do not include markdown fences, prose, comments, or any keys outside the JSON object."
+        )
+    system_content = (
+        "You are a careful ecommerce localization translator. Return valid JSON only."
+        if prompt_profile != OPENAI_PROMPT_HTML_TEXT_NODES
+        else "You translate only visible ecommerce HTML text nodes and return valid JSON only."
+    )
+    if repair:
+        system_content += (
+            " Return only valid JSON with a top-level translations object."
+        )
+    return {
+        "model": OPENAI_MODEL,
+        "input": [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+        "text": {"format": {"type": "json_object"}},
+    }
+
+
+def _parse_openai_translation_response(data, entries, prompt_profile):
+    parsed, parse_error = _json_object_from_openai_text(_output_text_from_openai(data))
+    if parsed is None:
+        return None, parse_error or "OpenAI response was not valid JSON."
+    translations = _normalize_openai_translations_object(
+        parsed,
+        entries,
+        prompt_profile,
+    )
+    if translations is None:
+        return None, OPENAI_TRANSLATIONS_MISSING_MESSAGE
+    normalized = dict(parsed)
+    normalized["translations"] = translations
+    return normalized, ""
+
+
+def _json_object_from_openai_text(text):
+    text = str(text or "").strip()
+    if not text:
+        return None, "OpenAI response was empty."
+    candidates = [text]
+    candidates.extend(_json_code_fence_candidates(text))
+    candidates.extend(_balanced_json_object_candidates(text))
+    seen = set()
+    last_error = ""
+    for candidate in candidates:
+        candidate = str(candidate or "").strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            parsed = json.loads(candidate)
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: OpenAI response was not valid JSON."
+            continue
+        if isinstance(parsed, dict):
+            return parsed, ""
+        last_error = "OpenAI response JSON was not an object."
+    return None, last_error or "OpenAI response was not valid JSON."
+
+
+def _json_code_fence_candidates(text):
+    candidates = []
+    for match in re.finditer(r"```(?:json)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL):
+        candidates.append(match.group(1))
+    return candidates
+
+
+def _balanced_json_object_candidates(text):
+    candidates = []
+    for start, char in enumerate(text):
+        if char != "{":
+            continue
+        depth = 0
+        in_string = False
+        escape_next = False
+        for index in range(start, len(text)):
+            current = text[index]
+            if escape_next:
+                escape_next = False
+                continue
+            if current == "\\" and in_string:
+                escape_next = True
+                continue
+            if current == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if current == "{":
+                depth += 1
+            elif current == "}":
+                depth -= 1
+                if depth == 0:
+                    candidates.append(text[start : index + 1])
+                    break
+    return candidates
+
+
+def _normalize_openai_translations_object(parsed, entries, prompt_profile):
+    if not isinstance(parsed, dict):
         return None
-    return parsed
+    expected = _openai_expected_translation_keys(entries)
+    raw_translations = parsed.get("translations")
+    if isinstance(raw_translations, dict):
+        return _safe_openai_translation_map(raw_translations, expected, prompt_profile)
+
+    for key in ("translation", "results", "result", "data", "output"):
+        raw_value = parsed.get(key)
+        normalized = _normalize_openai_translation_candidate(
+            raw_value,
+            expected,
+            prompt_profile,
+        )
+        if normalized is not None:
+            return normalized
+
+    return _safe_openai_translation_map(parsed, expected, prompt_profile)
+
+
+def _normalize_openai_translation_candidate(value, expected, prompt_profile):
+    if isinstance(value, dict):
+        raw_translations = value.get("translations")
+        if isinstance(raw_translations, dict):
+            nested = _safe_openai_translation_map(
+                raw_translations,
+                expected,
+                prompt_profile,
+            )
+            if nested is not None:
+                return nested
+        for key in ("translation", "results", "result", "data", "output"):
+            if key not in value:
+                continue
+            nested = _normalize_openai_translation_candidate(
+                value.get(key),
+                expected,
+                prompt_profile,
+            )
+            if nested is not None:
+                return nested
+        return _safe_openai_translation_map(value, expected, prompt_profile)
+    if isinstance(value, list):
+        mapped = _translation_list_to_map(value)
+        return _safe_openai_translation_map(mapped, expected, prompt_profile)
+    if isinstance(value, str) and len(expected.get("draft_keys") or []) == 1:
+        draft_key = next(iter(expected["draft_keys"]))
+        return {draft_key: value.strip()} if value.strip() else None
+    return None
+
+
+def _translation_list_to_map(items):
+    output = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        key = (
+            item.get("draft_key")
+            or item.get("key")
+            or item.get("field")
+            or item.get("name")
+        )
+        value = (
+            item.get("translation")
+            or item.get("translated_text")
+            or item.get("translated")
+            or item.get("value")
+            or item.get("text")
+        )
+        if key and value is not None:
+            output[str(key)] = value
+    return output
+
+
+def _openai_expected_translation_keys(entries):
+    draft_keys = {
+        str(entry.get("draft_key") or entry.get("field") or "")
+        for entry in entries or []
+        if str(entry.get("draft_key") or entry.get("field") or "")
+    }
+    field_counts = {}
+    for entry in entries or []:
+        field = str(entry.get("field") or "")
+        if field:
+            field_counts[field] = field_counts.get(field, 0) + 1
+    return {
+        "draft_keys": draft_keys,
+        "safe_field_keys": {
+            field for field, count in field_counts.items() if count == 1
+        },
+    }
+
+
+def _safe_openai_translation_map(candidate, expected, prompt_profile):
+    if not isinstance(candidate, dict):
+        return None
+    draft_keys = expected.get("draft_keys") or set()
+    safe_field_keys = expected.get("safe_field_keys") or set()
+    if not draft_keys and not safe_field_keys:
+        return None
+    output = {}
+    for key, value in candidate.items():
+        text_key = str(key)
+        if text_key not in draft_keys and text_key not in safe_field_keys:
+            continue
+        if not _openai_translation_value_is_safe(value, prompt_profile):
+            continue
+        output[text_key] = value
+    return output or None
+
+
+def _openai_translation_value_is_safe(value, prompt_profile):
+    if isinstance(value, str):
+        return bool(value.strip())
+    if prompt_profile == OPENAI_PROMPT_HTML_TEXT_NODES and isinstance(value, dict):
+        node_values = value.get("html_text_nodes") or value.get("nodes")
+        return isinstance(node_values, dict) and any(
+            str(item or "").strip() for item in node_values.values()
+        )
+    return False
 
 
 def _openai_prompt(locale, missing_entries, prompt_profile=OPENAI_PROMPT_RICH):
@@ -1871,31 +2163,74 @@ def _openai_prompt_profile_for_entry(entry):
 def _translations_from_openai_response(parsed, entries, prompt_profile, result):
     raw_translations = parsed.get("translations")
     if not isinstance(raw_translations, dict):
-        result["draft_status"] = "blocked_openai_draft_generation_failed"
-        result["failure_type"] = "openai_response_invalid"
-        result["error"] = "OpenAI response did not include a translations object."
-        result["blocking_conditions"].append("blocked_openai_draft_generation_failed")
+        _record_openai_invalid_response(
+            result,
+            "",
+            retry_attempted=False,
+            retry_succeeded=False,
+            blocking=True,
+        )
         return None
+    invalid_response = bool(parsed.get("_openai_invalid_translation_response"))
+    invalid_error = str(
+        parsed.get("_openai_invalid_translation_error")
+        or OPENAI_TRANSLATIONS_MISSING_MESSAGE
+    )
     if prompt_profile != OPENAI_PROMPT_HTML_TEXT_NODES:
-        return {
-            entry.get("draft_key") or entry.get("field"): str(
-                raw_translations.get(entry.get("draft_key") or entry.get("field"))
-                or ""
-            ).strip()
-            for entry in entries or []
-        }
+        translations = {}
+        for entry in entries or []:
+            draft_key = entry.get("draft_key") or entry.get("field")
+            raw_value, found = _openai_translation_value_for_entry(
+                raw_translations,
+                entry,
+            )
+            if not found:
+                _mark_openai_missing_translation_entry(
+                    entry,
+                    invalid_error if invalid_response else "OpenAI response was missing this field.",
+                )
+                result["openai_missing_translation_field_count"] = int(
+                    result.get("openai_missing_translation_field_count") or 0
+                ) + 1
+                translations[draft_key] = ""
+                continue
+            translations[draft_key] = _string_from_openai_translation_value(
+                raw_value
+            )
+        return translations
     translations = {}
     for entry in entries or []:
         draft_key = entry.get("draft_key") or entry.get("field")
-        raw_value = raw_translations.get(draft_key)
+        raw_value, found = _openai_translation_value_for_entry(
+            raw_translations,
+            entry,
+        )
+        if not found:
+            _mark_openai_missing_translation_entry(
+                entry,
+                invalid_error if invalid_response else "OpenAI response was missing this field.",
+            )
+            result["openai_missing_translation_field_count"] = int(
+                result.get("openai_missing_translation_field_count") or 0
+            ) + 1
+            translations[draft_key] = ""
+            continue
         if isinstance(raw_value, str):
             translations[draft_key] = raw_value.strip()
             continue
         if not isinstance(raw_value, dict):
+            _mark_openai_missing_translation_entry(
+                entry,
+                "OpenAI response field was not a supported translation value.",
+            )
             translations[draft_key] = ""
             continue
         node_translations = raw_value.get("html_text_nodes") or raw_value.get("nodes")
         if not isinstance(node_translations, dict):
+            _mark_openai_missing_translation_entry(
+                entry,
+                "OpenAI response did not include html_text_nodes for this field.",
+            )
             translations[draft_key] = ""
             continue
         translations[draft_key] = _rebuild_html_from_node_translations(
@@ -1903,6 +2238,130 @@ def _translations_from_openai_response(parsed, entries, prompt_profile, result):
             node_translations,
         )
     return translations
+
+
+def _openai_translation_value_for_entry(raw_translations, entry):
+    draft_key = str((entry or {}).get("draft_key") or (entry or {}).get("field") or "")
+    field = str((entry or {}).get("field") or "")
+    if draft_key and draft_key in raw_translations:
+        return raw_translations.get(draft_key), True
+    if field and field in raw_translations:
+        return raw_translations.get(field), True
+    return None, False
+
+
+def _string_from_openai_translation_value(value):
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("translation", "translated_text", "translated", "value", "text"):
+            if str(value.get(key) or "").strip():
+                return str(value.get(key) or "").strip()
+    return ""
+
+
+def _mark_openai_missing_translation_entry(entry, sanitized_error):
+    entry["openai_failure_type"] = OPENAI_INVALID_TRANSLATION_RESPONSE
+    entry["openai_response_error"] = str(
+        sanitized_error or OPENAI_TRANSLATIONS_MISSING_MESSAGE
+    )
+    entry["draft_requires_manual_review"] = True
+    entry["draft_manual_review_reason"] = OPENAI_INVALID_TRANSLATION_RESPONSE
+
+
+def _record_openai_retry_attempt(result, locale, prompt_profile, sanitized_error):
+    result["openai_retry_attempt_count"] = int(
+        result.get("openai_retry_attempt_count") or 0
+    ) + 1
+    result["retry_attempted"] = True
+    _record_openai_response_recovery_event(
+        result,
+        locale,
+        prompt_profile,
+        retry_attempted=True,
+        retry_succeeded=False,
+        sanitized_error=sanitized_error or OPENAI_TRANSLATIONS_MISSING_MESSAGE,
+    )
+
+
+def _record_openai_retry_success(result, locale, prompt_profile):
+    result["openai_retry_success_count"] = int(
+        result.get("openai_retry_success_count") or 0
+    ) + 1
+    result["retry_attempted"] = True
+    result["retry_succeeded"] = True
+    _record_openai_response_recovery_event(
+        result,
+        locale,
+        prompt_profile,
+        retry_attempted=True,
+        retry_succeeded=True,
+        sanitized_error="",
+    )
+
+
+def _record_openai_invalid_response(
+    result,
+    locale,
+    *,
+    retry_attempted,
+    retry_succeeded,
+    blocking,
+    count=True,
+):
+    if count:
+        result["openai_invalid_translation_response_count"] = int(
+            result.get("openai_invalid_translation_response_count") or 0
+        ) + 1
+    result["retry_attempted"] = bool(
+        result.get("retry_attempted") or retry_attempted
+    )
+    result["retry_succeeded"] = bool(
+        result.get("retry_succeeded") or retry_succeeded
+    )
+    if not blocking:
+        return
+    result["draft_status"] = "blocked_openai_draft_generation_failed"
+    result["failure_type"] = OPENAI_INVALID_TRANSLATION_RESPONSE
+    result["failed_stage"] = OPENAI_TRANSLATION_GENERATION_STAGE
+    result["sanitized_error"] = OPENAI_TRANSLATIONS_MISSING_MESSAGE
+    result["error"] = OPENAI_TRANSLATIONS_MISSING_MESSAGE
+    blocking_conditions = result.setdefault("blocking_conditions", [])
+    if "blocked_openai_draft_generation_failed" not in blocking_conditions:
+        blocking_conditions.append("blocked_openai_draft_generation_failed")
+
+
+def _record_openai_response_recovery_event(
+    result,
+    locale,
+    prompt_profile,
+    *,
+    retry_attempted,
+    retry_succeeded,
+    sanitized_error,
+):
+    events = result.setdefault("openai_response_recovery_events", [])
+    events.append(
+        {
+            "locale": str(locale or ""),
+            "failed_stage": OPENAI_TRANSLATION_GENERATION_STAGE,
+            "prompt_profile": str(prompt_profile or ""),
+            "sanitized_error": _openai_sanitized_response_error(sanitized_error),
+            "retry_attempted": bool(retry_attempted),
+            "retry_succeeded": bool(retry_succeeded),
+        }
+    )
+
+
+def _openai_sanitized_response_error(value):
+    text = str(value or OPENAI_TRANSLATIONS_MISSING_MESSAGE)
+    if "translations object" in text:
+        return OPENAI_TRANSLATIONS_MISSING_MESSAGE
+    if "not valid JSON" in text:
+        return "OpenAI response was not valid JSON."
+    if "empty" in text.lower():
+        return "OpenAI response was empty."
+    return OPENAI_TRANSLATIONS_MISSING_MESSAGE
 
 
 def _load_translation_cache():
@@ -2298,7 +2757,12 @@ def _quality_notes_for_draft(entry, draft):
     notes = []
     if not draft:
         notes.append("draft_empty")
-        return notes
+        if entry_data.get("draft_requires_manual_review"):
+            notes.append(
+                entry_data.get("draft_manual_review_reason")
+                or "manual_review_required"
+            )
+        return _unique(notes)
     max_chars = int(entry_data.get("max_chars") or FIELD_MAX_CHARS.get(field) or 0)
     if max_chars and len(draft) > max_chars:
         notes.append("draft_over_max_chars")
@@ -2799,6 +3263,18 @@ def _attach_draft_batch_summary(result):
         summary["per_group_discovery_reasons"],
     )
     summary["openai_call_count"] = int(result.get("openai_call_count") or 0)
+    summary["openai_retry_attempt_count"] = int(
+        result.get("openai_retry_attempt_count") or 0
+    )
+    summary["openai_retry_success_count"] = int(
+        result.get("openai_retry_success_count") or 0
+    )
+    summary["openai_invalid_translation_response_count"] = int(
+        result.get("openai_invalid_translation_response_count") or 0
+    )
+    summary["openai_missing_translation_field_count"] = int(
+        result.get("openai_missing_translation_field_count") or 0
+    )
     summary["reused_cache_count"] = int(result.get("reused_cache_count") or 0)
     summary["skipped_existing_count"] = int(
         result.get("skipped_existing_count")

@@ -2663,6 +2663,102 @@
           </button>
         {% endfor %}
       </div>
+      <div class="tw-shopify-apply-panel" data-all-languages-shopify-update-panel>
+        <div class="tw-results-heading">
+          <h3>Validate and update all languages to Shopify</h3>
+          {% if all_languages_update_result and all_languages_update_display.shopify_write_performed and all_languages_update_display.updated_count == all_languages_update_display.verified_count and all_languages_update_display.updated_count %}
+            <span class="tw-status-badge is-ready">Shopify updated</span>
+          {% else %}
+            <span class="tw-count-badge">Safe fields only</span>
+          {% endif %}
+        </div>
+        <p class="tw-shopify-apply-note">Updates safe validated product translations for all 5 languages. Options, variants, metafields, and media alt text remain preview-only until mapping is enabled.</p>
+        <form method="post" action="{% url 'shopify_translation_console' %}" data-all-languages-shopify-update-form>
+          {% csrf_token %}
+          <input type="hidden" name="ui_mode" value="editor">
+          <input type="hidden" name="action" value="{{ all_languages_real_write_action_name }}">
+          <input type="hidden" name="product_search" value="{{ product_search_text }}">
+          <input type="hidden" name="selected_product_gid" value="{{ translation_background_job.product_gid|default:selected_product_gid }}">
+          <input type="hidden" name="target_locale" value="{{ selected_locale }}">
+          <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+          <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+          <div class="tw-job-actions" style="align-items: flex-end;">
+            <div>
+              <div class="tw-header-status-label">Candidates</div>
+              <div class="tw-header-status-value">{{ all_languages_update_display.candidate_count|default:0 }}</div>
+            </div>
+            <div>
+              <div class="tw-header-status-label">Ready</div>
+              <div class="tw-header-status-value">{{ all_languages_update_display.write_ready_count|default:0 }}</div>
+            </div>
+            <div>
+              <div class="tw-header-status-label">Blocked</div>
+              <div class="tw-header-status-value">{{ all_languages_update_display.blocked_count|default:0 }}</div>
+            </div>
+            <button type="submit" class="button tw-danger-button"{% if translation_background_job.is_active or not translation_background_job.show_translation_results %} disabled{% endif %}>Validate and update all languages to Shopify</button>
+          </div>
+        </form>
+        <div class="tw-shopify-apply-disabled-reason" data-all-languages-update-status hidden>Running validation/update status...</div>
+        {% if all_languages_update_result %}
+          {% if not all_languages_update_display.shopify_write_performed %}
+            <div class="tw-shopify-apply-disabled-reason">No safe translations were written.</div>
+          {% endif %}
+          <div class="tw-editor-table-wrap" style="margin-top: 10px;">
+            <table class="tw-results-table">
+              <tbody>
+                <tr><th>Status</th><td>{{ all_languages_update_display.status }}</td></tr>
+                <tr><th>Candidate count</th><td>{{ all_languages_update_display.candidate_count }}</td></tr>
+                <tr><th>Write-ready count</th><td>{{ all_languages_update_display.write_ready_count }}</td></tr>
+                <tr><th>Updated count</th><td>{{ all_languages_update_display.updated_count }}</td></tr>
+                <tr><th>Verified count</th><td>{{ all_languages_update_display.verified_count }}</td></tr>
+                <tr><th>Skipped count</th><td>{{ all_languages_update_display.skipped_count }}</td></tr>
+                <tr><th>Blocked count</th><td>{{ all_languages_update_display.blocked_count }}</td></tr>
+                <tr><th>Failed count</th><td>{{ all_languages_update_display.failed_count }}</td></tr>
+                <tr><th>Report path</th><td>{{ all_languages_update_display.json_report_path }}</td></tr>
+                <tr><th>Shopify was updated</th><td>{{ all_languages_update_display.shopify_write_performed }}</td></tr>
+                <tr><th>Readback performed</th><td>{{ all_languages_update_display.readback_performed }}</td></tr>
+                <tr><th>Rollback needed</th><td>{{ all_languages_update_display.rollback_needed }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h4>Per-language update summary</h4>
+          <div class="tw-editor-table-wrap">
+            <table class="tw-results-table">
+              <thead>
+                <tr><th>Language</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Failed</th></tr>
+              </thead>
+              <tbody>
+                {% for item in all_languages_update_display.per_locale_summary %}
+                  <tr>
+                    <td>{{ item.locale }}</td>
+                    <td>{{ item.candidate_count }}</td>
+                    <td>{{ item.write_ready_count }}</td>
+                    <td>{{ item.updated_count }}</td>
+                    <td>{{ item.verified_count }}</td>
+                    <td>{{ item.skipped_count }}</td>
+                    <td>{{ item.blocked_count }}</td>
+                    <td>{{ item.failed_count }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <details class="tw-current-translation-details">
+            <summary>Technical details</summary>
+            <div class="tw-editor-table-wrap">
+              <table class="tw-results-table">
+                <tbody>
+                  <tr><th>Action</th><td>{{ all_languages_update_display.action_name }}</td></tr>
+                  <tr><th>mutation_called</th><td>{{ all_languages_update_display.mutation_called }}</td></tr>
+                  <tr><th>translations_register_called</th><td>{{ all_languages_update_display.translations_register_called }}</td></tr>
+                  <tr><th>blocking_conditions</th><td>{{ all_languages_update_display.blocking_conditions|join:", " }}</td></tr>
+                  <tr><th>HTML report path</th><td>{{ all_languages_update_display.html_report_path }}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        {% endif %}
+      </div>
       <div class="tw-shopify-apply-panel" data-shopify-apply-panel>
         <div class="tw-results-heading">
           <h3>Shopify update</h3>
@@ -2737,6 +2833,20 @@
       </div>
       {% for language_group in translation_background_job.translation_result_groups %}
         <section class="tw-language-panel" data-language-panel="{{ language_group.language }}"{% if not language_group.is_default %} hidden{% endif %}>
+          {% if language_group.retry_allowed %}
+            <form method="post" action="{% url 'shopify_translation_console' %}" class="tw-job-actions">
+              {% csrf_token %}
+              <input type="hidden" name="ui_mode" value="editor">
+              <input type="hidden" name="action" value="{{ translation_workspace_retry_locale_action_name }}">
+              <input type="hidden" name="product_search" value="{{ product_search_text }}">
+              <input type="hidden" name="selected_product_gid" value="{{ translation_background_job.product_gid|default:selected_product_gid }}">
+              <input type="hidden" name="target_locale" value="{{ language_group.language }}">
+              <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
+              <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+              <button type="submit" class="button" {% if translation_background_job.is_active %}disabled{% endif %}>Retry this language</button>
+              <span class="tw-compact-safe-text">Preview only. Shopify is not updated.</span>
+            </form>
+          {% endif %}
           {% if language_group.count == 0 %}
             <div class="tw-empty-result-panel">
               {{ language_group.empty_message }}
@@ -7402,6 +7512,25 @@
         updateSearchStatus(input.value.trim(), count ? count.textContent : 0, false);
       }
       closeDropdown();
+    }());
+
+    (function () {
+      var form = document.querySelector("[data-all-languages-shopify-update-form]");
+      if (!form) {
+        return;
+      }
+      var status = document.querySelector("[data-all-languages-update-status]");
+      var submit = form.querySelector("button[type='submit']");
+      form.addEventListener("submit", function () {
+        if (status) {
+          status.hidden = false;
+          status.textContent = "Running validation/update status...";
+        }
+        if (submit) {
+          submit.disabled = true;
+          submit.textContent = "Validating and updating...";
+        }
+      });
     }());
   </script>
 </div>
