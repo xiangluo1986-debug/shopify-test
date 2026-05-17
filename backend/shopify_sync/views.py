@@ -70,6 +70,7 @@ from .translation_apply_plan import (
     build_translation_workspace_safe_write_readiness_state,
     build_selected_product_translation_apply_plan,
     execute_translation_workspace_single_locked_write,
+    load_latest_all_languages_update_report,
     load_translation_workspace_locked_execution_package,
     validate_and_update_all_languages_to_shopify,
 )
@@ -1138,6 +1139,7 @@ def review_request_workbench(request):
         result = review_request_review_and_send(
             request.POST.get("candidate_id"),
             admin_username=request.user.get_username(),
+            params=request.GET,
         )
         if result.get("email_sent") is True:
             messages.success(
@@ -2753,6 +2755,13 @@ def translation_console(request):
         selected_translations_apply_result or selected_translations_apply_state
     )
     all_languages_update_display = all_languages_update_result or all_languages_update_state
+    all_languages_update_report_display = all_languages_update_result or {}
+    if not all_languages_update_report_display:
+        all_languages_update_report_display = load_latest_all_languages_update_report(
+            translation_job_product_id
+        )
+    if all_languages_update_report_display:
+        all_languages_update_display = all_languages_update_report_display
     workspace_locked_execution_display = workspace_locked_execution_result or {}
     workspace_real_write_display = workspace_real_write_result or {}
     workspace_real_write_can_submit = (
@@ -2833,6 +2842,7 @@ def translation_console(request):
             "selected_translations_apply_error_message": selected_translations_apply_error_message,
             "all_languages_update_state": all_languages_update_state,
             "all_languages_update_result": all_languages_update_result,
+            "all_languages_update_report_display": all_languages_update_report_display,
             "all_languages_update_display": all_languages_update_display,
             "all_languages_update_error_message": all_languages_update_error_message,
             "workspace_locked_execution_result": workspace_locked_execution_result,

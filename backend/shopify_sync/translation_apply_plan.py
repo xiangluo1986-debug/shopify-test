@@ -53,6 +53,13 @@ ALL_LANGUAGES_AUTO_WRITE_FIELD_SET = set(ALL_LANGUAGES_AUTO_WRITE_FIELDS)
 LOCKED_EXECUTION_ALLOWED_FIELDS = SAFE_WRITE_READINESS_FIELDS
 LOCKED_EXECUTION_ALLOWED_FIELD_SET = set(LOCKED_EXECUTION_ALLOWED_FIELDS)
 ALL_LANGUAGES_SUPPORTED_LOCALES = ("ja", "de", "fr", "es", "it")
+ALL_LANGUAGES_LOCALE_LABELS = {
+    "ja": "Japanese",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+}
 LOCKED_EXECUTION_SUPPORTED_LOCALES = set(ALL_LANGUAGES_SUPPORTED_LOCALES)
 LOCKED_EXECUTION_LOCALE_LABEL_ALIASES = {
     "japanese": "ja",
@@ -725,6 +732,68 @@ def build_translation_workspace_all_languages_update_state(
         "sanitized_errors": [],
     }
     return _all_languages_attach_plain_language(state)
+
+
+def load_latest_all_languages_update_report(product_gid: str):
+    product_gid = str(product_gid or "").strip()
+    if not product_gid:
+        return {}
+    product_token = _safe_write_product_token(product_gid)
+    report_paths = []
+    for report_dir in _all_languages_update_report_search_dirs():
+        try:
+            report_paths.extend(
+                report_dir.glob(
+                    f"translation_all_languages_update_{product_token}_*.json"
+                )
+            )
+        except OSError:
+            continue
+    try:
+        report_paths = sorted(
+            report_paths,
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    except OSError:
+        return {}
+    for report_path in report_paths:
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("action_name") != ALL_LANGUAGES_REAL_WRITE_ACTION_NAME:
+            continue
+        report_product_gid = str(payload.get("product_gid") or "").strip()
+        if report_product_gid and report_product_gid != product_gid:
+            continue
+        payload = dict(payload)
+        payload["report_exists"] = True
+        payload["latest_update_report_loaded"] = True
+        payload["json_report_path"] = (
+            payload.get("json_report_path") or report_path.as_posix()
+        )
+        payload["html_report_path"] = (
+            payload.get("html_report_path") or report_path.with_suffix(".html").as_posix()
+        )
+        _all_languages_recount_payload(payload)
+        return _all_languages_attach_plain_language(payload)
+    return {}
+
+
+def _all_languages_update_report_search_dirs():
+    dirs = [REAL_WRITE_REPORT_DIR, Path("backend") / REAL_WRITE_REPORT_DIR]
+    unique_dirs = []
+    seen = set()
+    for report_dir in dirs:
+        key = str(report_dir)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_dirs.append(report_dir)
+    return unique_dirs
 
 
 def validate_and_update_all_languages_to_shopify(
@@ -2454,6 +2523,7 @@ def _all_languages_per_locale_summary(entries: list[dict], report: dict | None =
         locale_status = locale_statuses.get(locale) or {}
         row = {
             "locale": locale,
+            "language_label": _all_languages_locale_label(locale),
             "candidate_count": len(locale_entries),
             "write_ready_count": _all_languages_entry_status_count(
                 locale_entries,
@@ -2485,6 +2555,19 @@ def _all_languages_per_locale_summary(entries: list[dict], report: dict | None =
             "report_locale_status": locale_status.get("status", ""),
             "blocking_reasons": _all_languages_reason_counts(locale_entries),
         }
+        updated_field_labels = _all_languages_updated_field_labels(locale_entries)
+        confirmed_field_labels = _all_languages_updated_field_labels(
+            locale_entries,
+            confirmed_only=True,
+        )
+        row["updated_field_labels"] = updated_field_labels
+        row["confirmed_field_labels"] = confirmed_field_labels
+        row["updated_fields_label"] = _all_languages_join_labels(updated_field_labels)
+        row["confirmed_fields_label"] = _all_languages_join_labels(confirmed_field_labels)
+        row["all_updated_fields_confirmed"] = bool(updated_field_labels) and (
+            row["updated_count"] == row["verified_count"]
+        )
+        row["success_summary_text"] = _all_languages_locale_success_summary_text(row)
         if not locale_entries:
             row["blocking_reasons"].append(
                 {"reason": "blocked_no_report_rows_for_locale", "count": 1}
@@ -2569,9 +2652,15 @@ def _all_languages_reason_counts(entries: list[dict]):
 
 
 def _all_languages_attach_plain_language(payload: dict):
+    _all_languages_recount_payload(payload)
     entries = payload.get("entries") or []
     for entry in entries:
         _all_languages_refresh_entry_human_reasons(entry)
+        entry["field_label"] = _all_languages_field_label(entry.get("key", ""))
+        entry["language_label"] = _all_languages_locale_label(entry.get("locale", ""))
+        entry["confirmed_label"] = (
+            "Yes" if _all_languages_entry_confirmed(entry) else "No"
+        )
     payload["status_label"] = _all_languages_status_label(payload)
     payload["result_message"] = _all_languages_result_message(payload)
     payload["shopify_update_label"] = (
@@ -2593,9 +2682,56 @@ def _all_languages_attach_plain_language(payload: dict):
         entries,
         payload.get("blocking_conditions") or [],
     )
+    payload["is_successfully_updated"] = _all_languages_successfully_updated(payload)
+    payload["ready_count_label"] = (
+        "Ready before update"
+        if int(payload.get("updated_count") or 0) > 0
+        else "Ready to update"
+    )
+    payload["show_ready_count_in_main_summary"] = (
+        int(payload.get("updated_count") or 0) <= 0
+    )
+    payload["not_updated_explanation"] = _all_languages_not_updated_explanation(payload)
+    payload["not_updated_breakdown"] = _all_languages_not_updated_breakdown(entries)
+    payload["updated_entries"] = _all_languages_updated_entries_display(entries)
+    payload["successful_locale_summaries"] = (
+        _all_languages_successful_locale_summaries(entries)
+    )
     safe_diagnostics, safe_summary = _all_languages_safe_field_diagnostics(entries)
     payload["safe_field_diagnostics"] = safe_diagnostics
     payload["safe_field_diagnostic_summary"] = safe_summary
+    return payload
+
+
+def _all_languages_recount_payload(payload: dict):
+    entries = payload.get("entries") or []
+    if not isinstance(entries, list):
+        entries = []
+        payload["entries"] = entries
+    payload["candidate_count"] = len(entries)
+    payload["write_ready_count"] = _all_languages_entry_status_count(
+        entries,
+        "write_ready",
+    )
+    payload["updated_count"] = _all_languages_entry_status_count(
+        entries,
+        "written_verified",
+        "readback_mismatch",
+    )
+    payload["verified_count"] = _all_languages_entry_status_count(
+        entries,
+        "written_verified",
+    )
+    payload["skipped_count"] = _all_languages_entry_status_count(entries, "skipped")
+    payload["blocked_count"] = _all_languages_entry_status_count(entries, "blocked")
+    payload["review_note_count"] = _all_languages_entry_soft_warning_count(entries)
+    payload["failed_count"] = _all_languages_entry_status_count(
+        entries,
+        "write_failed",
+        "readback_mismatch",
+    )
+    payload["per_locale_summary"] = _all_languages_per_locale_summary(entries)
+    payload["per_field_summary"] = _all_languages_per_field_summary(entries)
     return payload
 
 
@@ -2620,6 +2756,182 @@ def _all_languages_result_message(payload: dict):
     if updated_count == 0 and blocked_count > 0:
         return "No translations were updated. The system did not find any safe fields to update."
     return "No Shopify update has been run yet."
+
+
+def _all_languages_successfully_updated(payload: dict):
+    updated_count = int(payload.get("updated_count") or 0)
+    verified_count = int(payload.get("verified_count") or 0)
+    return (
+        payload.get("status") == ALL_LANGUAGES_WRITTEN_AND_VERIFIED_STATUS
+        and bool(payload.get("shopify_write_performed"))
+        and bool(payload.get("readback_performed"))
+        and updated_count > 0
+        and verified_count == updated_count
+        and not payload.get("rollback_needed")
+    )
+
+
+def _all_languages_not_updated_explanation(payload: dict):
+    blocked_count = int(payload.get("blocked_count") or 0)
+    if blocked_count <= 0:
+        return ""
+    return (
+        f"{blocked_count} items were not updated because they are not enabled for "
+        "automatic Shopify update yet or need review."
+    )
+
+
+def _all_languages_not_updated_breakdown(entries: list[dict]):
+    buckets = {
+        "product_title_needs_review": {
+            "label": "Product title needs review",
+            "count": 0,
+        },
+        "product_description_not_enabled": {
+            "label": "Product description not enabled yet",
+            "count": 0,
+        },
+        "mapping_needed": {
+            "label": "Options/variants/metafields/media need mapping",
+            "count": 0,
+        },
+        "other_review_needed": {
+            "label": "Other items need review",
+            "count": 0,
+        },
+    }
+    for entry in entries or []:
+        if entry.get("status") != "blocked":
+            continue
+        field_key = str(entry.get("key") or "").strip()
+        group_key = str(entry.get("field_group") or "").strip()
+        if field_key == "title":
+            bucket_key = "product_title_needs_review"
+        elif field_key == "body_html":
+            bucket_key = "product_description_not_enabled"
+        elif group_key in ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS or field_key in {
+            "options",
+            "variants",
+            "metafields",
+            "media",
+            "media_alt_text",
+        }:
+            bucket_key = "mapping_needed"
+        else:
+            bucket_key = "other_review_needed"
+        buckets[bucket_key]["count"] += 1
+    return [item for item in buckets.values() if item["count"]]
+
+
+def _all_languages_successful_locale_summaries(entries: list[dict]):
+    rows = []
+    for locale in ALL_LANGUAGES_SUPPORTED_LOCALES:
+        locale_entries = [entry for entry in entries or [] if entry.get("locale") == locale]
+        updated_entries = [
+            entry for entry in locale_entries if _all_languages_entry_updated(entry)
+        ]
+        if not updated_entries:
+            continue
+        field_labels = _all_languages_updated_field_labels(locale_entries)
+        confirmed_count = sum(
+            1 for entry in updated_entries if _all_languages_entry_confirmed(entry)
+        )
+        all_confirmed = confirmed_count == len(updated_entries)
+        status_text = (
+            "updated and confirmed"
+            if all_confirmed
+            else "updated; confirmation needs review"
+        )
+        rows.append(
+            {
+                "locale": locale,
+                "language_label": _all_languages_locale_label(locale),
+                "field_labels": field_labels,
+                "fields_label": _all_languages_join_labels(field_labels),
+                "updated_count": len(updated_entries),
+                "confirmed_count": confirmed_count,
+                "all_confirmed": all_confirmed,
+                "summary_text": (
+                    f"{_all_languages_locale_label(locale)}: "
+                    f"{_all_languages_join_labels(field_labels)} {status_text}"
+                ),
+            }
+        )
+    return rows
+
+
+def _all_languages_updated_entries_display(entries: list[dict]):
+    rows = []
+    for entry in entries or []:
+        if not _all_languages_entry_updated(entry):
+            continue
+        confirmed = _all_languages_entry_confirmed(entry)
+        rows.append(
+            {
+                "locale": entry.get("locale", ""),
+                "language_label": _all_languages_locale_label(entry.get("locale", "")),
+                "field": entry.get("key", ""),
+                "field_label": _all_languages_field_label(entry.get("key", "")),
+                "proposed_value": entry.get("proposed_translation_value", ""),
+                "confirmed": confirmed,
+                "confirmed_label": "Yes" if confirmed else "No",
+            }
+        )
+    return rows
+
+
+def _all_languages_locale_success_summary_text(row: dict):
+    fields_label = row.get("updated_fields_label") or ""
+    if not fields_label:
+        return ""
+    status_text = (
+        "updated and confirmed"
+        if row.get("all_updated_fields_confirmed")
+        else "updated; confirmation needs review"
+    )
+    return f"{row.get('language_label') or row.get('locale')}: {fields_label} {status_text}"
+
+
+def _all_languages_updated_field_labels(
+    entries: list[dict],
+    *,
+    confirmed_only: bool = False,
+):
+    labels = []
+    for field in ALL_LANGUAGES_AUTO_WRITE_FIELDS:
+        field_entries = [entry for entry in entries or [] if entry.get("key") == field]
+        if confirmed_only:
+            has_field = any(_all_languages_entry_confirmed(entry) for entry in field_entries)
+        else:
+            has_field = any(_all_languages_entry_updated(entry) for entry in field_entries)
+        if has_field:
+            labels.append(_all_languages_field_label(field))
+    return labels
+
+
+def _all_languages_join_labels(labels: list[str]):
+    return ", ".join(label for label in labels or [] if label)
+
+
+def _all_languages_entry_updated(entry: dict):
+    return entry.get("status") in {"written_verified", "readback_mismatch"}
+
+
+def _all_languages_entry_confirmed(entry: dict):
+    return entry.get("status") == "written_verified"
+
+
+def _all_languages_field_label(field: str):
+    field = str(field or "")
+    return ALL_LANGUAGES_SAFE_FIELD_LABELS.get(
+        field,
+        field.replace("_", " ").strip().capitalize() or "Field",
+    )
+
+
+def _all_languages_locale_label(locale: str):
+    locale = _safe_write_canonical_locale(locale)
+    return ALL_LANGUAGES_LOCALE_LABELS.get(locale, locale or "Locale")
 
 
 def _all_languages_refresh_entry_human_reasons(entry: dict):
@@ -4074,40 +4386,55 @@ def _render_all_languages_update_html(payload: dict):
         _row(label, payload.get(key))
         for label, key in [
             ("Action Name", "action_name"),
-            ("Status", "status"),
+            ("Raw Status", "status"),
             ("Product GID", "product_gid"),
             ("Product Title", "product_title"),
             ("Locales", "locales"),
-            ("Candidate Count", "candidate_count"),
-            ("Write Ready Count", "write_ready_count"),
-            ("Updated Count", "updated_count"),
-            ("Verified Count", "verified_count"),
-            ("Skipped Count", "skipped_count"),
-            ("Blocked Count", "blocked_count"),
-            ("Review Note Count", "review_note_count"),
-            ("Failed Count", "failed_count"),
+            ("Checked Items", "candidate_count"),
+            ("Raw write_ready_count", "write_ready_count"),
+            ("Updated in Shopify", "updated_count"),
+            ("Confirmed After Update", "verified_count"),
+            ("Already Up To Date", "skipped_count"),
+            ("Not Updated", "blocked_count"),
+            ("Review Notes", "review_note_count"),
+            ("Failed", "failed_count"),
             ("Mutation Called", "mutation_called"),
             ("translationsRegister Called", "translations_register_called"),
             ("Shopify Write Performed", "shopify_write_performed"),
             ("Readback Performed", "readback_performed"),
-            ("Rollback Needed", "rollback_needed"),
+            ("Restore May Be Needed", "rollback_needed"),
             ("Blocking Conditions", "blocking_conditions"),
             ("JSON Report Path", "json_report_path"),
             ("HTML Report Path", "html_report_path"),
         ]
     )
+    success_summary = ""
+    if payload.get("is_successfully_updated"):
+        success_summary = f"""
+  <h2>Success</h2>
+  <ul>
+    <li>Shopify updated successfully</li>
+    <li>{escape(str(payload.get('updated_count', 0)))} translations updated</li>
+    <li>{escape(str(payload.get('verified_count', 0)))} confirmed after update</li>
+    <li>Restore not needed</li>
+  </ul>
+"""
     entry_rows = "\n".join(
         _all_languages_update_entry_row(entry)
         for entry in payload.get("entries", [])
     ) or "<tr><td colspan='9'>No entries</td></tr>"
+    updated_entry_rows = "\n".join(
+        _all_languages_updated_entry_html_row(entry)
+        for entry in payload.get("updated_entries", [])
+    ) or "<tr><td colspan='4'>No updated entries</td></tr>"
     locale_rows = "\n".join(
         _all_languages_summary_row(item, "locale")
         for item in payload.get("per_locale_summary", [])
-    ) or "<tr><td colspan='8'>No locale summary</td></tr>"
+    ) or "<tr><td colspan='9'>No locale summary</td></tr>"
     field_rows = "\n".join(
         _all_languages_summary_row(item, "field")
         for item in payload.get("per_field_summary", [])
-    ) or "<tr><td colspan='8'>No field summary</td></tr>"
+    ) or "<tr><td colspan='9'>No field summary</td></tr>"
     error_rows = "\n".join(
         _real_write_error_row(error)
         for error in payload.get("sanitized_errors", [])
@@ -4118,19 +4445,25 @@ def _render_all_languages_update_html(payload: dict):
 <body>
   <h1>All Languages Shopify Translation Update Audit</h1>
   <p><strong>No automatic rollback is performed. Restore candidates are included for manual rollback planning if needed.</strong></p>
+  {success_summary}
   <h2>Summary</h2>
   <table border="1" cellspacing="0" cellpadding="6"><tbody>{summary_rows}</tbody></table>
   <h2>Per Locale Summary</h2>
   <table border="1" cellspacing="0" cellpadding="6">
-    <thead><tr><th>Locale</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Review Notes</th><th>Failed</th></tr></thead>
+    <thead><tr><th>Locale</th><th>Checked Items</th><th>Raw Ready Count</th><th>Updated in Shopify</th><th>Confirmed After Update</th><th>Already Up To Date</th><th>Not Updated</th><th>Review Notes</th><th>Failed</th></tr></thead>
     <tbody>{locale_rows}</tbody>
   </table>
   <h2>Per Field Summary</h2>
   <table border="1" cellspacing="0" cellpadding="6">
-    <thead><tr><th>Field</th><th>Candidates</th><th>Ready</th><th>Updated</th><th>Verified</th><th>Skipped</th><th>Blocked</th><th>Review Notes</th><th>Failed</th></tr></thead>
+    <thead><tr><th>Field</th><th>Checked Items</th><th>Raw Ready Count</th><th>Updated in Shopify</th><th>Confirmed After Update</th><th>Already Up To Date</th><th>Not Updated</th><th>Review Notes</th><th>Failed</th></tr></thead>
     <tbody>{field_rows}</tbody>
   </table>
   <h2>Entries</h2>
+  <table border="1" cellspacing="0" cellpadding="6">
+    <thead><tr><th>Locale</th><th>Field</th><th>Proposed value</th><th>Confirmed</th></tr></thead>
+    <tbody>{updated_entry_rows}</tbody>
+  </table>
+  <h2>Technical Entries</h2>
   <table border="1" cellspacing="0" cellpadding="6">
     <thead><tr><th>Locale</th><th>Key</th><th>Resource ID</th><th>Digest</th><th>Manual edit</th><th>Status</th><th>Blocking reason</th><th>Readback matched</th><th>Rollback needed</th></tr></thead>
     <tbody>{entry_rows}</tbody>
@@ -4157,6 +4490,18 @@ def _all_languages_update_entry_row(entry):
         f"<td>{escape(str(entry.get('blocking_reason', '')))}</td>"
         f"<td>{escape(str(entry.get('readback_matched', '')))}</td>"
         f"<td>{escape(str(entry.get('rollback_needed', '')))}</td>"
+        "</tr>"
+    )
+
+
+def _all_languages_updated_entry_html_row(entry):
+    return (
+        "<tr>"
+        f"<td>{escape(str(entry.get('language_label', '')))}"
+        f"{' (' + escape(str(entry.get('locale', ''))) + ')' if entry.get('locale') else ''}</td>"
+        f"<td>{escape(str(entry.get('field_label', '')))}</td>"
+        f"<td>{escape(str(entry.get('proposed_value', '')))}</td>"
+        f"<td>{escape(str(entry.get('confirmed_label', '')))}</td>"
         "</tr>"
     )
 

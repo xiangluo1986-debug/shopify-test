@@ -641,6 +641,42 @@
     margin-top: 10px;
     color: #111827;
   }
+  .translation-workspace .tw-shopify-success-summary {
+    border: 1px solid #86efac;
+    border-left: 4px solid #16a34a;
+    border-radius: 8px;
+    background: #f0fdf4;
+    color: #14532d;
+    padding: 10px 12px;
+  }
+  .translation-workspace .tw-shopify-success-summary h4 {
+    margin: 0 0 8px;
+    color: #14532d;
+    font-size: 16px;
+  }
+  .translation-workspace .tw-shopify-success-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+  }
+  .translation-workspace .tw-shopify-success-metric {
+    border: 1px solid #bbf7d0;
+    border-radius: 6px;
+    background: #ffffff;
+    padding: 8px 9px;
+  }
+  .translation-workspace .tw-shopify-success-label {
+    color: #166534;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+  .translation-workspace .tw-shopify-success-value {
+    margin-top: 3px;
+    color: #14532d;
+    font-weight: 900;
+  }
   .translation-workspace .tw-shopify-update-kv-grid,
   .translation-workspace .tw-shopify-update-technical-grid {
     display: grid;
@@ -733,6 +769,13 @@
     padding: 0;
     list-style: none;
   }
+  .translation-workspace .tw-shopify-success-list {
+    display: grid;
+    gap: 6px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+  }
   .translation-workspace .tw-shopify-reason-list li {
     border: 1px solid #fde68a;
     border-radius: 6px;
@@ -740,6 +783,26 @@
     color: #713f12;
     font-weight: 700;
     padding: 7px 9px;
+  }
+  .translation-workspace .tw-shopify-success-list li {
+    border: 1px solid #bbf7d0;
+    border-radius: 6px;
+    background: #f0fdf4;
+    color: #14532d;
+    font-weight: 700;
+    padding: 7px 9px;
+  }
+  .translation-workspace .tw-shopify-not-updated-note {
+    margin: 8px 0 0;
+    border: 1px solid #fde68a;
+    border-radius: 6px;
+    background: #fffbeb;
+    color: #713f12;
+    font-weight: 700;
+    padding: 8px 10px;
+  }
+  .translation-workspace .tw-shopify-updated-table {
+    margin-top: 9px;
   }
   .translation-workspace .tw-shopify-diagnostic-table {
     margin-top: 8px;
@@ -2908,7 +2971,7 @@
       <div class="tw-shopify-apply-panel" data-all-languages-shopify-update-panel>
         <div class="tw-results-heading">
           <h3>Update Shopify with safe translations</h3>
-          {% if all_languages_update_result and all_languages_update_display.shopify_write_performed and all_languages_update_display.updated_count == all_languages_update_display.verified_count and all_languages_update_display.updated_count %}
+          {% if all_languages_update_display.is_successfully_updated %}
             <span class="tw-status-badge is-ready">Shopify updated</span>
           {% else %}
             <span class="tw-count-badge">Safe fields only</span>
@@ -2929,10 +2992,21 @@
               <div class="tw-header-status-label">Checked items</div>
               <div class="tw-header-status-value">{{ all_languages_update_display.candidate_count|default:0 }}</div>
             </div>
-            <div>
-              <div class="tw-header-status-label">Ready to update</div>
-              <div class="tw-header-status-value">{{ all_languages_update_display.write_ready_count|default:0 }}</div>
-            </div>
+            {% if all_languages_update_display.updated_count %}
+              <div>
+                <div class="tw-header-status-label">Updated in Shopify</div>
+                <div class="tw-header-status-value">{{ all_languages_update_display.updated_count|default:0 }}</div>
+              </div>
+              <div>
+                <div class="tw-header-status-label">Confirmed after update</div>
+                <div class="tw-header-status-value">{{ all_languages_update_display.verified_count|default:0 }}</div>
+              </div>
+            {% else %}
+              <div>
+                <div class="tw-header-status-label">{{ all_languages_update_display.ready_count_label|default:"Ready to update" }}</div>
+                <div class="tw-header-status-value">{{ all_languages_update_display.write_ready_count|default:0 }}</div>
+              </div>
+            {% endif %}
             <div>
               <div class="tw-header-status-label">Review notes</div>
               <div class="tw-header-status-value">{{ all_languages_update_display.review_note_count|default:0 }}</div>
@@ -2950,7 +3024,7 @@
         {% else %}
           <div class="tw-shopify-apply-disabled-reason">No Shopify update has been run yet.</div>
         {% endif %}
-        {% if all_languages_update_display.safe_field_diagnostic_summary %}
+        {% if all_languages_update_display.safe_field_diagnostic_summary and not all_languages_update_display.updated_count %}
           <div class="tw-shopify-update-result" aria-label="Safe field Shopify update diagnostic">
             <h4>Safe field check</h4>
             <div class="tw-shopify-update-kv-grid">
@@ -3026,8 +3100,27 @@
             </table>
           </div>
         {% endif %}
-        {% if all_languages_update_result %}
+        {% if all_languages_update_report_display %}
           <div class="tw-shopify-update-result" aria-label="Shopify update result summary">
+            {% if all_languages_update_display.is_successfully_updated %}
+              <div class="tw-shopify-success-summary" role="status">
+                <h4>Shopify updated successfully</h4>
+                <div class="tw-shopify-success-metrics">
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Translations updated</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.updated_count }} translations updated</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Confirmed after update</div>
+                    <div class="tw-shopify-success-value">{{ all_languages_update_display.verified_count }} confirmed after update</div>
+                  </div>
+                  <div class="tw-shopify-success-metric">
+                    <div class="tw-shopify-success-label">Restore status</div>
+                    <div class="tw-shopify-success-value">Restore not needed</div>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
             <div class="tw-shopify-update-kv-grid">
               <div class="tw-shopify-update-card is-wide">
                 <div class="tw-shopify-update-label">Result</div>
@@ -3037,10 +3130,12 @@
                 <div class="tw-shopify-update-label">Checked items</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.candidate_count }}</div>
               </div>
-              <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Ready to update</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.write_ready_count }}</div>
-              </div>
+              {% if all_languages_update_display.show_ready_count_in_main_summary %}
+                <div class="tw-shopify-update-card">
+                  <div class="tw-shopify-update-label">{{ all_languages_update_display.ready_count_label|default:"Ready to update" }}</div>
+                  <div class="tw-shopify-update-value">{{ all_languages_update_display.write_ready_count }}</div>
+                </div>
+              {% endif %}
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Updated in Shopify</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.updated_count }}</div>
@@ -3079,7 +3174,17 @@
               </div>
             </div>
           </div>
-          {% if all_languages_update_display.blocked_reason_summary %}
+          {% if all_languages_update_display.not_updated_explanation %}
+            <p class="tw-shopify-not-updated-note">{{ all_languages_update_display.not_updated_explanation }}</p>
+          {% endif %}
+          {% if all_languages_update_display.not_updated_breakdown %}
+            <h4>Why items were not updated</h4>
+            <ul class="tw-shopify-reason-list">
+              {% for item in all_languages_update_display.not_updated_breakdown %}
+                <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}</li>
+              {% endfor %}
+            </ul>
+          {% elif all_languages_update_display.blocked_reason_summary %}
             <h4>Why items were not updated</h4>
             <ul class="tw-shopify-reason-list">
               {% for item in all_languages_update_display.blocked_reason_summary %}
@@ -3088,19 +3193,28 @@
             </ul>
           {% endif %}
           <h4>Per-language update summary</h4>
+          {% if all_languages_update_display.successful_locale_summaries %}
+            <ul class="tw-shopify-success-list">
+              {% for item in all_languages_update_display.successful_locale_summaries %}
+                <li>{{ item.summary_text }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
           <div class="tw-shopify-language-grid" aria-label="Per-language update summary">
             {% for item in all_languages_update_display.per_locale_summary %}
               <article class="tw-shopify-language-card">
-                <div class="tw-shopify-language-title">{{ item.locale }}</div>
+                <div class="tw-shopify-language-title">{{ item.language_label|default:item.locale }}{% if item.locale %} ({{ item.locale }}){% endif %}</div>
                 <div class="tw-shopify-language-count-grid">
                   <div class="tw-shopify-language-count">
                     <div class="tw-shopify-language-count-label">Checked</div>
                     <div class="tw-shopify-language-count-value">{{ item.candidate_count }}</div>
                   </div>
-                  <div class="tw-shopify-language-count">
-                    <div class="tw-shopify-language-count-label">Ready to update</div>
-                    <div class="tw-shopify-language-count-value">{{ item.write_ready_count }}</div>
-                  </div>
+                  {% if all_languages_update_display.show_ready_count_in_main_summary %}
+                    <div class="tw-shopify-language-count">
+                      <div class="tw-shopify-language-count-label">{{ all_languages_update_display.ready_count_label|default:"Ready to update" }}</div>
+                      <div class="tw-shopify-language-count-value">{{ item.write_ready_count }}</div>
+                    </div>
+                  {% endif %}
                   <div class="tw-shopify-language-count">
                     <div class="tw-shopify-language-count-label">Updated in Shopify</div>
                     <div class="tw-shopify-language-count-value">{{ item.updated_count }}</div>
@@ -3131,6 +3245,33 @@
               <div class="tw-shopify-update-empty">No per-language update summary is available.</div>
             {% endfor %}
           </div>
+          {% if all_languages_update_display.updated_entries %}
+            <details class="tw-shopify-update-details">
+              <summary>Updated entries ({{ all_languages_update_display.updated_entries|length }})</summary>
+              <div class="tw-editor-table-wrap">
+                <table class="tw-results-table tw-shopify-updated-table">
+                  <thead>
+                    <tr>
+                      <th>Locale</th>
+                      <th>Field</th>
+                      <th>Proposed value</th>
+                      <th>Confirmed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for entry in all_languages_update_display.updated_entries %}
+                      <tr>
+                        <td>{{ entry.language_label }}{% if entry.locale %} ({{ entry.locale }}){% endif %}</td>
+                        <td>{{ entry.field_label }}</td>
+                        <td>{{ entry.proposed_value }}</td>
+                        <td>{{ entry.confirmed_label }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          {% endif %}
           <details class="tw-shopify-update-details">
             <summary>Technical details</summary>
             <div class="tw-shopify-update-technical-grid">
@@ -3149,6 +3290,44 @@
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Translations register called</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.translations_register_called }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Shopify write performed</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.shopify_write_performed }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Readback performed</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.readback_performed }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Raw write_ready_count</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.write_ready_count }}</div>
+              </div>
+              {% if all_languages_update_display.preflight_summary %}
+                <div class="tw-shopify-update-card">
+                  <div class="tw-shopify-update-label">Ready before update</div>
+                  <div class="tw-shopify-update-value">{{ all_languages_update_display.preflight_summary.write_ready_count|default:0 }}</div>
+                </div>
+              {% endif %}
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Raw checked count</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.candidate_count }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Raw updated count</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.updated_count }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Raw verified count</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.verified_count }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Raw blocked count</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.blocked_count }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Raw failed count</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.failed_count }}</div>
               </div>
               <div class="tw-shopify-update-card is-wide">
                 <div class="tw-shopify-update-label">Blocking conditions</div>
