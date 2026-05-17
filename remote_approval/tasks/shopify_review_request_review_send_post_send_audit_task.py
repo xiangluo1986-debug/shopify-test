@@ -150,6 +150,42 @@ def _load_source_html() -> str:
         return ""
 
 
+def load_review_send_post_send_audit_payload_from_django() -> dict:
+    completed = _run_django_local_audit()
+    if completed["success"]:
+        payload = completed.get("payload") if isinstance(completed.get("payload"), dict) else {}
+        return {
+            "success": bool(payload),
+            "payload": payload,
+            "failure_type": "" if payload else "audit_payload_missing",
+            "error": "" if payload else "Django audit returned no payload.",
+        }
+    return {
+        "success": False,
+        "payload": {},
+        "failure_type": _safe_text(completed.get("failure_type")),
+        "error": _safe_text(completed.get("stderr") or completed.get("stdout") or completed.get("failure_type")),
+    }
+
+
+def build_review_send_post_send_audit_payload_from_source_report(
+    source_report: dict,
+    source_error: str = "",
+    source_html: str = "",
+    source_json_path: str = "",
+    source_html_path: str = "",
+    source_html_found: bool = False,
+) -> dict:
+    payload = _build_payload(source_report if isinstance(source_report, dict) else {}, source_error, source_html or "")
+    if source_json_path:
+        payload["source_review_send_json_path"] = _safe_text(source_json_path, max_length=180)
+    if source_html_path:
+        payload["source_review_send_html_path"] = _safe_text(source_html_path, max_length=180)
+    if source_html_found:
+        payload["source_review_send_html_found"] = True
+    return payload
+
+
 def _build_payload(source_report: dict, source_error: str, source_html: str) -> dict:
     selected_order = _canonical_order_name(
         source_report.get("selected_order")

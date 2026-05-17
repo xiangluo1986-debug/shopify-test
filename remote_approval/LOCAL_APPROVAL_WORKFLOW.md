@@ -170,6 +170,14 @@ The task is locked to the successful post-send audited order, currently
 `1: reveiw request` aliases only after the exact approval gate passes. It must
 not call Gmail, Trustpilot, Kudosi, or Ali Reviews APIs.
 
+Phase 5.28O makes the tag-write task source selection match the Django/web
+post-send audit path. A no-approval run should still stop at
+`blocked_missing_tag_write_approval`, but it should report whether host logs,
+the Django/web audit builder, the latest Review & Send report, and the latest
+post-send audit were found. If the audited send is found, the report should show
+`tag_write_ready=true`, `email_sent_confirmed=true`, `sent_count=1`, and no
+Shopify API call or write.
+
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local
 candidate scan can use Shopify order tags, `fulfillment_status`, notes, and

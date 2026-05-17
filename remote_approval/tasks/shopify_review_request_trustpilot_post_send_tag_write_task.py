@@ -15,6 +15,11 @@ COMMAND_LABEL = "shopify_review_request_trustpilot_post_send_tag_write"
 SOURCE_POST_SEND_AUDIT_JSON_PATH = (
     LOG_DIR / "codex_runs" / "shopify_review_request_review_send_post_send_audit.json"
 )
+SOURCE_POST_SEND_AUDIT_LOGICAL_PATH = "logs/codex_runs/shopify_review_request_review_send_post_send_audit.json"
+SOURCE_REVIEW_SEND_JSON_PATH = LOG_DIR / "shopify_review_request_trustpilot_review_and_send_execute.json"
+SOURCE_REVIEW_SEND_HTML_PATH = LOG_DIR / "shopify_review_request_trustpilot_review_and_send_execute.html"
+SOURCE_REVIEW_SEND_LOGICAL_PATH = "logs/shopify_review_request_trustpilot_review_and_send_execute.json"
+SOURCE_REVIEW_SEND_HTML_LOGICAL_PATH = "logs/shopify_review_request_trustpilot_review_and_send_execute.html"
 REPORT_JSON_PATH = LOG_DIR / "codex_runs" / "shopify_review_request_trustpilot_post_send_tag_write.json"
 REPORT_HTML_PATH = LOG_DIR / "codex_runs" / "shopify_review_request_trustpilot_post_send_tag_write.html"
 
@@ -62,7 +67,7 @@ def run_shopify_review_request_trustpilot_post_send_tag_write_task(mode: str) ->
         raise ValueError(f"{TASK_NAME} only supports dry-run mode.")
 
     started = time.time()
-    source_report, source_error = _read_source_post_send_audit()
+    source_report, source_error, source_diagnostics = _read_source_post_send_audit()
     source_blockers = _source_blocking_conditions(source_report, source_error)
     approval = _approval_gate()
     write_result = _write_result(source_report, source_blockers, approval)
@@ -72,6 +77,7 @@ def run_shopify_review_request_trustpilot_post_send_tag_write_task(mode: str) ->
     payload = _build_payload(
         source_report=source_report,
         source_error=source_error,
+        source_diagnostics=source_diagnostics,
         approval=approval,
         source_blockers=source_blockers,
         blocking_conditions=blocking_conditions,
@@ -102,16 +108,256 @@ def run_shopify_review_request_trustpilot_post_send_tag_write_task(mode: str) ->
     return _task_result(payload, json_path, html_path)
 
 
-def _read_source_post_send_audit() -> tuple[dict, str]:
+def _read_source_post_send_audit() -> tuple[dict, str, dict]:
+    diagnostics = _source_diagnostics()
+    candidates = []
+
+    host_candidate = _load_host_post_send_audit_source(diagnostics)
+    if host_candidate:
+        candidates.append(host_candidate)
+
+    if not _has_ready_source(candidates):
+        django_candidate = _load_django_post_send_audit_source(diagnostics)
+        if django_candidate:
+            candidates.append(django_candidate)
+
+    if not _has_ready_source(candidates):
+        candidates.extend(_load_history_ledger_sources(diagnostics))
+
+    selected = _select_source_candidate(candidates)
+    diagnostics["source_candidates"] = [_source_candidate_summary(candidate) for candidate in candidates]
+    diagnostics["selected_source"] = _safe_text((selected or {}).get("source_name"), max_length=120)
+    diagnostics["selected_source_path"] = _safe_text((selected or {}).get("source_path"), max_length=180)
+    diagnostics["source_selection_why_not_ready"] = (selected or {}).get("blocking_statuses") or []
+
+    if selected and selected.get("payload"):
+        return selected["payload"], selected.get("error", ""), diagnostics
+    return {}, "blocked_missing_post_send_audit_report", diagnostics
+
+
+def _source_diagnostics() -> dict:
+    return {
+        "source_paths_checked": [],
+        "source_candidates": [],
+        "host_report_found": False,
+        "django_audit_source_found": False,
+        "django_audit_error": "",
+        "latest_review_send_report_found": False,
+        "latest_post_send_audit_found": False,
+        "history_ledger_error": "",
+        "selected_source": "",
+        "selected_source_path": "",
+        "source_selection_why_not_ready": [],
+    }
+
+
+def _record_source_path(diagnostics: dict, value: str) -> None:
+    text = _safe_text(value, max_length=180)
+    if text and text not in diagnostics["source_paths_checked"]:
+        diagnostics["source_paths_checked"].append(text)
+
+
+def _load_host_post_send_audit_source(diagnostics: dict) -> dict:
+    _record_source_path(diagnostics, SOURCE_POST_SEND_AUDIT_LOGICAL_PATH)
     if not SOURCE_POST_SEND_AUDIT_JSON_PATH.exists():
-        return {}, "blocked_missing_post_send_audit_report"
+        return {}
+    diagnostics["host_report_found"] = True
+    diagnostics["latest_post_send_audit_found"] = True
     try:
         payload = json.loads(SOURCE_POST_SEND_AUDIT_JSON_PATH.read_text(encoding="utf-8", errors="replace"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        return {}, _sanitize_text(f"blocked_post_send_audit_unreadable: {exc}")
+        return _source_candidate(
+            source_name="host_post_send_audit_report",
+            payload={},
+            error=_sanitize_text(f"blocked_post_send_audit_unreadable: {exc}"),
+            source_path=SOURCE_POST_SEND_AUDIT_LOGICAL_PATH,
+        )
     if not isinstance(payload, dict):
-        return {}, "blocked_post_send_audit_not_object"
-    return payload, ""
+        return _source_candidate(
+            source_name="host_post_send_audit_report",
+            payload={},
+            error="blocked_post_send_audit_not_object",
+            source_path=SOURCE_POST_SEND_AUDIT_LOGICAL_PATH,
+        )
+    return _source_candidate(
+        source_name="host_post_send_audit_report",
+        payload=payload,
+        error="",
+        source_path=SOURCE_POST_SEND_AUDIT_LOGICAL_PATH,
+    )
+
+
+def _load_django_post_send_audit_source(diagnostics: dict) -> dict:
+    _record_source_path(
+        diagnostics,
+        "django_web_container:build_review_request_review_send_post_send_audit_report",
+    )
+    try:
+        from remote_approval.tasks.shopify_review_request_review_send_post_send_audit_task import (
+            load_review_send_post_send_audit_payload_from_django,
+        )
+    except ImportError as exc:
+        return _source_candidate(
+            source_name="django_web_container_post_send_audit_builder",
+            payload={},
+            error=_sanitize_text(f"django_audit_import_failed: {exc}"),
+            source_path="django_web_container:build_review_request_review_send_post_send_audit_report",
+        )
+
+    result = load_review_send_post_send_audit_payload_from_django()
+    payload = result.get("payload") if isinstance(result.get("payload"), dict) else {}
+    if payload:
+        diagnostics["django_audit_source_found"] = True
+        if payload.get("source_review_send_report_found") is True:
+            diagnostics["latest_review_send_report_found"] = True
+        source_path = _safe_text(payload.get("source_review_send_json_path"), max_length=180)
+        if source_path:
+            _record_source_path(diagnostics, source_path)
+        return _source_candidate(
+            source_name="django_web_container_post_send_audit_builder",
+            payload=payload,
+            error="",
+            source_path=source_path or "django_web_container:post_send_audit_payload",
+        )
+    error = _safe_text(
+        " | ".join(
+            _dedupe_text(
+                [
+                    result.get("failure_type"),
+                    result.get("error"),
+                ]
+            )
+        ),
+        max_length=300,
+    ) or "django_post_send_audit_unavailable"
+    diagnostics["django_audit_error"] = error
+    return _source_candidate(
+        source_name="django_web_container_post_send_audit_builder",
+        payload={},
+        error=error,
+        source_path="django_web_container:build_review_request_review_send_post_send_audit_report",
+    )
+
+
+def _load_history_ledger_sources(diagnostics: dict) -> list[dict]:
+    _record_source_path(diagnostics, "history_ledger:load_history_source_reports")
+    try:
+        from backend.shopify_sync.review_request_history_ledger import load_history_source_reports
+        from remote_approval.tasks.shopify_review_request_review_send_post_send_audit_task import (
+            build_review_send_post_send_audit_payload_from_source_report,
+        )
+    except ImportError as exc:
+        diagnostics["history_ledger_error"] = _sanitize_text(f"history_ledger_import_failed: {exc}")
+        return [
+            _source_candidate(
+                source_name="history_ledger_local_report_loader",
+                payload={},
+                error=_sanitize_text(f"history_ledger_import_failed: {exc}"),
+                source_path="history_ledger:load_history_source_reports",
+            )
+        ]
+
+    try:
+        reports = load_history_source_reports(LOG_DIR)
+    except Exception as exc:
+        diagnostics["history_ledger_error"] = _sanitize_text(f"history_ledger_load_failed: {exc}")
+        return [
+            _source_candidate(
+                source_name="history_ledger_local_report_loader",
+                payload={},
+                error=_sanitize_text(f"history_ledger_load_failed: {exc}"),
+                source_path="history_ledger:load_history_source_reports",
+            )
+        ]
+
+    candidates = []
+    for report in reports:
+        key = report.get("key")
+        if key not in {"review_send_post_send_audit", "trustpilot_review_and_send_execute"}:
+            continue
+        relative_path = _safe_text(report.get("relative_path"), max_length=180)
+        if relative_path:
+            _record_source_path(diagnostics, relative_path)
+        if key == "review_send_post_send_audit" and report.get("loaded"):
+            diagnostics["latest_post_send_audit_found"] = True
+            candidates.append(
+                _source_candidate(
+                    source_name="history_ledger_post_send_audit_report",
+                    payload=report.get("data") or {},
+                    error="",
+                    source_path=relative_path or SOURCE_POST_SEND_AUDIT_LOGICAL_PATH,
+                )
+            )
+        elif key == "trustpilot_review_and_send_execute" and report.get("loaded"):
+            diagnostics["latest_review_send_report_found"] = True
+            payload = build_review_send_post_send_audit_payload_from_source_report(
+                report.get("data") or {},
+                source_error="",
+                source_html="",
+                source_json_path=relative_path or SOURCE_REVIEW_SEND_LOGICAL_PATH,
+                source_html_path=SOURCE_REVIEW_SEND_HTML_LOGICAL_PATH,
+                source_html_found=SOURCE_REVIEW_SEND_HTML_PATH.exists(),
+            )
+            candidates.append(
+                _source_candidate(
+                    source_name="history_ledger_latest_review_send_report",
+                    payload=payload,
+                    error="",
+                    source_path=relative_path or SOURCE_REVIEW_SEND_LOGICAL_PATH,
+                )
+            )
+    return candidates
+
+
+def _source_candidate(source_name: str, payload: dict, error: str, source_path: str) -> dict:
+    payload = payload if isinstance(payload, dict) else {}
+    error = _sanitize_text(error)
+    blockers = _source_blocking_conditions(payload, error) if payload or error else []
+    return {
+        "source_name": _safe_text(source_name, max_length=120),
+        "source_path": _safe_text(source_path, max_length=180),
+        "payload": payload,
+        "error": error,
+        "found": bool(payload),
+        "ready": bool(payload) and not blockers,
+        "blocking_statuses": _dedupe_text(item.get("status") for item in blockers),
+        "audit_status": _safe_text(payload.get("audit_status") or payload.get("report_status"), max_length=120),
+        "selected_order": _canonical_order_name(payload.get("selected_order")),
+        "email_sent_confirmed": payload.get("email_sent_confirmed") is True,
+        "sent_count": _safe_int(payload.get("sent_count")),
+    }
+
+
+def _source_candidate_summary(candidate: dict) -> dict:
+    return {
+        "source_name": _safe_text(candidate.get("source_name"), max_length=120),
+        "source_path": _safe_text(candidate.get("source_path"), max_length=180),
+        "found": candidate.get("found") is True,
+        "ready": candidate.get("ready") is True,
+        "audit_status": _safe_text(candidate.get("audit_status"), max_length=120),
+        "selected_order": _canonical_order_name(candidate.get("selected_order")),
+        "email_sent_confirmed": candidate.get("email_sent_confirmed") is True,
+        "sent_count": _safe_int(candidate.get("sent_count")),
+        "blocking_statuses": [_safe_text(item, max_length=120) for item in candidate.get("blocking_statuses") or []],
+        "error": _safe_text(candidate.get("error"), max_length=180),
+    }
+
+
+def _has_ready_source(candidates: list[dict]) -> bool:
+    return any(candidate.get("ready") is True for candidate in candidates)
+
+
+def _select_source_candidate(candidates: list[dict]) -> dict:
+    for candidate in candidates:
+        if candidate.get("ready") is True:
+            return candidate
+    for candidate in candidates:
+        if candidate.get("found") is True:
+            return candidate
+    for candidate in candidates:
+        if candidate.get("error"):
+            return candidate
+    return {}
 
 
 def _source_blocking_conditions(source_report: dict, source_error: str) -> list[dict]:
@@ -635,6 +881,7 @@ def _parse_json_from_stdout(stdout: str) -> dict:
 def _build_payload(
     source_report: dict,
     source_error: str,
+    source_diagnostics: dict,
     approval: dict,
     source_blockers: list[dict],
     blocking_conditions: list[dict],
@@ -644,20 +891,33 @@ def _build_payload(
 ) -> dict:
     selected_order = _canonical_order_name(source_report.get("selected_order")) or EXPECTED_ORDER_NAME
     safety = _safety_summary(write_result)
+    source_diagnostics = source_diagnostics or {}
+    why_not_ready = _why_not_ready(blocking_conditions, source_diagnostics)
     payload = {
         "timestamp": utc_now_iso(),
         "report_generated_at": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28N",
+        "phase": "5.28O",
         "mode": write_result.get("mode", "dry-run-approval-missing"),
         "command_label": COMMAND_LABEL,
         "tag_write_status": status,
         "report_status": status,
         "success": status in {SUCCESS_STATUS, MISSING_APPROVAL_STATUS},
-        "source_post_send_audit_json_path": "logs/codex_runs/shopify_review_request_review_send_post_send_audit.json",
+        "source_post_send_audit_json_path": SOURCE_POST_SEND_AUDIT_LOGICAL_PATH,
         "source_post_send_audit_found": bool(source_report),
         "source_post_send_audit_error": _sanitize_text(source_error),
+        "source_paths_checked": source_diagnostics.get("source_paths_checked") or [],
+        "host_report_found": source_diagnostics.get("host_report_found") is True,
+        "django_audit_source_found": source_diagnostics.get("django_audit_source_found") is True,
+        "django_audit_error": _safe_text(source_diagnostics.get("django_audit_error"), max_length=300),
+        "latest_review_send_report_found": source_diagnostics.get("latest_review_send_report_found") is True,
+        "latest_post_send_audit_found": source_diagnostics.get("latest_post_send_audit_found") is True,
+        "history_ledger_error": _safe_text(source_diagnostics.get("history_ledger_error"), max_length=300),
+        "selected_source": _safe_text(source_diagnostics.get("selected_source"), max_length=120),
+        "selected_source_path": _safe_text(source_diagnostics.get("selected_source_path"), max_length=180),
+        "source_candidate_summaries": source_diagnostics.get("source_candidates") or [],
+        "why_not_ready": why_not_ready,
         "source_audit_status": _safe_text(source_report.get("audit_status") or source_report.get("report_status")),
         "selected_order": selected_order,
         "expected_order": EXPECTED_ORDER_NAME,
@@ -718,6 +978,17 @@ def _build_payload(
     return payload
 
 
+def _why_not_ready(blocking_conditions: list[dict], source_diagnostics: dict) -> list[str]:
+    reasons = _dedupe_text(
+        item.get("status")
+        for item in blocking_conditions or []
+        if isinstance(item, dict) and item.get("status")
+    )
+    if reasons:
+        return reasons
+    return _dedupe_text(source_diagnostics.get("source_selection_why_not_ready") or [])
+
+
 def _safety_summary(write_result: dict) -> dict:
     return {
         "shopify_api_call_performed": write_result.get("shopify_api_call_performed") is True,
@@ -764,6 +1035,15 @@ def _render_html_report(payload: dict) -> str:
             ("Tag write status", payload.get("tag_write_status")),
             ("Selected order", payload.get("selected_order")),
             ("Source audit status", payload.get("source_audit_status")),
+            ("Selected source", payload.get("selected_source")),
+            ("Host report found", payload.get("host_report_found")),
+            ("Django audit source found", payload.get("django_audit_source_found")),
+            ("Django audit error", payload.get("django_audit_error")),
+            ("Latest Review & Send report found", payload.get("latest_review_send_report_found")),
+            ("Latest post-send audit found", payload.get("latest_post_send_audit_found")),
+            ("History ledger error", payload.get("history_ledger_error")),
+            ("Source paths checked", ", ".join(payload.get("source_paths_checked") or [])),
+            ("Why not ready", ", ".join(payload.get("why_not_ready") or [])),
             ("Email sent confirmed", payload.get("email_sent_confirmed")),
             ("Sent count", payload.get("sent_count")),
             ("Tag write ready", payload.get("tag_write_ready")),
@@ -817,6 +1097,15 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "html_trustpilot_post_send_tag_write_path": str(html_path),
         "tag_write_status": payload.get("tag_write_status"),
         "source_audit_status": payload.get("source_audit_status"),
+        "source_paths_checked": payload.get("source_paths_checked"),
+        "host_report_found": payload.get("host_report_found"),
+        "django_audit_source_found": payload.get("django_audit_source_found"),
+        "django_audit_error": payload.get("django_audit_error"),
+        "latest_review_send_report_found": payload.get("latest_review_send_report_found"),
+        "latest_post_send_audit_found": payload.get("latest_post_send_audit_found"),
+        "history_ledger_error": payload.get("history_ledger_error"),
+        "selected_source": payload.get("selected_source"),
+        "why_not_ready": payload.get("why_not_ready"),
         "selected_order": payload.get("selected_order"),
         "email_sent_confirmed": payload.get("email_sent_confirmed"),
         "sent_count": payload.get("sent_count"),
@@ -846,6 +1135,15 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Status: {payload.get('tag_write_status')}\n"
         f"Selected order: {payload.get('selected_order')}\n"
         f"Source audit status: {payload.get('source_audit_status')}\n"
+        f"Selected source: {payload.get('selected_source')}\n"
+        f"Source paths checked: {', '.join(payload.get('source_paths_checked') or [])}\n"
+        f"Host report found: {payload.get('host_report_found')}\n"
+        f"Django audit source found: {payload.get('django_audit_source_found')}\n"
+        f"Django audit error: {payload.get('django_audit_error')}\n"
+        f"Latest Review & Send report found: {payload.get('latest_review_send_report_found')}\n"
+        f"Latest post-send audit found: {payload.get('latest_post_send_audit_found')}\n"
+        f"History ledger error: {payload.get('history_ledger_error')}\n"
+        f"Why not ready: {', '.join(payload.get('why_not_ready') or [])}\n"
         f"Email sent confirmed: {payload.get('email_sent_confirmed')}\n"
         f"Sent count: {payload.get('sent_count')}\n"
         f"Tag write ready: {payload.get('tag_write_ready')}\n"
@@ -914,6 +1212,17 @@ def _safe_text(value, max_length: int = 300) -> str:
     if len(text) > max_length:
         return text[: max_length - 3] + "..."
     return text
+
+
+def _dedupe_text(values) -> list[str]:
+    seen = set()
+    result = []
+    for value in values or []:
+        text = _safe_text(value, max_length=180)
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
 
 
 def _sanitize_text(value) -> str:

@@ -193,6 +193,21 @@ Phase 0.2 automation decision:
   no Shopify API call, no Shopify write, no Gmail action, and no external
   review API call.
 
+#### Phase 5.28O Post-Send Tag Write Source Reliability
+
+- [x] The Trustpilot post-send tag-write task can use the same Django/web
+  post-send audit builder as the Review Request workbench before any Shopify
+  tag-write approval branch runs.
+- [x] If host-side post-send audit evidence is missing or stale, the task checks
+  the web/container audit builder and local history-ledger reports before
+  deciding whether the sent order is ready.
+- [x] Blocked reports include `source_paths_checked`, host/web/history source
+  found flags, selected order, email sent confirmation, sent count, and
+  `why_not_ready`.
+- [x] The no-approval run remains no-write: no Shopify API call, no Shopify tag
+  write, no Gmail action, no external review API call, and no
+  `translationsRegister`.
+
 ### Shopify Admin API Tag Permissions
 
 - [ ] Confirm the app has the required `write_orders` scope before any order tag
