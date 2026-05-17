@@ -350,8 +350,8 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "seo_description_over_160_chars": "SEO description is over 160 characters",
 }
 TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS = {
-    "blocked_body_html_forbidden_in_selected_apply": "Product description update is not enabled yet.",
-    "blocked_body_html_manual_review_required": "Product description update is not enabled yet.",
+    "blocked_body_html_forbidden_in_selected_apply": "Product description needs review before automatic Shopify update.",
+    "blocked_body_html_manual_review_required": "Product description needs review before automatic Shopify update.",
     "blocked_field_not_allowed_for_selected_apply": "Only title, SEO title, and SEO description can be updated in this phase.",
     "blocked_future_write_needs_resource_mapping": "Missing Shopify write mapping.",
     "blocked_missing_generated_or_manual_translation": "No translation result is available for Shopify update.",
@@ -1382,7 +1382,7 @@ def translation_console(request):
         "report_visible": False,
         "hidden_previous_report": False,
         "warning": "",
-        "empty_message": "Select this product and click Translate all languages.",
+        "empty_message": "Select this product and click Translate and update Shopify.",
     }
     draft_error_message = ""
     apply_plan_result = None
@@ -2418,6 +2418,10 @@ def translation_console(request):
                 "verified_count": all_languages_update_result.get("verified_count", 0),
                 "skipped_count": all_languages_update_result.get("skipped_count", 0),
                 "blocked_count": all_languages_update_result.get("blocked_count", 0),
+                "not_updated_count": all_languages_update_result.get(
+                    "not_updated_count",
+                    0,
+                ),
                 "review_note_count": all_languages_update_result.get(
                     "review_note_count",
                     0,
@@ -4082,7 +4086,7 @@ def _translation_workspace_report_guard(report: dict | None, *, selected_product
             if hidden_previous_report
             else ""
         ),
-        "empty_message": "Select this product and click Translate all languages.",
+        "empty_message": "Select this product and click Translate and update Shopify.",
     }
 
 
@@ -5993,10 +5997,10 @@ def _attach_translation_workspace_safe_write_ui(
     }
     all_language_entries_by_key = {
         (
-            entry.get("resource_id", ""),
-            entry.get("key", ""),
-            entry.get("locale", ""),
-            entry.get("digest", ""),
+            str(entry.get("resource_id") or "").strip(),
+            _translation_editor_normalize_field_key(entry.get("key")),
+            _translation_editor_canonical_locale(entry.get("locale")),
+            str(entry.get("digest") or "").strip(),
         ): entry
         for entry in all_language_entries
     }
@@ -8878,7 +8882,7 @@ def _translation_editor_badge_label(badge: str) -> str:
         "untranslated": "Needs translation",
         "exceeds limit": "Too long",
         "not eligible": "Not translated automatically",
-        "future write blocked": "Can review now; Shopify update support needs extra mapping",
+        "future write blocked": "Can review now; Shopify update support needs extra mapping.",
     }
     return labels.get(str(badge or ""), _translation_editor_humanize_key(badge))
 

@@ -48,7 +48,7 @@ ALL_LANGUAGES_BLOCKED_STATUS = "all_languages_shopify_translations_blocked"
 SAFE_WRITE_READINESS_MAX_ENTRY_COUNT = 3
 SAFE_WRITE_READINESS_FIELDS = ("title", "meta_title", "meta_description")
 SAFE_WRITE_READINESS_FIELD_SET = set(SAFE_WRITE_READINESS_FIELDS)
-ALL_LANGUAGES_AUTO_WRITE_FIELDS = SAFE_WRITE_READINESS_FIELDS
+ALL_LANGUAGES_AUTO_WRITE_FIELDS = SAFE_WRITE_READINESS_FIELDS + ("body_html",)
 ALL_LANGUAGES_AUTO_WRITE_FIELD_SET = set(ALL_LANGUAGES_AUTO_WRITE_FIELDS)
 LOCKED_EXECUTION_ALLOWED_FIELDS = SAFE_WRITE_READINESS_FIELDS
 LOCKED_EXECUTION_ALLOWED_FIELD_SET = set(LOCKED_EXECUTION_ALLOWED_FIELDS)
@@ -109,6 +109,7 @@ ALL_LANGUAGES_SAFE_FIELD_LABELS = {
     "title": "Product title",
     "meta_title": "SEO title",
     "meta_description": "SEO description",
+    "body_html": "Product description",
 }
 ALL_LANGUAGES_NEUTRAL_REVIEW_CODES = {
     "already_translated_skipped",
@@ -696,7 +697,6 @@ def build_translation_workspace_all_languages_update_state(
         "locales": list(ALL_LANGUAGES_SUPPORTED_LOCALES),
         "allowed_fields": list(ALL_LANGUAGES_AUTO_WRITE_FIELDS),
         "blocked_fields": [
-            "body_html",
             "options",
             "variants",
             "metafields",
@@ -2148,9 +2148,7 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_key_missing")
     if not digest:
         reasons.append("blocked_digest_missing")
-    if field_key == "body_html":
-        reasons.append("blocked_body_html_auto_update_disabled")
-    elif field_key not in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET:
+    if field_key not in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET:
         reasons.append("blocked_field_not_allowed_for_all_languages_update")
     if group_key not in SAFE_WRITE_READINESS_GROUP_SET:
         reasons.append("blocked_scope_group_not_allowed")
@@ -2334,6 +2332,10 @@ def _all_languages_html_structure_notes(source_html: str, proposed_html: str):
         if proposed_snapshot.tag_counts.get(tag, 0) < source_count:
             notes.append("body_html_structure_broken")
             break
+    for tag, source_count in source_snapshot.end_tag_counts.items():
+        if proposed_snapshot.end_tag_counts.get(tag, 0) < source_count:
+            notes.append("body_html_structure_broken")
+            break
     for tag in ALL_LANGUAGES_BODY_HTML_LINK_MEDIA_TAGS:
         if proposed_snapshot.tag_counts.get(tag, 0) < source_snapshot.tag_counts.get(tag, 0):
             notes.append("html_media_or_link_tag_broken")
@@ -2349,6 +2351,7 @@ class _AllLanguagesHtmlSnapshot(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.tag_counts = {}
+        self.end_tag_counts = {}
         self.link_media_attrs = []
 
     @classmethod
@@ -2359,6 +2362,7 @@ class _AllLanguagesHtmlSnapshot(HTMLParser):
             parser.close()
         except Exception:
             parser.tag_counts = {}
+            parser.end_tag_counts = {}
             parser.link_media_attrs = []
         return parser
 
@@ -2367,6 +2371,11 @@ class _AllLanguagesHtmlSnapshot(HTMLParser):
 
     def handle_startendtag(self, tag, attrs):
         self._record_tag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        tag = str(tag or "").lower()
+        if tag:
+            self.end_tag_counts[tag] = self.end_tag_counts.get(tag, 0) + 1
 
     def _record_tag(self, tag, attrs):
         tag = str(tag or "").lower()
@@ -2383,65 +2392,68 @@ def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | No
     entry = entry or {}
     field_key = str(entry.get("key") or "").strip()
     group_key = str(entry.get("field_group") or "").strip()
+    if (
+        field_key == "body_html"
+        and reason not in {"existing_translation_current_same_value"}
+    ):
+        return "Product description needs review before automatic Shopify update."
     if reason in {
         "blocked_future_write_needs_resource_mapping",
         "blocked_scope_group_not_allowed",
         "blocked_field_not_allowed_for_all_languages_update",
     }:
-        if field_key == "body_html":
-            return "Product description is not enabled for automatic Shopify update yet."
         if group_key == "options":
-            return "Options need extra Shopify mapping before update."
+            return "Options need extra Shopify mapping."
         if group_key == "variants":
-            return "Variants need extra Shopify mapping before update."
+            return "Variants need extra Shopify mapping."
         if group_key in {"important_metafields", "metafields", "technical_metafields"}:
-            return "Metafields need extra Shopify mapping before update."
+            return "Metafields need extra Shopify mapping."
         if group_key in {"media", "media_alt_text"}:
-            return "Media alt text needs extra Shopify mapping before update."
+            return "Media alt text update is not enabled yet."
     if (
-        field_key in SAFE_WRITE_READINESS_FIELD_SET
+        field_key in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET
         and reason
         in {"blocked_resource_id_missing", "blocked_key_missing", "blocked_digest_missing"}
     ):
-        return "Re-run translation for this product to create Shopify update-ready data."
+        return "Missing Shopify mapping."
     return _all_languages_blocking_reason_label(reason)
 
 
 def _all_languages_blocking_reason_label(reason: str):
     if reason == "blocked_future_write_needs_resource_mapping":
-        return "Missing Shopify write mapping."
+        return "Missing Shopify mapping."
     labels = {
-        "blocked_background_draft_report_not_completed_or_partial": "Latest translation report is not completed or partial.",
-        "blocked_body_html_auto_update_disabled": "Product description is not enabled for automatic Shopify update yet.",
-        "blocked_body_html_structure_broken": "Product description HTML structure needs review.",
-        "blocked_digest_missing": "Missing Shopify write mapping.",
-        "blocked_existing_current_translation": "This field is already up to date.",
-        "blocked_field_not_allowed_for_all_languages_update": "Missing Shopify write mapping.",
-        "blocked_forbidden_phrase_detected": "Forbidden phrase found.",
-        "blocked_html_media_or_link_tag_broken": "HTML links, images, video, or iframe tags need review.",
-        "blocked_identity_review_required": "Product identity check failed.",
-        "blocked_key_missing": "Missing Shopify write mapping.",
-        "blocked_missing_background_draft_report": "No completed translation report was found for this product.",
+        "blocked_background_draft_report_not_completed_or_partial": "Needs review before update.",
+        "blocked_body_html_auto_update_disabled": "Product description needs review before automatic Shopify update.",
+        "blocked_body_html_structure_broken": "Product description needs review before automatic Shopify update.",
+        "blocked_digest_missing": "Missing Shopify mapping.",
+        "blocked_existing_current_translation": "Already up to date.",
+        "blocked_field_not_allowed_for_all_languages_update": "Missing Shopify mapping.",
+        "blocked_forbidden_phrase_detected": "Contains blocked wording.",
+        "blocked_html_media_or_link_tag_broken": "Product description needs review before automatic Shopify update.",
+        "blocked_identity_review_required": "Product/model check failed.",
+        "blocked_key_missing": "Missing Shopify mapping.",
+        "blocked_missing_background_draft_report": "Needs review before update.",
         "blocked_missing_selected_product": "Select one product before updating Shopify.",
-        "blocked_needs_review_status": "This translation needs review before Shopify update.",
-        "blocked_no_write_ready_candidates": "No title or SEO fields are ready to update.",
-        "blocked_not_customer_write_safe": "This row is not enabled for Shopify update.",
-        "blocked_product_gid_mismatch": "This row belongs to another product and cannot be updated.",
+        "blocked_needs_review_status": "Needs review before update.",
+        "blocked_no_write_ready_candidates": "Needs review before update.",
+        "blocked_not_customer_write_safe": "Needs review before update.",
+        "blocked_product_gid_mismatch": "Product/model check failed.",
         "blocked_proposed_translation_empty": "Translation is empty.",
-        "blocked_proposed_translation_equals_source": "Translation matches the source text.",
-        "blocked_resource_id_missing": "Missing Shopify write mapping.",
-        "blocked_scope_group_not_allowed": "Missing Shopify write mapping.",
-        "blocked_selected_product_report_mismatch": "Latest report belongs to another product.",
+        "blocked_proposed_translation_equals_source": "Needs review before update.",
+        "blocked_resource_id_missing": "Missing Shopify mapping.",
+        "blocked_scope_group_not_allowed": "Missing Shopify mapping.",
+        "blocked_selected_product_report_mismatch": "Product/model check failed.",
         "blocked_target_locale_unsupported": "This language is not supported.",
         "blocked_product_title_over_80_chars": "Translation is too long.",
         "blocked_seo_title_over_60_chars": "Translation is too long.",
         "blocked_seo_description_over_160_chars": "Translation is too long.",
         "blocked_shopify_installation_missing": "Shopify installation is missing.",
         "blocked_shopify_installation_incomplete": "Shopify installation is incomplete.",
-        "blocked_source_empty": "Original source is empty.",
-        "existing_translation_current_same_value": "This field is already up to date.",
+        "blocked_source_empty": "Translation is empty.",
+        "existing_translation_current_same_value": "Already up to date.",
         "readback_mismatch": "Shopify confirmation check did not match.",
-        "translations_register_failed": "Shopify returned an update error.",
+        "translations_register_failed": "Needs review before update.",
     }
     return labels.get(reason, reason)
 
@@ -2694,6 +2706,7 @@ def _all_languages_attach_plain_language(payload: dict):
     payload["not_updated_explanation"] = _all_languages_not_updated_explanation(payload)
     payload["not_updated_breakdown"] = _all_languages_not_updated_breakdown(entries)
     payload["updated_entries"] = _all_languages_updated_entries_display(entries)
+    payload["updated_field_labels"] = _all_languages_updated_field_labels(entries)
     payload["successful_locale_summaries"] = (
         _all_languages_successful_locale_summaries(entries)
     )
@@ -2730,6 +2743,15 @@ def _all_languages_recount_payload(payload: dict):
         "write_failed",
         "readback_mismatch",
     )
+    payload["write_failed_count"] = _all_languages_entry_status_count(
+        entries,
+        "write_failed",
+    )
+    payload["not_updated_count"] = (
+        int(payload.get("skipped_count") or 0)
+        + int(payload.get("blocked_count") or 0)
+        + int(payload.get("write_failed_count") or 0)
+    )
     payload["per_locale_summary"] = _all_languages_per_locale_summary(entries)
     payload["per_field_summary"] = _all_languages_per_field_summary(entries)
     return payload
@@ -2749,12 +2771,24 @@ def _all_languages_result_message(payload: dict):
     verified_count = int(payload.get("verified_count") or 0)
     failed_count = int(payload.get("failed_count") or 0)
     blocked_count = int(payload.get("blocked_count") or 0)
+    skipped_count = int(payload.get("skipped_count") or 0)
     if updated_count > 0 and verified_count == updated_count and failed_count == 0:
-        return "Shopify updated successfully. All updated fields were confirmed."
+        return (
+            f"Shopify updated successfully. {verified_count} translations updated "
+            "and confirmed."
+        )
     if updated_count > 0 and (failed_count > 0 or verified_count != updated_count):
-        return "Shopify was partly updated. Some fields need review."
+        return (
+            "Some translations were not updated because they need review or are not "
+            "enabled for automatic update yet."
+        )
     if updated_count == 0 and blocked_count > 0:
-        return "No translations were updated. The system did not find any safe fields to update."
+        return (
+            "Some translations were not updated because they need review or are not "
+            "enabled for automatic update yet."
+        )
+    if updated_count == 0 and skipped_count > 0:
+        return "No Shopify update was needed. Safe translations are already up to date."
     return "No Shopify update has been run yet."
 
 
@@ -2772,55 +2806,29 @@ def _all_languages_successfully_updated(payload: dict):
 
 
 def _all_languages_not_updated_explanation(payload: dict):
-    blocked_count = int(payload.get("blocked_count") or 0)
-    if blocked_count <= 0:
+    not_updated_count = int(payload.get("not_updated_count") or 0)
+    if not_updated_count <= 0:
         return ""
     return (
-        f"{blocked_count} items were not updated because they are not enabled for "
-        "automatic Shopify update yet or need review."
+        "Some translations were not updated because they need review or are not "
+        "enabled for automatic update yet."
     )
 
 
 def _all_languages_not_updated_breakdown(entries: list[dict]):
-    buckets = {
-        "product_title_needs_review": {
-            "label": "Product title needs review",
-            "count": 0,
-        },
-        "product_description_not_enabled": {
-            "label": "Product description not enabled yet",
-            "count": 0,
-        },
-        "mapping_needed": {
-            "label": "Options/variants/metafields/media need mapping",
-            "count": 0,
-        },
-        "other_review_needed": {
-            "label": "Other items need review",
-            "count": 0,
-        },
-    }
+    counts = {}
     for entry in entries or []:
-        if entry.get("status") != "blocked":
+        if entry.get("status") not in {"blocked", "skipped", "write_failed"}:
             continue
-        field_key = str(entry.get("key") or "").strip()
-        group_key = str(entry.get("field_group") or "").strip()
-        if field_key == "title":
-            bucket_key = "product_title_needs_review"
-        elif field_key == "body_html":
-            bucket_key = "product_description_not_enabled"
-        elif group_key in ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS or field_key in {
-            "options",
-            "variants",
-            "metafields",
-            "media",
-            "media_alt_text",
-        }:
-            bucket_key = "mapping_needed"
-        else:
-            bucket_key = "other_review_needed"
-        buckets[bucket_key]["count"] += 1
-    return [item for item in buckets.values() if item["count"]]
+        labels = entry.get("human_blocking_reasons") or []
+        label = str(labels[0] if labels else entry.get("blocking_reason") or "").strip()
+        if not label:
+            label = "Needs review before update."
+        counts[label] = counts.get(label, 0) + 1
+    return [
+        {"label": label, "count": count}
+        for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
 
 
 def _all_languages_successful_locale_summaries(entries: list[dict]):
@@ -3000,9 +3008,11 @@ def _all_languages_blocked_reason_summary(entries: list[dict], blocking_conditio
 def _all_languages_safe_field_diagnostics(entries: list[dict]):
     diagnostics = []
     safe_entries = [
-        entry for entry in entries or [] if entry.get("key") in SAFE_WRITE_READINESS_FIELD_SET
+        entry
+        for entry in entries or []
+        if entry.get("key") in ALL_LANGUAGES_AUTO_WRITE_FIELD_SET
     ]
-    for field in SAFE_WRITE_READINESS_FIELDS:
+    for field in ALL_LANGUAGES_AUTO_WRITE_FIELDS:
         field_entries = [entry for entry in safe_entries if entry.get("key") == field]
         reason_summary = _all_languages_safe_field_reason_summary(field_entries)
         soft_warning_summary = _all_languages_safe_field_soft_warning_summary(field_entries)
@@ -3085,6 +3095,11 @@ def _all_languages_safe_field_diagnostics(entries: list[dict]):
             item["candidates_found"]
             for item in diagnostics
             if item["field"] == "meta_description"
+        ),
+        "product_description_candidates_found": next(
+            item["candidates_found"]
+            for item in diagnostics
+            if item["field"] == "body_html"
         ),
         "safe_fields_ready": ready_count,
         "safe_fields_blocked": blocked_count,

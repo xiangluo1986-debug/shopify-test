@@ -1508,7 +1508,7 @@
   }
   .tw-result-compare-grid {
     align-items: stretch;
-    grid-template-columns: repeat(2, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   }
   .tw-compare-column {
     display: flex;
@@ -1614,7 +1614,7 @@
   }
   .tw-result-compare-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 10px;
     margin-top: 6px;
   }
@@ -2821,19 +2821,19 @@
             <form method="post" action="{% url 'shopify_translation_console' %}" data-job-start-form>
               {% csrf_token %}
               <input type="hidden" name="ui_mode" value="editor">
-              <input type="hidden" name="action" value="translate_all_languages_all_content">
+              <input type="hidden" name="action" value="{% if translation_background_job.show_translation_results and not translation_background_job.is_active and not all_languages_update_display.is_successfully_updated %}{{ all_languages_real_write_action_name }}{% else %}translate_all_languages_all_content{% endif %}">
               <input type="hidden" name="product_search" value="{{ product_search_text }}">
               <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
               <input type="hidden" name="target_locale" value="{{ selected_locale }}">
               <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
               <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-              <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>{% if translation_background_job.exists and not translation_background_job.is_active %}Translate all languages again{% else %}Translate all languages{% endif %}</button>
+              <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active or all_languages_update_display.is_successfully_updated %} disabled{% endif %}>{% if all_languages_update_display.is_successfully_updated %}Shopify updated successfully{% else %}Translate and update Shopify{% endif %}</button>
             </form>
           {% else %}
-            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate all languages</button>
+            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate and update Shopify</button>
           {% endif %}
-          <span class="tw-compact-safe-text">Preview only. No Shopify update.</span>
-          <span class="tw-compact-safe-text">Translations are preview results. Since Shopify is not updated yet, running again may find the same missing items.</span>
+          <span class="tw-compact-safe-text">Only safe fields are updated automatically.</span>
+          <span class="tw-compact-safe-text">{% if translation_background_job.show_translation_results and not translation_background_job.is_active %}Translation is ready. Click the button to validate and update safe fields.{% else %}Translation runs first. Shopify update only runs after an explicit click when results are ready.{% endif %}</span>
         </div>
         <div class="tw-job-pill is-{{ translation_background_job.compact_status_key|default:'not_started' }}" data-job-status-pill>
           <div class="tw-job-pill-head">
@@ -2846,7 +2846,7 @@
             {% elif translation_background_job.show_translation_results %}
               Translation results are ready for review.
             {% else %}
-              {% if selected_product_gid %}Select this product and click Translate all languages.{% else %}Select a product and click Translate all languages.{% endif %}
+              {% if selected_product_gid %}Select this product and click Translate and update Shopify.{% else %}Select a product and click Translate and update Shopify.{% endif %}
             {% endif %}
           </div>
           {% if translation_background_job.exists %}
@@ -2870,24 +2870,14 @@
   {% if translation_background_job.show_translation_results %}
     <div id="translation-results" class="module tw-translation-results tw-translation-comparison" data-workspace-section="results" data-translation-results-section data-result-count="{{ translation_background_job.translation_result_count|default:0 }}" data-locale-terminal-count="{{ translation_background_job.counts.processed_locales|default:0 }}" data-language-switcher>
       <div class="tw-results-heading">
-        <h2>Translation results</h2>
+        <h2>Result summary</h2>
         <div class="tw-results-meta-row">
-          <span class="tw-status-badge is-{{ translation_background_job.compact_status_key|default:'completed' }}">{{ translation_background_job.compact_status_label|default:"Completed" }}</span>
-          <span class="tw-count-badge">{{ translation_background_job.counts.completed_locales|default:0 }} / {{ translation_background_job.counts.total_locales|default:5 }} languages completed</span>
-          <span class="tw-count-badge">{{ translation_background_job.counts.failed_locales|default:0 }} failed</span>
-          <span class="tw-count-badge">{{ translation_background_job.counts.generated_draft_count|default:0 }} translated</span>
-          <span class="tw-count-badge">{{ translation_background_job.counts.blocked_count|default:0 }} needs review</span>
-          <span class="tw-count-badge">{{ translation_background_job.counts.skipped_count|default:0 }} skipped</span>
-          <span class="tw-count-badge">OpenAI calls {{ translation_background_job.counts.openai_call_count|default:0 }}</span>
-          <span class="tw-count-badge">Cache reused {{ translation_background_job.counts.reused_cache_count|default:0 }}</span>
-          <span class="tw-count-badge">Deduplicated {{ translation_background_job.counts.deduplicated_input_count|default:0 }}</span>
-          <span class="tw-count-badge">Skipped existing {{ translation_background_job.counts.skipped_existing_count|default:0 }}</span>
-          <span class="tw-count-badge">Skipped technical {{ translation_background_job.counts.skipped_technical_count|default:0 }}</span>
-          <span class="tw-count-badge">Last updated {{ translation_background_job.updated_at|default:"-" }}</span>
-          <span class="tw-count-badge">Source read: Shopify read-only</span>
-          <span class="tw-count-badge">Translation generated by: OpenAI API</span>
-          <span class="tw-count-badge">Shopify update: not performed</span>
-          <span class="tw-count-badge">Preview only</span>
+          <span class="tw-count-badge">Languages completed {{ translation_background_job.counts.completed_locales|default:0 }} / {{ translation_background_job.counts.total_locales|default:5 }}</span>
+          <span class="tw-count-badge">Translated items {{ translation_background_job.counts.generated_draft_count|default:0 }}</span>
+          <span class="tw-count-badge">Updated in Shopify {{ all_languages_update_display.updated_count|default:0 }}</span>
+          <span class="tw-count-badge">Confirmed after update {{ all_languages_update_display.verified_count|default:0 }}</span>
+          <span class="tw-count-badge">Needs review {{ translation_background_job.counts.blocked_count|default:0 }}</span>
+          <span class="tw-count-badge">Not updated {{ all_languages_update_display.not_updated_count|default:0 }}</span>
         </div>
       </div>
       <div class="tw-language-tabs" role="tablist" aria-label="Translation result languages">
@@ -2901,7 +2891,8 @@
           </button>
         {% endfor %}
       </div>
-      <section class="tw-efficiency-panel" aria-label="Translation efficiency">
+      <details class="tw-efficiency-panel" aria-label="Translation efficiency">
+        <summary>OpenAI efficiency stats</summary>
         <div class="tw-results-heading tw-efficiency-heading">
           <h3>Translation efficiency</h3>
           <span class="tw-count-badge">Older reports show 0 when stats are not available</span>
@@ -2967,57 +2958,39 @@
             </table>
           </div>
         </details>
-      </section>
+      </details>
       <div class="tw-shopify-apply-panel" data-all-languages-shopify-update-panel>
         <div class="tw-results-heading">
-          <h3>Update Shopify with safe translations</h3>
+          <h3>Shopify update result</h3>
           {% if all_languages_update_display.is_successfully_updated %}
             <span class="tw-status-badge is-ready">Shopify updated</span>
           {% else %}
             <span class="tw-count-badge">Safe fields only</span>
           {% endif %}
         </div>
-        <p class="tw-shopify-apply-note">Automatically checks and updates only safe product title and SEO translations. Product description, options, variants, metafields, and media alt text remain preview-only until mapping is enabled.</p>
-        <form method="post" action="{% url 'shopify_translation_console' %}" data-all-languages-shopify-update-form>
-          {% csrf_token %}
-          <input type="hidden" name="ui_mode" value="editor">
-          <input type="hidden" name="action" value="{{ all_languages_real_write_action_name }}">
-          <input type="hidden" name="product_search" value="{{ product_search_text }}">
-          <input type="hidden" name="selected_product_gid" value="{{ translation_background_job.product_gid|default:selected_product_gid }}">
-          <input type="hidden" name="target_locale" value="{{ selected_locale }}">
-          <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
-          <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-          <div class="tw-job-actions" style="align-items: flex-end;">
-            <div>
-              <div class="tw-header-status-label">Checked items</div>
-              <div class="tw-header-status-value">{{ all_languages_update_display.candidate_count|default:0 }}</div>
-            </div>
-            {% if all_languages_update_display.updated_count %}
-              <div>
-                <div class="tw-header-status-label">Updated in Shopify</div>
-                <div class="tw-header-status-value">{{ all_languages_update_display.updated_count|default:0 }}</div>
-              </div>
-              <div>
-                <div class="tw-header-status-label">Confirmed after update</div>
-                <div class="tw-header-status-value">{{ all_languages_update_display.verified_count|default:0 }}</div>
-              </div>
-            {% else %}
-              <div>
-                <div class="tw-header-status-label">{{ all_languages_update_display.ready_count_label|default:"Ready to update" }}</div>
-                <div class="tw-header-status-value">{{ all_languages_update_display.write_ready_count|default:0 }}</div>
-              </div>
-            {% endif %}
-            <div>
-              <div class="tw-header-status-label">Review notes</div>
-              <div class="tw-header-status-value">{{ all_languages_update_display.review_note_count|default:0 }}</div>
-            </div>
-            <div>
-              <div class="tw-header-status-label">Not updated</div>
-              <div class="tw-header-status-value">{{ all_languages_update_display.blocked_count|default:0 }}</div>
-            </div>
-            <button type="submit" class="button tw-danger-button"{% if translation_background_job.is_active or not translation_background_job.show_translation_results %} disabled{% endif %}>Update Shopify with safe translations</button>
+        <p class="tw-shopify-apply-note">Only safe fields are updated automatically. Product description updates only when the HTML validation passes.</p>
+        <div class="tw-job-actions" style="align-items: flex-end;">
+          <div>
+            <div class="tw-header-status-label">Checked items</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.candidate_count|default:0 }}</div>
           </div>
-        </form>
+          <div>
+            <div class="tw-header-status-label">Updated in Shopify</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.updated_count|default:0 }}</div>
+          </div>
+          <div>
+            <div class="tw-header-status-label">Confirmed after update</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.verified_count|default:0 }}</div>
+          </div>
+          <div>
+            <div class="tw-header-status-label">Needs review</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.review_note_count|default:0 }}</div>
+          </div>
+          <div>
+            <div class="tw-header-status-label">Not updated</div>
+            <div class="tw-header-status-value">{{ all_languages_update_display.not_updated_count|default:0 }}</div>
+          </div>
+        </div>
         <div class="tw-shopify-apply-disabled-reason" data-all-languages-update-status hidden>Running validation/update status...</div>
         {% if all_languages_update_display.result_message %}
           <div class="tw-shopify-apply-disabled-reason">{{ all_languages_update_display.result_message }}</div>
@@ -3025,12 +2998,18 @@
           <div class="tw-shopify-apply-disabled-reason">No Shopify update has been run yet.</div>
         {% endif %}
         {% if all_languages_update_display.safe_field_diagnostic_summary and not all_languages_update_display.updated_count %}
-          <div class="tw-shopify-update-result" aria-label="Safe field Shopify update diagnostic">
+          <details class="tw-shopify-update-details" aria-label="Safe field Shopify update diagnostic">
+            <summary>Update readiness details</summary>
+          <div class="tw-shopify-update-result">
             <h4>Safe field check</h4>
             <div class="tw-shopify-update-kv-grid">
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Product title checked</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.product_title_candidates_found|default:0 }}</div>
+              </div>
+              <div class="tw-shopify-update-card">
+                <div class="tw-shopify-update-label">Product description checked</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.safe_field_diagnostic_summary.product_description_candidates_found|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">SEO title checked</div>
@@ -3094,48 +3073,33 @@
                     <td>{{ item.soft_warning_summary_text }}</td>
                   </tr>
                 {% empty %}
-                  <tr><td colspan="8">No title or SEO fields were found in this report.</td></tr>
+                  <tr><td colspan="8">No safe fields were found in this report.</td></tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
+          </details>
         {% endif %}
         {% if all_languages_update_report_display %}
           <div class="tw-shopify-update-result" aria-label="Shopify update result summary">
             {% if all_languages_update_display.is_successfully_updated %}
               <div class="tw-shopify-success-summary" role="status">
                 <h4>Shopify updated successfully</h4>
-                <div class="tw-shopify-success-metrics">
-                  <div class="tw-shopify-success-metric">
-                    <div class="tw-shopify-success-label">Translations updated</div>
-                    <div class="tw-shopify-success-value">{{ all_languages_update_display.updated_count }} translations updated</div>
-                  </div>
-                  <div class="tw-shopify-success-metric">
-                    <div class="tw-shopify-success-label">Confirmed after update</div>
-                    <div class="tw-shopify-success-value">{{ all_languages_update_display.verified_count }} confirmed after update</div>
-                  </div>
-                  <div class="tw-shopify-success-metric">
-                    <div class="tw-shopify-success-label">Restore status</div>
-                    <div class="tw-shopify-success-value">Restore not needed</div>
-                  </div>
-                </div>
+                <p>{{ all_languages_update_display.verified_count }} translations updated and confirmed.</p>
+                {% if all_languages_update_display.updated_field_labels %}
+                  <ul class="tw-shopify-success-list">
+                    {% for field_label in all_languages_update_display.updated_field_labels %}
+                      <li>{{ field_label }}</li>
+                    {% endfor %}
+                  </ul>
+                {% endif %}
               </div>
             {% endif %}
             <div class="tw-shopify-update-kv-grid">
-              <div class="tw-shopify-update-card is-wide">
-                <div class="tw-shopify-update-label">Result</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.status_label|default:all_languages_update_display.status }}</div>
-              </div>
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Checked items</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.candidate_count }}</div>
               </div>
-              {% if all_languages_update_display.show_ready_count_in_main_summary %}
-                <div class="tw-shopify-update-card">
-                  <div class="tw-shopify-update-label">{{ all_languages_update_display.ready_count_label|default:"Ready to update" }}</div>
-                  <div class="tw-shopify-update-value">{{ all_languages_update_display.write_ready_count }}</div>
-                </div>
-              {% endif %}
               <div class="tw-shopify-update-card">
                 <div class="tw-shopify-update-label">Updated in Shopify</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.updated_count }}</div>
@@ -3145,32 +3109,12 @@
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.verified_count }}</div>
               </div>
               <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Already up to date</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.skipped_count }}</div>
-              </div>
-              <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Not updated</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.blocked_count }}</div>
-              </div>
-              <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Review notes</div>
+                <div class="tw-shopify-update-label">Needs review</div>
                 <div class="tw-shopify-update-value">{{ all_languages_update_display.review_note_count|default:0 }}</div>
               </div>
               <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Failed</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.failed_count }}</div>
-              </div>
-              <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Shopify was updated</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.shopify_update_label }}</div>
-              </div>
-              <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Shopify confirmation check</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.shopify_confirmation_check_label }}</div>
-              </div>
-              <div class="tw-shopify-update-card">
-                <div class="tw-shopify-update-label">Restore may be needed</div>
-                <div class="tw-shopify-update-value">{{ all_languages_update_display.restore_needed_label }}</div>
+                <div class="tw-shopify-update-label">Not updated</div>
+                <div class="tw-shopify-update-value">{{ all_languages_update_display.not_updated_count }}</div>
               </div>
             </div>
           </div>
@@ -3184,7 +3128,7 @@
                 <li>{{ item.label }}{% if item.count %} ({{ item.count }}){% endif %}</li>
               {% endfor %}
             </ul>
-          {% elif all_languages_update_display.blocked_reason_summary %}
+          {% elif all_languages_update_display.blocked_count and all_languages_update_display.blocked_reason_summary %}
             <h4>Why items were not updated</h4>
             <ul class="tw-shopify-reason-list">
               {% for item in all_languages_update_display.blocked_reason_summary %}
@@ -3192,6 +3136,8 @@
               {% endfor %}
             </ul>
           {% endif %}
+          <details class="tw-shopify-update-details">
+          <summary>Update report details</summary>
           <h4>Per-language update summary</h4>
           {% if all_languages_update_display.successful_locale_summaries %}
             <ul class="tw-shopify-success-list">
@@ -3245,6 +3191,7 @@
               <div class="tw-shopify-update-empty">No per-language update summary is available.</div>
             {% endfor %}
           </div>
+          </details>
           {% if all_languages_update_display.updated_entries %}
             <details class="tw-shopify-update-details">
               <summary>Updated entries ({{ all_languages_update_display.updated_entries|length }})</summary>
@@ -3461,7 +3408,7 @@
                           {% if row.context_label %}<div class="tw-muted">{{ row.context_label }}</div>{% endif %}
                           {% if row.option_context_line %}<div class="tw-muted">{{ row.option_context_line }}</div>{% endif %}
                           {% if row.related_variants_label %}<div class="tw-muted">Related variants: {{ row.related_variants_label }}</div>{% endif %}
-                          {% if row.visible_product_option %}<div class="tw-muted">Options need extra Shopify mapping before update.</div>{% endif %}
+                          {% if row.visible_product_option %}<div class="tw-muted">Options need extra Shopify mapping.</div>{% endif %}
                         </div>
                         <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
                       </div>
@@ -3518,6 +3465,12 @@
                           {% else %}
                             <div class="tw-result-text{% if row.main_value_is_reason %} is-reason{% endif %}">{{ row.comparison_translation_display|default:row.main_value_display|default:"-" }}</div>
                           {% endif %}
+                        </div>
+                        <div class="tw-compare-column">
+                          <div class="tw-result-detail-label">Shopify update status</div>
+                          <div class="tw-result-text{% if row.shopify_update_status_key == 'needs_review' %} is-reason{% endif %}">
+                            {{ row.shopify_update_status_label|default:"Needs review before update" }}
+                          </div>
                         </div>
                       </div>
                       {% if row.has_generated_draft %}
@@ -3618,7 +3571,7 @@
         <span class="tw-count-badge">Preview only</span>
       </div>
       <div class="tw-empty-result-panel">
-        {% if selected_product_gid %}{{ translation_report_guard.empty_message|default:"Select this product and click Translate all languages." }}{% else %}Select a product and click Translate all languages.{% endif %}
+        {% if selected_product_gid %}{{ translation_report_guard.empty_message|default:"Select this product and click Translate and update Shopify." }}{% else %}Select a product and click Translate and update Shopify.{% endif %}
       </div>
     </div>
   {% endif %}
@@ -3706,9 +3659,9 @@
       <h3>What to do next</h3>
       <ol>
         <li>Choose product and language.</li>
-        <li>Click Translate all languages.</li>
+        <li>Click Translate and update Shopify.</li>
         <li>Review original vs translation results on this page.</li>
-        <li>Keep this page for review only. It cannot update Shopify.</li>
+        <li>Review any item that was not updated.</li>
       </ol>
     </div>
   </details>
@@ -6973,7 +6926,7 @@
           panel.setAttribute("data-product-gid", normalizedNextProductGid);
           panel.setAttribute("data-job-initial-status", "not_started");
         }
-        setText("[data-job-current-line]", "Select this product and click Translate all languages.");
+        setText("[data-job-current-line]", "Select this product and click Translate and update Shopify.");
         setText("[data-job-field='completed_locales']", "0 / 0");
         setText("[data-job-field='failed_locales']", "0");
         setText("[data-job-field='generated_draft_count']", "0");
