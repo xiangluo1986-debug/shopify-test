@@ -5414,6 +5414,24 @@ def _translation_workspace_translation_result_groups(
             "needs_review_count": 0,
             "skipped_count": 0,
             "source_rows_checked": int(locale_status.get("source_rows_checked") or 0),
+            "openai_call_count": _translation_workspace_int(
+                locale_status.get("openai_call_count"), 0
+            ),
+            "reused_cache_count": _translation_workspace_int(
+                locale_status.get("reused_cache_count"), 0
+            ),
+            "skipped_existing_count": _translation_workspace_int(
+                locale_status.get("skipped_existing_count"), 0
+            ),
+            "skipped_technical_count": _translation_workspace_int(
+                locale_status.get("skipped_technical_count"), 0
+            ),
+            "deduplicated_input_count": _translation_workspace_int(
+                locale_status.get("deduplicated_input_count"), 0
+            ),
+            "estimated_input_chars_saved": _translation_workspace_int(
+                locale_status.get("estimated_input_chars_saved"), 0
+            ),
             "status_key": locale_status.get("status_key") or "pending",
             "status_label": locale_status.get("status_label") or "Waiting",
             "lifecycle_status": locale_status.get("status") or "pending",
