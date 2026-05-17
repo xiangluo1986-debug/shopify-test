@@ -1104,3 +1104,28 @@ Future tracking design note:
 - [x] Phase 5.28F performs no Shopify writes, tag mutations, Gmail API calls,
   email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
   `translationsRegister` calls.
+
+## Phase 5.28H Customer History Trustpilot Guard
+
+- [x] Trustpilot review email flow is repeat-customer only: local customer
+  history count must be confirmed and greater than one before Review & Send can
+  appear.
+- [x] First-order customers are blocked with a plain first-order reason and
+  moved to Blocked / Not ready.
+- [x] Customer history is resolved from local `ShopifyOrder` history by
+  customer email first, with customer name plus shipping fields only as a safe
+  fallback; raw customer email is not written to reports or HTML.
+- [x] Prior Trustpilot detection checks same-customer historical order tags
+  across all local `ShopifyOrder` rows, not only the current 60-day scan.
+- [x] Trustpilot sent aliases include `1: trustpilot`, `1: trustpoilt`,
+  `trustpilot`, `trustpoilt`, and spacing/case variants.
+- [x] `#21076` is blocked when same-customer history contains a prior
+  Trustpilot alias tag on `#21778`.
+- [x] The Review Requests page shows Customer orders and Trustpilot history in
+  the main and blocked queues, without raw customer email.
+- [x] Added `shopify_review_request_customer_history_trustpilot_guard_audit` to
+  report first-order blocks, prior Trustpilot customer blocks, unknown history,
+  focus order diagnoses, active Review & Send count, and no-write safety flags.
+- [x] Phase 5.28H performs no Shopify writes, tag mutations, Gmail API calls,
+  email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
+  `translationsRegister` calls.

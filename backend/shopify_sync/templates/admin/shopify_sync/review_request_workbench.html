@@ -421,7 +421,7 @@
                 <tr>
                     <th>Order</th>
                     <th>Customer</th>
-                    <th>Orders</th>
+                    <th>Customer orders</th>
                     <th>Tags</th>
                     <th>Trustpilot history</th>
                     <th>Status</th>
@@ -451,7 +451,12 @@
                                 <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
                             {% endfor %}
                         </td>
-                        <td>{{ row.trustpilot_history_label }}</td>
+                        <td>
+                            {{ row.trustpilot_history_label }}
+                            {% if row.previous_trustpilot_tag_values %}
+                                <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
+                            {% endif %}
+                        </td>
                         <td>
                             <span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span>
                             <div>
@@ -540,7 +545,9 @@
                 <tr>
                     <th>Order/group</th>
                     <th>Customer</th>
+                    <th>Customer orders</th>
                     <th>Tags</th>
+                    <th>Trustpilot history</th>
                     <th>Block reason</th>
                     <th>Missing requirement</th>
                     <th>Evidence</th>
@@ -564,9 +571,19 @@
                             {% endif %}
                         </td>
                         <td>
+                            {{ row.customer_orders_display }}
+                            <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
+                        </td>
+                        <td>
                             {% for chip in row.tag_chips %}
                                 <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
                             {% endfor %}
+                        </td>
+                        <td>
+                            {{ row.trustpilot_history_label }}
+                            {% if row.previous_trustpilot_tag_values %}
+                                <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
+                            {% endif %}
                         </td>
                         <td>{{ row.eligibility_reason_plain }}</td>
                         <td>
@@ -590,7 +607,7 @@
                         </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="6" class="rrw-muted">No blocked or not-ready orders are listed right now.</td></tr>
+                    <tr><td colspan="8" class="rrw-muted">No blocked or not-ready orders are listed right now.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

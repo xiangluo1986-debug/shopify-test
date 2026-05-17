@@ -15,6 +15,9 @@ from remote_approval.tasks.shopify_review_request_candidate_scan_task import (
 from remote_approval.tasks.shopify_review_request_customer_level_trustpilot_duplicate_audit_task import (
     run_shopify_review_request_customer_level_trustpilot_duplicate_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_customer_history_trustpilot_guard_audit_task import (
+    run_shopify_review_request_customer_history_trustpilot_guard_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_gmail_readiness_package_task import (
     run_shopify_review_request_gmail_readiness_package_task,
 )
@@ -368,6 +371,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_customer_level_trustpilot_duplicate_audit": (
         run_shopify_review_request_customer_level_trustpilot_duplicate_audit_task
     ),
+    "shopify_review_request_customer_history_trustpilot_guard_audit": (
+        run_shopify_review_request_customer_history_trustpilot_guard_audit_task
+    ),
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
     "shopify_review_request_gmail_oauth_setup_helper": run_shopify_review_request_gmail_oauth_setup_helper_task,
     "shopify_review_request_history_ledger_audit": run_shopify_review_request_history_ledger_audit_task,
@@ -701,6 +707,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local DB/read-only report audit only",
         "review_file_path": "logs/shopify_review_request_customer_level_trustpilot_duplicate_audit.json",
+    },
+    "shopify_review_request_customer_history_trustpilot_guard_audit": {
+        "description": "Audit local customer history, first-order blocking, and prior Trustpilot tag suppression without APIs or writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local ShopifyOrder/report audit only",
+        "review_file_path": "logs/shopify_review_request_customer_history_trustpilot_guard_audit.json",
     },
     "shopify_review_request_gmail_readiness_package": {
         "description": "Generate a docs-only Gmail send permission readiness package for review requests.",

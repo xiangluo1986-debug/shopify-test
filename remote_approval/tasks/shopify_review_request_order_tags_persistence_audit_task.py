@@ -42,6 +42,8 @@ TRUSTPILOT_SENT_TAG_ALIASES = [
     "1 : trustpilot",
     "1:trustpoilt",
     "1 : trustpoilt",
+    "trustpilot",
+    "trustpoilt",
 ]
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
@@ -89,7 +91,7 @@ def _run_django_local_audit() -> dict:
             f"TAG_FIELD = '{SHOPIFY_ORDER_TAG_FIELD}'",
             "REVIEW_ALIASES = ['1: review request', '1: reveiw request', '1:review request', '1 : review request', '1:reveiw request', '1 : reveiw request']",
             "DELIVERED_ALIASES = ['Delivered', 'delivered']",
-            "TRUSTPILOT_ALIASES = ['1: trustpilot', '1: trustpoilt', '1:trustpilot', '1 : trustpilot', '1:trustpoilt', '1 : trustpoilt']",
+            "TRUSTPILOT_ALIASES = ['1: trustpilot', '1: trustpoilt', '1:trustpilot', '1 : trustpilot', '1:trustpoilt', '1 : trustpoilt', 'trustpilot', 'trustpoilt']",
             "def norm(value):",
             "    return re.sub(r'\\s+', '', str(value or '').strip().lower())",
             "def split_tags(value):",

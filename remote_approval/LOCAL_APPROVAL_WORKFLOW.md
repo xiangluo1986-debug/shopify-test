@@ -67,6 +67,7 @@ python remote_approval_runner.py --task shopify_review_request_last_60_days_cand
 python remote_approval_runner.py --task shopify_review_request_shopify_order_sync_coverage --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_order_tags_persistence_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_customer_history_trustpilot_guard_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -463,12 +464,23 @@ case variants. Future writes still use canonical `1: review request`. It also
 prevents repeat-customer orders from being treated as merged shipments unless
 explicit merge evidence exists.
 
+Phase 5.28H makes local customer history a hard Trustpilot eligibility gate.
+First-order customers, unconfirmed customer history, and any same-customer
+historical Trustpilot tag alias such as `1: trustpilot`, `1: trustpoilt`,
+`trustpilot`, or `trustpoilt` block the main queue and POST path before Gmail.
+
 `shopify_review_request_tag_alias_and_candidate_correction_audit` is the local
 audit task for this correction. It reports `#22562` tag loading, matched review
 request tag value, delivered detection, merge evidence source, explicit merge
 evidence, final eligibility, blockers, and eligible candidate count after the
 fix. It does not call Gmail, create drafts, send email, call Shopify, write
 tags, call Trustpilot/Kudosi/Ali Reviews, or call `translationsRegister`.
+
+`shopify_review_request_customer_history_trustpilot_guard_audit` is the local
+audit task for Phase 5.28H. It reports first-order blocks, customer-history
+unknown blocks, prior Trustpilot customer-history blocks, focus order diagnoses
+for `#21070`, `#21075`, `#21076`, `#21102`, and `#21778`, and performs no API
+calls or writes.
 
 The `Review & Send` admin POST remains locked in Phase 5.27. It verifies the
 selected order against the current eligible queue and returns a no-send blocker;

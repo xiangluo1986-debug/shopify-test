@@ -60,6 +60,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("report_status", "status"),
     },
     {
+        "key": "customer_history_trustpilot_guard_audit",
+        "label": "Customer history Trustpilot guard audit",
+        "filename": "shopify_review_request_customer_history_trustpilot_guard_audit.json",
+        "channel": "trustpilot",
+        "event_type": "duplicate_block",
+        "status_keys": ("report_status", "status"),
+    },
+    {
         "key": "customer_level_duplicate_audit",
         "label": "Customer-level Trustpilot duplicate audit",
         "filename": "shopify_review_request_customer_level_trustpilot_duplicate_audit.json",
