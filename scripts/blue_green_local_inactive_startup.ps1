@@ -34,8 +34,48 @@ function Write-Warn {
     Write-Host $Message -ForegroundColor Yellow
 }
 
+function ConvertTo-ProcessArgument {
+    param([AllowEmptyString()][string]$Argument)
+
+    if ($null -eq $Argument -or $Argument.Length -eq 0) {
+        return '""'
+    }
+
+    if ($Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+
+    $escaped = $Argument -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+function Join-ProcessArguments {
+    param([string[]]$Arguments)
+
+    if ($null -eq $Arguments -or $Arguments.Count -eq 0) {
+        return ""
+    }
+
+    return (($Arguments | ForEach-Object { ConvertTo-ProcessArgument -Argument $_ }) -join " ")
+}
+
+function Split-CapturedText {
+    param([AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return @()
+    }
+
+    return @($Text -split "`r`n|`n|`r" | Where-Object { $_ -ne "" })
+}
+
 function Invoke-CaptureCommand {
     param([string[]]$Command)
+
+    if ($null -eq $Command -or $Command.Count -eq 0) {
+        throw "Invoke-CaptureCommand requires at least one command element."
+    }
 
     $exe = $Command[0]
     $commandArgs = @()
@@ -43,11 +83,60 @@ function Invoke-CaptureCommand {
         $commandArgs = $Command[1..($Command.Count - 1)]
     }
 
-    $output = & $exe @commandArgs 2>&1
-    return [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
-        Output = $output
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $exe
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $argumentListProperty = $startInfo.GetType().GetProperty("ArgumentList")
+    if ($null -ne $argumentListProperty) {
+        foreach ($arg in $commandArgs) {
+            [void]$startInfo.ArgumentList.Add($arg)
+        }
+    } else {
+        $startInfo.Arguments = Join-ProcessArguments -Arguments $commandArgs
     }
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+
+    try {
+        [void]$process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+
+        $stdout = Split-CapturedText -Text $stdoutTask.Result
+        $stderr = Split-CapturedText -Text $stderrTask.Result
+
+        return [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            StdOut = $stdout
+            StdErr = $stderr
+            Output = @($stdout + $stderr)
+        }
+    } catch {
+        $message = "Failed to run native command '$exe': $($_.Exception.Message)"
+        return [pscustomobject]@{
+            ExitCode = 127
+            StdOut = @()
+            StdErr = @($message)
+            Output = @($message)
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Write-CapturedOutput {
+    param($Result)
+
+    if ($null -eq $Result -or $null -eq $Result.Output -or $Result.Output.Count -eq 0) {
+        return
+    }
+
+    $Result.Output | ForEach-Object { Write-Host "  $_" }
 }
 
 function Show-Mode {
@@ -379,6 +468,7 @@ function Invoke-InactiveStartup {
 
     $inactiveHealthUrl = "http://127.0.0.1:$TestPort/healthz/"
     $startedInactiveService = $false
+    $startupAttempted = $false
     $exitCode = 0
     $previousLocalTestPort = [Environment]::GetEnvironmentVariable("BLUE_GREEN_LOCAL_TEST_PORT", "Process")
 
@@ -390,6 +480,7 @@ function Invoke-InactiveStartup {
         $config = Invoke-CaptureCommand -Command @("docker", "compose", "-f", $ComposeFile, "config", "--quiet")
         if ($config.ExitCode -ne 0) {
             Write-Warn "Blocked: docker compose config validation failed for $ComposeFile."
+            Write-CapturedOutput -Result $config
             Write-Warn "No inactive service was started."
             Write-Warn "Production remains NO-GO."
             return 2
@@ -399,9 +490,11 @@ function Invoke-InactiveStartup {
         Write-Step "Start inactive test service only"
         Write-Host "Starting only inactive service '$InactiveService' from '$ComposeFile'."
         Write-Host "Command uses --no-deps and --no-build."
+        $startupAttempted = $true
         $start = Invoke-CaptureCommand -Command @("docker", "compose", "-f", $ComposeFile, "up", "-d", "--no-deps", "--no-build", $InactiveService)
         if ($start.ExitCode -ne 0) {
             Write-Warn "Blocked: inactive service startup failed."
+            Write-CapturedOutput -Result $start
             Write-Warn "No current web, scheduler, proxy, traffic, migration, collectstatic, or production action was requested by this runner."
             return 2
         }
@@ -411,20 +504,22 @@ function Invoke-InactiveStartup {
         if (-not (Test-InactiveHealth -Url $inactiveHealthUrl)) {
             Write-Warn "Inactive service health check failed. Printing inactive service logs only."
             $logs = Invoke-CaptureCommand -Command @("docker", "compose", "-f", $ComposeFile, "logs", "--tail=100", $InactiveService)
-            if ($logs.Output) {
-                $logs.Output | ForEach-Object { Write-Host $_ }
+            if ($logs.ExitCode -ne 0) {
+                Write-Warn "Could not read inactive service logs."
             }
+            Write-CapturedOutput -Result $logs
             $exitCode = 2
         } else {
             Write-Ok "Inactive local startup validation passed."
         }
     } finally {
-        if ($startedInactiveService) {
+        if ($startedInactiveService -or $startupAttempted) {
             Write-Step "Cleanup inactive test service only"
             Write-Host "Stopping only inactive service '$InactiveService'."
             $stop = Invoke-CaptureCommand -Command @("docker", "compose", "-f", $ComposeFile, "stop", $InactiveService)
             if ($stop.ExitCode -ne 0) {
                 Write-Warn "Inactive service stop command failed. Review the inactive test service manually."
+                Write-CapturedOutput -Result $stop
                 $exitCode = 2
             } else {
                 Write-Ok "Inactive test service stop command completed."
