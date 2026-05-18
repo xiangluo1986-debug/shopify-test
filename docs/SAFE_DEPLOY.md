@@ -12,6 +12,12 @@ Deploys can briefly break a server while code, containers, migrations, and stati
 
 This reduces the chance of silently leaving the Django aftersales server unavailable after an update.
 
+## Current limitation
+
+The current Compose setup has one `web` container serving port `8000`. `safe_deploy.ps1` reduces deployment risk by validating before restart and checking `/healthz/` after restart, but it cannot fully eliminate brief restart-time unavailability while a single serving container is replaced.
+
+For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md). That plan is documentation only until a separate reviewed apply task is approved.
+
 ## Current project deploy command
 
 From the project root:
