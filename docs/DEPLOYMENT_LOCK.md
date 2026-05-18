@@ -12,8 +12,8 @@ non-dry-run mode. It also has dry-run/check-only lock awareness for validation
 without deployment. `scripts/blue_green_production_apply.ps1` now exists as a
 no-action production apply skeleton that documents the future lock gates, but
 real production blue-green apply remains NO-GO until a future apply task
-implements exact runtime commands and uses the same lock before any
-runtime-changing action.
+implements exact runtime commands, follows the non-production validation gate,
+and uses the same lock before any runtime-changing action.
 
 ## What The Lock Protects
 
@@ -23,6 +23,7 @@ deployment state, including:
 - `scripts/safe_deploy.ps1`.
 - `scripts/blue_green_production_apply.ps1` in any future runtime-changing
   phase.
+- Future non-production blue-green runtime validation.
 - Future blue-green deploy scripts.
 - Future proxy switch scripts.
 - Future production cleanup scripts.
@@ -50,6 +51,9 @@ the matching `lock_id` in cleanup/finally handling:
 - Traffic switch from one color to another.
 - Cleanup of blue/green services after an observation window.
 - Production apply for `safe_deploy` or future blue-green deploys.
+- Non-production runtime validation when it starts/stops test-only services,
+  validates test-only proxy routing, cleans up test resources, or exercises a
+  rollback/no-switch path.
 - Rollback, including proxy switchback, service restart, service stop/start, or
   restoring a previously approved runtime target.
 
@@ -207,8 +211,9 @@ scripts/blue_green_production_apply.ps1
 ```
 
 Current status: skeleton only / no-action. Default execution prints the
-production apply plan, required lock behavior, future steps, and exits `0`
-without acquiring the deployment lock or changing runtime state.
+production apply plan, required non-production validation gate, required lock
+behavior, future steps, and exits `0` without acquiring the deployment lock or
+changing runtime state.
 
 The required approval phrase for any future production apply execution request
 is:
@@ -230,6 +235,12 @@ The skeleton does not run Docker Compose commands, start/stop/restart/build
 containers, run migrations, run collectstatic, switch proxy traffic, modify
 active `docker-compose.yml`, modify production nginx/proxy configuration, or
 call Shopify/Gmail/review/translation workflows.
+
+Production apply also requires successful non-production blue-green runtime
+validation first, documented in
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
+That future validation must use the deployment lock for runtime-changing
+test-only actions, while normal non-deploy tasks remain unblocked.
 
 ## Lock Behavior
 
@@ -278,6 +289,7 @@ Integrate the deployment lock into:
 - `scripts/safe_deploy.ps1`.
 - The future real implementation behind
   `scripts/blue_green_production_apply.ps1`.
+- Future non-production runtime validation.
 - The future proxy switch script.
 - Future production cleanup and rolling restart scripts.
 
@@ -294,9 +306,13 @@ runtime-changing actions should use the shared deployment lock.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
+- Non-production validation plan:
+  `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION.md`; separate approval required
+  before any runtime validation.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
-  switch/cleanup and releases only the matching `lock_id`.
+  switch/cleanup, successful non-production validation has been reviewed, and
+  only the matching `lock_id` is released.
 
 ## Current Status
 
@@ -313,5 +329,5 @@ runtime-changing actions should use the shared deployment lock.
   prints the future lock flow but does not acquire the lock in default or
   blocked execution modes.
 - Production blue-green apply remains NO-GO until a separate future apply task
-  approves exact runtime commands and confirms every runtime-changing path uses
-  the deployment lock.
+  approves exact runtime commands, confirms every runtime-changing path uses
+  the deployment lock, and reviews successful non-production validation.

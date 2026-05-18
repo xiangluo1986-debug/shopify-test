@@ -19,6 +19,7 @@ Related non-active drafts:
 - [scripts/deploy_lock_dry_run.ps1](../scripts/deploy_lock_dry_run.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
+- [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
 - [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
 
 ## Current Status
@@ -38,6 +39,11 @@ Related non-active drafts:
 - Gated local inactive startup runner: READY for dry-run / no-action status
   checks by default at `scripts/blue_green_local_inactive_startup.ps1`; future
   local-only execution is gated by the exact Ack and `-AllowContainerAction`.
+- Non-production validation plan: READY after review at
+  [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
+  Future runtime validation requires separate approval, deployment lock
+  acquisition/release, non-`8000` test ports, test-only proxy routing, and no
+  production traffic switch.
 - Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
   approval of exact commands. Real local simulation execution is not
@@ -66,9 +72,10 @@ Related non-active drafts:
   production lock, run Docker commands, run migrations, run collectstatic,
   switch traffic, or modify files. Required future approval phrase:
   `I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK`.
-- Production apply: NO-GO until a separate production task approves exact
-  runtime commands, route, port ownership, proxy, scheduler, migration,
-  static/media, rollback, observation, and lock handling.
+- Production apply: NO-GO until non-production runtime validation passes and a
+  separate production task approves exact runtime commands, route, port
+  ownership, proxy, scheduler, migration, static/media, rollback, observation,
+  and lock handling.
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
@@ -85,6 +92,9 @@ Related non-active drafts:
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before any build/start/migrate/collectstatic,
   proxy switch, traffic switch, cleanup, or rollback action.
+- Non-production runtime validation: future approved runtime validation must
+  also use the deployment lock before any test-only container start, proxy
+  validation route, cleanup, or rollback/no-switch handling.
 
 Runtime-changing actions that require the deployment lock before any future
 apply include container start, container stop, container restart, image build,
@@ -109,6 +119,9 @@ review. Normal non-deploy tasks are not blocked.
 - The local inactive startup plan in
   [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
   has been reviewed before any inactive-color startup.
+- The non-production validation plan in
+  [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
+  has been reviewed before any future non-production runtime validation.
 - The local-test inactive Compose example
   [docker-compose.bluegreen.local-test.example.yml](../docker-compose.bluegreen.local-test.example.yml)
   has been reviewed and confirmed not to bind host port `8000`, not to declare
@@ -125,6 +138,8 @@ review. Normal non-deploy tasks are not blocked.
 - Any future production switch acquires the deployment lock first and releases
   it only after switch validation and cleanup/finally handling.
 - The production apply skeleton has been reviewed in default no-action mode.
+- Successful non-production runtime validation has been reviewed before any
+  future production apply request.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply is not implemented in this phase.`
 - Deployment tasks do not auto-queue behind an existing lock. A second deploy
@@ -145,6 +160,9 @@ review. Normal non-deploy tasks are not blocked.
   approval phrase alone is not enough.
 - A separate apply task approves the exact local runtime commands before any
   container start, restart, proxy reload, or traffic switch is run.
+- Future non-production runtime validation uses a non-production Compose
+  project/scope, test-only ports such as `18080`, `18081`, or `19080`, and no
+  Cloudflare/domain routing change.
 - A reviewed proxy design is selected and tested away from production traffic.
 - The active color source of truth is documented and recoverable.
 - Database backup and restore process is confirmed for the production database.
@@ -215,6 +233,8 @@ These actions are not approved by this checklist alone:
 - Stopping the previous active color.
 - Proceeding with production apply before deployment lock enforcement is active
   for the exact runtime path being used.
+- Proceeding with production apply before successful non-production validation
+  and separate manual production approval.
 
 ## Rollback Steps
 

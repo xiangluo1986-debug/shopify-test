@@ -34,6 +34,7 @@ traffic or change current deployment commands:
 - [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
+- [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
 - [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
@@ -65,8 +66,9 @@ build/preparation task before attempting local inactive startup.
 
 The production apply skeleton at
 `scripts/blue_green_production_apply.ps1` is skeleton only / no-action by
-default. It prints the future production apply plan, required deployment lock
-flow, and approval gate, then exits without acquiring the production lock,
+default. It prints the future production apply plan, required non-production
+validation gate, required deployment lock flow, and approval gate, then exits
+without acquiring the production lock,
 running Docker commands, running migrations, running collectstatic, switching
 traffic, or modifying files. The required approval phrase for a future
 execution request is:
@@ -83,6 +85,11 @@ Real production blue-green apply is not implemented in this phase.
 ```
 
 Production remains NO-GO.
+
+The non-production validation plan exists at
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
+Production apply remains blocked until a separate non-production runtime
+validation passes and manual production approval is given.
 
 ## Deployment Lock Gate
 
@@ -316,8 +323,15 @@ requires a separate approved task.
 
 Future task after Phase 1 review.
 
-Local validation remains NO-GO. The current gated runner is available only for
-dry-run / no-action status checks:
+Non-production validation is documented in
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
+It may be local-only or staging, must use a non-production Compose/project
+scope and non-`8000` test ports, must not change Cloudflare/domain routing,
+and must leave the current production web path untouched. Runtime validation
+requires the deployment lock and a separate approval.
+
+Local validation remains NO-GO unless separately approved. The current gated
+runner is available only for dry-run / no-action status checks:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1

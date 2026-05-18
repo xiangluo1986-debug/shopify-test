@@ -17,6 +17,11 @@ This reduces the chance of silently leaving the Django aftersales server unavail
 The current Compose setup has one `web` container serving port `8000`. `safe_deploy.ps1` reduces deployment risk by validating before restart and checking `/healthz/` after restart, but it cannot fully eliminate brief restart-time unavailability while a single serving container is replaced.
 
 For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md). That plan is documentation only until a separate reviewed apply task is approved.
+The non-production runtime validation gate for that future path is documented
+in
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
+Production apply remains blocked until non-production validation passes and a
+separate manual production approval is given.
 
 The current safe deploy flow now enforces a deployment single-flight lock in
 real non-dry-run mode. The standalone helper exists at
@@ -54,6 +59,8 @@ service can become healthy.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
+- Non-production validation: documented for future local/staging runtime
+  validation, separate approval required, and production remains NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before any build/start/migrate/collectstatic,
   proxy switch, traffic switch, cleanup, or rollback action.
@@ -64,8 +71,9 @@ switch, cleanup of blue/green services, production apply, and rollback. Future
 scripts for those paths must acquire the deployment lock before changing
 runtime state. If the lock exists, they must block and exit non-zero, not
 auto-queue. They must release only the matching `lock_id` in cleanup/finally
-handling. Stale locks require manual review. Normal non-deploy tasks are not
-blocked.
+handling. Non-production runtime validation must follow the same lock rule for
+test-only runtime actions. Stale locks require manual review. Normal
+non-deploy tasks are not blocked.
 
 ## Current project deploy command
 
@@ -134,7 +142,8 @@ deployment lock, run Docker commands, run migrations, run collectstatic, switch
 traffic, or modify files. Execution requests remain blocked unless the exact
 approval phrase, valid target/active colors, and `.deploy/` lock path gate are
 present; even then real production apply remains blocked because it is not
-implemented in this phase.
+implemented in this phase. It also reports that successful non-production
+blue-green runtime validation is required before any future production apply.
 
 Deployment lock helper status:
 

@@ -141,6 +141,14 @@ function Show-NoActionBoundary {
     Write-Host "This skeleton does not acquire, create, release, delete, or modify the production deployment lock."
 }
 
+function Show-NonProductionGate {
+    Write-Step "Required non-production validation gate"
+    Write-Host "Production apply requires successful non-production blue-green runtime validation first."
+    Write-Host "Required validation document: docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
+    Write-Host "Production remains NO-GO until that validation passes and manual production approval is given."
+    Write-Host "This skeleton still performs no runtime action."
+}
+
 function Show-LockFlow {
     Write-Step "Future required deployment lock flow"
     Write-Host "NOT RUN: acquire deployment lock before any build/start/migrate/collectstatic/proxy switch/cleanup."
@@ -197,11 +205,13 @@ try {
 } catch {
     Show-PlanHeader -ResolvedLockPath $resolvedLockPath
     Show-NoActionBoundary
+    Show-NonProductionGate
     Show-BlockingResult -Message $_.Exception.Message -Code 5
 }
 
 Show-PlanHeader -ResolvedLockPath $resolvedLockPath
 Show-NoActionBoundary
+Show-NonProductionGate
 Show-LockFlow
 Show-FutureSteps
 
@@ -214,6 +224,7 @@ if ((-not [string]::IsNullOrWhiteSpace($normalizedTargetColor)) -and
 if (-not $ExecuteProductionApply) {
     Write-Step "Result"
     Write-Ok "Plan-only production apply skeleton completed. No runtime action was performed."
+    Write-Ok "Successful non-production validation and manual approval are required before production apply."
     Write-Ok "Production real apply remains NO-GO."
     exit 0
 }
