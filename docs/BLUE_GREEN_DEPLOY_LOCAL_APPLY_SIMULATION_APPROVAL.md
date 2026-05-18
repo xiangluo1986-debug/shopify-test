@@ -96,10 +96,25 @@ starting, stopping, restarting, or building containers. It does not run
 migrations, run collectstatic, switch traffic, change Cloudflare/domain routing,
 modify files, call Shopify/Gmail APIs, or send email.
 
+The local-test inactive Compose example used by the future startup path is:
+
+```text
+docker-compose.bluegreen.local-test.example.yml
+```
+
+It is a separate EXAMPLE ONLY file, not active, not used by normal
+`docker compose` commands, local-test only, and must not bind `8000`.
+
 The inactive startup execution gate uses this separate exact approval phrase:
 
 ```text
 I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC
+```
+
+Real local inactive startup also requires:
+
+```powershell
+-AllowContainerAction
 ```
 
 Safety blocks in the runner:
@@ -108,15 +123,16 @@ Safety blocks in the runner:
 - `-InactiveService web` is always blocked because `web` is the current active
   service.
 - Missing or wrong `-Ack` blocks execution requests.
-- Even the correct `-Ack` remains blocked in this phase with:
+- Correct `-Ack` without `-AllowContainerAction` still blocks before any Docker
+  container action.
+- The active `docker-compose.yml` is blocked as a startup compose file.
 
-```text
-Real inactive startup execution is not implemented in this phase.
-```
-
-Production remains NO-GO. The next phase would implement actual local startup
-only after a separate approval of exact commands, inactive service name,
-non-`8000` test port, cleanup path, and no-production-traffic constraints.
+The future executable path is local-only. It validates
+`docker-compose.bluegreen.local-test.example.yml`, starts only
+`web_green_test` or another reviewed inactive service with `--no-deps` and
+`--no-build`, health-checks the non-`8000` test port, prints logs for the
+inactive service if health fails, and stops only that inactive service during
+cleanup. Production remains NO-GO.
 
 ## Future Local Simulation Scope
 
@@ -129,9 +145,10 @@ A future simulation may only:
 - Stop only the inactive test color after validation.
 - Leave the current `web` service untouched.
 
-The next phase may implement actual inactive-color startup on a local-only test
-port, but only after separate approval of the exact commands, target color,
-environment handling, cleanup path, and no-production-traffic constraints.
+The inactive-color startup path is now implemented for future local-only use,
+but only after separate approval of the exact commands, target color,
+environment handling, cleanup path, `-AllowContainerAction`, and
+no-production-traffic constraints.
 The reviewed planning artifact for that future step is
 [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
 It is a plan only; local inactive startup remains NO-GO until a separate
@@ -180,6 +197,11 @@ docker compose exec -T web python manage.py check
 docker compose -f docker-compose.bluegreen.example.yml config
 ```
 
+```powershell
+# NOT RUN IN THIS TASK
+docker compose -f docker-compose.bluegreen.local-test.example.yml config
+```
+
 If proxy syntax validation is separately approved and does not modify active
 runtime routing:
 
@@ -196,7 +218,7 @@ port `8000`.
 
 ```powershell
 # NOT RUN IN THIS TASK
-docker compose -f <local-simulation-compose-file> up -d web_green
+.\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC -AllowContainerAction -TestPort 18080 -InactiveService web_green_test
 ```
 
 ### Health Check
@@ -258,6 +280,7 @@ Before any future local simulation:
 - Current `web` remains running.
 - Active `docker-compose.yml` is unchanged.
 - Approval phrase is present.
+- `-AllowContainerAction` is present for any future real local inactive startup.
 - No production port takeover is planned.
 - Rollback/cleanup command is ready.
 - The inactive color target and local-only test port are explicitly named.
@@ -282,13 +305,14 @@ or production routing changes as part of failure handling.
 - Local inactive startup plan: READY for review in
   [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
 - Gated simulation runner: dry-run / no-action only.
-- Gated inactive startup runner: dry-run / no-action only at
+- Gated inactive startup runner: dry-run / no-action by default at
   `scripts/blue_green_local_inactive_startup.ps1`.
 - Local simulation execution: NO-GO. The approval phrase is required for a
   future phase, but real execution is not implemented in this phase.
 - Local inactive startup: NO-GO until separate approval of exact commands,
-  inactive service name, non-`8000` test port, and cleanup path. The current
-  runner blocks `-TestPort 8000`, blocks `-InactiveService web`, and still does
-  not implement real startup even with the required approval phrase.
+  inactive service name, non-`8000` test port, `-AllowContainerAction`, and
+  cleanup path. The current runner blocks `-TestPort 8000`, blocks
+  `-InactiveService web`, blocks active `docker-compose.yml`, and blocks correct
+  `-Ack` unless `-AllowContainerAction` is present.
 - Production: NO-GO.
 - Runtime behavior changed by this package: no.

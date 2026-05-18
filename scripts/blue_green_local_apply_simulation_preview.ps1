@@ -84,6 +84,10 @@ function Show-FileStatus {
             Path = ".\docker-compose.bluegreen.example.yml"
         },
         [pscustomobject]@{
+            Label = "Local-test inactive Compose example"
+            Path = ".\docker-compose.bluegreen.local-test.example.yml"
+        },
+        [pscustomobject]@{
             Label = "Example proxy draft"
             Path = ".\nginx\bluegreen.example.conf"
         },
@@ -129,9 +133,10 @@ function Show-RunnerStatus {
 
     Write-Warn "Current status is dry-run / no-action only."
     Write-Warn "Real local simulation execution is not implemented in this phase."
-    Write-Warn "Local inactive-color startup remains NO-GO until separate approval."
+    Write-Warn "Local inactive-color startup has a future executable path, but remains NO-GO until separate approval and gates."
     Write-Warn "Inactive startup runner default behavior is blocked dry-run / no-action only."
     Write-Warn "Required inactive startup approval phrase: $InactiveStartupApprovalPhrase"
+    Write-Warn "Future real local inactive startup also requires -AllowContainerAction."
     Write-Warn "Any future inactive startup must use a non-8000 test port and leave current web untouched."
     Write-Warn "The inactive service must not be the current active service name web."
     Write-Warn "Production remains NO-GO."
@@ -199,6 +204,7 @@ function Show-FutureCommandPlan {
             Label = "Example compose config validation"
             Commands = @(
                 "docker compose -f docker-compose.bluegreen.example.yml config",
+                "docker compose -f docker-compose.bluegreen.local-test.example.yml config",
                 "docker run --rm -v `"`${PWD}\nginx\bluegreen.example.conf:/etc/nginx/conf.d/default.conf:ro`" nginx:1.27-alpine nginx -t"
             )
         },
@@ -207,28 +213,30 @@ function Show-FutureCommandPlan {
             Commands = @(
                 "# Future gated runner: .\scripts\blue_green_local_inactive_startup.ps1",
                 "# Required phrase: $InactiveStartupApprovalPhrase",
+                "# Future requirement: -AllowContainerAction is required before any container action.",
+                "# Future requirement: use docker-compose.bluegreen.local-test.example.yml.",
                 "# Future requirement: use one inactive test service only on a non-8000 port such as 18080 or 18081.",
                 "# Future requirement: inactive service must not be web.",
-                "docker compose -f <local-simulation-compose-file> up -d web_green"
+                ".\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -Ack <approval-phrase> -AllowContainerAction -TestPort 18080 -InactiveService web_green_test"
             )
         },
         [pscustomobject]@{
             Label = "Health check"
             Commands = @(
                 "Invoke-WebRequest -Uri `"http://127.0.0.1:<inactive-test-port>/healthz/`" -UseBasicParsing -TimeoutSec 5",
-                "docker compose -f <local-simulation-compose-file> exec -T web_green python manage.py check"
+                "docker compose -f docker-compose.bluegreen.local-test.example.yml exec -T web_green_test python manage.py check"
             )
         },
         [pscustomobject]@{
             Label = "Logs inspection"
             Commands = @(
-                "docker compose -f <local-simulation-compose-file> logs --tail=100 web_green"
+                "docker compose -f docker-compose.bluegreen.local-test.example.yml logs --tail=100 web_green_test"
             )
         },
         [pscustomobject]@{
             Label = "Cleanup inactive test color"
             Commands = @(
-                "docker compose -f <local-simulation-compose-file> stop web_green"
+                "docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test"
             )
         },
         [pscustomobject]@{
@@ -259,7 +267,7 @@ Show-FutureCommandPlan
 Write-Step "Result"
 Write-Ok "Local blue-green apply simulation preview completed."
 Write-Ok "No runtime behavior was changed."
-Write-Ok "Inactive startup plan status: exists if listed above; local inactive startup remains NO-GO."
-Write-Ok "Inactive startup runner status: dry-run / no-action only; test port 8000 and service web are blocked."
+Write-Ok "Inactive startup plan status: exists if listed above; local inactive startup remains NO-GO without the separate Ack and -AllowContainerAction gates."
+Write-Ok "Inactive startup runner status: dry-run / no-action by default; test port 8000 and service web are blocked."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."
 Write-Ok "No docker compose up/down/restart/build, migrate, collectstatic, traffic switch, file modification, Shopify call, Gmail call, or email send was performed."

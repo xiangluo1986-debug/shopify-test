@@ -8,9 +8,20 @@ deployment path.
 This plan does not start containers, stop containers, restart containers, build
 images, run migrations, run collectstatic, switch traffic, or change
 Cloudflare/domain routing. It does not change the active `docker-compose.yml`.
+The local-test Compose example is:
+
+```text
+docker-compose.bluegreen.local-test.example.yml
+```
+
+It is marked EXAMPLE ONLY, NOT ACTIVE, NOT USED BY NORMAL `docker compose`
+COMMANDS, LOCAL TEST ONLY, and MUST NOT BIND `8000`.
 
 The future test must use no production traffic, must not take over host port
 `8000`, and must not restart or replace the current `web` service.
+Current project commands remain unchanged; normal `docker compose` commands do
+not use the local-test example unless `-f docker-compose.bluegreen.local-test.example.yml`
+is explicitly supplied.
 
 ## Execution-Gated Runner
 
@@ -38,19 +49,30 @@ The execution request gate requires this exact phrase:
 I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC
 ```
 
-Even with the correct phrase, real inactive startup execution is still blocked
-in this phase. The runner reports:
+Real local inactive startup also requires the explicit container-action gate:
 
-```text
-Real inactive startup execution is not implemented in this phase.
+```powershell
+-AllowContainerAction
 ```
 
-`-TestPort 8000` is always blocked. `-InactiveService web` is always blocked
-because `web` is the current active service name. Production remains NO-GO.
+Without `-AllowContainerAction`, the runner blocks even when the approval phrase
+is correct. `-TestPort 8000` is always blocked. `-InactiveService web` is
+always blocked because `web` is the current active service name. The active
+`docker-compose.yml` is not a valid startup compose file for this runner.
+Production remains NO-GO.
+
+The future executable path is local-only and test-only. It validates the
+local-test compose file, starts only the inactive test service with `--no-deps`
+and `--no-build`, checks `/healthz/` on the non-`8000` test port, prints logs
+for that inactive service if health fails, and stops only that inactive service
+during cleanup. This task must not run that executable path.
 
 ## Proposed Inactive Color
 
 - Use one inactive test service only.
+- Default service concept: `web_green_test`.
+- Default local-test compose file:
+  `docker-compose.bluegreen.local-test.example.yml`.
 - Use a non-production local test port such as `18080` or `18081`.
 - Do not bind host port `8000`.
 - Do not replace, rename, stop, restart, or scale the current `web` service.
@@ -95,7 +117,15 @@ validate by loading the active production compose into a changed runtime path.
 
 ```powershell
 # NOT RUN IN THIS TASK
-docker compose -f <inactive-startup-compose-file> config
+docker compose -f docker-compose.bluegreen.local-test.example.yml config
+```
+
+The gated runner's future execution branch validates without printing expanded
+config:
+
+```powershell
+# NOT RUN IN THIS TASK
+docker compose -f docker-compose.bluegreen.local-test.example.yml config --quiet
 ```
 
 If proxy syntax is included in a future local-only test file, validate it
@@ -113,28 +143,28 @@ host port, for example `18080` or `18081`.
 
 ```powershell
 # NOT RUN IN THIS TASK
-docker compose -f <inactive-startup-compose-file> up -d <inactive-test-service>
+docker compose -f docker-compose.bluegreen.local-test.example.yml up -d --no-deps --no-build web_green_test
 ```
 
 ### Check `/healthz/` On Inactive Color
 
 ```powershell
 # NOT RUN IN THIS TASK
-Invoke-WebRequest -Uri "http://127.0.0.1:<inactive-test-port>/healthz/" -UseBasicParsing -TimeoutSec 5
+Invoke-WebRequest -Uri "http://127.0.0.1:18080/healthz/" -UseBasicParsing -TimeoutSec 5
 ```
 
 ### Inspect Inactive Logs
 
 ```powershell
 # NOT RUN IN THIS TASK
-docker compose -f <inactive-startup-compose-file> logs --tail=100 <inactive-test-service>
+docker compose -f docker-compose.bluegreen.local-test.example.yml logs --tail=100 web_green_test
 ```
 
 ### Stop Inactive Color Only
 
 ```powershell
 # NOT RUN IN THIS TASK
-docker compose -f <inactive-startup-compose-file> stop <inactive-test-service>
+docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test
 ```
 
 ### Cleanup
@@ -145,16 +175,19 @@ current `web`, or change active routing.
 
 ```powershell
 # NOT RUN IN THIS TASK
-docker compose -f <inactive-startup-compose-file> rm -f <inactive-test-service>
+docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test
 ```
 
 ## Safety Gates Before Future Execution
 
 - Exact approval phrase is required:
   `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
+- `-AllowContainerAction` is required before any future real local startup.
 - Current `/healthz/` on port `8000` must pass before inactive startup.
 - Git status must be reviewed.
 - Active `docker-compose.yml` must remain unchanged.
+- Startup compose file must be the reviewed local-test example, not the active
+  `docker-compose.yml`.
 - Inactive service must not bind host port `8000`.
 - Inactive service must not be named `web`.
 - The runner blocks `-TestPort 8000` and `-InactiveService web`.
@@ -182,10 +215,15 @@ external API writes as part of failure handling.
 ## Go / No-Go
 
 - Plan: READY.
-- Execution-gated runner: READY for dry-run / no-action status checks only.
-- Local inactive startup: NO-GO until separate approval.
-- Real inactive startup execution: not implemented in this phase.
-- Next phase: implement actual local startup only after a separate approval of
-  exact command scope, inactive service, non-`8000` test port, and cleanup path.
+- Local-test Compose example: READY as a non-active local-only example.
+- Execution-gated runner: READY for dry-run / no-action status checks and for a
+  future local-only startup path only after all gates are supplied.
+- Local inactive startup: NO-GO in this task. Future execution requires the
+  exact approval phrase, `-AllowContainerAction`, a non-`8000` test port, an
+  inactive service other than `web`, and the reviewed local-test compose file.
+- Real inactive startup execution: implemented behind gates but not run in this
+  task.
+- Next phase: decide whether to run the gated local startup path and capture the
+  output without changing production traffic.
 - Production: NO-GO.
 - Runtime behavior changed by this plan: no.

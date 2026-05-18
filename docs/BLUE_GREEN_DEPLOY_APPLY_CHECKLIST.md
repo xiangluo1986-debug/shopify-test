@@ -7,6 +7,7 @@ Cloudflare routing until that task is explicitly approved.
 Related non-active drafts:
 
 - [docker-compose.bluegreen.example.yml](../docker-compose.bluegreen.example.yml)
+- [docker-compose.bluegreen.local-test.example.yml](../docker-compose.bluegreen.local-test.example.yml)
 - [nginx/bluegreen.example.conf](../nginx/bluegreen.example.conf)
 - [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md)
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
@@ -31,15 +32,17 @@ Related non-active drafts:
 - Local inactive startup plan: READY for review in
   [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
 - Gated local inactive startup runner: READY for dry-run / no-action status
-  checks only at `scripts/blue_green_local_inactive_startup.ps1`.
+  checks by default at `scripts/blue_green_local_inactive_startup.ps1`; future
+  local-only execution is gated by the exact Ack and `-AllowContainerAction`.
 - Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
   approval of exact commands. Real local simulation execution is not
   implemented in the current runner phase.
 - Local inactive startup: NO-GO until a separate task approves one inactive
-  service, a non-`8000` test port, and cleanup commands. The current startup
-  runner blocks `-TestPort 8000`, blocks `-InactiveService web`, and still
-  blocks real startup even with the required phrase
+  service, a non-`8000` test port, `-AllowContainerAction`, and cleanup
+  commands. The current startup runner blocks `-TestPort 8000`, blocks
+  `-InactiveService web`, blocks active `docker-compose.yml`, and blocks correct
+  Ack without `-AllowContainerAction`. Required phrase:
   `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Production apply: NO-GO.
@@ -62,6 +65,9 @@ Related non-active drafts:
 - The local inactive startup plan in
   [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
   has been reviewed before any inactive-color startup.
+- The local-test inactive Compose example
+  [docker-compose.bluegreen.local-test.example.yml](../docker-compose.bluegreen.local-test.example.yml)
+  has been reviewed and confirmed not to bind host port `8000`.
 - The future local simulation approval phrase is present:
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC`.
 - The future inactive service is confirmed to bind only a non-`8000` local test
@@ -70,6 +76,8 @@ Related non-active drafts:
 - The future inactive startup approval phrase is present only in a separately
   approved task:
   `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
+- The future inactive startup command includes `-AllowContainerAction`; correct
+  approval phrase alone is not enough.
 - A separate apply task approves the exact local runtime commands before any
   container start, restart, proxy reload, or traffic switch is run.
 - A reviewed proxy design is selected and tested away from production traffic.
@@ -183,12 +191,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_a
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1
 ```
 
+- Confirm the local-test inactive Compose example validates without starting
+  containers:
+
+```powershell
+docker compose -f docker-compose.bluegreen.local-test.example.yml config
+```
+
 - Confirm inactive startup execution requests remain blocked unless the exact
-  approval gate is supplied, and that even correct approval remains a future
-  placeholder in this phase:
+  approval gate is supplied:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup
+```
+
+- Confirm the startup runner blocks correct Ack when `-AllowContainerAction` is
+  missing:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC
 ```
 
 - Confirm the startup runner blocks forbidden target choices:

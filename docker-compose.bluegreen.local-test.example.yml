@@ -1,0 +1,81 @@
+# EXAMPLE ONLY.
+# NOT ACTIVE.
+# NOT USED BY NORMAL docker compose COMMANDS.
+# LOCAL TEST ONLY.
+# MUST NOT BIND 8000.
+#
+# This file is separate from the active docker-compose.yml and is not loaded
+# unless an operator explicitly passes it with `docker compose -f`.
+# It is for a future local inactive-color startup test only. It must not be
+# used for production, proxy takeover, Cloudflare/domain routing, scheduler
+# duplication, migrations, collectstatic, Shopify writes, Gmail calls, or email
+# sends.
+#
+# The local inactive startup runner sets BLUE_GREEN_LOCAL_TEST_PORT from its
+# reviewed -TestPort parameter. The runner blocks port 8000 before Docker is
+# called. With no override, the host test port is 18080.
+name: aftersales-bluegreen-local-test-example
+
+x-local-django-web: &local-django-web
+  build:
+    context: ./backend
+  environment:
+    TZ: Asia/Shanghai
+    DJANGO_DEBUG: "0"
+    DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+    DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:18080,http://127.0.0.1:18080
+    SHOPIFY_TRANSLATION_WORKFLOW_LOG_DIR: /app/workflow_logs
+  volumes:
+    - ./backend:/app
+    - local_test_media:/app/media
+    - local_test_workflow_logs:/app/workflow_logs
+  expose:
+    - "8000"
+  depends_on:
+    - db
+  networks:
+    - local_test_net
+  # Override the project image default command so this local test path does not
+  # run migrations or collectstatic.
+  command: bash -lc "python manage.py runserver 0.0.0.0:8000"
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - 'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/healthz/\", timeout=5).read()"'
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 20s
+
+services:
+  # Shared DB reference concept only. The startup runner uses --no-deps and
+  # starts only the inactive test service; it does not start a duplicate
+  # scheduler or switch production traffic.
+  db:
+    image: postgres:16
+    # No database credentials are included in this example. A future approved
+    # task must decide local test database env/secret handling without exposing
+    # private values.
+    volumes:
+      - local_test_pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - local_test_net
+
+  web_green_test:
+    <<: *local-django-web
+    ports:
+      - "${BLUE_GREEN_LOCAL_TEST_PORT:-18080}:8000"
+    labels:
+      com.kidstoylover.deploy.role: django-web
+      com.kidstoylover.deploy.color: green-test
+      com.kidstoylover.deploy.scope: local-test-only
+
+volumes:
+  local_test_pgdata:
+  local_test_media:
+  local_test_workflow_logs:
+
+networks:
+  local_test_net:

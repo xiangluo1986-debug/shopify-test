@@ -18,6 +18,7 @@ are not referenced by the current `docker-compose.yml`, and do not switch
 traffic or change current deployment commands:
 
 - [docker-compose.bluegreen.example.yml](../docker-compose.bluegreen.example.yml)
+- [docker-compose.bluegreen.local-test.example.yml](../docker-compose.bluegreen.local-test.example.yml)
 - [nginx/bluegreen.example.conf](../nginx/bluegreen.example.conf)
 - [BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md](BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md)
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
@@ -38,16 +39,18 @@ The gated local simulation runner at
 this phase. It prints readiness and the future local simulation plan, blocks
 execution requests without the exact approval phrase, and still does not
 implement real local simulation execution even when the phrase is supplied.
-The local inactive-color startup plan is also documentation only; inactive
-startup remains NO-GO until a separate task approves one inactive service, a
-non-`8000` test port, and cleanup commands.
+The local inactive-color startup plan documents a local-only startup path;
+inactive startup remains NO-GO unless a separate task approves one inactive
+service, a non-`8000` test port, `-AllowContainerAction`, and cleanup commands.
 The execution-gated local inactive startup runner at
-`scripts/blue_green_local_inactive_startup.ps1` is dry-run / no-action only in
-this phase. It blocks `-TestPort 8000`, blocks `-InactiveService web`, requires
-the exact phrase
+`scripts/blue_green_local_inactive_startup.ps1` is dry-run / no-action by
+default. It blocks `-TestPort 8000`, blocks `-InactiveService web`, blocks the
+active `docker-compose.yml` as the startup compose file, requires the exact
+phrase
 `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC` for any
-execution request, and still reports real inactive startup execution is not
-implemented in this phase even when the phrase is supplied.
+execution request, and requires `-AllowContainerAction` before any future local
+container action. The default compose path is the non-active local-test example
+`docker-compose.bluegreen.local-test.example.yml`.
 Production remains NO-GO.
 
 ## Current Architecture
@@ -226,20 +229,22 @@ dry-run / no-action status checks:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1
 ```
 
-A future phase may implement actual inactive-color startup on a local-only test
-port only after
+An actual inactive-color startup path now exists for future local-only use only
+after
 [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
 and
 [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
 are reviewed, the exact local-only approval phrase is provided in a separate
-task, and the exact commands, target color, non-`8000` test port, cleanup path,
-and no-production-traffic constraints are approved.
+task, `-AllowContainerAction` is supplied, and the exact commands, target color,
+non-`8000` test port, cleanup path, and no-production-traffic constraints are
+approved.
 The current startup runner path is
 `scripts/blue_green_local_inactive_startup.ps1`; its default behavior is
 dry-run only, and the required inactive-startup phrase is
 `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
-`TestPort` must not be `8000`, `InactiveService` must not be `web`, and real
-container startup remains blocked in this phase.
+`TestPort` must not be `8000`, `InactiveService` must not be `web`, the active
+`docker-compose.yml` must not be used for this local startup path, and correct
+Ack alone is blocked unless `-AllowContainerAction` is present.
 
 Validate the proxy and color services locally or in staging:
 
@@ -369,8 +374,9 @@ Review the dry-run output from
 `scripts/blue_green_local_apply_simulation_preview.ps1`, and
 `scripts/blue_green_local_inactive_startup.ps1`.
 The recommended next separate task is to implement an actual local-only
-inactive-color startup path only after explicit approval of the exact compose
-file, inactive service, non-`8000` test port, health check, and stop-only
-cleanup command. Production should remain NO-GO until local or staging results
-are reviewed and a separate production task approves route, port ownership,
-proxy, scheduler, migration, static/media, rollback, and observation details.
+inactive-color startup run using the gated path only after explicit approval of
+the exact compose file, inactive service, non-`8000` test port, health check,
+`-AllowContainerAction`, and stop-only cleanup command. Production should remain
+NO-GO until local or staging results are reviewed and a separate production task
+approves route, port ownership, proxy, scheduler, migration, static/media,
+rollback, and observation details.

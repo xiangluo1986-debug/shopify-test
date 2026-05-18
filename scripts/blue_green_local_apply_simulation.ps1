@@ -90,6 +90,10 @@ function Show-ReadinessFiles {
             Path = ".\docker-compose.bluegreen.example.yml"
         },
         [pscustomobject]@{
+            Label = "Local-test inactive Compose example"
+            Path = ".\docker-compose.bluegreen.local-test.example.yml"
+        },
+        [pscustomobject]@{
             Label = "Example nginx proxy draft"
             Path = ".\nginx\bluegreen.example.conf"
         },
@@ -153,9 +157,17 @@ function Show-FutureInactiveStartupPhase {
         Write-Warn "Inactive startup runner is missing: $runnerPath"
     }
 
-    Write-Warn "Local inactive-color startup is planned but blocked in this phase."
+    $localTestComposePath = ".\docker-compose.bluegreen.local-test.example.yml"
+    if (Test-Path -LiteralPath $localTestComposePath) {
+        Write-Ok "Local-test inactive Compose example exists: $localTestComposePath"
+    } else {
+        Write-Warn "Local-test inactive Compose example is missing: $localTestComposePath"
+    }
+
+    Write-Warn "Local inactive-color startup now has a future executable path, but it remains blocked by default."
     Write-Warn "Inactive startup runner default behavior is dry-run / no-action only."
     Write-Warn "Required inactive startup approval phrase: $InactiveStartupApprovalPhrase"
+    Write-Warn "Future real local inactive startup also requires -AllowContainerAction."
     Write-Warn "Any future inactive test service must use a non-8000 test port such as 18080 or 18081."
     Write-Warn "The inactive service must not be the current active service name web."
     Write-Warn "Current web remains untouched and keeps host port 8000."
@@ -188,9 +200,9 @@ function Show-SafeConfigNote {
     Write-Step "Example Compose config validation"
 
     Write-Host "No Docker command is run by this runner in this phase."
-    Write-Host "A future separately approved phase may run this read-only validation if the example Compose file is confirmed not to expose private environment values:"
+    Write-Host "This task validates the local-test inactive Compose example without starting containers:"
     Write-Host "  # NOT RUN IN THIS TASK"
-    Write-Host "  docker compose -f docker-compose.bluegreen.example.yml config"
+    Write-Host "  docker compose -f docker-compose.bluegreen.local-test.example.yml config"
 }
 
 function Show-BlockedActionPlan {
@@ -203,8 +215,8 @@ function Show-BlockedActionPlan {
         "Review git status and local readiness files.",
         "Confirm active docker-compose.yml remains unchanged.",
         "Confirm current web service still owns host port 8000.",
-        "Validate example Compose/proxy config without starting containers.",
-        "Start only one inactive test service on a reviewed non-8000 local-only test port.",
+        "Validate the local-test inactive Compose example without starting containers.",
+        "Start only one inactive test service on a reviewed non-8000 local-only test port after all gates pass.",
         "Run Django checks against the inactive color only.",
         "Health-check the inactive color directly through /healthz/.",
         "Stop only the inactive local test color after validation.",
@@ -227,8 +239,10 @@ function Show-BlockedActionPlan {
     Write-Host ""
     Write-Host "Future inactive-color startup remains blocked here:"
     Write-Host "  - runner path: .\scripts\blue_green_local_inactive_startup.ps1"
+    Write-Host "  - local-test compose path: .\docker-compose.bluegreen.local-test.example.yml"
     Write-Host "  - default behavior is dry-run / no-action only"
     Write-Host "  - required approval phrase: $InactiveStartupApprovalPhrase"
+    Write-Host "  - -AllowContainerAction is required before any future container action"
     Write-Host "  - test port must be non-8000, for example 18080 or 18081"
     Write-Host "  - inactive service must not be web"
     Write-Host "  - current web must remain untouched"
@@ -262,7 +276,7 @@ function Test-ExecutionGate {
 
     Write-Ok "Approval phrase matched."
     Write-Warn "Real local simulation execution is not implemented in this phase."
-    Write-Warn "Local inactive-color startup is planned but still blocked in this phase."
+    Write-Warn "Local inactive-color startup has a future executable path, but remains blocked unless its separate Ack and -AllowContainerAction gates are supplied."
     Write-Warn "No containers were started, stopped, restarted, or built."
     Write-Warn "No migration, collectstatic, proxy switch, file edit, Shopify call, Gmail call, or email send was performed."
     Write-Warn "Production remains NO-GO."

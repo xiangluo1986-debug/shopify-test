@@ -148,6 +148,10 @@ function Show-DraftArtifactSummary {
             Path = ".\docker-compose.bluegreen.example.yml"
         },
         [pscustomobject]@{
+            Label = "Local-test inactive Compose example"
+            Path = ".\docker-compose.bluegreen.local-test.example.yml"
+        },
+        [pscustomobject]@{
             Label = "Proxy example config"
             Path = ".\nginx\bluegreen.example.conf"
         },
@@ -305,9 +309,11 @@ function Show-FuturePlan {
     Write-Host ""
     Write-Host "Local simulation runner status: dry-run / no-action only."
     Write-Host "Real local simulation execution is not implemented in this phase."
-    Write-Host "Local inactive-color startup plan status: reviewed document only; startup remains NO-GO."
-    Write-Host "Local inactive-color startup runner status: exists if listed above; dry-run / no-action only and blocked by default."
+    Write-Host "Local inactive-color startup plan status: reviewed local-only startup path; startup remains NO-GO by default."
+    Write-Host "Local inactive-color startup runner status: exists if listed above; future executable path is gated and blocked by default."
     Write-Host "Required inactive startup approval phrase: $InactiveStartupApprovalPhrase"
+    Write-Host "Future real local inactive startup also requires -AllowContainerAction."
+    Write-Host "Local-test compose example: docker-compose.bluegreen.local-test.example.yml."
     Write-Host "Any future inactive startup must use one inactive test service on a non-8000 local port and leave current web untouched."
     Write-Host "The future inactive service must not be the current active service name web."
     Write-Host "Production remains NO-GO."
@@ -327,5 +333,5 @@ Show-FuturePlan
 Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
 Write-Ok "No runtime behavior was changed by this read-only planner."
-Write-Ok "Inactive startup runner status: dry-run / no-action only; test port 8000 and service web are blocked; production remains NO-GO."
+Write-Ok "Inactive startup runner status: dry-run / no-action by default; future execution requires Ack plus -AllowContainerAction; test port 8000 and service web are blocked; production remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."
