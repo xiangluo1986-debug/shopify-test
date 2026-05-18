@@ -281,6 +281,12 @@
     font-weight: 700;
     padding: 11px 12px;
   }
+  .tw-permission-note span {
+    display: block;
+    margin-top: 4px;
+    font-size: 13px;
+    font-weight: 600;
+  }
   .tw-workspace-header {
     position: static;
     padding: 6px 8px;
@@ -2558,7 +2564,7 @@
       <h1>Shopify 翻译工作台</h1>
       <span class="tw-safety">Preview and review first</span>
     </div>
-    <p>Search a Shopify product, preview translations, review safe fields, then update safe validated fields in Shopify.</p>
+    <p>Search a Shopify product, preview translations, review safe fields, then update validated translations in Shopify.</p>
   </div>
   {% endif %}
 
@@ -2889,7 +2895,7 @@
     <div class="tw-intro-heading">
       <div>
         <h1 id="tw-intro-title">Shopify 翻译工作台</h1>
-        <p class="tw-intro-lede">Search a Shopify product, preview translations, review safe fields, then update safe validated fields in Shopify.</p>
+        <p class="tw-intro-lede">Search a Shopify product, preview translations, review safe fields, then update validated translations in Shopify.</p>
       </div>
       <span class="tw-safety">Preview and review first</span>
     </div>
@@ -2909,12 +2915,13 @@
         </div>
         <div class="tw-intro-step">
           <span class="tw-intro-step-number">4</span>
-          <div class="tw-intro-step-title">Admin updates Shopify</div>
+          <div class="tw-intro-step-title">Update Shopify</div>
         </div>
       </div>
     {% endif %}
     <div class="tw-permission-note">
-      Staff can preview/review/save local edits. Admins can update Shopify.
+      Staff can translate, review, edit, and update safe Shopify translations.
+      <span>Only safe validated fields are updated. Technical/internal fields remain blocked. No update happens unless you click the update button.</span>
     </div>
   </section>
   <div class="module tw-workspace-header tw-compact-topbar" data-workspace-header>
@@ -3437,10 +3444,11 @@
           {% endif %}
           {% if all_languages_update_display.translation_readiness_audit %}
             <details class="tw-shopify-update-details">
-              <summary>More fields we can enable later</summary>
+              <summary>Future fields audit</summary>
               {% with more_fields=all_languages_update_display.translation_readiness_audit.more_fields_enablement %}
                 {% if more_fields %}
-                  <h4>More fields we can enable later</h4>
+                  <h4>Future fields audit</h4>
+                  <p class="tw-shopify-not-updated-note">{{ more_fields.plain_summary|default:"Variants and metafields remain disabled until a separate enablement task proves safe mapping and readback." }}</p>
                   <div class="tw-shopify-diagnostic-card-grid">
                     <article class="tw-shopify-diagnostic-card">
                       <div class="tw-shopify-diagnostic-title">Variants</div>
@@ -3469,9 +3477,9 @@
                     </article>
                   </div>
                   {% if more_fields.ready_for_next_enablement_count %}
-                    <p class="tw-shopify-not-updated-note">Ready for next enablement task: {{ more_fields.ready_for_next_enablement_labels|join:", " }}</p>
+                    <p class="tw-shopify-not-updated-note">Ready for next enablement: {{ more_fields.ready_for_next_enablement_labels|join:", " }}</p>
                   {% else %}
-                    <p class="tw-shopify-not-updated-note">No additional variant or metafield write scope is ready from this report.</p>
+                    <p class="tw-shopify-not-updated-note">No additional safe fields are ready to enable yet.</p>
                   {% endif %}
                 {% endif %}
               {% endwith %}

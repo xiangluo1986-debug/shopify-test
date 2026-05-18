@@ -197,6 +197,7 @@ def run_audit(*, output_dir="", sample_limit=6):
     ]
     media_summary = _media_alt_summary(media_rows)
     variant_metafield_summary = _variant_metafield_summary(variant_rows, metafield_rows)
+    variant_source_probe_summary = _variant_source_probe_summary(product_audits)
     payload = {
         "audit_name": "translation_readiness_audit",
         "audit_status": "completed",
@@ -222,6 +223,7 @@ def run_audit(*, output_dir="", sample_limit=6):
         ),
         "media_alt_text_mapping_audit": media_summary,
         "variant_metafield_quick_audit": variant_metafield_summary,
+        "variant_source_probe_summary": variant_source_probe_summary,
     }
     payload["recommendation"] = _overall_recommendation(payload)
     report_dir = _output_dir(output_dir, generated_at)
@@ -253,8 +255,17 @@ def _print_summary(payload, write_line):
     write_line(
         "Variants classified: "
         f"{variant_meta.get('variant_row_count', 0)}; "
+        f"mapping missing: {variant_meta.get('variant_mapping_missing_count', 0)}; "
+        f"technical/SKU-only: {variant_meta.get('variant_technical_or_sku_count', 0)}; "
         f"ready for next enablement: "
         f"{variant_meta.get('variant_ready_for_next_enablement_count', 0)}"
+    )
+    variant_probe = payload.get("variant_source_probe_summary") or {}
+    write_line(
+        "Variant source probe: "
+        f"variant rows {variant_probe.get('variant_rows_found', 0)}; "
+        f"selectedOptions option rows {variant_probe.get('selected_options_derived_option_rows_found', 0)}; "
+        f"option value rows already handled {variant_probe.get('option_value_rows_already_handled_separately', 0)}"
     )
     write_line(
         "Customer-facing metafields: "
@@ -426,8 +437,9 @@ def _audit_product(product_gid, fact, roles):
     rows = fact.get("review_rows") or []
     entries = fact.get("update_entries") or []
     media_source_rows = entries if entries else rows
-    variant_rows = _variant_rows(entries or rows, product_gid)
-    metafield_rows = _metafield_rows(entries or rows, product_gid)
+    future_field_rows = _future_field_source_rows(rows, entries)
+    variant_rows = _variant_rows(future_field_rows, product_gid)
+    metafield_rows = _metafield_rows(future_field_rows, product_gid)
     return {
         "sample_types": roles,
         "product_gid": product_gid,
@@ -452,6 +464,7 @@ def _audit_product(product_gid, fact, roles):
         "media_alt_mapping_result": _media_alt_mapping_result(media_source_rows, product_gid),
         "variant_rows": variant_rows,
         "metafield_rows": metafield_rows,
+        "variant_source_probe": _variant_source_probe(rows, entries),
     }
 
 
@@ -632,6 +645,110 @@ def _media_alt_mapping_result(rows, product_gid):
     return _media_alt_summary(media_rows)
 
 
+def _future_field_source_rows(workspace_rows, update_entries):
+    combined = []
+    by_key = {}
+    for source_name, rows in (
+        ("latest_product_report", workspace_rows),
+        ("latest_update_report", update_entries),
+    ):
+        for raw_row in rows or []:
+            if not isinstance(raw_row, dict):
+                continue
+            key = _future_field_dedupe_key(raw_row)
+            existing = by_key.get(key)
+            if existing is not None:
+                sources = existing.setdefault("_audit_sources", [])
+                if source_name not in sources:
+                    sources.append(source_name)
+                continue
+            row = dict(raw_row)
+            row["_audit_sources"] = [source_name]
+            by_key[key] = row
+            combined.append(row)
+    return combined
+
+
+def _future_field_dedupe_key(row):
+    return (
+        _text(row.get("locale") or row.get("target_locale")),
+        _text(row.get("resource_id")),
+        _text(row.get("key") or row.get("field_key")),
+        _text(row.get("digest") or row.get("source_digest")),
+        _text(row.get("context_label")),
+        _proposed_translation(row),
+    )
+
+
+def _variant_source_probe(workspace_rows, update_entries):
+    all_rows = list(workspace_rows or []) + list(update_entries or [])
+    variant_rows = [
+        row
+        for row in all_rows
+        if str(row.get("group_key") or row.get("field_group") or "") == "variants"
+        or str(row.get("key") or row.get("field_key") or "").startswith("variant.")
+    ]
+    selected_option_rows = [
+        row
+        for row in all_rows
+        if str(row.get("group_key") or row.get("field_group") or "") == "options"
+        and (
+            row.get("selected_options")
+            or row.get("related_variants")
+            or row.get("visible_product_option")
+        )
+    ]
+    option_value_rows = [
+        row
+        for row in all_rows
+        if str(row.get("group_key") or row.get("field_group") or "") == "options"
+        and str(row.get("key") or row.get("field_key") or "") == "option.value"
+    ]
+    variant_title_rows = [
+        row
+        for row in variant_rows
+        if "title"
+        in " ".join(
+            [
+                str(row.get("key") or row.get("field_key") or ""),
+                str(row.get("field_label") or ""),
+            ]
+        ).lower()
+    ]
+    return {
+        "variant_rows_found": len(variant_rows),
+        "variant_title_rows_found": len(variant_title_rows),
+        "selected_options_derived_option_rows_found": len(selected_option_rows),
+        "option_value_rows_already_handled_separately": len(option_value_rows),
+    }
+
+
+def _variant_source_probe_summary(product_audits):
+    totals = Counter()
+    for product in product_audits or []:
+        for key, value in (product.get("variant_source_probe") or {}).items():
+            totals[key] += int(value or 0)
+    if not totals.get("variant_rows_found"):
+        classification = "no_variant_rows_found"
+    elif totals.get("variant_rows_found") and not totals.get("variant_title_rows_found"):
+        classification = "variant_rows_are_not_title_rows"
+    else:
+        classification = "variant_rows_found_needs_mapping_audit"
+    return {
+        "classification": classification,
+        "variant_rows_found": totals.get("variant_rows_found", 0),
+        "variant_title_rows_found": totals.get("variant_title_rows_found", 0),
+        "selected_options_derived_option_rows_found": totals.get(
+            "selected_options_derived_option_rows_found",
+            0,
+        ),
+        "option_value_rows_already_handled_separately": totals.get(
+            "option_value_rows_already_handled_separately",
+            0,
+        ),
+    }
+
+
 def _media_alt_summary(media_rows):
     classifications = Counter(row.get("classification", "") for row in media_rows)
     safe_mapping_count = sum(1 for row in media_rows if row.get("mapping_safe"))
@@ -729,6 +846,8 @@ def _variant_rows(rows, product_gid):
         if group != "variants" and not key.startswith("variant."):
             continue
         resource_id = _text(row.get("resource_id"))
+        resource_type = _gid_type(resource_id) or _text(row.get("resource_type"))
+        maps_to_variant = resource_type == "ProductVariant"
         locale = _text(row.get("locale") or row.get("target_locale"))
         digest = _text(row.get("digest") or row.get("source_digest"))
         proposed = _proposed_translation(row)
@@ -749,18 +868,26 @@ def _variant_rows(rows, product_gid):
             locale=locale,
             proposed=proposed,
         )
+        if resource_id and not maps_to_variant:
+            missing.append("ProductVariant resource_id")
+            missing = _unique_strings(missing)
         empty_value = not bool(proposed)
-        ready_later = not technical and not missing and not empty_value
+        ready_later = (
+            not technical and maps_to_variant and not missing and not empty_value
+        )
         variants.append(
             {
                 "product_gid": product_gid,
+                "source_report_types": list(row.get("_audit_sources") or []),
                 "locale": locale,
                 "locale_exists": bool(locale),
                 "key": key,
                 "key_exists": bool(key),
                 "resource_id": resource_id,
+                "resource_type": resource_type,
                 "resource_id_exists": bool(resource_id),
                 "resource_id_is_real_shopify_gid": _real_shopify_gid(resource_id),
+                "maps_to_product_variant": maps_to_variant,
                 "digest": digest,
                 "digest_exists": bool(digest),
                 "proposed_translation_exists": bool(proposed),
@@ -813,6 +940,7 @@ def _metafield_rows(rows, product_gid):
         metafields.append(
             {
                 "product_gid": product_gid,
+                "source_report_types": list(row.get("_audit_sources") or []),
                 "locale": locale,
                 "locale_exists": bool(locale),
                 "namespace": namespace,
@@ -849,7 +977,10 @@ def _variant_metafield_summary(variant_rows, metafield_rows):
     variants_with_mapping = sum(
         1
         for row in variant_rows
-        if row.get("resource_id_is_real_shopify_gid") and row.get("digest_exists") and row.get("key")
+        if row.get("resource_id_is_real_shopify_gid")
+        and row.get("maps_to_product_variant")
+        and row.get("digest_exists")
+        and row.get("key")
     )
     unique_metafields = {}
     for row in metafield_rows:
@@ -868,6 +999,8 @@ def _variant_metafield_summary(variant_rows, metafield_rows):
     variant_ready = sum(
         1 for row in variant_rows if row.get("ready_for_next_enablement_task")
     )
+    variant_mapping_missing = sum(1 for row in variant_rows if row.get("missing_mapping"))
+    variant_technical = sum(1 for row in variant_rows if row.get("technical_or_sku"))
     customer_metafield_ready = sum(
         1 for row in metafield_rows if row.get("ready_for_next_enablement_task")
     )
@@ -887,11 +1020,15 @@ def _variant_metafield_summary(variant_rows, metafield_rows):
     return {
         "variant_row_count": variant_count,
         "variant_rows_with_resource_key_digest": variants_with_mapping,
+        "variant_mapping_missing_count": variant_mapping_missing,
+        "variant_technical_or_sku_count": variant_technical,
         "variant_ready_for_next_enablement_count": variant_ready,
+        "variant_source_report_counts": _source_report_counts(variant_rows),
+        "variant_classification_counts": _classification_counts(variant_rows),
         "variant_status": (
             "ready_for_next_enablement_task"
             if variant_ready
-            else "no_rows_found"
+            else "no_safe_rows_found"
             if not variant_count
             else "not_ready"
         ),
@@ -901,6 +1038,8 @@ def _variant_metafield_summary(variant_rows, metafield_rows):
         "technical_or_internal_metafield_count": sum(
             1 for row in metafield_rows if row.get("technical_or_internal")
         ),
+        "metafield_source_report_counts": _source_report_counts(metafield_rows),
+        "metafield_classification_counts": _classification_counts(metafield_rows),
         "customer_facing_future_candidate_count": sum(
             1 for row in metafield_rows if row.get("customer_facing_candidate")
         ),
@@ -928,6 +1067,20 @@ def _variant_metafield_summary(variant_rows, metafield_rows):
         "variant_rows": variant_rows,
         "metafield_rows": metafield_rows,
     }
+
+
+def _source_report_counts(rows):
+    counts = Counter()
+    for row in rows or []:
+        sources = row.get("source_report_types") or []
+        for source in sources:
+            counts[str(source)] += 1
+    return _counter_rows(counts)
+
+
+def _classification_counts(rows):
+    counts = Counter(str(row.get("classification") or "unknown") for row in rows or [])
+    return _counter_rows(counts)
 
 
 def _missing_enablement_requirements(*, resource_id, key, digest, locale, proposed):
@@ -1228,6 +1381,26 @@ def _render_html(payload):
     media = payload.get("media_alt_text_mapping_audit") or {}
     workflow = payload.get("existing_translation_workflow_readiness_summary") or {}
     variant_meta = payload.get("variant_metafield_quick_audit") or {}
+    variant_probe = payload.get("variant_source_probe_summary") or {}
+    variant_ready_count = int(
+        variant_meta.get("variant_ready_for_next_enablement_count") or 0
+    )
+    metafield_ready_count = int(
+        variant_meta.get(
+            "customer_facing_metafield_ready_for_next_enablement_count"
+        )
+        or 0
+    )
+    ready_next_parts = []
+    if variant_ready_count:
+        ready_next_parts.append(f"Variants ({variant_ready_count} row(s))")
+    if ready_metafields:
+        ready_next_parts.append(ready_metafields)
+    ready_next_line = (
+        "Ready for next enablement: " + ", ".join(ready_next_parts)
+        if ready_next_parts
+        else "No additional safe fields are ready to enable yet."
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1279,15 +1452,16 @@ def _render_html(payload):
       <tbody>{_media_technical_rows(media.get('rows') or [])}</tbody>
     </table>
   </details>
-  <h2>Variants and metafields</h2>
+  <h2>Future fields audit</h2>
   <ul>
-    <li>Variants: {escape(str(variant_meta.get('variant_status', 'not_ready')))}; rows: {escape(str(variant_meta.get('variant_row_count', 0)))}; ready for next enablement: {escape(str(variant_meta.get('variant_ready_for_next_enablement_count', 0)))}.</li>
+    <li>Variants: {escape(str(variant_meta.get('variant_status', 'not_ready')))}; rows: {escape(str(variant_meta.get('variant_row_count', 0)))}; mapping missing: {escape(str(variant_meta.get('variant_mapping_missing_count', 0)))}; technical/SKU-only: {escape(str(variant_meta.get('variant_technical_or_sku_count', 0)))}; ready for next enablement: {escape(str(variant_ready_count))}.</li>
+    <li>Variant source probe: {escape(str(variant_probe.get('classification', 'not_run')))}; variant title rows: {escape(str(variant_probe.get('variant_title_rows_found', 0)))}; selectedOptions-derived option rows: {escape(str(variant_probe.get('selected_options_derived_option_rows_found', 0)))}; option value rows already handled separately: {escape(str(variant_probe.get('option_value_rows_already_handled_separately', 0)))}.</li>
     <li>Customer-facing metafields: {escape(str(variant_meta.get('customer_facing_metafield_ready_for_next_enablement_count', 0)))} ready / {escape(str(variant_meta.get('customer_facing_metafield_blocked_count', 0)))} blocked.</li>
     <li>Technical fields: blocked; technical/internal rows: {escape(str(variant_meta.get('technical_or_internal_metafield_count', 0)))}.</li>
     <li>Missing mapping: blocked; rows: {escape(str(variant_meta.get('missing_mapping_blocked_count', 0)))}.</li>
     <li>Empty values: skipped; rows: {escape(str(variant_meta.get('empty_value_skipped_count', 0)))}.</li>
     <li>Future candidate metafields: {escape(future_metafields or 'None found in sample.')}</li>
-    <li>Ready for next enablement task: {escape(ready_metafields or 'None found in sample.')}</li>
+    <li>{escape(ready_next_line)}</li>
     <li>Write status: variants and metafields remain disabled by this audit.</li>
   </ul>
   <details>
