@@ -19,10 +19,11 @@ The current Compose setup has one `web` container serving port `8000`. `safe_dep
 For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md). That plan is documentation only until a separate reviewed apply task is approved.
 
 The current safe deploy flow also does not yet enforce a deployment
-single-flight lock. Before any production apply, proxy switch, rolling restart,
-or cleanup work, the deployment lock design in
-[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must be implemented and enforced.
-The proposed runtime-only lock path is:
+single-flight lock. The standalone helper exists at `scripts/deploy_lock.ps1`,
+but `safe_deploy.ps1` does not call it yet. Before any production apply, proxy
+switch, rolling restart, or cleanup work, the deployment lock described in
+[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must be integrated and enforced.
+The runtime-only lock path is:
 
 ```text
 .deploy/deploy.lock
@@ -55,6 +56,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_ru
 
 This helper is read-only. It does not create or delete `.deploy/deploy.lock`.
 `scripts/safe_deploy.ps1` does not enforce the lock yet.
+
+Deployment lock helper status:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action status
+```
+
+Acquire/release examples are documented in
+[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md). Release requires the exact `lock_id`
+from the current lock. Active deploy scripts still do not acquire or release
+this lock automatically.
 
 Optional flags:
 

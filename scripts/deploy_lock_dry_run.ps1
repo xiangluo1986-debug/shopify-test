@@ -100,9 +100,9 @@ function Show-FutureLockRecord {
         process_id = "<process-id>"
         command = "<sanitized-command>"
         purpose = $PurposeValue
-        target_environment = $TargetValue
-        expected_max_age = "PT2H"
-        current_phase = "<acquiring|building|checking|switching|cleanup|releasing>"
+        target = $TargetValue
+        max_age_minutes = 120
+        project_path = "<project-root>"
     }
 
     foreach ($key in $record.Keys) {
@@ -111,19 +111,32 @@ function Show-FutureLockRecord {
 }
 
 function Show-ImplementationPlan {
-    Write-Step "Future enforcement plan"
-    Write-Host "1. Add an atomic acquire helper before deploy/build/restart/switch/cleanup actions."
-    Write-Host "2. Block and exit non-zero when .deploy/deploy.lock already exists."
-    Write-Host "3. Print sanitized owner metadata for the existing lock."
-    Write-Host "4. Never auto-remove another active lock."
-    Write-Host "5. Require explicit manual stale-lock review before removal."
-    Write-Host "6. Release only the lock owned by the current process in a finally/cleanup block."
-    Write-Host "7. Keep production apply blocked until safe_deploy and future blue-green switch paths enforce the lock."
+    Write-Step "Current helper and future enforcement plan"
+    Write-Host "Real helper: scripts\deploy_lock.ps1"
+    Write-Host "1. The helper can acquire, release, report status, and validate a local lock file."
+    Write-Host "2. Active deploy scripts still do not call the helper."
+    Write-Host "3. Future runtime-changing deploy paths must acquire the lock before deploy/build/restart/switch/cleanup actions."
+    Write-Host "4. Future runtime-changing deploy paths must release only the matching lock_id in cleanup/finally handling."
+    Write-Host "5. Keep production apply blocked until safe_deploy and future blue-green switch paths enforce the lock."
+}
+
+function Show-RealHelperExamples {
+    Write-Step "Real helper examples"
+    Write-Host "Status:"
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action status"
+    Write-Host "Acquire:"
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action acquire -Purpose `"safe-deploy`" -Target `"production`""
+    Write-Host "Release requires the exact lock_id printed by acquire or status:"
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action release -LockId <lock_id>"
+    Write-Host "Validate:"
+    Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action validate"
+    Write-Host "These examples are not run by this dry-run helper."
 }
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $LockDirectory = Join-Path -Path $ProjectRoot -ChildPath ".deploy"
 $LockPath = Join-Path -Path $LockDirectory -ChildPath "deploy.lock"
+$LockHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "deploy_lock.ps1"
 $RelativeLockPath = ".deploy\deploy.lock"
 
 Write-Step "Deployment lock dry-run"
@@ -131,6 +144,7 @@ Write-Host "Purpose: $Purpose"
 Write-Host "Target: $Target"
 Write-Host "Proposed lock path: $RelativeLockPath"
 Write-Host "Resolved lock path: $LockPath"
+Write-Host "Real helper path: scripts\deploy_lock.ps1"
 Write-Host "Design document: docs\DEPLOYMENT_LOCK.md"
 Write-Host "This helper is read-only. It does not create, delete, or modify lock files."
 
@@ -139,6 +153,7 @@ $lockDirectoryExists = Test-Path -LiteralPath $LockDirectory -PathType Container
 $lockExists = Test-Path -LiteralPath $LockPath -PathType Leaf
 Write-Host "Lock directory exists: $lockDirectoryExists"
 Write-Host "Lock file exists: $lockExists"
+Write-Host "Real helper exists: $(Test-Path -LiteralPath $LockHelperPath -PathType Leaf)"
 
 if ($lockExists) {
     Show-LockFileContents -Path $LockPath
@@ -148,9 +163,11 @@ Show-DryRunPlan -Path $RelativeLockPath -Exists $lockExists
 
 if ($ShowPlan) {
     Show-FutureLockRecord -PurposeValue $Purpose -TargetValue $Target
+    Show-RealHelperExamples
     Show-ImplementationPlan
 }
 
 Write-Step "Result"
 Write-Ok "Deployment lock dry-run completed. No file or runtime change was performed."
-Write-Ok "Active deploy scripts do not enforce the lock yet; production apply remains blocked until enforcement is implemented."
+Write-Ok "Real helper exists if reported above, but active deploy scripts do not enforce the lock yet."
+Write-Ok "Production apply remains blocked until lock enforcement is integrated into active deploy scripts."

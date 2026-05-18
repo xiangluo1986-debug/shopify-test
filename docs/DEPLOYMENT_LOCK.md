@@ -6,9 +6,10 @@ The deployment lock prevents more than one deploy, update, switch, or cleanup
 flow from running at the same time. It is intended to protect both the current
 `safe_deploy` flow and the future blue-green deploy flow.
 
-This is a design and dry-run document only. The lock is not yet enforced by
-active deployment scripts, and production apply remains NO-GO until enforcement
-is implemented and reviewed.
+The standalone helper now exists at `scripts/deploy_lock.ps1`, but the lock is
+not yet enforced by active deployment scripts. Production apply remains NO-GO
+until enforcement is integrated into `safe_deploy` and the future blue-green
+runtime-changing deploy paths.
 
 ## What The Lock Protects
 
@@ -54,7 +55,7 @@ passwords, private URLs, or environment values in the lock file.
 
 ## Lock Contents
 
-The lock file should contain enough sanitized metadata for another operator to
+The lock file contains enough sanitized metadata for another operator to
 understand who owns the deployment flow and what phase it is in:
 
 - `lock_id`
@@ -64,12 +65,61 @@ understand who owns the deployment flow and what phase it is in:
 - `process_id`
 - `command`
 - `purpose`
-- `target_environment`
-- `expected_max_age`
-- `current_phase`
+- `target`
+- `max_age_minutes`
+- `project_path`
 
 The command should be a human-readable command label or sanitized command text.
 It must not include secret-bearing arguments or private environment values.
+
+## Helper Commands
+
+The real helper is:
+
+```powershell
+scripts/deploy_lock.ps1
+```
+
+Check status without modifying files:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action status
+```
+
+Acquire the default deployment lock:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action acquire -Purpose "safe-deploy" -Target "production"
+```
+
+Acquire uses atomic file creation for `.deploy/deploy.lock`. It creates the
+`.deploy/` directory if needed, then fails non-zero if the lock file already
+exists. On success, it prints the generated `lock_id`.
+
+Release requires the exact `lock_id` from the current lock:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action release -LockId <lock_id>
+```
+
+If `-LockId` is missing or does not match the current lock metadata, release is
+blocked and exits non-zero. This protects another task's lock from accidental
+deletion.
+
+Validate the helper and any existing lock metadata without modifying files:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action validate
+```
+
+`-LockPath` may be used for test locks under `.deploy/`, such as:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action status -LockPath .\.deploy\test-deploy.lock
+```
+
+The helper intentionally restricts lock paths to the project `.deploy/`
+directory.
 
 ## Lock Behavior
 
@@ -90,7 +140,7 @@ check-then-create race where two processes both decide the lock is available.
 
 ## Stale Lock Policy
 
-The proposed stale threshold is 2 hours.
+The default stale threshold is 120 minutes.
 
 A stale-looking lock should require manual review before removal. The review
 should confirm:
@@ -101,6 +151,12 @@ should confirm:
 - The operator understands which deployment phase may have been interrupted.
 
 Never auto-remove a lock if the current process status is unclear.
+
+The current helper reports a stale candidate when `created_at` is older than
+`-MaxAgeMinutes`, but it does not auto-delete stale locks. `-ForceStaleRelease`
+is accepted only as an explicit signal for future/manual stale handling; this
+version still requires an exact `LockId` release and does not perform stale
+deletion.
 
 ## Future Integration Plan
 
@@ -117,9 +173,11 @@ runtime-changing actions should use the shared deployment lock.
 
 ## Current Status
 
-- Design/dry-run only.
+- Real helper exists: `scripts/deploy_lock.ps1`.
 - Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
-- Proposed lock path: `.deploy/deploy.lock`.
+- Default lock path: `.deploy/deploy.lock`.
 - Active deploy scripts do not enforce the lock yet.
-- Production apply remains NO-GO until the deployment lock is implemented and
-  enforced before build, restart, switch, and cleanup actions.
+- Current task adds the helper only, not active deploy enforcement.
+- Production apply remains NO-GO until the deployment lock is integrated into
+  active deploy scripts and enforced before build, restart, switch, and cleanup
+  actions.

@@ -8,7 +8,7 @@ The current production-safety foundation remains:
 
 - Public lightweight `/healthz/` endpoint.
 - `scripts/safe_deploy.ps1` validation and post-restart health check.
-- Deployment lock design and read-only dry-run helper.
+- Deployment lock helper, design document, and read-only dry-run helper.
 - `docs/SAFE_DEPLOY.md` operational notes.
 - No secrets, logs, or generated deployment output committed.
 
@@ -26,6 +26,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
 - [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md)
+- [scripts/deploy_lock.ps1](../scripts/deploy_lock.ps1)
 - [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
 - [scripts/deploy_lock_dry_run.ps1](../scripts/deploy_lock_dry_run.ps1)
 - [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
@@ -62,8 +63,8 @@ Production remains NO-GO.
 
 ## Deployment Lock Gate
 
-Production apply must not proceed until the deployment lock is implemented and
-enforced in runtime-changing deploy paths. The proposed shared lock is
+Production apply must not proceed until the deployment lock is integrated and
+enforced in runtime-changing deploy paths. The shared lock is
 documented in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md), with the runtime-only
 path:
 
@@ -83,10 +84,12 @@ risk: overlapping deployment tasks racing with each other.
 
 Current status:
 
-- Design/dry-run only.
+- Real helper exists: `scripts/deploy_lock.ps1`.
 - Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
 - Active deploy scripts do not enforce the lock yet.
-- Production apply remains NO-GO until lock enforcement is implemented.
+- This helper-only task does not add enforcement to active deploy scripts.
+- Production apply remains NO-GO until lock enforcement is integrated into
+  active deploy scripts.
 
 ## Current Architecture
 
@@ -413,12 +416,9 @@ Review the dry-run output from
 `scripts/blue_green_local_apply_simulation.ps1`,
 `scripts/blue_green_local_apply_simulation_preview.ps1`, and
 `scripts/blue_green_local_inactive_startup.ps1`.
-The recommended next separate task is to implement an actual local-only
-inactive-color startup run using the gated path only after explicit approval of
-the exact compose file, inactive service, non-`8000` test port, health check,
-`-AllowContainerAction`, existing `aftersales-web` image readiness, and
-stop-only cleanup command. Production should remain NO-GO until local or
-staging results are reviewed and a separate production task approves route,
-port ownership, proxy, scheduler, migration, static/media, rollback, and
-observation details. Before any production apply or proxy switch, implement and
-enforce the deployment lock described in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md).
+The recommended next separate task is to integrate the deployment lock helper
+into active runtime-changing deployment scripts in a reviewed dry-run-first
+phase, without deploying or switching traffic. Production should remain NO-GO
+until local or staging results are reviewed and a separate production task
+approves route, port ownership, proxy, scheduler, migration, static/media,
+rollback, observation details, and active lock enforcement.

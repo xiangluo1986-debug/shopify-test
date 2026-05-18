@@ -180,6 +180,10 @@ function Show-DraftArtifactSummary {
             Path = ".\scripts\deploy_lock_dry_run.ps1"
         },
         [pscustomobject]@{
+            Label = "Deployment lock real helper"
+            Path = ".\scripts\deploy_lock.ps1"
+        },
+        [pscustomobject]@{
             Label = "Local inactive startup plan"
             Path = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
         },
@@ -213,6 +217,7 @@ function Show-DeploymentLockStatus {
 
     $lockDocPath = ".\docs\DEPLOYMENT_LOCK.md"
     $lockDryRunPath = ".\scripts\deploy_lock_dry_run.ps1"
+    $lockHelperPath = ".\scripts\deploy_lock.ps1"
 
     if (Test-Path -LiteralPath $lockDocPath) {
         Write-Ok "Deployment lock design doc exists: $lockDocPath"
@@ -226,10 +231,16 @@ function Show-DeploymentLockStatus {
         Write-Warn "Deploy lock dry-run helper is missing: $lockDryRunPath"
     }
 
-    Write-Warn "Production apply remains blocked until deployment lock enforcement is implemented in active runtime-changing scripts."
+    if (Test-Path -LiteralPath $lockHelperPath) {
+        Write-Ok "Deploy lock real helper exists: $lockHelperPath"
+    } else {
+        Write-Warn "Deploy lock real helper is missing: $lockHelperPath"
+    }
+
+    Write-Warn "Production apply remains blocked until deployment lock enforcement is integrated into active runtime-changing scripts."
     Write-Host "Any future production deploy, proxy switch, restart, rolling update, or cleanup must acquire the deployment lock first."
     Write-Host "Proposed lock path: .deploy/deploy.lock"
-    Write-Host "Current status: design/dry-run only; active deploy scripts do not enforce this lock yet."
+    Write-Host "Current status: helper exists if listed above; active deploy scripts do not enforce this lock yet."
 }
 
 function Show-DecisionStatus {
@@ -368,6 +379,6 @@ Show-FuturePlan
 Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
 Write-Ok "No runtime behavior was changed by this read-only planner."
-Write-Ok "Deployment lock design status: dry-run helper and doc are checked above; production apply remains blocked until enforcement exists."
+Write-Ok "Deployment lock status: helper/doc are checked above; production apply remains blocked until active deploy scripts enforce the lock."
 Write-Ok "Inactive startup runner status: dry-run / no-action by default; future execution requires Ack plus -AllowContainerAction; test port 8000 and service web are blocked; production remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."

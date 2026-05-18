@@ -14,6 +14,7 @@ Related non-active drafts:
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
 - [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md)
+- [scripts/deploy_lock.ps1](../scripts/deploy_lock.ps1)
 - [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
 - [scripts/deploy_lock_dry_run.ps1](../scripts/deploy_lock_dry_run.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
@@ -49,9 +50,11 @@ Related non-active drafts:
   The local inactive service reuses the existing `aftersales-web` image; the
   startup runner intentionally uses `--no-build`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
-- Deployment lock: design/dry-run only. Active deploy scripts do not enforce
-  the lock yet.
-- Production apply: NO-GO until deployment lock enforcement is implemented.
+- Deployment lock helper: available at `scripts/deploy_lock.ps1`.
+- Deployment lock enforcement: NO-GO. Active deploy scripts do not enforce the
+  lock yet.
+- Production apply: NO-GO until deployment lock enforcement is integrated into
+  active deploy scripts.
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
@@ -79,8 +82,8 @@ Related non-active drafts:
   explicit image build/preparation task has been completed first.
 - The deployment lock design in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) has
   been reviewed.
-- The deployment lock is implemented and enforced before any production deploy,
-  build, restart, proxy switch, rolling update, or cleanup action.
+- The deployment lock helper is integrated and enforced before any production
+  deploy, build, restart, proxy switch, rolling update, or cleanup action.
 - Any future production switch acquires the deployment lock first and releases
   it only after switch validation and cleanup/finally handling.
 - The completed local inactive startup success on non-production port `18080`
@@ -191,6 +194,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_deploy_
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_run.ps1 -Purpose "blue-green-production-preflight" -Target "production" -ShowPlan
+```
+
+- Check deployment lock helper status without changing runtime state:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action status
 ```
 
 - Review the local-only dry-run package:
