@@ -30,6 +30,30 @@ from remote_approval.utils import (
 
 DOTENV_META_ENV_PREFIX = "REMOTE_APPROVAL_DOTENV_"
 GMAIL_RELATED_ENV_PREFIXES = ("GMAIL_", "GOOGLE_GMAIL_")
+OPTIONAL_LIST_RESULT_FIELDS = (
+    "checked_items",
+    "warnings",
+    "blocking_conditions",
+    "allowed_actions",
+    "approval_actions",
+)
+OPTIONAL_TEXT_RESULT_FIELDS = (
+    "detected_issue_summary",
+    "summary",
+    "summary_text",
+    "issue_summary",
+    "status_summary",
+)
+OPTIONAL_REPORT_PATH_FIELDS = (
+    "review_path",
+    "review_file_path",
+    "report_path",
+    "report_file_path",
+    "json_review_path",
+    "html_review_path",
+    "json_report_path",
+    "html_report_path",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -88,7 +112,7 @@ def main() -> int:
             dotenv_summary["secret_values_printed"],
         )
         task_func = get_task(args.task)
-        result = task_func(args.mode)
+        result = _normalize_task_result(task_func(args.mode))
         task_summary = _build_task_summary(args.task, args.mode, args.approval, result)
         logger.info("task result summary: %s", task_summary)
 
@@ -160,26 +184,80 @@ def main() -> int:
         return 1
 
 
+def _normalize_task_result(result: dict | None) -> dict:
+    if not isinstance(result, dict):
+        result_type = type(result).__name__
+        normalized = {
+            "success": False,
+            "detected_issue_summary": f"Task returned {result_type}; expected a dict result payload.",
+            "raw_result_type": result_type,
+        }
+    else:
+        normalized = dict(result)
+
+    for key in OPTIONAL_LIST_RESULT_FIELDS:
+        if key not in normalized or normalized.get(key) is None:
+            normalized[key] = []
+
+    for key in OPTIONAL_TEXT_RESULT_FIELDS:
+        if key not in normalized or normalized.get(key) is None:
+            normalized[key] = ""
+
+    if not normalized.get("detected_issue_summary"):
+        normalized["detected_issue_summary"] = _default_detected_issue_summary(normalized)
+
+    for key in OPTIONAL_REPORT_PATH_FIELDS:
+        if key not in normalized or normalized.get(key) is None:
+            normalized[key] = ""
+
+    return normalized
+
+
+def _default_detected_issue_summary(result: dict) -> str:
+    success = result.get("success")
+    if success is False:
+        return "Task reported success=False without a task-provided issue summary."
+    if success is True:
+        return "Task completed without a task-provided issue summary."
+    return "No issue summary for this task."
+
+
 def _build_approval_message(task: str, mode: str, result: dict, approval_id: str) -> str:
-    if result.get("approval_message"):
+    result = _normalize_task_result(result)
+    approval_message = result.get("approval_message")
+    if approval_message:
         return (
             f"Task: {task}\n"
             f"Approval ID: {approval_id}\n"
             f"Mode: {mode}\n\n"
-            f"{result['approval_message']}"
+            f"{approval_message}"
         )
 
     result_lines = []
     for key in (
+        "task_type",
         "success",
+        "status",
         "detected_issue_summary",
         "checked_items",
         "warnings",
-        "review_path",
-        "json_review_path",
-        "html_review_path",
+        "blocking_conditions",
     ):
         if key in result:
+            result_lines.append(f"- {key}: {_format_approval_value(result.get(key))}")
+    for key in (
+        "allowed_actions",
+        "approval_actions",
+        "review_path",
+        "review_file_path",
+        "report_path",
+        "report_file_path",
+        "json_review_path",
+        "html_review_path",
+        "json_report_path",
+        "html_report_path",
+    ):
+        if result.get(key):
             result_lines.append(f"- {key}: {_format_approval_value(result.get(key))}")
     if not result_lines:
         result_lines.append("- summary: no structured result summary fields were provided.")
@@ -201,6 +279,23 @@ def _format_approval_value(value) -> str:
     if isinstance(value, (dict, list, tuple)):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
+
+
+def _primary_review_path(result: dict) -> str:
+    for key in (
+        "review_path",
+        "review_file_path",
+        "json_review_path",
+        "html_review_path",
+        "report_path",
+        "report_file_path",
+        "json_report_path",
+        "html_report_path",
+    ):
+        value = result.get(key)
+        if value:
+            return str(value)
+    return ""
 
 
 def _request_reply(message: str, logger, approval_mode: str, summary: str) -> ApprovalReply:
@@ -480,7 +575,10 @@ def _execute_selected_action(
         "git_safety_check",
     }:
         if approval_reply.reply == "1":
-            return "keep_review_file", f"Review file kept: {result.get('review_path')}", "approved"
+            review_path = _primary_review_path(result)
+            if review_path:
+                return "keep_review_file", f"Review file kept: {review_path}", "approved"
+            return "keep_review_file", "Review file kept; task did not provide a review path.", "approved"
         return "invalid", f"Invalid reply for {result.get('task_type')}. Task stopped.", "invalid"
     if approval_reply.reply == "1":
         review_path = _write_demo_review(task, mode, result)
@@ -511,15 +609,26 @@ def _write_demo_review(task: str, mode: str, result: dict) -> Path:
 
 
 def _summarize_task_result(result: dict) -> str:
+    result = _normalize_task_result(result)
     summary_keys = [
         "task_type",
         "success",
+        "status",
         "exit_code",
         "command_label",
         "review_path",
+        "review_file_path",
+        "report_path",
+        "report_file_path",
         "json_review_path",
         "html_review_path",
+        "json_report_path",
+        "html_report_path",
         "detected_issue_summary",
+        "summary",
+        "summary_text",
+        "issue_summary",
+        "status_summary",
         "audit_status",
         "hook_status",
         "wired_to_discovered_sync_completion_point",
@@ -661,6 +770,9 @@ def _summarize_task_result(result: dict) -> str:
         "all_no_write_confirmed",
         "checked_items",
         "warnings",
+        "blocking_conditions",
+        "allowed_actions",
+        "approval_actions",
         "next_step",
         "products_checked",
         "warnings_count",
@@ -1385,11 +1497,12 @@ def _summarize_task_result(result: dict) -> str:
         "untracked_files",
         "secret_findings",
     ]
-    summary = {key: result[key] for key in summary_keys if key in result}
+    summary = {key: result.get(key) for key in summary_keys if key in result}
     return json.dumps(summary, ensure_ascii=False)
 
 
 def _build_task_summary(task: str, mode: str, approval_mode: str, result: dict) -> str:
+    result = _normalize_task_result(result)
     metadata = get_task_metadata(task)
     success = result.get("success")
     if success is None and task == "demo":
@@ -1398,9 +1511,9 @@ def _build_task_summary(task: str, mode: str, approval_mode: str, result: dict) 
         "task": task,
         "mode": mode,
         "approval_mode": approval_mode,
-        "review_file_path": result.get("review_path") or metadata.get("review_file_path"),
+        "review_file_path": _primary_review_path(result) or metadata.get("review_file_path"),
         "success": success,
-        "detected_issue_summary": result.get("detected_issue_summary") or "No issue summary for this task.",
+        "detected_issue_summary": result.get("detected_issue_summary"),
         "next_allowed_actions": _next_allowed_actions(task),
         "result": json.loads(_summarize_task_result(result)),
     }
