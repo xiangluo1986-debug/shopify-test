@@ -26,6 +26,8 @@ deployment state, including:
 - Future non-production blue-green runtime validation.
 - Future non-production runtime validation approved through
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
+- Future local/test proxy routing validation approved through
+  [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
 - Future blue-green deploy scripts.
 - Future proxy switch scripts.
 - Future production cleanup scripts.
@@ -56,6 +58,9 @@ the matching `lock_id` in cleanup/finally handling:
 - Non-production runtime validation when it starts/stops test-only services,
   validates test-only proxy routing, cleans up test resources, or exercises a
   rollback/no-switch path.
+- Local/test proxy routing validation when it starts `web_green_test`, starts
+  `bluegreen_proxy_test`, checks `19080 /healthz/`, cleans up either test-only
+  service, or reports a no-switch failure.
 - Rollback, including proxy switchback, service restart, service stop/start, or
   restoring a previously approved runtime target.
 
@@ -241,12 +246,22 @@ call Shopify/Gmail/review/translation workflows.
 Production apply also requires local/test proxy validation after the successful
 local inactive runtime validation documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
-The separate approval package is
+The separate runtime validation approval package is
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
 That future validation must use a deployment lock for runtime-changing
 test-only actions, with the fixed validation lock path
 `.deploy/bluegreen-nonprod-validation.lock`, while normal non-deploy tasks
 remain unblocked.
+
+The local/test proxy routing validation approval package is
+[BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
+That future validation remains pending and must use lock path
+`.deploy/bluegreen-proxy-validation.lock`, Compose project
+`aftersales-bluegreen-proxy-validation`, inactive service `web_green_test` on
+`18080`, and test proxy service `bluegreen_proxy_test` on `19080`. It must not
+use production port `8000`, touch the current `web` service, or switch
+production traffic. Normal non-deploy tasks are not blocked by this validation
+lock.
 
 ## Lock Behavior
 
@@ -320,6 +335,10 @@ runtime-changing actions should use the shared deployment lock.
   `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md`; production approval
   remains not granted, local/test proxy validation is pending, and the
   validation lock path is `.deploy/bluegreen-nonprod-validation.lock`.
+- Local/test proxy routing validation approval package:
+  `docs/BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md`; production approval
+  remains not granted, proxy validation is pending, and the validation lock path
+  is `.deploy/bluegreen-proxy-validation.lock`.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, local/test proxy validation has passed, and only the matching

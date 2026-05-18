@@ -31,6 +31,22 @@ The future validation must use a deployment lock, such as
 Production remains NO-GO. Normal non-deploy tasks are not blocked by this
 deployment lock.
 
+The local/test proxy routing validation approval package exists at
+[BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
+It prepares a future validation only; it does not run anything and does not
+approve production. Proxy validation remains pending and requires this separate
+approval phrase before any test proxy or inactive service is started:
+
+```text
+I_APPROVE_LOCAL_PROXY_ROUTING_VALIDATION_NO_PRODUCTION_TRAFFIC
+```
+
+That future proxy validation must use deployment lock path
+`.deploy/bluegreen-proxy-validation.lock`, Compose project
+`aftersales-bluegreen-proxy-validation`, inactive service `web_green_test` on
+`18080`, and test proxy service `bluegreen_proxy_test` on `19080`. The current
+`web` service and production port `8000` must remain untouched.
+
 ## Validation Result - 2026-05-18
 
 - Validation status: PASSED.
@@ -62,8 +78,8 @@ deployment lock.
 This result proves the local inactive-service startup and direct health-check
 path only. It does not approve production apply, production proxy changes,
 traffic switching, migrations, collectstatic, or external API workflows.
-Local/test proxy routing validation is still required before production apply
-can be reconsidered.
+Local/test proxy routing validation is still pending and required before
+production apply can be reconsidered.
 
 ## Validation Scope
 
@@ -75,6 +91,9 @@ The future validation should cover:
 - Inactive color `/healthz/` check.
 - Proxy configuration validation.
 - Test-only proxy routing on a non-production port.
+- Test-only proxy routing validation through `19080` to `web_green_test` on
+  `18080`, gated by
+  [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
 - Rollback/no-switch behavior when validation fails.
 - Cleanup of test-only services.
 - Confirmation that the current production web service remains untouched.
@@ -113,6 +132,9 @@ Before any non-production runtime validation, confirm:
 - Production apply remains NO-GO.
 - The approval package has been reviewed.
 - The exact approval phrase has been provided in a separate task.
+- For proxy validation, the proxy approval package has been reviewed, the
+  local proxy approval phrase has been provided in a separate task, the proxy
+  test port is `19080`, and production port `8000` is not used.
 
 If any gate is uncertain, stop before starting test-only services.
 
@@ -216,5 +238,6 @@ the test-only resources.
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
   exists for separate review.
 - Non-production inactive runtime validation: PASSED on 2026-05-18.
-- Local/test proxy routing validation: still required.
+- Local/test proxy routing validation: pending; approval package exists at
+  [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
 - Production apply: NO-GO.

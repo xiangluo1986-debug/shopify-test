@@ -1,0 +1,38 @@
+# EXAMPLE ONLY.
+# LOCAL TEST ONLY.
+# NOT ACTIVE.
+# NOT USED BY NORMAL docker compose COMMANDS.
+# MUST NOT BIND 8000.
+#
+# This file is separate from the active docker-compose.yml and is not loaded
+# unless an operator explicitly passes it with `docker compose -f`.
+# It is for a future local/test proxy routing validation only. It must not be
+# used for production traffic, Cloudflare/domain routing, scheduler workflows,
+# migrations, collectstatic, Shopify writes, Gmail calls, or email sends.
+#
+# The future validation must publish only 19080:80. The inactive test service
+# should already be running as web_green_test on the same local_test_net network
+# under the aftersales-bluegreen-proxy-validation Compose project.
+name: aftersales-bluegreen-proxy-validation
+
+services:
+  bluegreen_proxy_test:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/bluegreen.local-test.example.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "19080:80"
+    expose:
+      - "80"
+    networks:
+      - local_test_net
+    labels:
+      com.kidstoylover.deploy.role: local-test-proxy
+      com.kidstoylover.deploy.scope: local-test-only
+      com.kidstoylover.deploy.production_traffic: "false"
+    # No scheduler, database, migration, collectstatic, production proxy, or
+    # production traffic service is declared in this test-only compose file.
+
+networks:
+  local_test_net:
+    name: aftersales-bluegreen-proxy-validation_local_test_net

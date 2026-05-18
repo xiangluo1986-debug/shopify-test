@@ -36,6 +36,9 @@ traffic or change current deployment commands:
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
+- [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
+- [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
+- [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
 - [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
@@ -96,6 +99,17 @@ It records that local inactive runtime validation PASSED on 2026-05-18 for
 It does not approve production. The next phase is local/test proxy routing
 simulation and validation. Production apply remains blocked until proxy
 validation passes and manual production approval is given.
+
+The local/test proxy routing validation approval package exists at
+[BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
+Proxy validation remains pending. A future run requires deployment lock path
+`.deploy/bluegreen-proxy-validation.lock`, Compose project
+`aftersales-bluegreen-proxy-validation`, inactive service `web_green_test` on
+port `18080`, test proxy service `bluegreen_proxy_test` on port `19080`, and
+the exact approval phrase
+`I_APPROVE_LOCAL_PROXY_ROUTING_VALIDATION_NO_PRODUCTION_TRAFFIC`. This does not
+approve production, does not transfer port `8000`, and does not block normal
+non-deploy tasks.
 
 ## Deployment Lock Gate
 
@@ -160,6 +174,8 @@ Normal non-deploy tasks are not blocked.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   the deployment lock before any build/start/migrate/collectstatic/proxy
   switch/cleanup action.
+- Local proxy routing validation approval package: READY after review; future
+  validation still requires the exact approval phrase and deployment lock.
 
 ## Current Architecture
 
@@ -384,7 +400,10 @@ Validate the proxy and color services locally or in staging:
 - Confirm scheduler behavior is unchanged.
 - Confirm media and static file behavior.
 
-Next phase: proxy local simulation / validation. Production remains NO-GO.
+Next phase: local/test proxy routing validation through `19080` to
+`web_green_test` on `18080`, using
+[BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
+Production remains NO-GO.
 
 ### Phase 3: One-Time Traffic Path Introduction
 

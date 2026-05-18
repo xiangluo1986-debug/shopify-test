@@ -1,0 +1,232 @@
+# Blue-Green Proxy Local Validation Approval
+
+## Purpose
+
+Prepare a future local/test proxy routing validation for the blue-green
+deployment path.
+
+This approval package does not approve production. It does not run commands,
+start containers, start nginx, switch traffic, or change runtime behavior.
+
+The future validation should prove only this local/test path:
+
+- Start the inactive test service on local port `18080`.
+- Start or validate a test-only proxy on local port `19080`.
+- Confirm proxy `/healthz/` routes to the inactive test service.
+- Clean up only the test proxy and inactive test service.
+- Leave the current `web` service and production traffic untouched.
+
+## Explicit Non-Goals
+
+- No production traffic switch.
+- No Cloudflare, DNS, tunnel, or domain routing change.
+- No port `8000` ownership change.
+- No current `web` restart.
+- No migration.
+- No collectstatic.
+- No external API write or send.
+- No Shopify API call.
+- No Gmail API call.
+- No email send.
+- No Trustpilot, Kudosi, or Ali Reviews action.
+
+## Required Approval Phrase
+
+Local/test proxy routing validation remains NO-GO until a separate task
+provides this exact approval phrase:
+
+```text
+I_APPROVE_LOCAL_PROXY_ROUTING_VALIDATION_NO_PRODUCTION_TRAFFIC
+```
+
+## Fixed Future Validation Parameters
+
+- Inactive web test port: `18080`.
+- Proxy test port: `19080`.
+- Compose project name: `aftersales-bluegreen-proxy-validation`.
+- Lock path: `.deploy/bluegreen-proxy-validation.lock`.
+- Target inactive service: `web_green_test`.
+- Test proxy service: `bluegreen_proxy_test`.
+- Current web service: must remain untouched.
+- Production port `8000`: must not be used.
+- Production traffic: no switch.
+
+## Safety Gates Before Future Run
+
+Before a future local/test proxy routing validation run, confirm:
+
+- `git status` has been reviewed.
+- `http://127.0.0.1:8000/healthz/` is OK.
+- `18080` is not serving before the test.
+- `19080` is not serving before the test.
+- Deployment lock helper is available.
+- No existing deploy lock is present.
+- Inactive target is not `web`.
+- Proxy test port is not `8000`.
+- Cleanup command is ready.
+- Rollback/no-switch plan is ready.
+- Production apply remains NO-GO.
+
+If any gate is uncertain, stop before starting test-only services.
+
+## Future Command Groups
+
+All commands in this section are examples for a future separately approved
+validation task.
+
+NOT RUN IN THIS TASK:
+
+### Lock Status
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -Action status -LockPath .\.deploy\bluegreen-proxy-validation.lock
+```
+
+NOT RUN IN THIS TASK:
+
+### Acquire Proxy Validation Lock
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 `
+  -Action acquire `
+  -LockPath .\.deploy\bluegreen-proxy-validation.lock `
+  -Purpose "blue-green-proxy-validation" `
+  -Target "local-proxy-routing"
+```
+
+Record the printed `lock_id`. Release must use the matching `lock_id`.
+
+NOT RUN IN THIS TASK:
+
+### Validate Inactive Compose Config
+
+```powershell
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.local-test.example.yml `
+  config
+```
+
+NOT RUN IN THIS TASK:
+
+### Validate Proxy Compose And Config
+
+```powershell
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.proxy-test.example.yml `
+  config
+
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.local-test.example.yml `
+  -f .\docker-compose.bluegreen.proxy-test.example.yml `
+  config
+```
+
+NOT RUN IN THIS TASK:
+
+### Start Inactive Test Service On 18080
+
+```powershell
+$env:BLUE_GREEN_LOCAL_TEST_PORT = "18080"
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.local-test.example.yml `
+  up -d --no-deps --no-build web_green_test
+```
+
+NOT RUN IN THIS TASK:
+
+### Start Test Proxy On 19080
+
+```powershell
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.proxy-test.example.yml `
+  up -d --no-deps --no-build bluegreen_proxy_test
+```
+
+NOT RUN IN THIS TASK:
+
+### Check Proxy Health Route
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:19080/healthz/
+```
+
+NOT RUN IN THIS TASK:
+
+### Stop Test Proxy Only
+
+```powershell
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.proxy-test.example.yml `
+  stop bluegreen_proxy_test
+
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.proxy-test.example.yml `
+  rm -f bluegreen_proxy_test
+```
+
+NOT RUN IN THIS TASK:
+
+### Stop Inactive Test Service Only
+
+```powershell
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.local-test.example.yml `
+  stop web_green_test
+
+docker compose -p aftersales-bluegreen-proxy-validation `
+  -f .\docker-compose.bluegreen.local-test.example.yml `
+  rm -f web_green_test
+```
+
+NOT RUN IN THIS TASK:
+
+### Release Matching Lock ID
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 `
+  -Action release `
+  -LockPath .\.deploy\bluegreen-proxy-validation.lock `
+  -LockId <matching-lock-id>
+```
+
+NOT RUN IN THIS TASK:
+
+### Post-Check Current 8000 Health
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/healthz/
+```
+
+NOT RUN IN THIS TASK:
+
+### Confirm Test Ports Are Not Serving After Cleanup
+
+```powershell
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:18080/healthz/
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:19080/healthz/
+```
+
+Both commands should fail to connect after cleanup.
+
+## Failure Handling
+
+If future local/test proxy routing validation fails:
+
+- Do not switch production traffic.
+- Do not touch the current `web` service.
+- Print target and proxy logs for manual review.
+- Stop the test proxy only.
+- Stop the inactive test service only.
+- Release the matching deployment lock.
+- Report failure with the failed gate, target service, proxy service, test
+  ports, and cleanup result.
+
+Rollback in this validation means no production switch occurred. The current
+production path should remain unchanged.
+
+## Go / No-Go
+
+- Approval package: READY after review.
+- Local proxy routing validation: NO-GO until the separate explicit approval
+  phrase is provided.
+- Production apply: NO-GO.
