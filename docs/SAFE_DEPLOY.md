@@ -19,10 +19,12 @@ The current Compose setup has one `web` container serving port `8000`. `safe_dep
 For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md). That plan is documentation only until a separate reviewed apply task is approved.
 
 The current safe deploy flow also does not yet enforce a deployment
-single-flight lock. The standalone helper exists at `scripts/deploy_lock.ps1`,
-but `safe_deploy.ps1` does not call it yet. Before any production apply, proxy
-switch, rolling restart, or cleanup work, the deployment lock described in
-[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must be integrated and enforced.
+single-flight lock in real mode. The standalone helper exists at
+`scripts/deploy_lock.ps1`, and `safe_deploy.ps1` now reports/checks lock state
+in dry-run/check-only modes. It does not acquire or release the lock during a
+real deploy yet. Before any production apply, proxy switch, rolling restart, or
+cleanup work, the deployment lock described in
+[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must be fully enforced.
 The runtime-only lock path is:
 
 ```text
@@ -48,6 +50,28 @@ Dry run:
 .\scripts\safe_deploy.ps1 -DryRun
 ```
 
+In this phase, `-DryRun` reports the deployment lock path, whether
+`scripts/deploy_lock.ps1` exists, whether the lock currently exists, and whether
+a future real safe deploy would be blocked. It still executes no deploy
+commands.
+
+Check only for an existing deployment lock:
+
+```powershell
+.\scripts\safe_deploy.ps1 -CheckDeployLock
+```
+
+This checks lock status only. It does not deploy, build, migrate,
+collectstatic, restart containers, create a lock, delete a lock, acquire a
+lock, or release a lock. It exits `0` when no lock exists and non-zero when a
+lock exists.
+
+For validation with a temporary test lock under `.deploy/`:
+
+```powershell
+.\scripts\safe_deploy.ps1 -CheckDeployLock -DeployLockPath .\.deploy\test-safe-deploy.lock
+```
+
 Deployment lock dry-run:
 
 ```powershell
@@ -55,7 +79,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_ru
 ```
 
 This helper is read-only. It does not create or delete `.deploy/deploy.lock`.
-`scripts/safe_deploy.ps1` does not enforce the lock yet.
+`scripts/safe_deploy.ps1` has dry-run/check-only awareness of the lock, but
+real non-dry-run deploy does not enforce it yet.
 
 Deployment lock helper status:
 
@@ -67,6 +92,11 @@ Acquire/release examples are documented in
 [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md). Release requires the exact `lock_id`
 from the current lock. Active deploy scripts still do not acquire or release
 this lock automatically.
+
+Deployment tasks should not auto-queue behind the lock. If a deploy task sees
+an existing lock, it should stop and require a manual rerun after the current
+deploy is complete. Normal non-deploy tasks are not blocked by this deployment
+lock.
 
 Optional flags:
 
@@ -99,38 +129,44 @@ The health endpoint is public, lightweight, and does not call Shopify, OpenAI, G
 1. Prints the current Git branch.
 2. Prints `git status --short`.
 3. Warns if the working tree is dirty.
-4. Builds the web image:
+4. In `-DryRun` only, reports deployment lock awareness and whether a future
+   real deploy would be blocked.
+5. Builds the web image:
 
 ```powershell
 docker compose build web
 ```
 
-5. Runs Django checks:
+6. Runs Django checks:
 
 ```powershell
 docker compose run --rm web python manage.py check
 ```
 
-6. Runs migrations unless `-SkipMigrate` is set:
+7. Runs migrations unless `-SkipMigrate` is set:
 
 ```powershell
 docker compose run --rm web python manage.py migrate
 ```
 
-7. Runs collectstatic unless `-SkipCollectstatic` is set:
+8. Runs collectstatic unless `-SkipCollectstatic` is set:
 
 ```powershell
 docker compose run --rm web python manage.py collectstatic --noinput
 ```
 
-8. Restarts the web service:
+9. Restarts the web service:
 
 ```powershell
 docker compose up -d web
 ```
 
-9. Polls the health endpoint for up to 60 seconds.
-10. Prints success only after the health endpoint returns HTTP 200.
+10. Polls the health endpoint for up to 60 seconds.
+11. Prints success only after the health endpoint returns HTTP 200.
+
+Real-mode lock enforcement is still pending. A future enforcement task must
+acquire the deployment lock before build/check/migrate/collectstatic/restart
+and release the matching lock in cleanup/finally handling.
 
 ## If the health check fails
 

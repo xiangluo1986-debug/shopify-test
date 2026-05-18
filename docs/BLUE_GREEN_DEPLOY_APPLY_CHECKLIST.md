@@ -51,10 +51,13 @@ Related non-active drafts:
   startup runner intentionally uses `--no-build`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Deployment lock helper: available at `scripts/deploy_lock.ps1`.
-- Deployment lock enforcement: NO-GO. Active deploy scripts do not enforce the
-  lock yet.
-- Production apply: NO-GO until deployment lock enforcement is integrated into
-  active deploy scripts.
+- safe_deploy lock awareness: READY for dry-run/check-only status reporting at
+  `scripts/safe_deploy.ps1 -DryRun` and
+  `scripts/safe_deploy.ps1 -CheckDeployLock`.
+- Deployment lock enforcement: NO-GO. Real non-dry-run deploy scripts do not
+  acquire or release the lock yet.
+- Production apply: NO-GO until active deployment lock enforcement is
+  implemented in runtime-changing deploy scripts.
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
@@ -82,10 +85,14 @@ Related non-active drafts:
   explicit image build/preparation task has been completed first.
 - The deployment lock design in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) has
   been reviewed.
-- The deployment lock helper is integrated and enforced before any production
-  deploy, build, restart, proxy switch, rolling update, or cleanup action.
+- The deployment lock helper is integrated and enforced in real mode before any
+  production deploy, build, restart, proxy switch, rolling update, or cleanup
+  action.
 - Any future production switch acquires the deployment lock first and releases
   it only after switch validation and cleanup/finally handling.
+- Deployment tasks do not auto-queue behind an existing lock. A second deploy
+  task stops and requires a manual rerun after the current deploy completes.
+- Normal non-deploy tasks are not blocked by this deployment lock.
 - The completed local inactive startup success on non-production port `18080`
   is understood as a local runtime test only; it does not waive deployment lock
   enforcement for future production apply.
@@ -194,6 +201,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_deploy_
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_run.ps1 -Purpose "blue-green-production-preflight" -Target "production" -ShowPlan
+```
+
+- Run safe_deploy lock awareness dry-run without deploying:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -DryRun
+```
+
+- Run safe_deploy lock check without deploying:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -CheckDeployLock
 ```
 
 - Check deployment lock helper status without changing runtime state:

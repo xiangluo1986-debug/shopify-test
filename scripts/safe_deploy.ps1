@@ -1,15 +1,21 @@
 [CmdletBinding()]
 param(
     [switch]$DryRun,
+    [switch]$CheckDeployLock,
     [switch]$SkipPull,
     [switch]$SkipMigrate,
     [switch]$SkipCollectstatic,
+    [string]$DeployLockPath = ".deploy/deploy.lock",
     [string]$HealthUrl = "http://127.0.0.1:8000/healthz/",
     [int]$HealthTimeoutSeconds = 60
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$ProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$DeployDirectory = [System.IO.Path]::GetFullPath((Join-Path -Path $ProjectRoot -ChildPath ".deploy"))
+$DeployLockHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "deploy_lock.ps1"
 
 function Write-Step {
     param([string]$Message)
@@ -42,6 +48,107 @@ function Format-Command {
             $_
         }
     }) -join " ")
+}
+
+function Test-PathInsideDirectory {
+    param(
+        [string]$Path,
+        [string]$Directory
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullDirectory = [System.IO.Path]::GetFullPath($Directory).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    $directoryPrefix = $fullDirectory + [System.IO.Path]::DirectorySeparatorChar
+
+    return $fullPath.StartsWith($directoryPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Resolve-DeployLockPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "DeployLockPath is required."
+    }
+
+    $candidate = $Path
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path -Path $ProjectRoot -ChildPath $candidate
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($candidate)
+    $fileName = [System.IO.Path]::GetFileName($fullPath)
+    if ([string]::IsNullOrWhiteSpace($fileName)) {
+        throw "DeployLockPath must point to a lock file, not a directory."
+    }
+
+    if (-not (Test-PathInsideDirectory -Path $fullPath -Directory $DeployDirectory)) {
+        throw "DeployLockPath must stay inside the project .deploy directory."
+    }
+
+    return $fullPath
+}
+
+function Get-RelativeProjectPath {
+    param([string]$Path)
+
+    if ($Path.StartsWith($ProjectRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $Path.Substring($ProjectRoot.Length).TrimStart("\", "/")
+    }
+
+    return $Path
+}
+
+function Get-DeployLockStatus {
+    $resolvedLockPath = Resolve-DeployLockPath -Path $DeployLockPath
+
+    return [pscustomobject]@{
+        LockPath = (Get-RelativeProjectPath -Path $resolvedLockPath)
+        ResolvedLockPath = $resolvedLockPath
+        LockHelperPath = (Get-RelativeProjectPath -Path $DeployLockHelperPath)
+        LockHelperExists = (Test-Path -LiteralPath $DeployLockHelperPath -PathType Leaf)
+        LockExists = (Test-Path -LiteralPath $resolvedLockPath -PathType Leaf)
+    }
+}
+
+function Show-DeployLockAwareness {
+    Write-Step "Deployment lock awareness"
+
+    $status = Get-DeployLockStatus
+    Write-Host "Deployment lock path: $($status.LockPath)"
+    Write-Host "Resolved deployment lock path: $($status.ResolvedLockPath)"
+    Write-Host "Lock helper path: $($status.LockHelperPath)"
+    Write-Host "Lock helper exists: $($status.LockHelperExists)"
+    Write-Host "Deployment lock currently exists: $($status.LockExists)"
+    Write-Host "Future real safe deploy must acquire the deployment lock before build/check/migrate/collectstatic/restart."
+    Write-Host "Future real safe deploy must release the deployment lock in cleanup/finally handling."
+
+    if ($status.LockExists) {
+        Write-Warn "Dry run: real safe deploy would be blocked until the deployment lock is released."
+    } else {
+        Write-Ok "Dry run: no deployment lock currently blocks a future real safe deploy."
+    }
+
+    Write-Warn "Real safe_deploy lock enforcement is still pending; non-dry-run behavior is unchanged in this phase."
+}
+
+function Invoke-CheckDeployLock {
+    Write-Step "Deployment lock check"
+
+    $status = Get-DeployLockStatus
+    Write-Host "Deployment lock path: $($status.LockPath)"
+    Write-Host "Resolved deployment lock path: $($status.ResolvedLockPath)"
+    Write-Host "Lock helper path: $($status.LockHelperPath)"
+    Write-Host "Lock helper exists: $($status.LockHelperExists)"
+    Write-Host "Deployment lock currently exists: $($status.LockExists)"
+    Write-Host "This check does not create, delete, acquire, release, or deploy."
+
+    if ($status.LockExists) {
+        Write-Fail "Deployment lock exists. A real safe deploy should stop and require a manual rerun after the lock is released."
+        return 2
+    }
+
+    Write-Ok "No deployment lock exists."
+    return 0
 }
 
 function Invoke-CaptureCommand {
@@ -152,7 +259,14 @@ function Wait-HealthCheck {
 }
 
 try {
+    if ($CheckDeployLock) {
+        exit (Invoke-CheckDeployLock)
+    }
+
     Show-GitState
+    if ($DryRun) {
+        Show-DeployLockAwareness
+    }
 
     if ($SkipPull) {
         Write-Warn "-SkipPull set. This script does not run git pull by default."

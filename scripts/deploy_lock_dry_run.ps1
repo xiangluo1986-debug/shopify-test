@@ -113,11 +113,13 @@ function Show-FutureLockRecord {
 function Show-ImplementationPlan {
     Write-Step "Current helper and future enforcement plan"
     Write-Host "Real helper: scripts\deploy_lock.ps1"
+    Write-Host "Safe deploy awareness: scripts\safe_deploy.ps1 reports lock status in -DryRun and supports -CheckDeployLock."
     Write-Host "1. The helper can acquire, release, report status, and validate a local lock file."
-    Write-Host "2. Active deploy scripts still do not call the helper."
-    Write-Host "3. Future runtime-changing deploy paths must acquire the lock before deploy/build/restart/switch/cleanup actions."
-    Write-Host "4. Future runtime-changing deploy paths must release only the matching lock_id in cleanup/finally handling."
-    Write-Host "5. Keep production apply blocked until safe_deploy and future blue-green switch paths enforce the lock."
+    Write-Host "2. safe_deploy lock integration is dry-run/check-only in this phase."
+    Write-Host "3. Real safe_deploy enforcement is still pending; non-dry-run behavior does not acquire or release the lock yet."
+    Write-Host "4. Future runtime-changing deploy paths must acquire the lock before deploy/build/restart/switch/cleanup actions."
+    Write-Host "5. Future runtime-changing deploy paths must release only the matching lock_id in cleanup/finally handling."
+    Write-Host "6. Keep production apply NO-GO until active lock enforcement is implemented."
 }
 
 function Show-RealHelperExamples {
@@ -137,7 +139,13 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $LockDirectory = Join-Path -Path $ProjectRoot -ChildPath ".deploy"
 $LockPath = Join-Path -Path $LockDirectory -ChildPath "deploy.lock"
 $LockHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "deploy_lock.ps1"
+$SafeDeployPath = Join-Path -Path $PSScriptRoot -ChildPath "safe_deploy.ps1"
 $RelativeLockPath = ".deploy\deploy.lock"
+$safeDeployLockAwarenessExists = $false
+if (Test-Path -LiteralPath $SafeDeployPath -PathType Leaf) {
+    $safeDeployText = Get-Content -LiteralPath $SafeDeployPath -Raw
+    $safeDeployLockAwarenessExists = ($safeDeployText -match "CheckDeployLock") -and ($safeDeployText -match "Show-DeployLockAwareness")
+}
 
 Write-Step "Deployment lock dry-run"
 Write-Host "Purpose: $Purpose"
@@ -145,6 +153,7 @@ Write-Host "Target: $Target"
 Write-Host "Proposed lock path: $RelativeLockPath"
 Write-Host "Resolved lock path: $LockPath"
 Write-Host "Real helper path: scripts\deploy_lock.ps1"
+Write-Host "Safe deploy script path: scripts\safe_deploy.ps1"
 Write-Host "Design document: docs\DEPLOYMENT_LOCK.md"
 Write-Host "This helper is read-only. It does not create, delete, or modify lock files."
 
@@ -154,6 +163,7 @@ $lockExists = Test-Path -LiteralPath $LockPath -PathType Leaf
 Write-Host "Lock directory exists: $lockDirectoryExists"
 Write-Host "Lock file exists: $lockExists"
 Write-Host "Real helper exists: $(Test-Path -LiteralPath $LockHelperPath -PathType Leaf)"
+Write-Host "safe_deploy dry-run/check-only lock awareness exists: $safeDeployLockAwarenessExists"
 
 if ($lockExists) {
     Show-LockFileContents -Path $LockPath
@@ -169,5 +179,5 @@ if ($ShowPlan) {
 
 Write-Step "Result"
 Write-Ok "Deployment lock dry-run completed. No file or runtime change was performed."
-Write-Ok "Real helper exists if reported above, but active deploy scripts do not enforce the lock yet."
-Write-Ok "Production apply remains blocked until lock enforcement is integrated into active deploy scripts."
+Write-Ok "safe_deploy lock awareness exists if reported above; real enforcement is still pending."
+Write-Ok "Production apply remains NO-GO until active lock enforcement is implemented."

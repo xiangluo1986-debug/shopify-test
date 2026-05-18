@@ -8,6 +8,7 @@ The current production-safety foundation remains:
 
 - Public lightweight `/healthz/` endpoint.
 - `scripts/safe_deploy.ps1` validation and post-restart health check.
+- `scripts/safe_deploy.ps1` dry-run/check-only deployment lock awareness.
 - Deployment lock helper, design document, and read-only dry-run helper.
 - `docs/SAFE_DEPLOY.md` operational notes.
 - No secrets, logs, or generated deployment output committed.
@@ -77,6 +78,10 @@ must acquire the deployment lock before changing runtime state. If the lock is
 already present, the operation should block and print sanitized lock owner
 metadata for manual review.
 
+Deployment tasks should not auto-queue behind the lock. If a second deploy task
+sees the lock, it should stop and require a manual rerun after the first deploy
+is complete. Normal non-deploy tasks are not blocked by this deployment lock.
+
 The successful local inactive-color startup on non-production port `18080`
 confirmed that a local inactive test service can reach `/healthz/`, but it does
 not remove the need for the deployment lock. The lock addresses a separate
@@ -86,10 +91,11 @@ Current status:
 
 - Real helper exists: `scripts/deploy_lock.ps1`.
 - Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
-- Active deploy scripts do not enforce the lock yet.
-- This helper-only task does not add enforcement to active deploy scripts.
-- Production apply remains NO-GO until lock enforcement is integrated into
-  active deploy scripts.
+- `scripts/safe_deploy.ps1` reports lock status in `-DryRun` and supports
+  `-CheckDeployLock`.
+- Real non-dry-run safe deploy does not acquire or release the lock yet.
+- Production apply remains NO-GO until active lock enforcement is implemented
+  in runtime-changing deploy scripts.
 
 ## Current Architecture
 
@@ -416,9 +422,9 @@ Review the dry-run output from
 `scripts/blue_green_local_apply_simulation.ps1`,
 `scripts/blue_green_local_apply_simulation_preview.ps1`, and
 `scripts/blue_green_local_inactive_startup.ps1`.
-The recommended next separate task is to integrate the deployment lock helper
-into active runtime-changing deployment scripts in a reviewed dry-run-first
-phase, without deploying or switching traffic. Production should remain NO-GO
+The recommended next separate task is to implement real deployment lock
+enforcement in active runtime-changing deployment scripts, without deploying or
+switching traffic in the enforcement-prep task. Production should remain NO-GO
 until local or staging results are reviewed and a separate production task
 approves route, port ownership, proxy, scheduler, migration, static/media,
 rollback, observation details, and active lock enforcement.

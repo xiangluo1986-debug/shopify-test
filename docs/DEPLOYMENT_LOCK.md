@@ -6,10 +6,11 @@ The deployment lock prevents more than one deploy, update, switch, or cleanup
 flow from running at the same time. It is intended to protect both the current
 `safe_deploy` flow and the future blue-green deploy flow.
 
-The standalone helper now exists at `scripts/deploy_lock.ps1`, but the lock is
-not yet enforced by active deployment scripts. Production apply remains NO-GO
-until enforcement is integrated into `safe_deploy` and the future blue-green
-runtime-changing deploy paths.
+The standalone helper now exists at `scripts/deploy_lock.ps1`.
+`scripts/safe_deploy.ps1` has dry-run/check-only lock awareness, but real
+non-dry-run safe deploy does not acquire or release the lock yet. Production
+apply remains NO-GO until enforcement is active in `safe_deploy` and the
+future blue-green runtime-changing deploy paths.
 
 ## What The Lock Protects
 
@@ -40,6 +41,10 @@ including:
 
 Read-only checks should still avoid exposing secrets and should not modify
 containers, files, traffic, or external systems.
+
+Normal non-deploy tasks are not blocked by this deployment lock. The lock is
+for deploy, restart, switch, cleanup, and other runtime-changing deployment
+tasks.
 
 ## Proposed Lock Location
 
@@ -121,6 +126,34 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -A
 The helper intentionally restricts lock paths to the project `.deploy/`
 directory.
 
+## safe_deploy Dry-Run And Check-Only Phase
+
+`scripts/safe_deploy.ps1 -DryRun` now reports:
+
+- Deployment lock path.
+- Whether `scripts/deploy_lock.ps1` exists.
+- Whether a deployment lock currently exists.
+- That future real safe deploy must acquire the lock before
+  build/check/migrate/collectstatic/restart.
+- That future real safe deploy must release the lock in cleanup/finally
+  handling.
+- Whether a real safe deploy would be blocked by an existing lock.
+
+`scripts/safe_deploy.ps1 -CheckDeployLock` checks lock status only. It does not
+create, delete, acquire, release, deploy, build, run migrations, run
+collectstatic, restart containers, or switch traffic. It exits `0` when no lock
+exists and exits non-zero when a lock exists.
+
+For validation against a temporary test lock under `.deploy/`, use
+`-DeployLockPath`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -CheckDeployLock -DeployLockPath .\.deploy\test-safe-deploy.lock
+```
+
+This is not real enforcement. Non-dry-run `safe_deploy.ps1` behavior remains
+unchanged until a separate enforcement task is approved.
+
 ## Lock Behavior
 
 Future deploy scripts should follow this behavior:
@@ -130,9 +163,12 @@ Future deploy scripts should follow this behavior:
 2. If the lock exists, block the operation and exit non-zero.
 3. Print sanitized lock owner metadata, including who owns the lock and when it
    was created.
-4. Do not automatically delete another active lock.
-5. Allow stale lock review only through an explicit manual command and approval.
-6. Release the lock in a `finally` or cleanup block owned by the process that
+4. Do not auto-queue deployment tasks behind the lock.
+5. If a second deploy task sees the lock, stop and require a manual rerun after
+   the first deploy is complete.
+6. Do not automatically delete another active lock.
+7. Allow stale lock review only through an explicit manual command and approval.
+8. Release the lock in a `finally` or cleanup block owned by the process that
    acquired it.
 
 Lock acquisition should be atomic. The implementation should avoid a
@@ -176,8 +212,10 @@ runtime-changing actions should use the shared deployment lock.
 - Real helper exists: `scripts/deploy_lock.ps1`.
 - Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
 - Default lock path: `.deploy/deploy.lock`.
-- Active deploy scripts do not enforce the lock yet.
-- Current task adds the helper only, not active deploy enforcement.
+- `scripts/safe_deploy.ps1` has dry-run/check-only lock awareness.
+- Active real deploy paths do not enforce the lock yet.
+- This phase adds status/check awareness only, not real active deploy
+  enforcement.
 - Production apply remains NO-GO until the deployment lock is integrated into
   active deploy scripts and enforced before build, restart, switch, and cleanup
   actions.
