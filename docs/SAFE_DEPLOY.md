@@ -18,13 +18,13 @@ The current Compose setup has one `web` container serving port `8000`. `safe_dep
 
 For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md). That plan is documentation only until a separate reviewed apply task is approved.
 
-The current safe deploy flow also does not yet enforce a deployment
-single-flight lock in real mode. The standalone helper exists at
-`scripts/deploy_lock.ps1`, and `safe_deploy.ps1` now reports/checks lock state
-in dry-run/check-only modes. It does not acquire or release the lock during a
-real deploy yet. Before any production apply, proxy switch, rolling restart, or
-cleanup work, the deployment lock described in
-[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must be fully enforced.
+The current safe deploy flow now enforces a deployment single-flight lock in
+real non-dry-run mode. The standalone helper exists at
+`scripts/deploy_lock.ps1`, and `safe_deploy.ps1` reports/checks lock state in
+dry-run/check-only modes without acquiring the real lock. Before any future
+blue-green production apply, proxy switch, rolling restart, or cleanup work,
+the deployment lock described in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must
+also be enforced by that runtime-changing path.
 The runtime-only lock path is:
 
 ```text
@@ -50,10 +50,10 @@ Dry run:
 .\scripts\safe_deploy.ps1 -DryRun
 ```
 
-In this phase, `-DryRun` reports the deployment lock path, whether
+`-DryRun` reports the deployment lock path, whether
 `scripts/deploy_lock.ps1` exists, whether the lock currently exists, and whether
-a future real safe deploy would be blocked. It still executes no deploy
-commands.
+a real safe deploy would be blocked. It does not acquire or release the real
+lock and still executes no deploy commands.
 
 Check only for an existing deployment lock:
 
@@ -72,6 +72,16 @@ For validation with a temporary test lock under `.deploy/`:
 .\scripts\safe_deploy.ps1 -CheckDeployLock -DeployLockPath .\.deploy\test-safe-deploy.lock
 ```
 
+Validate acquire/release cleanup without deploying:
+
+```powershell
+.\scripts\safe_deploy.ps1 -ValidateDeployLockOnly -DeployLockPath .\.deploy\test-safe-deploy.lock
+```
+
+This may create and release the selected test lock under `.deploy/`, but it
+does not run Docker, build images, run migrations, run collectstatic, restart
+containers, call `/healthz/`, or switch traffic.
+
 Deployment lock dry-run:
 
 ```powershell
@@ -79,8 +89,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_ru
 ```
 
 This helper is read-only. It does not create or delete `.deploy/deploy.lock`.
-`scripts/safe_deploy.ps1` has dry-run/check-only awareness of the lock, but
-real non-dry-run deploy does not enforce it yet.
+`scripts/safe_deploy.ps1` has dry-run/check-only awareness of the lock, and
+real non-dry-run deploy enforces it before the first Docker deploy command.
 
 Deployment lock helper status:
 
@@ -90,8 +100,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -A
 
 Acquire/release examples are documented in
 [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md). Release requires the exact `lock_id`
-from the current lock. Active deploy scripts still do not acquire or release
-this lock automatically.
+from the current lock. `scripts/safe_deploy.ps1` automatically acquires this
+lock in real mode and releases only the matching `lock_id` in cleanup/finally
+handling.
 
 Deployment tasks should not auto-queue behind the lock. If a deploy task sees
 an existing lock, it should stop and require a manual rerun after the current
@@ -129,44 +140,50 @@ The health endpoint is public, lightweight, and does not call Shopify, OpenAI, G
 1. Prints the current Git branch.
 2. Prints `git status --short`.
 3. Warns if the working tree is dirty.
-4. In `-DryRun` only, reports deployment lock awareness and whether a future
-   real deploy would be blocked.
-5. Builds the web image:
+4. In `-DryRun` only, reports deployment lock awareness and whether a real
+   deploy would be blocked.
+5. In real mode only, acquires `.deploy/deploy.lock` before any Docker deploy
+   command. If the lock exists, the script exits non-zero before build/check,
+   migration, collectstatic, restart, or health check. It does not queue.
+6. Builds the web image:
 
 ```powershell
 docker compose build web
 ```
 
-6. Runs Django checks:
+7. Runs Django checks:
 
 ```powershell
 docker compose run --rm web python manage.py check
 ```
 
-7. Runs migrations unless `-SkipMigrate` is set:
+8. Runs migrations unless `-SkipMigrate` is set:
 
 ```powershell
 docker compose run --rm web python manage.py migrate
 ```
 
-8. Runs collectstatic unless `-SkipCollectstatic` is set:
+9. Runs collectstatic unless `-SkipCollectstatic` is set:
 
 ```powershell
 docker compose run --rm web python manage.py collectstatic --noinput
 ```
 
-9. Restarts the web service:
+10. Restarts the web service:
 
 ```powershell
 docker compose up -d web
 ```
 
-10. Polls the health endpoint for up to 60 seconds.
-11. Prints success only after the health endpoint returns HTTP 200.
+11. Polls the health endpoint for up to 60 seconds.
+12. Releases only the matching deployment lock in cleanup/finally handling,
+    even when build, check, migration, collectstatic, restart, or health check
+    fails.
+13. Prints success only after the health endpoint returns HTTP 200.
 
-Real-mode lock enforcement is still pending. A future enforcement task must
-acquire the deployment lock before build/check/migrate/collectstatic/restart
-and release the matching lock in cleanup/finally handling.
+Real-mode lock enforcement is active for this script. Future runtime-changing
+blue-green, proxy switch, rolling restart, or cleanup scripts must follow the
+same acquire-before-change and release-in-cleanup pattern.
 
 ## If the health check fails
 

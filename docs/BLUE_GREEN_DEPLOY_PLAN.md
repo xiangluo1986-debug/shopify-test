@@ -8,7 +8,8 @@ The current production-safety foundation remains:
 
 - Public lightweight `/healthz/` endpoint.
 - `scripts/safe_deploy.ps1` validation and post-restart health check.
-- `scripts/safe_deploy.ps1` dry-run/check-only deployment lock awareness.
+- `scripts/safe_deploy.ps1` real-mode deployment lock enforcement plus
+  dry-run/check-only lock awareness.
 - Deployment lock helper, design document, and read-only dry-run helper.
 - `docs/SAFE_DEPLOY.md` operational notes.
 - No secrets, logs, or generated deployment output committed.
@@ -64,10 +65,11 @@ Production remains NO-GO.
 
 ## Deployment Lock Gate
 
-Production apply must not proceed until the deployment lock is integrated and
-enforced in runtime-changing deploy paths. The shared lock is
-documented in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md), with the runtime-only
-path:
+`scripts/safe_deploy.ps1` now enforces the deployment lock in real mode.
+Production blue-green apply must still not proceed until the same lock rule is
+integrated and enforced in the exact runtime-changing blue-green path. The
+shared lock is documented in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md), with the
+runtime-only path:
 
 ```text
 .deploy/deploy.lock
@@ -93,9 +95,12 @@ Current status:
 - Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
 - `scripts/safe_deploy.ps1` reports lock status in `-DryRun` and supports
   `-CheckDeployLock`.
-- Real non-dry-run safe deploy does not acquire or release the lock yet.
-- Production apply remains NO-GO until active lock enforcement is implemented
-  in runtime-changing deploy scripts.
+- `scripts/safe_deploy.ps1` acquires the lock in real non-dry-run mode before
+  build/check/migrate/collectstatic/restart/health check, then releases only
+  the matching `lock_id` in cleanup/finally handling.
+- Production blue-green apply remains NO-GO until a separate apply task
+  approves exact runtime commands and confirms every runtime-changing path uses
+  the deployment lock.
 
 ## Current Architecture
 
@@ -422,9 +427,10 @@ Review the dry-run output from
 `scripts/blue_green_local_apply_simulation.ps1`,
 `scripts/blue_green_local_apply_simulation_preview.ps1`, and
 `scripts/blue_green_local_inactive_startup.ps1`.
-The recommended next separate task is to implement real deployment lock
-enforcement in active runtime-changing deployment scripts, without deploying or
-switching traffic in the enforcement-prep task. Production should remain NO-GO
-until local or staging results are reviewed and a separate production task
-approves route, port ownership, proxy, scheduler, migration, static/media,
-rollback, observation details, and active lock enforcement.
+The recommended next separate task is to extend the same deployment lock rule
+to any future blue-green runtime-changing script design, still without
+deploying or switching traffic in that preparation task. Production should
+remain NO-GO until local or staging results are reviewed and a separate
+production task approves route, port ownership, proxy, scheduler, migration,
+static/media, rollback, observation details, and lock enforcement for the exact
+runtime path being used.

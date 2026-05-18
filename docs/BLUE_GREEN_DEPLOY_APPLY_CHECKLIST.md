@@ -54,10 +54,15 @@ Related non-active drafts:
 - safe_deploy lock awareness: READY for dry-run/check-only status reporting at
   `scripts/safe_deploy.ps1 -DryRun` and
   `scripts/safe_deploy.ps1 -CheckDeployLock`.
-- Deployment lock enforcement: NO-GO. Real non-dry-run deploy scripts do not
-  acquire or release the lock yet.
-- Production apply: NO-GO until active deployment lock enforcement is
-  implemented in runtime-changing deploy scripts.
+- safe_deploy lock enforcement: READY for real non-dry-run safe deploy mode;
+  it acquires the lock before build/check/migrate/collectstatic/restart/health
+  check and releases only the matching `lock_id` in cleanup/finally handling.
+- Deployment lock enforcement for blue-green runtime paths: NO-GO until a
+  separate apply task approves exact commands and confirms every
+  runtime-changing path uses the shared lock.
+- Production apply: NO-GO until a separate production task approves exact
+  runtime commands, route, port ownership, proxy, scheduler, migration,
+  static/media, rollback, observation, and lock handling.
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
@@ -85,9 +90,11 @@ Related non-active drafts:
   explicit image build/preparation task has been completed first.
 - The deployment lock design in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) has
   been reviewed.
-- The deployment lock helper is integrated and enforced in real mode before any
-  production deploy, build, restart, proxy switch, rolling update, or cleanup
-  action.
+- The deployment lock helper is integrated and enforced in real safe_deploy
+  mode before build/check/migrate/collectstatic/restart/health check.
+- Any future blue-green production deploy, proxy switch, rolling update, or
+  cleanup action also integrates and enforces the same lock before changing
+  runtime state.
 - Any future production switch acquires the deployment lock first and releases
   it only after switch validation and cleanup/finally handling.
 - Deployment tasks do not auto-queue behind an existing lock. A second deploy
@@ -176,7 +183,8 @@ These actions are not approved by this checklist alone:
   separate approved apply task.
 - Switching traffic between colors.
 - Stopping the previous active color.
-- Proceeding with production apply before deployment lock enforcement is active.
+- Proceeding with production apply before deployment lock enforcement is active
+  for the exact runtime path being used.
 
 ## Rollback Steps
 
@@ -213,6 +221,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -D
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -CheckDeployLock
+```
+
+- Validate safe_deploy acquire/release without deploying:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -ValidateDeployLockOnly -DeployLockPath .\.deploy\test-safe-deploy.lock
 ```
 
 - Check deployment lock helper status without changing runtime state:

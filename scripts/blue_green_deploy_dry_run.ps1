@@ -240,17 +240,17 @@ function Show-DeploymentLockStatus {
 
     if (Test-Path -LiteralPath $safeDeployPath) {
         $safeDeployText = Get-Content -LiteralPath $safeDeployPath -Raw
-        $safeDeployLockAwarenessExists = ($safeDeployText -match "CheckDeployLock") -and ($safeDeployText -match "Show-DeployLockAwareness")
-        Write-Host "safe_deploy dry-run/check-only lock awareness exists: $safeDeployLockAwarenessExists"
+        $safeDeployLockEnforcementExists = ($safeDeployText -match "CheckDeployLock") -and ($safeDeployText -match "ValidateDeployLockOnly") -and ($safeDeployText -match "Acquire-DeploymentLock") -and ($safeDeployText -match "Release-DeploymentLock")
+        Write-Host "safe_deploy real-mode lock enforcement exists: $safeDeployLockEnforcementExists"
     } else {
         Write-Warn "safe_deploy script is missing: $safeDeployPath"
     }
 
-    Write-Warn "safe_deploy lock integration is dry-run/check-only in this phase; real enforcement is still pending."
-    Write-Warn "Production apply remains NO-GO until active lock enforcement is implemented."
-    Write-Host "Any future production deploy, proxy switch, restart, rolling update, or cleanup must acquire the deployment lock first."
+    Write-Ok "safe_deploy enforces the deployment lock in real non-dry-run mode."
+    Write-Warn "Production blue-green apply remains NO-GO until a separate apply task approves exact runtime commands."
+    Write-Host "Any future production deploy, proxy switch, restart, rolling update, or cleanup path must acquire the deployment lock first."
     Write-Host "Proposed lock path: .deploy/deploy.lock"
-    Write-Host "Current status: helper exists if listed above; safe_deploy can report/check lock state, but non-dry-run safe_deploy does not acquire or release the lock yet."
+    Write-Host "Current status: helper exists if listed above; safe_deploy dry-run reports lock state without acquiring it, -CheckDeployLock is read-only, and real safe_deploy acquires/releases the lock."
 }
 
 function Show-DecisionStatus {
@@ -389,7 +389,7 @@ Show-FuturePlan
 Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
 Write-Ok "No runtime behavior was changed by this read-only planner."
-Write-Ok "Deployment lock status: helper/doc/safe_deploy awareness are checked above; real enforcement remains pending."
-Write-Ok "Production apply remains NO-GO until active deployment lock enforcement is implemented."
+Write-Ok "Deployment lock status: helper/doc/safe_deploy enforcement are checked above; dry-run still acquires no lock."
+Write-Ok "Production blue-green apply remains NO-GO until a separate apply task approves exact runtime commands."
 Write-Ok "Inactive startup runner status: dry-run / no-action by default; future execution requires Ack plus -AllowContainerAction; test port 8000 and service web are blocked; production remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."

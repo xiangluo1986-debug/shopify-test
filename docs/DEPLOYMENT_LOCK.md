@@ -7,10 +7,11 @@ flow from running at the same time. It is intended to protect both the current
 `safe_deploy` flow and the future blue-green deploy flow.
 
 The standalone helper now exists at `scripts/deploy_lock.ps1`.
-`scripts/safe_deploy.ps1` has dry-run/check-only lock awareness, but real
-non-dry-run safe deploy does not acquire or release the lock yet. Production
-apply remains NO-GO until enforcement is active in `safe_deploy` and the
-future blue-green runtime-changing deploy paths.
+`scripts/safe_deploy.ps1` now enforces the deployment lock in real
+non-dry-run mode. It also has dry-run/check-only lock awareness for validation
+without deployment. Production blue-green apply remains NO-GO until a separate
+apply task approves exact runtime commands and any future blue-green
+runtime-changing deploy paths use the same lock.
 
 ## What The Lock Protects
 
@@ -126,18 +127,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock.ps1 -A
 The helper intentionally restricts lock paths to the project `.deploy/`
 directory.
 
-## safe_deploy Dry-Run And Check-Only Phase
+## safe_deploy Enforcement, Dry-Run, And Check-Only
 
 `scripts/safe_deploy.ps1 -DryRun` now reports:
 
 - Deployment lock path.
 - Whether `scripts/deploy_lock.ps1` exists.
 - Whether a deployment lock currently exists.
-- That future real safe deploy must acquire the lock before
+- That real safe deploy acquires the lock before
   build/check/migrate/collectstatic/restart.
-- That future real safe deploy must release the lock in cleanup/finally
+- That real safe deploy releases the lock in cleanup/finally
   handling.
 - Whether a real safe deploy would be blocked by an existing lock.
+
+Dry-run does not create, acquire, release, or delete the real deployment lock.
 
 `scripts/safe_deploy.ps1 -CheckDeployLock` checks lock status only. It does not
 create, delete, acquire, release, deploy, build, run migrations, run
@@ -151,8 +154,21 @@ For validation against a temporary test lock under `.deploy/`, use
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -CheckDeployLock -DeployLockPath .\.deploy\test-safe-deploy.lock
 ```
 
-This is not real enforcement. Non-dry-run `safe_deploy.ps1` behavior remains
-unchanged until a separate enforcement task is approved.
+Validate the acquire/release cleanup path without deployment:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\safe_deploy.ps1 -ValidateDeployLockOnly -DeployLockPath .\.deploy\test-safe-deploy.lock
+```
+
+This validation may create and release the selected test lock under `.deploy/`,
+but it does not run Docker, build images, run checks, run migrations, run
+collectstatic, restart containers, call the health check, or switch traffic.
+
+Real non-dry-run `safe_deploy.ps1` acquires the deployment lock before the
+first Docker deploy command and holds it through restart and health check. It
+releases only the matching `lock_id` in cleanup/finally handling. If the lock
+already exists, safe deploy blocks before build/check/migrate/collectstatic or
+restart and requires a manual rerun after the current deployment finishes.
 
 ## Lock Behavior
 
@@ -212,10 +228,12 @@ runtime-changing actions should use the shared deployment lock.
 - Real helper exists: `scripts/deploy_lock.ps1`.
 - Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
 - Default lock path: `.deploy/deploy.lock`.
-- `scripts/safe_deploy.ps1` has dry-run/check-only lock awareness.
-- Active real deploy paths do not enforce the lock yet.
-- This phase adds status/check awareness only, not real active deploy
-  enforcement.
-- Production apply remains NO-GO until the deployment lock is integrated into
-  active deploy scripts and enforced before build, restart, switch, and cleanup
-  actions.
+- `scripts/safe_deploy.ps1` has real-mode lock enforcement.
+- `scripts/safe_deploy.ps1 -DryRun` reports lock state but does not acquire or
+  release the lock.
+- `scripts/safe_deploy.ps1 -CheckDeployLock` is read-only.
+- `scripts/safe_deploy.ps1 -ValidateDeployLockOnly` validates acquire/release
+  with a selected lock path and runs no deploy commands.
+- Production blue-green apply remains NO-GO until a separate apply task
+  approves exact runtime commands and confirms every runtime-changing path uses
+  the deployment lock.
