@@ -12,6 +12,25 @@ modify active production proxy configuration.
 The goal is to prove the operational path in a local-only or staging scope
 before a separate production approval task reviews exact runtime commands.
 
+## Approval Package Status
+
+The separate approval package exists at
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
+It prepares a future validation only; it does not run commands and does not
+approve production.
+
+Future non-production runtime validation remains NO-GO until a separate task
+provides the exact approval phrase:
+
+```text
+I_APPROVE_NON_PRODUCTION_BLUE_GREEN_RUNTIME_VALIDATION_NO_PRODUCTION_TRAFFIC
+```
+
+The future validation must use a deployment lock, such as
+`.deploy/bluegreen-nonprod-validation.lock`, before test-only runtime actions.
+Production remains NO-GO. Normal non-deploy tasks are not blocked by this
+deployment lock.
+
 ## Validation Scope
 
 The future validation should cover:
@@ -58,6 +77,8 @@ Before any non-production runtime validation, confirm:
 - Cleanup command is ready before startup.
 - Rollback/no-switch plan is ready before startup.
 - Production apply remains NO-GO.
+- The approval package has been reviewed.
+- The exact approval phrase has been provided in a separate task.
 
 If any gate is uncertain, stop before starting test-only services.
 
@@ -157,5 +178,8 @@ the test-only resources.
 ## Go / No-Go
 
 - This document: READY after review.
+- Approval package:
+  [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
+  exists for separate review.
 - Non-production runtime validation: separate approval required.
 - Production apply: NO-GO.

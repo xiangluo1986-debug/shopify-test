@@ -24,6 +24,8 @@ deployment state, including:
 - `scripts/blue_green_production_apply.ps1` in any future runtime-changing
   phase.
 - Future non-production blue-green runtime validation.
+- Future non-production runtime validation approved through
+  [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
 - Future blue-green deploy scripts.
 - Future proxy switch scripts.
 - Future production cleanup scripts.
@@ -239,8 +241,12 @@ call Shopify/Gmail/review/translation workflows.
 Production apply also requires successful non-production blue-green runtime
 validation first, documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
-That future validation must use the deployment lock for runtime-changing
-test-only actions, while normal non-deploy tasks remain unblocked.
+The separate approval package is
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
+That future validation must use a deployment lock for runtime-changing
+test-only actions, with the fixed validation lock path
+`.deploy/bluegreen-nonprod-validation.lock`, while normal non-deploy tasks
+remain unblocked.
 
 ## Lock Behavior
 
@@ -309,6 +315,10 @@ runtime-changing actions should use the shared deployment lock.
 - Non-production validation plan:
   `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION.md`; separate approval required
   before any runtime validation.
+- Non-production validation approval package:
+  `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md`; future validation
+  remains NO-GO until the exact approval phrase is provided, and the validation
+  lock path is `.deploy/bluegreen-nonprod-validation.lock`.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, successful non-production validation has been reviewed, and

@@ -35,6 +35,7 @@ traffic or change current deployment commands:
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
+- [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
@@ -88,6 +89,11 @@ Production remains NO-GO.
 
 The non-production validation plan exists at
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
+The separate non-production runtime validation approval package exists at
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
+It does not run commands, does not approve production, and requires a future
+separate task with the exact phrase
+`I_APPROVE_NON_PRODUCTION_BLUE_GREEN_RUNTIME_VALIDATION_NO_PRODUCTION_TRAFFIC`.
 Production apply remains blocked until a separate non-production runtime
 validation passes and manual production approval is given.
 
@@ -325,10 +331,13 @@ Future task after Phase 1 review.
 
 Non-production validation is documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
+The future approval package is documented in
+[BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
 It may be local-only or staging, must use a non-production Compose/project
 scope and non-`8000` test ports, must not change Cloudflare/domain routing,
 and must leave the current production web path untouched. Runtime validation
-requires the deployment lock and a separate approval.
+requires the deployment lock and a separate approval phrase. Normal non-deploy
+tasks are not blocked by this deployment lock.
 
 Local validation remains NO-GO unless separately approved. The current gated
 runner is available only for dry-run / no-action status checks:

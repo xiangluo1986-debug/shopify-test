@@ -20,6 +20,7 @@ Related non-active drafts:
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
+- [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
 
 ## Current Status
@@ -44,6 +45,10 @@ Related non-active drafts:
   Future runtime validation requires separate approval, deployment lock
   acquisition/release, non-`8000` test ports, test-only proxy routing, and no
   production traffic switch.
+- Non-production runtime validation approval package: READY after review at
+  [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
+  It does not deploy and requires the exact future approval phrase
+  `I_APPROVE_NON_PRODUCTION_BLUE_GREEN_RUNTIME_VALIDATION_NO_PRODUCTION_TRAFFIC`.
 - Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
   approval of exact commands. Real local simulation execution is not
@@ -122,6 +127,10 @@ review. Normal non-deploy tasks are not blocked.
 - The non-production validation plan in
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
   has been reviewed before any future non-production runtime validation.
+- The non-production runtime validation approval package in
+  [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
+  has been reviewed, and the exact approval phrase is supplied in a separate
+  task before any future validation run.
 - The local-test inactive Compose example
   [docker-compose.bluegreen.local-test.example.yml](../docker-compose.bluegreen.local-test.example.yml)
   has been reviewed and confirmed not to bind host port `8000`, not to declare
@@ -163,6 +172,8 @@ review. Normal non-deploy tasks are not blocked.
 - Future non-production runtime validation uses a non-production Compose
   project/scope, test-only ports such as `18080`, `18081`, or `19080`, and no
   Cloudflare/domain routing change.
+- Future non-production runtime validation uses the deployment lock, while
+  normal non-deploy tasks remain unblocked.
 - A reviewed proxy design is selected and tested away from production traffic.
 - The active color source of truth is documented and recoverable.
 - Database backup and restore process is confirmed for the production database.
