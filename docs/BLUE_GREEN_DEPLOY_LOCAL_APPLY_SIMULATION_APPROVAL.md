@@ -91,6 +91,10 @@ A future simulation may only:
 The next phase may implement actual inactive-color startup on a local-only test
 port, but only after separate approval of the exact commands, target color,
 environment handling, cleanup path, and no-production-traffic constraints.
+The reviewed planning artifact for that future step is
+[BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
+It is a plan only; local inactive startup remains NO-GO until a separate
+execution approval task.
 
 The current active `docker-compose.yml` must remain unchanged. The current web
 service must keep serving the existing local runtime path while the simulation
@@ -234,8 +238,12 @@ or production routing changes as part of failure handling.
 ## Go / No-Go
 
 - Approval package: READY.
+- Local inactive startup plan: READY for review in
+  [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
 - Gated simulation runner: dry-run / no-action only.
 - Local simulation execution: NO-GO. The approval phrase is required for a
   future phase, but real execution is not implemented in this phase.
+- Local inactive startup: NO-GO until separate approval of exact commands,
+  inactive service name, non-`8000` test port, and cleanup path.
 - Production: NO-GO.
 - Runtime behavior changed by this package: no.

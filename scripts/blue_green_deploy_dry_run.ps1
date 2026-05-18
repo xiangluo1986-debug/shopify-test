@@ -166,6 +166,10 @@ function Show-DraftArtifactSummary {
             Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md"
         },
         [pscustomobject]@{
+            Label = "Local inactive startup plan"
+            Path = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
+        },
+        [pscustomobject]@{
             Label = "Local apply simulation read-only preview"
             Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
         },
@@ -295,6 +299,8 @@ function Show-FuturePlan {
     Write-Host ""
     Write-Host "Local simulation runner status: dry-run / no-action only."
     Write-Host "Real local simulation execution is not implemented in this phase."
+    Write-Host "Local inactive-color startup plan status: reviewed document only; startup remains NO-GO."
+    Write-Host "Any future inactive startup must use one inactive test service on a non-8000 local port and leave current web untouched."
     Write-Host "Production remains NO-GO."
     Write-Host ""
     Write-Host "This script does not call docker compose up, down, restart, build, run, exec, or migrate."

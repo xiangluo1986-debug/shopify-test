@@ -23,6 +23,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+- [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
 - [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 
@@ -36,6 +37,9 @@ The gated local simulation runner at
 this phase. It prints readiness and the future local simulation plan, blocks
 execution requests without the exact approval phrase, and still does not
 implement real local simulation execution even when the phrase is supplied.
+The local inactive-color startup plan is also documentation only; inactive
+startup remains NO-GO until a separate task approves one inactive service, a
+non-`8000` test port, and cleanup commands.
 Production remains NO-GO.
 
 ## Current Architecture
@@ -217,9 +221,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_a
 A future phase may implement actual inactive-color startup on a local-only test
 port only after
 [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
-is reviewed, the exact local-only approval phrase is provided in a separate
-task, and the exact commands, target color, cleanup path, and no-production
-traffic constraints are approved.
+and
+[BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
+are reviewed, the exact local-only approval phrase is provided in a separate
+task, and the exact commands, target color, non-`8000` test port, cleanup path,
+and no-production-traffic constraints are approved.
 
 Validate the proxy and color services locally or in staging:
 
@@ -345,10 +351,11 @@ approve exact commands.
 ## Immediate Next Task Recommendation
 
 Review the dry-run output from
-`scripts/blue_green_local_apply_simulation.ps1`. The recommended next separate
-task is to design the actual local inactive-color startup step on a non-8000
-test port, still without production traffic, and only after explicit approval
-of the exact commands and cleanup path. Production should remain NO-GO until
-local or staging results are reviewed and a separate production task approves
-route, port ownership, proxy, scheduler, migration, static/media, rollback,
-and observation details.
+`scripts/blue_green_local_apply_simulation.ps1` and the reviewed plan in
+[BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
+The recommended next separate task is to prepare an execution-gated local
+inactive-color startup runner that is still blocked by default, targets one
+inactive service on a non-`8000` test port, and includes a stop-only cleanup
+path. Production should remain NO-GO until local or staging results are
+reviewed and a separate production task approves route, port ownership, proxy,
+scheduler, migration, static/media, rollback, and observation details.

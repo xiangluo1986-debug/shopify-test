@@ -109,6 +109,10 @@ function Show-ReadinessFiles {
             Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md"
         },
         [pscustomobject]@{
+            Label = "Local inactive startup plan"
+            Path = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
+        },
+        [pscustomobject]@{
             Label = "Local simulation preview script"
             Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
         },
@@ -125,6 +129,22 @@ function Show-ReadinessFiles {
             Write-Warn "$($item.Label) is missing: $($item.Path)"
         }
     }
+}
+
+function Show-FutureInactiveStartupPhase {
+    Write-Step "Future inactive-color startup phase"
+
+    $planPath = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
+    if (Test-Path -LiteralPath $planPath) {
+        Write-Ok "Inactive startup plan exists: $planPath"
+    } else {
+        Write-Warn "Inactive startup plan is missing: $planPath"
+    }
+
+    Write-Warn "Local inactive-color startup is planned but blocked in this phase."
+    Write-Warn "Any future inactive test service must use a non-8000 test port such as 18080 or 18081."
+    Write-Warn "Current web remains untouched and keeps host port 8000."
+    Write-Warn "Production remains NO-GO."
 }
 
 function Test-HealthUrl {
@@ -169,7 +189,7 @@ function Show-BlockedActionPlan {
         "Confirm active docker-compose.yml remains unchanged.",
         "Confirm current web service still owns host port 8000.",
         "Validate example Compose/proxy config without starting containers.",
-        "Start only the inactive color on a reviewed local-only test port.",
+        "Start only one inactive test service on a reviewed non-8000 local-only test port.",
         "Run Django checks against the inactive color only.",
         "Health-check the inactive color directly through /healthz/.",
         "Stop only the inactive local test color after validation.",
@@ -189,6 +209,11 @@ function Show-BlockedActionPlan {
     Write-Host "  python manage.py migrate"
     Write-Host "  python manage.py collectstatic"
     Write-Host "  proxy reload or traffic switch"
+    Write-Host ""
+    Write-Host "Future inactive-color startup remains blocked here:"
+    Write-Host "  - test port must be non-8000, for example 18080 or 18081"
+    Write-Host "  - current web must remain untouched"
+    Write-Host "  - production remains NO-GO"
 }
 
 function Test-ExecutionGate {
@@ -218,6 +243,7 @@ function Test-ExecutionGate {
 
     Write-Ok "Approval phrase matched."
     Write-Warn "Real local simulation execution is not implemented in this phase."
+    Write-Warn "Local inactive-color startup is planned but still blocked in this phase."
     Write-Warn "No containers were started, stopped, restarted, or built."
     Write-Warn "No migration, collectstatic, proxy switch, file edit, Shopify call, Gmail call, or email send was performed."
     Write-Warn "Production remains NO-GO."
@@ -227,6 +253,7 @@ function Test-ExecutionGate {
 Show-Mode
 Show-GitStatus
 Show-ReadinessFiles
+Show-FutureInactiveStartupPhase
 Test-HealthUrl -Url $HealthUrl
 Show-SafeConfigNote
 Show-BlockedActionPlan

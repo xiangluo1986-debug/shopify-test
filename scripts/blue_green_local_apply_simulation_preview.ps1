@@ -63,6 +63,10 @@ function Show-FileStatus {
             Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md"
         },
         [pscustomobject]@{
+            Label = "Local inactive startup plan"
+            Path = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
+        },
+        [pscustomobject]@{
             Label = "Local dry-run review package"
             Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md"
         },
@@ -113,6 +117,8 @@ function Show-RunnerStatus {
 
     Write-Warn "Current status is dry-run / no-action only."
     Write-Warn "Real local simulation execution is not implemented in this phase."
+    Write-Warn "Local inactive-color startup remains NO-GO until separate approval."
+    Write-Warn "Any future inactive startup must use a non-8000 test port and leave current web untouched."
     Write-Warn "Production remains NO-GO."
 }
 
@@ -184,6 +190,7 @@ function Show-FutureCommandPlan {
         [pscustomobject]@{
             Label = "Inactive color startup on test-only port"
             Commands = @(
+                "# Future requirement: use one inactive test service only on a non-8000 port such as 18080 or 18081.",
                 "docker compose -f <local-simulation-compose-file> up -d web_green"
             )
         },
@@ -234,5 +241,6 @@ Show-FutureCommandPlan
 Write-Step "Result"
 Write-Ok "Local blue-green apply simulation preview completed."
 Write-Ok "No runtime behavior was changed."
+Write-Ok "Inactive startup plan status: exists if listed above; local inactive startup remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."
 Write-Ok "No docker compose up/down/restart/build, migrate, collectstatic, traffic switch, file modification, Shopify call, Gmail call, or email send was performed."
