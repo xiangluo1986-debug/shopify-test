@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 
 import requests
 
@@ -202,6 +203,7 @@ def normalize_product_gid(value):
 
 
 def fetch_translation_console_data(installation, search_text, locale):
+    source_fetched_at = _utc_now_iso()
     search_text = (search_text or "").strip()
     locale = (locale or "ja").strip()
     if locale not in SUPPORTED_TRANSLATION_LOCALES:
@@ -220,9 +222,18 @@ def fetch_translation_console_data(installation, search_text, locale):
             result.update(fetched)
 
     result.update(_safety_flags(shopify_api_call_performed=True))
+    result["source_fetched_live_from_shopify"] = True
+    result["source_fetched_at"] = source_fetched_at
     result["locale"] = locale
     result["search_text"] = search_text
     return result
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(
+        "+00:00",
+        "Z",
+    )
 
 
 def _fetch_product_translation_resource(installation, product_gid, locale):

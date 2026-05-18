@@ -224,7 +224,7 @@ TRANSLATION_WORKSPACE_JOB_DIR = Path("logs/shopify_translation_workspace_jobs")
 TRANSLATION_WORKSPACE_PREVIOUS_REPORT_MAX_BYTES = 4_000_000
 TRANSLATION_WORKSPACE_IN_PROGRESS_REPORT_STATUSES = {"pending", "running", "partial"}
 SOURCE_CHANGED_REFRESH_MESSAGE = (
-    "Original product content changed. Translation will be refreshed."
+    "Original product content changed — translate again before updating Shopify."
 )
 OPENAI_PROMPT_COMPACT = "compact"
 OPENAI_PROMPT_RICH = "rich"
@@ -430,8 +430,24 @@ def generate_selected_product_missing_translation_draft_package(
             return result
 
         result["shopify_api_call_performed"] = True
+        result["source_fetched_live_from_shopify"] = bool(
+            data.get("source_fetched_live_from_shopify", True)
+        )
+        result["source_fetched_at"] = data.get("source_fetched_at") or result.get(
+            "source_fetched_at",
+            "",
+        )
+        result["source_fetches"][locale] = {
+            "source_fetched_live_from_shopify": bool(
+                data.get("source_fetched_live_from_shopify", True)
+            ),
+            "source_fetched_at": data.get("source_fetched_at", ""),
+            "product_gid": (data.get("product") or {}).get("id", product_id),
+        }
         _attach_child_discovery_metadata(result, locale, data)
         product = data.get("product") or {}
+        if product.get("id"):
+            result["product_gid"] = product.get("id", product_id)
         result["product_title"] = result["product_title"] or product.get("title", "")
         translatable_rows = data.get("translatable_rows", [])
         source_identity_context = build_product_identity_context(
@@ -473,6 +489,8 @@ def generate_selected_product_missing_translation_draft_package(
             )
             if source_change:
                 row.update(source_change)
+                result["source_changed_since_previous_report"] = True
+                result["source_changed_since_previous_report_count"] += 1
             existing_outdated = row.get("translation_outdated") is True
             if existing_present and row.get("source_changed_from_previous_report"):
                 existing_outdated = True
@@ -670,9 +688,16 @@ def _empty_result(product_id, target_locales, fields):
         "success": False,
         "draft_status": "",
         "product_id": product_id,
+        "product_gid": product_id,
         "product_title": "",
         "target_locales": target_locales,
         "requested_fields": fields,
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
+        "source_fetches": {},
+        "source_changed_since_previous_report": False,
+        "source_changed_since_previous_report_count": 0,
+        "stale_source_blocked_count": 0,
         "shopify_read_only": True,
         "shopify_api_call_performed": False,
         "openai_call_performed": False,
@@ -1220,8 +1245,14 @@ def _entry_template(locale, field, row, reason):
         "media_url": row.get("media_url", ""),
         "source_value": str(row.get("source_value") or ""),
         "source_digest": str(row.get("digest") or ""),
+        "source_text_hash": row.get("source_text_hash")
+        or _source_text_hash(row.get("source_value") or ""),
         "source_changed_from_previous_report": bool(
             row.get("source_changed_from_previous_report")
+        ),
+        "source_changed_since_previous_report": bool(
+            row.get("source_changed_since_previous_report")
+            or row.get("source_changed_from_previous_report")
         ),
         "source_change_message": row.get("source_change_message", ""),
         "previous_source_digest": row.get("previous_source_digest", ""),
@@ -2579,7 +2610,7 @@ def _source_snapshot_from_report_row(row: dict, *, report_status: str = ""):
         or row.get("key")
         or row.get("resource_key")
     )
-    if field != "body_html":
+    if not field:
         return {}
     source_value = _first_text(
         row,
@@ -2620,7 +2651,7 @@ def _source_snapshot_from_report_row(row: dict, *, report_status: str = ""):
 
 def _detect_previous_source_change(row: dict, locale: str, previous_source_index: dict):
     field = _normalize_draft_field_key(row.get("field_key") or row.get("key"))
-    if field != "body_html" or not previous_source_index:
+    if not field or not previous_source_index:
         return {}
     resource_id = str(row.get("resource_id") or "").strip()
     previous = previous_source_index.get(
@@ -2644,6 +2675,7 @@ def _detect_previous_source_change(row: dict, locale: str, previous_source_index
 
     return {
         "source_changed_from_previous_report": True,
+        "source_changed_since_previous_report": True,
         "source_change_message": SOURCE_CHANGED_REFRESH_MESSAGE,
         "previous_source_digest": previous_digest,
         "current_source_digest": current_digest,
@@ -3443,6 +3475,20 @@ def _attach_draft_batch_summary(result):
     entries = [entry for entry in result.get("entries") or [] if isinstance(entry, dict)]
     source_read_summary = result.get("source_read_summary") or {}
     summary["summary_status"] = "source_rows_classified"
+    summary["source_fetched_live_from_shopify"] = bool(
+        result.get("source_fetched_live_from_shopify")
+    )
+    summary["source_fetched_at"] = result.get("source_fetched_at", "")
+    summary["product_gid"] = result.get("product_gid") or result.get("product_id", "")
+    summary["source_changed_since_previous_report"] = bool(
+        result.get("source_changed_since_previous_report")
+    )
+    summary["source_changed_since_previous_report_count"] = int(
+        result.get("source_changed_since_previous_report_count") or 0
+    )
+    summary["stale_source_blocked_count"] = int(
+        result.get("stale_source_blocked_count") or 0
+    )
     if result.get("blocking_conditions"):
         summary["summary_status"] = "blocked"
     summary["total_languages_checked"] = len(source_read_summary)

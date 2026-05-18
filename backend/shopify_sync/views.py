@@ -317,7 +317,8 @@ TRANSLATION_WORKSPACE_RESULT_FIELD_ORDER = {
 TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "existing_translation_outdated": "Existing translation is outdated",
     "existing_translation_outdated_manual_review_required": "Existing translation is outdated",
-    "source_changed_from_previous_report": "Original product content changed. Translation will be refreshed.",
+    "source_changed_from_previous_report": "Original product content changed — translate again before updating Shopify.",
+    "source_changed_since_report": "Original product content changed — translate again before updating Shopify.",
     "seo_needs_manual_review": "SEO text needs review",
     "seo_not_ready": "SEO text needs review",
     "missing_part_type": "SEO may be missing the part type",
@@ -375,6 +376,7 @@ TRANSLATION_WORKSPACE_SHOPIFY_APPLY_BLOCK_LABELS = {
     "blocked_draft_status": "This translation needs review before Shopify update.",
     "blocked_draft_manual_review_required": "This translation needs review before Shopify update.",
     "blocked_seo_manual_review_required": "SEO text needs review before Shopify update.",
+    "blocked_stale_source_changed": "Original product content changed — translate again before updating Shopify.",
     "not_in_selected_locale": "Switch to this language tab to select this row.",
 }
 TRANSLATION_WORKSPACE_REVIEW_REASON_CODES = {
@@ -392,6 +394,7 @@ TRANSLATION_WORKSPACE_REVIEW_REASON_CODES = {
     "forbidden_marketing_or_shipping_phrase",
     "html_media_or_link_tag_broken",
     "source_changed_from_previous_report",
+    "source_changed_since_report",
     "keyword_stuffing_or_duplicate",
     "manual_review_required",
     "missing_core_keyword",
@@ -2045,6 +2048,7 @@ def translation_console(request):
     )
     if translation_report_guard["hidden_previous_report"]:
         translation_background_job = {}
+    _translation_workspace_attach_live_source_state(translation_background_job, result)
     if is_manual_translation_edit_post:
         manual_translation_edit_result = save_translation_workspace_manual_edit(
             product_gid=translation_job_product_id,
@@ -2061,6 +2065,7 @@ def translation_console(request):
         )
         if translation_report_guard["hidden_previous_report"]:
             translation_background_job = {}
+        _translation_workspace_attach_live_source_state(translation_background_job, result)
     safe_write_readiness_state = build_translation_workspace_safe_write_readiness_state(
         translation_background_job,
         selected_product_gid=translation_job_product_id,
@@ -2915,6 +2920,11 @@ def translation_console(request):
         and workspace_locked_execution_display.get("selected_entry_count") == 1
         and bool(workspace_locked_execution_display.get("locked_entry_checksum"))
     )
+    source_freshness = _translation_workspace_source_freshness_context(
+        result=result,
+        draft_result=draft_result,
+        translation_background_job=translation_background_job,
+    )
 
     return render(
         request,
@@ -2949,6 +2959,7 @@ def translation_console(request):
             "translation_workspace_update_permission_message": TRANSLATION_WORKSPACE_UPDATE_PERMISSION_MESSAGE,
             "editor_view": editor_view,
             "single_product_mvp": single_product_mvp,
+            "source_freshness": source_freshness,
             "shop_domain": shop_domain,
             "result": result,
             "workflow_status": workflow_status,
@@ -4234,6 +4245,216 @@ def _translation_workspace_report_guard(report: dict | None, *, selected_product
     }
 
 
+def _translation_workspace_attach_live_source_state(
+    report: dict | None,
+    live_result: dict | None,
+):
+    if not isinstance(report, dict) or not report:
+        return
+    live_result = live_result or {}
+    source_fetched_at = str(live_result.get("source_fetched_at") or "").strip()
+    live_rows = live_result.get("translatable_rows") or []
+    live_index = _translation_workspace_live_source_index(live_rows)
+    if not source_fetched_at and not live_index:
+        return
+    report["latest_live_source_fetched_at"] = source_fetched_at
+    report["latest_live_source_fetched_at_display"] = (
+        _translation_workspace_source_time_display(source_fetched_at)
+    )
+    report["latest_live_source_fetched_live_from_shopify"] = bool(
+        live_result.get("source_fetched_live_from_shopify") or live_index
+    )
+    report["visible_results_from_earlier_shopify_source"] = bool(
+        report.get("job_id") and source_fetched_at
+    )
+    changed_count = 0
+    comparable_count = 0
+    for row in report.get("review_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        snapshot = _translation_workspace_live_source_snapshot_for_row(row, live_index)
+        if not snapshot:
+            continue
+        comparable_count += 1
+        row["live_source_refetch_performed"] = True
+        row["latest_source_fetched_at"] = source_fetched_at
+        row["latest_source_digest"] = snapshot.get("source_digest", "")
+        row["latest_source_text_hash"] = snapshot.get("source_text_hash", "")
+        if _translation_workspace_report_row_source_changed(row, snapshot):
+            changed_count += 1
+            _translation_workspace_mark_row_stale_source(row)
+    report["source_rows_compared_with_latest_shopify"] = comparable_count
+    report["source_changed_since_report_count"] = changed_count
+    report["source_changed_since_report"] = changed_count > 0
+
+
+def _translation_workspace_source_freshness_context(
+    *,
+    result: dict | None,
+    draft_result: dict | None,
+    translation_background_job: dict | None,
+):
+    result = result or {}
+    draft_result = draft_result or {}
+    translation_background_job = translation_background_job or {}
+    live_source_at = (
+        result.get("source_fetched_at")
+        or draft_result.get("source_fetched_at")
+        or translation_background_job.get("latest_live_source_fetched_at")
+        or ""
+    )
+    report_source_at = (
+        translation_background_job.get("source_fetched_at")
+        or draft_result.get("source_fetched_at")
+        or ""
+    )
+    source_loaded = bool(
+        result.get("source_fetched_live_from_shopify")
+        or draft_result.get("source_fetched_live_from_shopify")
+        or translation_background_job.get("latest_live_source_fetched_live_from_shopify")
+        or translation_background_job.get("source_fetched_live_from_shopify")
+    )
+    source_changed_count = _translation_workspace_int(
+        translation_background_job.get("source_changed_since_report_count")
+        or draft_result.get("source_changed_since_previous_report_count")
+        or 0,
+        0,
+    )
+    return {
+        "source_loaded": source_loaded,
+        "source_loaded_at": live_source_at or report_source_at,
+        "source_loaded_at_display": _translation_workspace_source_time_display(
+            live_source_at or report_source_at
+        ),
+        "report_source_loaded_at": report_source_at,
+        "report_source_loaded_at_display": _translation_workspace_source_time_display(
+            report_source_at
+        ),
+        "using_latest_product_content": source_loaded and not source_changed_count,
+        "visible_results_from_earlier_source": bool(
+            translation_background_job.get("visible_results_from_earlier_shopify_source")
+            and translation_background_job.get("show_translation_results")
+        ),
+        "source_changed_since_report": source_changed_count > 0,
+        "source_changed_since_report_count": source_changed_count,
+        "loaded_message": "Source loaded from Shopify",
+        "latest_message": "Using latest product content",
+        "earlier_report_message": "This result was generated from an earlier Shopify source.",
+        "changed_message": "Original product content changed — translate again before updating Shopify.",
+    }
+
+
+def _translation_workspace_live_source_index(rows: list[dict]):
+    index = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        resource_id = str(row.get("resource_id") or "").strip()
+        if not resource_id:
+            continue
+        raw_keys = [
+            row.get("source_key"),
+            row.get("field_key"),
+            row.get("key"),
+        ]
+        keys = []
+        for raw_key in raw_keys:
+            key = _translation_editor_normalize_field_key(raw_key)
+            if key and key not in keys:
+                keys.append(key)
+            raw_key_text = str(raw_key or "").strip()
+            if raw_key_text and raw_key_text not in keys:
+                keys.append(raw_key_text)
+        if "description" in keys and "body_html" not in keys:
+            keys.append("body_html")
+        if "body_html" in keys and "description" not in keys:
+            keys.append("description")
+        snapshot = {
+            "resource_id": resource_id,
+            "source_digest": str(row.get("digest") or row.get("source_digest") or "").strip(),
+            "source_text_hash": _translation_workspace_source_text_hash(
+                row.get("source_value") or ""
+            ),
+            "source_value": str(row.get("source_value") or ""),
+        }
+        for key in keys:
+            index[(resource_id, key)] = snapshot
+    return index
+
+
+def _translation_workspace_live_source_snapshot_for_row(row: dict, live_index: dict):
+    resource_id = str((row or {}).get("resource_id") or "").strip()
+    if not resource_id:
+        return {}
+    keys = []
+    for raw_key in (
+        (row or {}).get("source_key"),
+        (row or {}).get("resource_key"),
+        (row or {}).get("field"),
+        (row or {}).get("key"),
+    ):
+        key = _translation_editor_normalize_field_key(raw_key)
+        if key and key not in keys:
+            keys.append(key)
+        raw_key_text = str(raw_key or "").strip()
+        if raw_key_text and raw_key_text not in keys:
+            keys.append(raw_key_text)
+    if "description" in keys and "body_html" not in keys:
+        keys.append("body_html")
+    if "body_html" in keys and "description" not in keys:
+        keys.append("description")
+    for key in keys:
+        snapshot = live_index.get((resource_id, key))
+        if snapshot:
+            return snapshot
+    return {}
+
+
+def _translation_workspace_report_row_source_changed(row: dict, snapshot: dict):
+    report_digest = str((row or {}).get("source_digest") or (row or {}).get("digest") or "").strip()
+    latest_digest = str((snapshot or {}).get("source_digest") or "").strip()
+    if report_digest and latest_digest:
+        return report_digest != latest_digest
+    report_hash = str((row or {}).get("source_text_hash") or "").strip()
+    if not report_hash:
+        report_hash = _translation_workspace_source_text_hash(
+            (row or {}).get("source_value") or (row or {}).get("source_value_display") or ""
+        )
+    latest_hash = str((snapshot or {}).get("source_text_hash") or "").strip()
+    return bool(report_hash and latest_hash and report_hash != latest_hash)
+
+
+def _translation_workspace_mark_row_stale_source(row: dict):
+    message = "Original product content changed — translate again before updating Shopify."
+    row["source_changed_since_report"] = True
+    row["source_changed_from_previous_report"] = True
+    row["source_change_message"] = message
+    row["draft_blocked"] = True
+    row["status"] = "needs_review"
+    row["shopify_apply_selectable"] = False
+    row["safe_write_selectable"] = False
+    row["shopify_apply_block_reason"] = "blocked_stale_source_changed"
+    row["safe_write_block_reason"] = "blocked_stale_source_changed"
+    reasons = _translation_workspace_split_reasons(row.get("blocking_reasons"))
+    reasons.append("source_changed_since_report")
+    row["blocking_reasons"] = ", ".join(list(dict.fromkeys(reason for reason in reasons if reason)))
+
+
+def _translation_workspace_source_text_hash(value):
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:24]
+
+
+def _translation_workspace_source_time_display(value: str):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = _translation_workspace_parse_iso(text)
+    if parsed:
+        return parsed.strftime("%Y-%m-%d %H:%M")
+    normalized = text.replace("T", " ").rstrip("Z")
+    return normalized[:16]
+
+
 def save_translation_workspace_manual_edit(
     *,
     product_gid: str,
@@ -4738,6 +4959,12 @@ def _translation_workspace_empty_job_status(
         "detail_preview_rows": [],
         "review_rows": [],
         "review_rows_truncated": False,
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
+        "source_fetches": {},
+        "source_changed_since_previous_report": False,
+        "source_changed_since_previous_report_count": 0,
+        "stale_source_blocked_count": 0,
         "report_path": "",
         "lock_path": "",
         "safety_flags": _translation_workspace_job_safety_flags(),
@@ -4791,6 +5018,8 @@ def _translation_workspace_empty_locale_status(locale: str):
         "updated_at": "",
         "finished_at": "",
         "heartbeat_at": "",
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
         "source_rows_checked": 0,
         "missing_draft_count": 0,
         "outdated_update_draft_count": 0,
@@ -4932,6 +5161,10 @@ def _translation_workspace_apply_locale_job_result(
     )
     retry_attempted = bool((draft_result or {}).get("retry_attempted"))
     retry_succeeded = bool((draft_result or {}).get("retry_succeeded"))
+    source_fetched_at = str((draft_result or {}).get("source_fetched_at") or "").strip()
+    source_fetched_live = bool(
+        (draft_result or {}).get("source_fetched_live_from_shopify")
+    )
     locale_error_message = ""
     if locale_status == "failed":
         if failure_type == OPENAI_INVALID_TRANSLATION_RESPONSE:
@@ -4956,6 +5189,8 @@ def _translation_workspace_apply_locale_job_result(
             "updated_at": now,
             "finished_at": now,
             "heartbeat_at": now,
+            "source_fetched_live_from_shopify": source_fetched_live,
+            "source_fetched_at": source_fetched_at,
             "source_rows_checked": source_rows_checked,
             "missing_draft_count": missing_count,
             "outdated_update_draft_count": outdated_count,
@@ -5000,6 +5235,23 @@ def _translation_workspace_apply_locale_job_result(
         status["product_title"] = _translation_workspace_safe_text(
             draft_result.get("product_title"), 200
         )
+    if source_fetched_live:
+        status["source_fetched_live_from_shopify"] = True
+    if source_fetched_at:
+        status["source_fetched_at"] = source_fetched_at
+    source_fetches = (draft_result or {}).get("source_fetches") or {}
+    if source_fetches:
+        status.setdefault("source_fetches", {}).update(source_fetches)
+    status["source_changed_since_previous_report"] = bool(
+        status.get("source_changed_since_previous_report")
+        or (draft_result or {}).get("source_changed_since_previous_report")
+    )
+    status["source_changed_since_previous_report_count"] = int(
+        status.get("source_changed_since_previous_report_count") or 0
+    ) + int((draft_result or {}).get("source_changed_since_previous_report_count") or 0)
+    status["stale_source_blocked_count"] = int(
+        status.get("stale_source_blocked_count") or 0
+    ) + int((draft_result or {}).get("stale_source_blocked_count") or 0)
     _translation_workspace_add_counts(status, locale_row)
     _translation_workspace_apply_group_counts(status, summary)
     _translation_workspace_append_child_discovery_errors(status, locale, summary)
@@ -6053,6 +6305,8 @@ def _translation_workspace_result_raw_reason_codes(row: dict):
         raw_reasons.append("existing_translation_outdated")
     if row.get("source_changed_from_previous_report"):
         raw_reasons.append("source_changed_from_previous_report")
+    if row.get("source_changed_since_report"):
+        raw_reasons.append("source_changed_since_report")
     if row.get("draft_blocked"):
         raw_reasons.append("draft_blocked")
     if row.get("product_identity_mismatch"):
@@ -6485,6 +6739,7 @@ def _translation_workspace_job_review_row(row: dict):
         "resource_key": resource_key,
         "digest": digest,
         "source_digest": digest,
+        "source_text_hash": row.get("source_text_hash", ""),
         "entry_id": safe_write_entry_id,
         "safe_write_entry_id": safe_write_entry_id,
         "context_label": row.get("context_label", ""),
@@ -6533,12 +6788,22 @@ def _translation_workspace_job_review_row(row: dict):
         ),
         "source_changed_from_previous_report": bool(
             row.get("source_changed_from_previous_report")
+            or row.get("source_changed_since_report")
+            or row.get("source_changed_since_previous_report")
+        ),
+        "source_changed_since_report": bool(
+            row.get("source_changed_since_report")
+            or row.get("source_changed_since_previous_report")
+            or row.get("source_changed_from_previous_report")
         ),
         "source_change_message": row.get("source_change_message", ""),
         "previous_source_digest": row.get("previous_source_digest", ""),
         "current_source_digest": row.get("current_source_digest", ""),
         "previous_source_text_hash": row.get("previous_source_text_hash", ""),
         "current_source_text_hash": row.get("current_source_text_hash", ""),
+        "latest_source_digest": row.get("latest_source_digest", ""),
+        "latest_source_text_hash": row.get("latest_source_text_hash", ""),
+        "latest_source_fetched_at": row.get("latest_source_fetched_at", ""),
         "existing_translation_summary": existing_fields["summary"],
         "existing_translation_display": existing_fields["display"],
         "existing_translation_is_long": existing_fields["is_long"],
@@ -8775,7 +9040,7 @@ def _build_translation_editor_row(
         source_row.get("source_change_message")
         or draft_entry.get("source_change_message")
         or (
-            "Original product content changed. Translation will be refreshed."
+            "Original product content changed — translate again before updating Shopify."
             if source_changed_from_previous_report
             else ""
         )
@@ -9821,6 +10086,7 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "resource_id": entry.get("resource_id", ""),
         "source_digest": entry.get("source_digest", ""),
         "digest": entry.get("source_digest", ""),
+        "source_text_hash": entry.get("source_text_hash", ""),
         "resource_group": entry.get("resource_group", ""),
         "context_label": entry.get("context_label", ""),
         "resource_note": entry.get("resource_note", ""),
@@ -9882,6 +10148,11 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "existing_translation_outdated": entry.get("existing_translation_outdated"),
         "source_changed_from_previous_report": bool(
             entry.get("source_changed_from_previous_report")
+            or entry.get("source_changed_since_previous_report")
+        ),
+        "source_changed_since_previous_report": bool(
+            entry.get("source_changed_since_previous_report")
+            or entry.get("source_changed_from_previous_report")
         ),
         "source_change_message": entry.get("source_change_message", ""),
         "previous_source_digest": entry.get("previous_source_digest", ""),

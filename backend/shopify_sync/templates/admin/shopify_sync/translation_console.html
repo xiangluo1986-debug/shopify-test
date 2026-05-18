@@ -1319,6 +1319,31 @@
     border-radius: 8px;
     background: #f8fafc;
   }
+  .tw-source-freshness {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 12px;
+    padding: 10px;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    background: #f0fdf4;
+    color: #14532d;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .tw-source-freshness.is-warning {
+    border-color: #fbbf24;
+    background: #fffbeb;
+    color: #92400e;
+  }
+  .tw-source-freshness strong {
+    color: inherit;
+  }
+  .tw-source-freshness span {
+    overflow-wrap: anywhere;
+  }
   .tw-library-note-title {
     margin-bottom: 4px;
     color: #111827;
@@ -2923,6 +2948,19 @@
       Staff can translate, review, edit, and update safe Shopify translations.
       <span>Only safe validated fields are updated. Technical/internal fields remain blocked. No update happens unless you click the update button.</span>
     </div>
+    {% if source_freshness.source_loaded %}
+      <div class="tw-source-freshness{% if source_freshness.source_changed_since_report %} is-warning{% endif %}">
+        <span><strong>{{ source_freshness.loaded_message }}:</strong> {{ source_freshness.source_loaded_at_display|default:source_freshness.source_loaded_at }}</span>
+        {% if source_freshness.source_changed_since_report %}
+          <span>{{ source_freshness.changed_message }}</span>
+        {% else %}
+          <span>{{ source_freshness.latest_message }}.</span>
+        {% endif %}
+        {% if source_freshness.visible_results_from_earlier_source %}
+          <span>{{ source_freshness.earlier_report_message }}</span>
+        {% endif %}
+      </div>
+    {% endif %}
   </section>
   <div class="module tw-workspace-header tw-compact-topbar" data-workspace-header>
     <div class="tw-topbar">
@@ -4155,6 +4193,10 @@
                           <dt>Resource ID</dt><dd>{{ row.resource_id|default:"-" }}</dd>
                           <dt>Resource key</dt><dd>{{ row.resource_key|default:"-" }}</dd>
                           <dt>Digest</dt><dd>{{ row.digest|default:"-" }}</dd>
+                          <dt>Source text hash</dt><dd>{{ row.source_text_hash|default:"-" }}</dd>
+                          <dt>Latest source digest</dt><dd>{{ row.latest_source_digest|default:"-" }}</dd>
+                          <dt>Latest source text hash</dt><dd>{{ row.latest_source_text_hash|default:"-" }}</dd>
+                          <dt>Source loaded from Shopify</dt><dd>{{ row.latest_source_fetched_at|default:source_freshness.source_loaded_at|default:"-" }}</dd>
                           <dt>Status</dt><dd>{{ row.status|default:"-" }}</dd>
                           <dt>Raw reasons</dt><dd>{{ row.raw_reason_text|default:"-" }}</dd>
                           <dt>Write eligibility</dt><dd>{{ row.write_eligibility|default:"-" }}</dd>

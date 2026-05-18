@@ -109,6 +109,10 @@ ALL_LANGUAGES_MAPPING_BLOCKED_GROUPS = {
 ALL_LANGUAGES_MAPPING_BLOCKED_REASON = (
     "Can review now; Shopify update support needs extra mapping."
 )
+STALE_SOURCE_BLOCKED_REASON = "blocked_stale_source_changed"
+STALE_SOURCE_BLOCKED_MESSAGE = (
+    "Original product content changed — translate again before updating Shopify."
+)
 ALL_LANGUAGES_TECHNICAL_METAFIELD_MARKERS = (
     "google",
     "google_product_category",
@@ -496,6 +500,14 @@ def build_translation_workspace_selected_apply_state(
         "readback_performed": False,
         "readback_verified_count": 0,
         "readback_failed_count": 0,
+        "updated_count": 0,
+        "verified_count": 0,
+        "live_source_refetch_performed": False,
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
+        "live_source_refetch_summary": {},
+        "stale_candidate_blocked_count": 0,
+        "live_source_blocked_count": 0,
         "rollback_needed": False,
         "rollback_performed": False,
         "publish_performed": False,
@@ -597,6 +609,14 @@ def apply_selected_translations_to_shopify(
         "readback_performed": False,
         "readback_verified_count": 0,
         "readback_failed_count": 0,
+        "updated_count": 0,
+        "verified_count": 0,
+        "live_source_refetch_performed": False,
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
+        "live_source_refetch_summary": {},
+        "stale_candidate_blocked_count": 0,
+        "live_source_blocked_count": 0,
         "rollback_needed": False,
         "rollback_performed": False,
         "publish_performed": False,
@@ -629,8 +649,53 @@ def apply_selected_translations_to_shopify(
             write_reports,
         )
 
+    live_refetch_summary = _live_source_refetch_and_mark_stale(
+        selected_entries,
+        installation=installation,
+    )
+    payload["live_source_refetch_summary"] = live_refetch_summary
+    payload["live_source_refetch_performed"] = live_refetch_summary.get(
+        "live_source_refetch_performed",
+        False,
+    )
+    payload["source_fetched_live_from_shopify"] = live_refetch_summary.get(
+        "source_fetched_live_from_shopify",
+        False,
+    )
+    payload["source_fetched_at"] = live_refetch_summary.get("source_fetched_at", "")
+    payload["stale_candidate_blocked_count"] = int(
+        live_refetch_summary.get("stale_candidate_blocked_count") or 0
+    )
+    payload["live_source_blocked_count"] = payload[
+        "stale_candidate_blocked_count"
+    ] + int(live_refetch_summary.get("unverified_candidate_blocked_count") or 0)
+    payload["sanitized_errors"].extend(
+        live_refetch_summary.get("sanitized_errors") or []
+    )
+    selected_entries_to_write = [
+        entry for entry in selected_entries if not entry.get("live_source_blocked")
+    ]
+    payload["selected_entries"] = selected_entries
+    payload["write_ready_selected_entry_count"] = len(selected_entries_to_write)
+    payload["translations_register_payload_preview"] = _selected_apply_payload_preview(
+        selected_entries_to_write
+    )
+    if selected_entries and not selected_entries_to_write:
+        payload["blocking_conditions"] = _unique_strings(
+            list(payload.get("blocking_conditions") or [])
+            + ["blocked_all_selected_candidates_stale_or_unverified"]
+        )
+        payload["status"] = SELECTED_TRANSLATIONS_BLOCKED_STATUS
+        payload["audit_status"] = SELECTED_TRANSLATIONS_BLOCKED_STATUS
+        return _finalize_selected_translations_payload(
+            payload,
+            json_path,
+            html_path,
+            write_reports,
+        )
+
     by_resource_id = {}
-    for entry in selected_entries:
+    for entry in selected_entries_to_write:
         by_resource_id.setdefault(entry.get("resource_id", ""), []).append(entry)
 
     mutation_summaries = {}
@@ -740,9 +805,16 @@ def apply_selected_translations_to_shopify(
     payload["readback_failed_count"] = failed_count
     payload["rollback_needed"] = failed_count > 0
     payload["readback_summary"] = readback_summaries
-    if verified_count == len(selected_entries) and failed_count == 0:
+    payload["updated_count"] = verified_count + failed_count
+    payload["verified_count"] = verified_count
+    live_blocked_count = len(selected_entries) - len(selected_entries_to_write)
+    if (
+        verified_count == len(selected_entries_to_write)
+        and failed_count == 0
+        and live_blocked_count == 0
+    ):
         payload["status"] = SELECTED_TRANSLATIONS_WRITTEN_AND_VERIFIED_STATUS
-    elif verified_count:
+    elif verified_count or live_blocked_count:
         payload["status"] = SELECTED_TRANSLATIONS_WRITE_PARTIAL_STATUS
     else:
         payload["status"] = SELECTED_TRANSLATIONS_WRITE_FAILED_STATUS
@@ -963,6 +1035,9 @@ def _all_languages_merge_entry_metadata(entry: dict, source_entry: dict):
         "source_key",
         "shopify_key",
         "source_digest",
+        "source_text_hash",
+        "source_changed_since_report",
+        "source_change_message",
         "resource_type",
         "resource_note",
         "field_label",
@@ -985,6 +1060,286 @@ def _all_languages_merge_entry_metadata(entry: dict, source_entry: dict):
             continue
         if entry.get(key) in (None, "", [], {}):
             entry[key] = value
+
+
+def _live_source_refetch_and_mark_stale(entries: list[dict], *, installation):
+    entries = [entry for entry in entries or [] if isinstance(entry, dict)]
+    summary = {
+        "live_source_refetch_performed": False,
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
+        "resource_locale_request_count": 0,
+        "resource_locale_success_count": 0,
+        "resource_locale_failed_count": 0,
+        "candidate_count": len(entries),
+        "stale_candidate_blocked_count": 0,
+        "unverified_candidate_blocked_count": 0,
+        "sanitized_errors": [],
+        "resource_summaries": {},
+    }
+    if not entries:
+        return summary
+    if installation is None or not getattr(installation, "shop", "") or not getattr(
+        installation,
+        "access_token",
+        "",
+    ):
+        for entry in entries:
+            _mark_entry_live_source_blocked(
+                entry,
+                "blocked_live_source_refetch_not_available",
+                "Shopify source could not be checked before update.",
+            )
+        summary["unverified_candidate_blocked_count"] = len(entries)
+        return summary
+
+    fetched_at = _utc_now()
+    summary["source_fetched_at"] = fetched_at
+    requests_needed = []
+    seen = set()
+    for entry in entries:
+        resource_id = str(entry.get("resource_id") or "").strip()
+        locale = _safe_write_canonical_locale(entry.get("locale"))
+        if not resource_id or not locale:
+            continue
+        request_key = (resource_id, locale)
+        if request_key in seen:
+            continue
+        seen.add(request_key)
+        requests_needed.append(request_key)
+
+    snapshots = {}
+    summary["resource_locale_request_count"] = len(requests_needed)
+    for resource_id, locale in requests_needed:
+        refetch = _fetch_live_source_resource(installation, resource_id, locale)
+        summary["live_source_refetch_performed"] = True
+        summary["source_fetched_live_from_shopify"] = True
+        summary["resource_summaries"][f"{resource_id}|{locale}"] = {
+            "resource_id": resource_id,
+            "locale": locale,
+            "called": refetch.get("called", False),
+            "request_failed": refetch.get("request_failed", False),
+            "http_status": refetch.get("http_status"),
+            "content_count": len(refetch.get("snapshots") or []),
+            "translation_count": len(refetch.get("translations") or []),
+        }
+        if refetch.get("request_failed"):
+            summary["resource_locale_failed_count"] += 1
+            summary["sanitized_errors"].extend(refetch.get("sanitized_errors") or [])
+            continue
+        summary["resource_locale_success_count"] += 1
+        for snapshot in refetch.get("snapshots") or []:
+            for key in _live_source_snapshot_keys(snapshot.get("key", "")):
+                snapshots[(resource_id, key, locale)] = snapshot
+
+    for entry in entries:
+        snapshot = _live_source_snapshot_for_entry(entry, snapshots)
+        if not snapshot:
+            _mark_entry_live_source_blocked(
+                entry,
+                "blocked_live_source_snapshot_missing",
+                "Shopify source could not be checked before update.",
+            )
+            summary["unverified_candidate_blocked_count"] += 1
+            continue
+        _attach_live_source_snapshot(entry, snapshot, fetched_at)
+        if _entry_source_changed_against_live_snapshot(entry, snapshot):
+            _mark_entry_live_source_blocked(
+                entry,
+                STALE_SOURCE_BLOCKED_REASON,
+                STALE_SOURCE_BLOCKED_MESSAGE,
+            )
+            summary["stale_candidate_blocked_count"] += 1
+    return summary
+
+
+def _fetch_live_source_resource(installation, resource_id: str, locale: str):
+    query = """
+    query($id: ID!, $locale: String!) {
+      translatableResource(resourceId: $id) {
+        resourceId
+        translatableContent {
+          key
+          value
+          digest
+          locale
+        }
+        translations(locale: $locale) {
+          key
+          value
+          locale
+          outdated
+        }
+      }
+    }
+    """
+    url = f"https://{installation.shop}/admin/api/{SHOPIFY_API_VERSION}/graphql.json"
+    result = {
+        "called": True,
+        "request_failed": False,
+        "http_status": None,
+        "resource_id": resource_id,
+        "snapshots": [],
+        "translations": [],
+        "sanitized_errors": [],
+    }
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "X-Shopify-Access-Token": installation.access_token,
+                "Content-Type": "application/json",
+            },
+            json={"query": query, "variables": {"id": resource_id, "locale": locale}},
+            timeout=30,
+        )
+        result["http_status"] = response.status_code
+        response.raise_for_status()
+        data = response.json()
+    except requests.HTTPError:
+        result["request_failed"] = True
+        result["sanitized_errors"].append(
+            _real_write_error(
+                "live_source_refetch",
+                f"Shopify HTTP {result['http_status']} returned during source refresh.",
+                "shopify_http_error",
+            )
+        )
+        return result
+    except requests.RequestException as exc:
+        result["request_failed"] = True
+        result["sanitized_errors"].append(
+            _real_write_error(
+                "live_source_refetch",
+                "Shopify request failed during source refresh.",
+                exc.__class__.__name__,
+            )
+        )
+        return result
+    except ValueError:
+        result["request_failed"] = True
+        result["sanitized_errors"].append(
+            _real_write_error(
+                "live_source_refetch",
+                "Shopify returned non-JSON during source refresh.",
+                "shopify_invalid_json_response",
+            )
+        )
+        return result
+
+    graphql_errors = data.get("errors") or []
+    result["request_failed"] = bool(graphql_errors)
+    resource = (data.get("data") or {}).get("translatableResource") or {}
+    result["resource_id"] = resource.get("resourceId", resource_id)
+    result["translations"] = resource.get("translations") or []
+    for item in resource.get("translatableContent") or []:
+        value = str((item or {}).get("value") or "")
+        result["snapshots"].append(
+            {
+                "resource_id": result["resource_id"],
+                "key": str((item or {}).get("key") or "").strip(),
+                "source_value": value,
+                "source_digest": str((item or {}).get("digest") or "").strip(),
+                "source_text_hash": _source_text_hash(value),
+                "source_locale": (item or {}).get("locale", ""),
+                "translations": [
+                    translation
+                    for translation in result["translations"]
+                    if translation.get("key") == (item or {}).get("key")
+                ],
+            }
+        )
+    for error in graphql_errors:
+        result["sanitized_errors"].append(
+            _real_write_error(
+                "live_source_refetch",
+                _real_write_graphql_error_message(error),
+                "shopify_graphql_error",
+            )
+        )
+    return result
+
+
+def _live_source_snapshot_keys(key: str):
+    keys = []
+    raw = str(key or "").strip()
+    normalized = raw.lower().replace("-", "_").replace(" ", "_")
+    for item in (raw, normalized):
+        if item and item not in keys:
+            keys.append(item)
+    aliases = {
+        "description": "body_html",
+        "body_html": "description",
+        "alt": "media.alt",
+        "media.alt": "alt",
+    }
+    alias = aliases.get(normalized) or aliases.get(raw)
+    if alias and alias not in keys:
+        keys.append(alias)
+    return keys
+
+
+def _live_source_snapshot_for_entry(entry: dict, snapshots: dict):
+    resource_id = str((entry or {}).get("resource_id") or "").strip()
+    locale = _safe_write_canonical_locale((entry or {}).get("locale"))
+    keys = []
+    for raw in (
+        (entry or {}).get("shopify_key"),
+        (entry or {}).get("source_key"),
+        (entry or {}).get("key"),
+    ):
+        for key in _live_source_snapshot_keys(raw):
+            if key and key not in keys:
+                keys.append(key)
+    for key in keys:
+        snapshot = snapshots.get((resource_id, key, locale))
+        if snapshot:
+            return snapshot
+    return {}
+
+
+def _attach_live_source_snapshot(entry: dict, snapshot: dict, fetched_at: str):
+    entry["live_source_refetch_performed"] = True
+    entry["source_fetched_live_from_shopify"] = True
+    entry["source_fetched_at"] = fetched_at
+    entry["live_source_digest"] = snapshot.get("source_digest", "")
+    entry["live_source_text_hash"] = snapshot.get("source_text_hash", "")
+    entry["live_source_key"] = snapshot.get("key", "")
+    entry["live_existing_translations"] = snapshot.get("translations", [])
+    entry["live_translation_outdated"] = any(
+        translation.get("outdated") is True
+        for translation in snapshot.get("translations") or []
+    )
+
+
+def _entry_source_changed_against_live_snapshot(entry: dict, snapshot: dict):
+    candidate_digest = str(
+        (entry or {}).get("digest") or (entry or {}).get("source_digest") or ""
+    ).strip()
+    live_digest = str((snapshot or {}).get("source_digest") or "").strip()
+    if candidate_digest and live_digest:
+        return candidate_digest != live_digest
+    candidate_hash = str((entry or {}).get("source_text_hash") or "").strip()
+    if not candidate_hash:
+        candidate_hash = _source_text_hash((entry or {}).get("source_value") or "")
+    live_hash = str((snapshot or {}).get("source_text_hash") or "").strip()
+    return bool(candidate_hash and live_hash and candidate_hash != live_hash)
+
+
+def _mark_entry_live_source_blocked(entry: dict, reason: str, message: str):
+    entry["status"] = "blocked"
+    entry["source_changed_since_report"] = reason == STALE_SOURCE_BLOCKED_REASON
+    entry["live_source_blocked"] = True
+    entry["live_source_blocked_reason"] = reason
+    entry["blocking_reason"] = message
+    reasons = list(entry.get("blocking_reasons") or [])
+    if isinstance(entry.get("blocking_reasons"), str):
+        reasons = [item.strip() for item in entry["blocking_reasons"].split(",")]
+    reasons.append(reason)
+    entry["blocking_reasons"] = _unique_strings(reason for reason in reasons if reason)
+    human = list(entry.get("human_blocking_reasons") or [])
+    human.append(message)
+    entry["human_blocking_reasons"] = _unique_strings(human)
 
 
 def validate_and_update_all_languages_to_shopify(
@@ -1039,6 +1394,12 @@ def validate_and_update_all_languages_to_shopify(
         "write_ready_count": len(write_ready_entries),
         "updated_count": 0,
         "verified_count": 0,
+        "live_source_refetch_performed": False,
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
+        "live_source_refetch_summary": {},
+        "stale_candidate_blocked_count": 0,
+        "live_source_blocked_count": 0,
         "skipped_count": 0,
         "blocked_count": 0,
         "review_note_count": state.get("review_note_count", 0),
@@ -1078,6 +1439,85 @@ def validate_and_update_all_languages_to_shopify(
         "all_new_actions_no_write_confirmed": True,
     }
     if blocking_conditions:
+        payload["status"] = ALL_LANGUAGES_BLOCKED_STATUS
+        payload["audit_status"] = ALL_LANGUAGES_BLOCKED_STATUS
+        return _finalize_all_languages_update_payload(
+            payload,
+            background_report or {},
+            json_path,
+            html_path,
+            write_reports,
+        )
+
+    live_refetch_summary = _live_source_refetch_and_mark_stale(
+        write_ready_entries,
+        installation=installation,
+    )
+    payload["live_source_refetch_summary"] = live_refetch_summary
+    payload["live_source_refetch_performed"] = live_refetch_summary.get(
+        "live_source_refetch_performed",
+        False,
+    )
+    payload["source_fetched_live_from_shopify"] = live_refetch_summary.get(
+        "source_fetched_live_from_shopify",
+        False,
+    )
+    payload["source_fetched_at"] = live_refetch_summary.get("source_fetched_at", "")
+    payload["stale_candidate_blocked_count"] = int(
+        live_refetch_summary.get("stale_candidate_blocked_count") or 0
+    )
+    payload["live_source_blocked_count"] = payload[
+        "stale_candidate_blocked_count"
+    ] + int(live_refetch_summary.get("unverified_candidate_blocked_count") or 0)
+    payload["sanitized_errors"].extend(
+        live_refetch_summary.get("sanitized_errors") or []
+    )
+    payload_entries_by_id = {
+        entry.get("entry_id", ""): entry
+        for entry in payload["entries"]
+        if entry.get("entry_id")
+    }
+    for entry in write_ready_entries:
+        payload_entry = payload_entries_by_id.get(entry.get("entry_id", ""))
+        if payload_entry:
+            payload_entry.update(
+                {
+                    key: entry.get(key)
+                    for key in (
+                        "status",
+                        "blocking_reason",
+                        "blocking_reasons",
+                        "human_blocking_reasons",
+                        "live_source_refetch_performed",
+                        "source_fetched_live_from_shopify",
+                        "source_fetched_at",
+                        "live_source_digest",
+                        "live_source_text_hash",
+                        "live_source_key",
+                        "live_translation_outdated",
+                        "live_source_blocked",
+                        "live_source_blocked_reason",
+                        "source_changed_since_report",
+                    )
+                    if key in entry
+                }
+            )
+    write_ready_entries = [
+        entry for entry in write_ready_entries if not entry.get("live_source_blocked")
+    ]
+    payload["write_ready_count"] = len(write_ready_entries)
+    payload["preflight_summary"]["write_ready_count"] = len(write_ready_entries)
+    payload["preflight_summary"]["stale_candidate_blocked_count"] = payload[
+        "stale_candidate_blocked_count"
+    ]
+    payload["preflight_summary"]["live_source_blocked_count"] = payload[
+        "live_source_blocked_count"
+    ]
+    if not write_ready_entries:
+        payload["blocking_conditions"] = _unique_strings(
+            list(payload.get("blocking_conditions") or [])
+            + ["blocked_no_live_source_verified_write_candidates"]
+        )
         payload["status"] = ALL_LANGUAGES_BLOCKED_STATUS
         payload["audit_status"] = ALL_LANGUAGES_BLOCKED_STATUS
         return _finalize_all_languages_update_payload(
@@ -1237,6 +1677,7 @@ def validate_and_update_all_languages_to_shopify(
         payload["updated_count"]
         and payload["verified_count"] == payload["updated_count"]
         and payload["failed_count"] == 0
+        and int(payload.get("live_source_blocked_count") or 0) == 0
     ):
         payload["status"] = ALL_LANGUAGES_WRITTEN_AND_VERIFIED_STATUS
     elif payload["updated_count"] or payload["verified_count"]:
@@ -1528,6 +1969,12 @@ def execute_translation_workspace_single_locked_write(
         "mutation_performed": False,
         "readback_performed": False,
         "readback_matched": False,
+        "live_source_refetch_performed": False,
+        "source_fetched_live_from_shopify": False,
+        "source_fetched_at": "",
+        "live_source_refetch_summary": {},
+        "stale_candidate_blocked_count": 0,
+        "live_source_blocked_count": 0,
         "rollback_needed": False,
         "rollback_performed": False,
         "publish_performed": False,
@@ -1565,6 +2012,49 @@ def execute_translation_workspace_single_locked_write(
     )
     payload["blocking_conditions"] = _unique_strings(blocking_conditions)
     if payload["blocking_conditions"]:
+        payload["execution_status"] = REAL_WRITE_BLOCKED_STATUS
+        return _finalize_real_write_payload(payload, json_path, html_path, write_reports)
+
+    live_entry = dict(entry)
+    live_entry.update(
+        {
+            "locale": locale,
+            "resource_id": resource_id,
+            "key": key,
+            "digest": digest,
+            "source_value": source_value,
+            "source_text_hash": entry.get("source_text_hash")
+            or _source_text_hash(source_value),
+        }
+    )
+    live_refetch_summary = _live_source_refetch_and_mark_stale(
+        [live_entry],
+        installation=installation,
+    )
+    payload["live_source_refetch_summary"] = live_refetch_summary
+    payload["live_source_refetch_performed"] = live_refetch_summary.get(
+        "live_source_refetch_performed",
+        False,
+    )
+    payload["source_fetched_live_from_shopify"] = live_refetch_summary.get(
+        "source_fetched_live_from_shopify",
+        False,
+    )
+    payload["source_fetched_at"] = live_refetch_summary.get("source_fetched_at", "")
+    payload["stale_candidate_blocked_count"] = int(
+        live_refetch_summary.get("stale_candidate_blocked_count") or 0
+    )
+    payload["live_source_blocked_count"] = payload[
+        "stale_candidate_blocked_count"
+    ] + int(live_refetch_summary.get("unverified_candidate_blocked_count") or 0)
+    payload["sanitized_errors"].extend(
+        live_refetch_summary.get("sanitized_errors") or []
+    )
+    if live_entry.get("live_source_blocked"):
+        payload["blocking_conditions"] = _unique_strings(
+            list(payload.get("blocking_conditions") or [])
+            + [live_entry.get("live_source_blocked_reason") or STALE_SOURCE_BLOCKED_REASON]
+        )
         payload["execution_status"] = REAL_WRITE_BLOCKED_STATUS
         return _finalize_real_write_payload(payload, json_path, html_path, write_reports)
 
@@ -1939,6 +2429,14 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
         "shopify_key": source_key,
         "digest": digest,
         "source_digest": digest,
+        "source_text_hash": str(row.get("source_text_hash") or "").strip()
+        or _source_text_hash(source_value),
+        "source_changed_since_report": _safe_write_bool(
+            row.get("source_changed_since_report")
+            or row.get("source_changed_since_previous_report")
+            or row.get("source_changed_from_previous_report")
+        ),
+        "source_change_message": row.get("source_change_message", ""),
         "resource_type": row.get("resource_type", ""),
         "resource_note": row.get("resource_note", ""),
         "field_label": row.get("field_label", ""),
@@ -2071,6 +2569,8 @@ def _safe_write_block_reason(entry: dict, *, product_gid: str):
         return "blocked_existing_current_translation"
     if entry.get("product_identity_mismatch"):
         return "blocked_identity_review_required"
+    if entry.get("source_changed_since_report"):
+        return STALE_SOURCE_BLOCKED_REASON
     if entry.get("draft_blocked"):
         return "blocked_draft_status"
     notes = _safe_write_issue_text(entry)
@@ -2142,6 +2642,8 @@ def _selected_apply_block_reason(entry: dict, *, product_gid: str):
         return "blocked_forbidden_phrase_detected"
     if entry.get("product_identity_mismatch"):
         return "blocked_identity_review_required"
+    if entry.get("source_changed_since_report"):
+        return STALE_SOURCE_BLOCKED_REASON
     if entry.get("draft_blocked"):
         return "blocked_draft_status"
     if entry.get("validation_status") not in {"", "draft_ready_for_manual_review"}:
@@ -2223,8 +2725,14 @@ def _selected_apply_report_entry(entry: dict):
         "locale": entry.get("locale", ""),
         "resource_id": entry.get("resource_id", ""),
         "key": entry.get("key", ""),
+        "source_key": entry.get("source_key", ""),
+        "shopify_key": entry.get("shopify_key", ""),
         "digest": entry.get("digest", ""),
+        "source_digest": entry.get("source_digest") or entry.get("digest", ""),
         "source_value": entry.get("source_value", ""),
+        "source_text_hash": entry.get("source_text_hash", ""),
+        "source_changed_since_report": bool(entry.get("source_changed_since_report")),
+        "source_change_message": entry.get("source_change_message", ""),
         "previous_translation_value": entry.get("existing_translation_value", ""),
         "previous_translation_existed": bool(
             str(entry.get("existing_translation_value") or "").strip()
@@ -2330,6 +2838,9 @@ def _all_languages_update_entry_from_row(row: dict, *, product_gid: str):
         "digest": entry.get("digest", ""),
         "source_digest": entry.get("source_digest") or entry.get("digest", ""),
         "source_value": entry.get("source_value", ""),
+        "source_text_hash": entry.get("source_text_hash", ""),
+        "source_changed_since_report": bool(entry.get("source_changed_since_report")),
+        "source_change_message": entry.get("source_change_message", ""),
         "previous_translation_value": existing_value,
         "previous_translation_existed": bool(existing_value.strip()),
         "previous_translation_outdated": entry.get("existing_translation_outdated"),
@@ -2463,6 +2974,8 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_forbidden_phrase_detected")
     if entry.get("product_identity_mismatch"):
         reasons.append("blocked_identity_review_required")
+    if entry.get("source_changed_since_report"):
+        reasons.append(STALE_SOURCE_BLOCKED_REASON)
     reasons.extend(_all_languages_hard_review_blocking_reasons(entry))
     if field_key == "body_html":
         reasons.extend(_all_languages_body_html_blocking_reasons(entry))
@@ -3078,6 +3591,8 @@ def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | No
         return "Needs review before update."
     if reason == "blocked_media_alt_over_125_chars":
         return "Translation is too long."
+    if reason == STALE_SOURCE_BLOCKED_REASON:
+        return STALE_SOURCE_BLOCKED_MESSAGE
     return _all_languages_blocking_reason_label(reason)
 
 
@@ -3101,6 +3616,7 @@ def _all_languages_blocking_reason_label(reason: str):
         "blocked_missing_selected_product": "Select one product before updating Shopify.",
         "blocked_needs_review_status": "Needs review before update.",
         "blocked_no_write_ready_candidates": "Needs review before update.",
+        "blocked_no_live_source_verified_write_candidates": "Original product content changed — translate again before updating Shopify.",
         "blocked_not_customer_write_safe": "This is a technical field and is not updated automatically.",
         "blocked_option_context_missing": "Missing Shopify mapping.",
         "blocked_option_translation_code_only": "This is a technical field and is not updated automatically.",
@@ -3117,6 +3633,7 @@ def _all_languages_blocking_reason_label(reason: str):
         "blocked_shopify_installation_missing": "Shopify installation is missing.",
         "blocked_shopify_installation_incomplete": "Shopify installation is incomplete.",
         "blocked_source_empty": "Translation is empty.",
+        STALE_SOURCE_BLOCKED_REASON: STALE_SOURCE_BLOCKED_MESSAGE,
         "existing_translation_current_same_value": "Already up to date.",
         "media_alt_text_empty": "Media alt text is empty.",
         "readback_mismatch": "Shopify confirmation check did not match.",
@@ -5258,6 +5775,10 @@ def _safe_write_entry_id(resource_id: str, key: str, locale: str, digest: str):
     return "swr_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:18]
 
 
+def _source_text_hash(value):
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:24]
+
+
 def _safe_write_locale_options(rows: list[dict], selected_locale: str):
     seen = []
     for row in rows or []:
@@ -5898,6 +6419,8 @@ def _real_write_blocking_conditions(
         conditions.append("blocked_seo_description_over_160_chars")
     if not product_gid or not resource_id or product_gid != resource_id:
         conditions.append("blocked_product_identity_mismatch")
+    if entry.get("source_changed_since_report"):
+        conditions.append(STALE_SOURCE_BLOCKED_REASON)
     if not ack_matched:
         conditions.append("blocked_manual_ack_phrase_not_exact")
     if installation is None:
@@ -6308,6 +6831,10 @@ def _render_real_write_html(payload: dict):
             ("Resource ID", "resource_id"),
             ("Digest", "digest"),
             ("ACK Matched", "ack_matched"),
+            ("Live Source Refetch Performed", "live_source_refetch_performed"),
+            ("Source Fetched At", "source_fetched_at"),
+            ("Stale Candidate Blocked Count", "stale_candidate_blocked_count"),
+            ("Live Source Blocked Count", "live_source_blocked_count"),
             ("Mutation Called", "mutation_called"),
             ("translationsRegister Called", "translations_register_called"),
             ("Shopify Write Performed", "shopify_write_performed"),
@@ -6364,6 +6891,10 @@ def _render_selected_translations_html(payload: dict):
             ("Selected Entry Count", "selected_entry_count"),
             ("Selected Fields", "selected_fields"),
             ("ACK Matched", "ack_matched"),
+            ("Live Source Refetch Performed", "live_source_refetch_performed"),
+            ("Source Fetched At", "source_fetched_at"),
+            ("Stale Candidate Blocked Count", "stale_candidate_blocked_count"),
+            ("Live Source Blocked Count", "live_source_blocked_count"),
             ("Mutation Called", "mutation_called"),
             ("translationsRegister Called", "translations_register_called"),
             ("Shopify Write Performed", "shopify_write_performed"),
@@ -6418,6 +6949,10 @@ def _render_all_languages_update_html(payload: dict):
             ("Locales", "locales"),
             ("Checked Items", "candidate_count"),
             ("Raw write_ready_count", "write_ready_count"),
+            ("Live Source Refetch Performed", "live_source_refetch_performed"),
+            ("Source Fetched At", "source_fetched_at"),
+            ("Stale Candidate Blocked Count", "stale_candidate_blocked_count"),
+            ("Live Source Blocked Count", "live_source_blocked_count"),
             ("Updated in Shopify", "updated_count"),
             ("Confirmed After Update", "verified_count"),
             ("Product Titles Updated", "product_title_updated_count"),
