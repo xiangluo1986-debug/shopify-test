@@ -129,6 +129,8 @@ TRUSTPILOT_POST_SEND_TAG_WRITE_HTML_FILENAME = (
 )
 LOCAL_REVIEW_SEND_EVIDENCE = "Email sent, Shopify tag update needs attention."
 LOCAL_REVIEW_SEND_HISTORY_LABEL = "Sent via local Review & Send report"
+TIME_NOT_RECORDED_LABEL = "Time not recorded"
+DASHBOARD_STALE_COUNTER_WARNING = "Data may be stale. Run Shopify sync / candidate scan."
 TRUSTPILOT_EMAIL_SUBJECT = "How was your Kidstoylover order?"
 TRUSTPILOT_REVIEW_LINK = "https://www.trustpilot.com/evaluate/www.kidstoylover.com"
 PHASE_22621_DRAFTS_SEND_HELPER_MODULE = (
@@ -632,6 +634,7 @@ TRUSTPILOT_EMAIL_EVENT_TYPES = {
     "draft_created",
     "send_preflight",
     "send_execute",
+    "tag_write_audit",
 }
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
@@ -2210,6 +2213,17 @@ def _normalize_filters(params):
         page_size = DEFAULT_LIMIT
     if page_size not in LIMIT_OPTIONS:
         page_size = DEFAULT_LIMIT
+    try:
+        sent_page = int(_param_get(params, "sent_page") or 1)
+    except (TypeError, ValueError):
+        sent_page = 1
+    sent_page = max(sent_page, 1)
+    try:
+        sent_page_size = int(_param_get(params, "sent_page_size") or DEFAULT_LIMIT)
+    except (TypeError, ValueError):
+        sent_page_size = DEFAULT_LIMIT
+    if sent_page_size not in LIMIT_OPTIONS:
+        sent_page_size = DEFAULT_LIMIT
     return {
         "q": q,
         "status": status,
@@ -2217,7 +2231,16 @@ def _normalize_filters(params):
         "limit": limit,
         "page": page,
         "page_size": page_size,
-        "has_active_filters": bool(q or status != "all" or tag != "all" or limit != DEFAULT_LIMIT),
+        "sent_page": sent_page,
+        "sent_page_size": sent_page_size,
+        "has_active_filters": bool(
+            q
+            or status != "all"
+            or tag != "all"
+            or limit != DEFAULT_LIMIT
+            or sent_page != 1
+            or sent_page_size != DEFAULT_LIMIT
+        ),
     }
 
 
@@ -2254,12 +2277,52 @@ def _selected_page_size_options(selected_page_size):
     ]
 
 
+def _selected_sent_page_size_options(
+    selected_page_size,
+    review_page=1,
+    review_page_size=DEFAULT_LIMIT,
+):
+    return [
+        {
+            "value": value,
+            "label": str(value),
+            "selected": value == selected_page_size,
+            "url": _sent_queue_page_url(1, value, review_page, review_page_size),
+        }
+        for value in LIMIT_OPTIONS
+    ]
+
+
 def _review_queue_page_url(page, page_size):
     normalized_page = max(_int_or_zero(page), 1)
     normalized_page_size = _int_or_zero(page_size)
     if normalized_page_size not in LIMIT_OPTIONS:
         normalized_page_size = DEFAULT_LIMIT
     return "?" + urlencode({"page": normalized_page, "page_size": normalized_page_size})
+
+
+def _sent_queue_page_url(
+    sent_page,
+    sent_page_size,
+    review_page=1,
+    review_page_size=DEFAULT_LIMIT,
+):
+    normalized_sent_page = max(_int_or_zero(sent_page), 1)
+    normalized_sent_page_size = _int_or_zero(sent_page_size)
+    if normalized_sent_page_size not in LIMIT_OPTIONS:
+        normalized_sent_page_size = DEFAULT_LIMIT
+    normalized_review_page = max(_int_or_zero(review_page), 1)
+    normalized_review_page_size = _int_or_zero(review_page_size)
+    if normalized_review_page_size not in LIMIT_OPTIONS:
+        normalized_review_page_size = DEFAULT_LIMIT
+    return "?" + urlencode(
+        {
+            "page": normalized_review_page,
+            "page_size": normalized_review_page_size,
+            "sent_page": normalized_sent_page,
+            "sent_page_size": normalized_sent_page_size,
+        }
+    )
 
 
 def _filter_rows(rows, filters, section_status):
@@ -2838,6 +2901,14 @@ def _trustpilot_email_records(events, filters):
                 "blocker_reason": _safe_text(event.get("blocker_reason")),
                 "gmail_draft_created": event.get("gmail_draft_created"),
                 "email_sent": event.get("email_sent"),
+                "sent_at": _safe_text(event.get("event_time")) or _safe_text(event.get("loaded_at")),
+                "email_sent_at": _safe_text(event.get("event_time")) or _safe_text(event.get("loaded_at")),
+                "shopify_tag_written": event.get("shopify_tag_written") is True,
+                "tag_written_at": (
+                    _safe_text(event.get("event_time")) or _safe_text(event.get("loaded_at"))
+                    if event.get("shopify_tag_written") is True
+                    else ""
+                ),
                 "partial_draft_id": _safe_text(event.get("partial_draft_id"), max_length=80),
                 "partial_message_id": _safe_text(event.get("partial_message_id"), max_length=80),
                 "source_report_path": _safe_text(event.get("source_report_path")),
@@ -2940,6 +3011,7 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
     email_sent = (
         payload.get("email_sent") is True
         or payload.get("email_sent_confirmed") is True
+        or payload.get("source_email_sent_confirmed") is True
     )
     sent_count = _int_or_zero(payload.get("sent_count") or payload.get("source_sent_count"))
     if not (email_sent and sent_count == 1):
@@ -2961,11 +3033,56 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
     source_path = _safe_text(source_path, max_length=180)
     if not source_path:
         source_path = f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}"
-    return {
-        "event_time": _safe_text(
-            payload.get("timestamp") or payload.get("report_generated_at"),
-            max_length=80,
+    sent_at = _payload_time_value(
+        payload,
+        (
+            "sent_at",
+            "email_sent_at",
+            "email_sent_time",
+            "gmail_sent_at",
+            "source_email_sent_at",
+            "timestamp",
+            "report_generated_at",
         ),
+    )
+    tag_write_status = _safe_text(
+        payload.get("tag_write_status") or payload.get("auto_tag_write_status"),
+        max_length=120,
+    )
+    tag_written_at = (
+        _payload_time_value(
+            payload,
+            (
+                "tag_written_at",
+                "tag_write_completed_at",
+                "tag_write_timestamp",
+                "tag_write_report_generated_at",
+                "timestamp",
+                "report_generated_at",
+            ),
+        )
+        if shopify_tag_written
+        else ""
+    )
+    tag_write_attempted = (
+        payload.get("tag_write_attempted") is True
+        or payload.get("auto_tag_write_attempted") is True
+        or payload.get("shopify_tag_write_performed") is True
+        or payload.get("tag_write_performed") is True
+    )
+    tag_write_failed = bool(
+        tag_write_status.startswith("blocked")
+        and tag_write_attempted
+        and not shopify_tag_written
+    )
+    return {
+        "event_time": sent_at,
+        "sent_at": sent_at,
+        "email_sent_at": sent_at,
+        "tag_written_at": tag_written_at,
+        "tag_write_status": tag_write_status,
+        "tag_write_failed": tag_write_failed,
+        "tag_write_already_complete": payload.get("tag_write_already_complete") is True,
         "order_name": order_name,
         "masked_email": masked,
         "event_type": "send_execute",
@@ -2995,11 +3112,8 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
         "local_review_send_success": True,
         "shopify_tag_pending": not shopify_tag_written,
         "shopify_tag_written": shopify_tag_written,
-        "evidence_message": (
-            LOCAL_REVIEW_SEND_EVIDENCE
-            if not shopify_tag_written
-            else "Trustpilot email sent and Shopify tag updated."
-        ),
+        "shopify_tag_already_existed": payload.get("tag_write_already_complete") is True,
+        "evidence_message": "Sent via Review & Send",
         "trustpilot_history_label": LOCAL_REVIEW_SEND_HISTORY_LABEL,
     }
 
@@ -3021,7 +3135,20 @@ def _dedupe_local_review_send_records(records):
             continue
         if record.get("shopify_tag_written") is True and existing.get("shopify_tag_written") is not True:
             result_by_key[key] = record
+            continue
+        if _already_sent_time_sort_value(record, "sent_at") > _already_sent_time_sort_value(existing, "sent_at"):
+            result_by_key[key] = record
     return [result_by_key[key] for key in order_keys]
+
+
+def _payload_time_value(payload, keys):
+    if not isinstance(payload, dict):
+        return ""
+    for key in keys:
+        value = _safe_text(payload.get(key), max_length=80)
+        if value:
+            return value
+    return ""
 
 
 def _shopify_tag_write_confirmed_from_payload(payload):
@@ -4878,6 +5005,8 @@ def _operating_dashboard(
         last_60_days_scan=last_60_days_scan,
         page=filters["page"],
         page_size=filters["page_size"],
+        sent_page=filters["sent_page"],
+        sent_page_size=filters["sent_page_size"],
     )
     order_data_coverage = _dashboard_order_data_coverage(last_60_days_scan)
     return {
@@ -4985,7 +5114,13 @@ def _dashboard_order_data_coverage(scan):
     incomplete = scan_source != "full_shopify_orders"
     latest_sync = _safe_text(coverage.get("latest_review_request_sync_finished_at"), max_length=120)
     sync_window = _safe_text(coverage.get("last_shopify_order_sync_window"), max_length=120)
-    freshness = _safe_text(scan.get("timestamp") or scan.get("scan_window_ended_at"), max_length=120)
+    freshness = _safe_text(
+        scan.get("candidate_scan_freshness")
+        or scan.get("timestamp")
+        or scan.get("scan_window_ended_at"),
+        max_length=120,
+    )
+    stale_counter_warning = scan.get("stale_counter_warning") is True or incomplete
     return {
         "scan_source": scan_source or "unknown",
         "local_data_source_label": source_label,
@@ -4998,6 +5133,17 @@ def _dashboard_order_data_coverage(scan):
         "local_orders_with_shopify_tag_data": _int_or_zero(coverage.get("local_orders_with_shopify_tag_data")),
         "order_22530_found_label": "Yes" if coverage.get("order_22530_found") is True else "No",
         "candidate_scan_freshness": freshness or "Unknown",
+        "last_sent_record_time": _safe_text(scan.get("latest_sent_time"), max_length=120)
+        or TIME_NOT_RECORDED_LABEL,
+        "last_tag_write_time": _safe_text(scan.get("latest_tag_write_time"), max_length=120)
+        or TIME_NOT_RECORDED_LABEL,
+        "stale_counter_warning": stale_counter_warning,
+        "stale_counter_warning_message": (
+            _safe_text(scan.get("stale_counter_warning_message"), max_length=160)
+            or DASHBOARD_STALE_COUNTER_WARNING
+        )
+        if stale_counter_warning
+        else "",
         "coverage_warnings": warnings,
         "warning_label": ", ".join(warnings) if warnings else "None",
         "incomplete": incomplete,
@@ -5110,6 +5256,8 @@ def _build_review_send_state(params=None):
         last_60_days_scan=last_60_days_scan,
         page=filters["page"],
         page_size=filters["page_size"],
+        sent_page=filters["sent_page"],
+        sent_page_size=filters["sent_page_size"],
     )
     return {
         "filters": filters,
@@ -5184,6 +5332,13 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "eligible_candidate_count": scan["eligible_candidate_count"],
         "eligible_candidate_count_total": scan["eligible_candidate_count_total"],
         "already_sent_count": scan["already_sent_count"],
+        "latest_sent_order": scan["latest_sent_order"],
+        "latest_sent_time": scan["latest_sent_time"],
+        "latest_tag_write_time": scan["latest_tag_write_time"],
+        "sent_rows_with_time_count": scan["sent_rows_with_time_count"],
+        "sent_rows_without_time_count": scan["sent_rows_without_time_count"],
+        "stale_counter_warning": scan["stale_counter_warning"],
+        "stale_counter_warning_message": scan["stale_counter_warning_message"],
         "trustpilot_tagged_orders_excluded_count": scan["trustpilot_tagged_orders_excluded_count"],
         "blocked_count": scan["blocked_count"],
         "blocked_merged_group_count": scan["blocked_merged_group_count"],
@@ -5211,6 +5366,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "already_sent_summary": scan["already_sent_summary"],
         "scan_window_started_at": scan["scan_window_started_at"],
         "scan_window_ended_at": scan["scan_window_ended_at"],
+        "candidate_scan_freshness": scan["candidate_scan_freshness"],
         "date_fallback_order_count": scan["date_fallback_order_count"],
         "date_fallback_summary": scan["date_fallback_summary"],
         "candidate_22562_audit": _candidate_22562_alias_audit_from_scan(scan),
@@ -5235,6 +5391,76 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "all_new_actions_no_write_confirmed": True,
         "detected_issue_summary": _last_60_days_issue_summary(scan),
     }
+
+
+def build_review_request_dashboard_counts_audit_report(params=None):
+    params = params or {}
+    context = build_review_request_workbench_context(params)
+    dashboard = context["review_request_workbench"]["operating_dashboard"]
+    queue = dashboard["approval_queue"]
+    latest_sent_order = _safe_text(queue.get("latest_sent_order"), max_length=80)
+    latest_sent_time = _safe_text(queue.get("latest_sent_time"), max_length=120)
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_dashboard_counts_audit",
+        "task_name": "shopify_review_request_dashboard_counts_audit",
+        "phase": "5.30",
+        "mode": "dry-run-local-dashboard-counts-audit",
+        "audit_status": "dashboard_counts_audit_ready",
+        "report_status": "dashboard_counts_audit_ready",
+        "success": True,
+        "eligible_total": _int_or_zero(queue.get("eligible_candidate_count_total")),
+        "needs_review_visible_count": _int_or_zero(queue.get("review_queue_visible_count")),
+        "already_sent_total": _int_or_zero(queue.get("already_sent_count")),
+        "blocked_total": _int_or_zero(queue.get("blocked_count")),
+        "older_eligible_hidden": _int_or_zero(queue.get("hidden_older_eligible_count")),
+        "latest_sent_order": latest_sent_order,
+        "latest_sent_time": latest_sent_time,
+        "latest_tag_write_time": _safe_text(queue.get("latest_tag_write_time"), max_length=120),
+        "sent_rows_with_time_count": _int_or_zero(queue.get("sent_rows_with_time_count")),
+        "sent_rows_without_time_count": _int_or_zero(queue.get("sent_rows_without_time_count")),
+        "already_sent_page_size": _int_or_zero(queue.get("already_sent_page_size")),
+        "already_sent_visible_count": _int_or_zero(queue.get("already_sent_visible_count")),
+        "already_sent_page": _int_or_zero(queue.get("already_sent_page")),
+        "already_sent_total_pages": _int_or_zero(queue.get("already_sent_total_pages")),
+        "stale_counter_warning": queue.get("stale_counter_warning") is True
+        or dashboard["order_data_coverage"].get("stale_counter_warning") is True,
+        "stale_counter_warning_message": _safe_text(
+            queue.get("stale_counter_warning_message")
+            or dashboard["order_data_coverage"].get("stale_counter_warning_message"),
+            max_length=160,
+        ),
+        "candidate_scan_freshness": _safe_text(
+            dashboard["order_data_coverage"].get("candidate_scan_freshness"),
+            max_length=120,
+        ),
+        "counter_source": "live_local_scan_plus_latest_review_send_and_tag_evidence",
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "translations_register_called": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+    }
+    payload["detected_issue_summary"] = (
+        f"Dashboard counts audit: eligible={payload['eligible_total']}, "
+        f"already_sent={payload['already_sent_total']}, blocked={payload['blocked_total']}, "
+        f"latest_sent={latest_sent_order or 'none'} at {latest_sent_time or TIME_NOT_RECORDED_LABEL}. "
+        "No Gmail, Shopify, external review API, or translationsRegister calls were performed."
+    )
+    return payload
 
 
 def build_review_request_sent_tag_pending_repair_evidence(target_order):
@@ -6862,9 +7088,17 @@ def _approval_queue(
     last_60_days_scan=None,
     page=1,
     page_size=DEFAULT_LIMIT,
+    sent_page=1,
+    sent_page_size=DEFAULT_LIMIT,
 ):
     if last_60_days_scan:
-        return _approval_queue_from_last_60_days_scan(last_60_days_scan, page=page, page_size=page_size)
+        return _approval_queue_from_last_60_days_scan(
+            last_60_days_scan,
+            page=page,
+            page_size=page_size,
+            sent_page=sent_page,
+            sent_page_size=sent_page_size,
+        )
 
     already_sent_rows = _already_sent_rows(
         focus=focus,
@@ -6944,14 +7178,31 @@ def _approval_queue(
         ),
     )
     needs_review_rows.sort(key=_approval_queue_sort_key)
-    already_sent_rows = _collapse_merged_group_rows(_dedupe_queue_rows(already_sent_rows))
+    all_already_sent_rows = _finalize_already_sent_rows(
+        _collapse_merged_group_rows(_dedupe_already_sent_rows(already_sent_rows))
+    )
+    sent_pagination = _already_sent_pagination(
+        total_count=len(all_already_sent_rows),
+        sent_page=sent_page,
+        sent_page_size=sent_page_size,
+        review_page=page,
+        review_page_size=page_size,
+    )
+    already_sent_rows = [
+        _already_sent_visible_row(row, sent_pagination)
+        for row in all_already_sent_rows[
+            sent_pagination["start_index"] : sent_pagination["end_index"]
+        ]
+    ]
+    latest_sent = _latest_already_sent_record(all_already_sent_rows)
     ready_to_send_count = sum(1 for row in needs_review_rows if row["action_state"] == "review_send")
     not_ready_count = sum(1 for row in needs_review_rows if row["action_state"] == "not_ready")
     return {
         "needs_review_rows": needs_review_rows,
         "already_sent_rows": already_sent_rows,
+        "all_already_sent_rows": all_already_sent_rows,
         "needs_review_count": len(needs_review_rows),
-        "already_sent_count": len(already_sent_rows),
+        "already_sent_count": len(all_already_sent_rows),
         "ready_to_send_count": ready_to_send_count,
         "not_ready_count": not_ready_count,
         "duplicate_block_count": sum(
@@ -6962,10 +7213,22 @@ def _approval_queue(
         "review_send_action_enabled_count": ready_to_send_count,
         "email_sent_count": sum(
             1
-            for row in already_sent_rows
+            for row in all_already_sent_rows
             if "sent" in row.get("status", "").lower()
             or "sent" in row.get("evidence", "").lower()
         ),
+        **_already_sent_pagination_summary(
+            sent_pagination,
+            already_sent_rows,
+            all_already_sent_rows,
+            page,
+            page_size,
+        ),
+        "latest_sent_order": latest_sent.get("order", ""),
+        "latest_sent_time": latest_sent.get("sent_at") or latest_sent.get("tag_written_at") or "",
+        "latest_tag_write_time": _latest_tag_write_time(all_already_sent_rows),
+        "stale_counter_warning": False,
+        "stale_counter_warning_message": "",
         "merged_group_count": merged_group_summary["merged_group_count"],
         "merged_groups": merged_group_summary["merged_groups"],
         "shopify_tag_write_enabled_count": 0,
@@ -7005,6 +7268,70 @@ def _approval_queue_pagination(total_count, page=1, page_size=DEFAULT_LIMIT):
     }
 
 
+def _already_sent_pagination(
+    total_count,
+    sent_page=1,
+    sent_page_size=DEFAULT_LIMIT,
+    review_page=1,
+    review_page_size=DEFAULT_LIMIT,
+):
+    pagination = _approval_queue_pagination(
+        total_count=total_count,
+        page=sent_page,
+        page_size=sent_page_size,
+    )
+    previous_page = pagination["previous_page"]
+    next_page = pagination["next_page"]
+    pagination["previous_page_url"] = (
+        _sent_queue_page_url(previous_page, pagination["page_size"], review_page, review_page_size)
+        if previous_page
+        else ""
+    )
+    pagination["next_page_url"] = (
+        _sent_queue_page_url(next_page, pagination["page_size"], review_page, review_page_size)
+        if next_page
+        else ""
+    )
+    return pagination
+
+
+def _already_sent_visible_row(row, pagination):
+    visible = dict(row or {})
+    visible["sent_page"] = pagination["page"]
+    visible["sent_page_size"] = pagination["page_size"]
+    return visible
+
+
+def _already_sent_pagination_summary(
+    pagination,
+    visible_rows,
+    all_rows,
+    review_page=1,
+    review_page_size=DEFAULT_LIMIT,
+):
+    return {
+        "already_sent_page_size": pagination["page_size"],
+        "already_sent_page": pagination["page"],
+        "already_sent_total_pages": pagination["total_pages"],
+        "already_sent_has_previous": pagination["has_previous"],
+        "already_sent_has_next": pagination["has_next"],
+        "already_sent_previous_page": pagination["previous_page"],
+        "already_sent_next_page": pagination["next_page"],
+        "already_sent_previous_page_url": pagination["previous_page_url"],
+        "already_sent_next_page_url": pagination["next_page_url"],
+        "already_sent_showing_start": pagination["showing_start"],
+        "already_sent_showing_end": pagination["showing_end"],
+        "already_sent_visible_count": len(visible_rows or []),
+        "already_sent_page_size_options": _selected_sent_page_size_options(
+            pagination["page_size"],
+            review_page,
+            review_page_size,
+        ),
+        "sent_rows_with_time_count": sum(1 for row in all_rows or [] if row.get("sent_time_recorded")),
+        "sent_rows_without_time_count": sum(1 for row in all_rows or [] if not row.get("sent_time_recorded")),
+    }
+
+
 def _review_queue_visible_row(row, pagination):
     visible = dict(row or {})
     visible["visible_in_review_batch"] = True
@@ -7014,10 +7341,18 @@ def _review_queue_visible_row(row, pagination):
     return visible
 
 
-def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT):
+def _approval_queue_from_last_60_days_scan(
+    scan,
+    page=1,
+    page_size=DEFAULT_LIMIT,
+    sent_page=1,
+    sent_page_size=DEFAULT_LIMIT,
+):
     needs_review_source_rows = list(scan.get("eligible_queue_rows") or scan.get("review_queue_rows") or [])
     blocked_rows = list(scan.get("blocked_queue_rows") or [])
-    already_sent_rows = list(scan.get("already_sent_queue_rows") or [])
+    already_sent_source_rows = _finalize_already_sent_rows(
+        scan.get("already_sent_queue_rows") or []
+    )
     merged_groups = scan.get("merged_groups") or []
     eligible_total = _int_or_zero(
         scan.get("eligible_candidate_count_total") or scan.get("eligible_candidate_count") or len(needs_review_source_rows)
@@ -7031,16 +7366,31 @@ def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT
         _review_queue_visible_row(row, pagination)
         for row in needs_review_source_rows[pagination["start_index"] : pagination["end_index"]]
     ]
+    sent_pagination = _already_sent_pagination(
+        total_count=len(already_sent_source_rows),
+        sent_page=sent_page,
+        sent_page_size=sent_page_size,
+        review_page=pagination["page"],
+        review_page_size=pagination["page_size"],
+    )
+    already_sent_rows = [
+        _already_sent_visible_row(row, sent_pagination)
+        for row in already_sent_source_rows[
+            sent_pagination["start_index"] : sent_pagination["end_index"]
+        ]
+    ]
     blocked_visible_rows = blocked_rows[:BLOCKED_QUEUE_DISPLAY_LIMIT]
     ready_to_send_count = len(needs_review_source_rows) or eligible_total
     coverage_incomplete = scan.get("scan_source") != "full_shopify_orders"
+    latest_sent = _latest_already_sent_record(already_sent_source_rows)
     return {
         "needs_review_rows": needs_review_rows,
         "blocked_rows": blocked_visible_rows,
         "already_sent_rows": already_sent_rows,
+        "all_already_sent_rows": already_sent_source_rows,
         "all_needs_review_rows": needs_review_source_rows,
         "needs_review_count": ready_to_send_count,
-        "already_sent_count": len(already_sent_rows),
+        "already_sent_count": len(already_sent_source_rows),
         "ready_to_send_count": ready_to_send_count,
         "not_ready_count": len(blocked_rows),
         "blocked_count": len(blocked_rows),
@@ -7082,6 +7432,28 @@ def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT
         "review_queue_overflow_count": max(ready_to_send_count - pagination["showing_end"], 0),
         "review_queue_page_size_options": _selected_page_size_options(pagination["page_size"]),
         "review_queue_sort_order": scan.get("review_queue_sort_order") or list(REVIEW_QUEUE_SORT_ORDER),
+        **_already_sent_pagination_summary(
+            sent_pagination,
+            already_sent_rows,
+            already_sent_source_rows,
+            pagination["page"],
+            pagination["page_size"],
+        ),
+        "latest_sent_order": scan.get("latest_sent_order") or latest_sent.get("order", ""),
+        "latest_sent_time": (
+            scan.get("latest_sent_time")
+            or latest_sent.get("sent_at")
+            or latest_sent.get("tag_written_at")
+            or ""
+        ),
+        "latest_tag_write_time": scan.get("latest_tag_write_time") or _latest_tag_write_time(already_sent_source_rows),
+        "stale_counter_warning": scan.get("stale_counter_warning") is True,
+        "stale_counter_warning_message": _safe_text(
+            scan.get("stale_counter_warning_message") or DASHBOARD_STALE_COUNTER_WARNING,
+            max_length=160,
+        )
+        if scan.get("stale_counter_warning") is True
+        else "",
         "shopify_tag_write_enabled_count": 0,
         "empty_message": (
             "Order data is incomplete. Run the 60-day Shopify sync before trusting the candidate list."
@@ -7101,7 +7473,15 @@ def _approval_queue_from_last_60_days_scan(scan, page=1, page_size=DEFAULT_LIMIT
             "hidden_older_eligible_count": _int_or_zero(scan.get("hidden_older_eligible_count")),
             "blocked_count": scan.get("blocked_count", 0),
             "blocked_ebay_order_count": scan.get("blocked_ebay_order_count", 0),
-            "already_sent_count": scan.get("already_sent_count", 0),
+            "already_sent_count": len(already_sent_source_rows),
+            "latest_sent_order": scan.get("latest_sent_order") or latest_sent.get("order", ""),
+            "latest_sent_time": (
+                scan.get("latest_sent_time")
+                or latest_sent.get("sent_at")
+                or latest_sent.get("tag_written_at")
+                or ""
+            ),
+            "latest_tag_write_time": scan.get("latest_tag_write_time") or _latest_tag_write_time(already_sent_source_rows),
             "window_days": scan.get("window_days", LAST_60_DAY_SCAN_WINDOW_DAYS),
             "scan_source": scan.get("scan_source", "unknown"),
             "coverage_incomplete": coverage_incomplete,
@@ -7212,7 +7592,9 @@ def _last_60_days_candidate_scan(
         source_row_groups=source_row_groups,
     )
     queue_rows = _dedupe_queue_rows(queue_rows)
-    already_sent_rows = _collapse_merged_group_rows(_dedupe_queue_rows(already_sent_rows))
+    already_sent_rows = _finalize_already_sent_rows(
+        _collapse_merged_group_rows(_dedupe_already_sent_rows(already_sent_rows))
+    )
     eligible_rows = [
         row for row in queue_rows if row.get("action_state") == "review_send"
     ]
@@ -7264,10 +7646,17 @@ def _last_60_days_candidate_scan(
     order_22562_diagnosis = _focus_order_diagnosis("#22562", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     eligible_candidate_count_total = len(eligible_rows)
     review_queue_visible_count = len(review_queue_rows)
+    latest_sent = _latest_already_sent_record(already_sent_rows)
+    latest_tag_write_time = _latest_tag_write_time(already_sent_rows)
+    stale_counter_warning = bool(
+        order_data_coverage["scan_source"] != "full_shopify_orders"
+        or order_data_coverage.get("coverage_warnings")
+    )
     return {
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "scan_window_started_at": cutoff.isoformat(),
         "scan_window_ended_at": now.isoformat(),
+        "candidate_scan_freshness": now.isoformat(),
         "scan_source": order_data_coverage["scan_source"],
         "coverage_warnings": order_data_coverage["coverage_warnings"],
         "order_data_coverage": order_data_coverage,
@@ -7298,6 +7687,13 @@ def _last_60_days_candidate_scan(
         "eligible_candidate_count": eligible_candidate_count_total,
         "eligible_candidate_count_total": eligible_candidate_count_total,
         "already_sent_count": len(already_sent_rows),
+        "latest_sent_order": latest_sent.get("order", ""),
+        "latest_sent_time": latest_sent.get("sent_at") or latest_sent.get("tag_written_at") or "",
+        "latest_tag_write_time": latest_tag_write_time,
+        "sent_rows_with_time_count": sum(1 for row in already_sent_rows if row.get("sent_time_recorded")),
+        "sent_rows_without_time_count": sum(1 for row in already_sent_rows if not row.get("sent_time_recorded")),
+        "stale_counter_warning": stale_counter_warning,
+        "stale_counter_warning_message": DASHBOARD_STALE_COUNTER_WARNING if stale_counter_warning else "",
         "trustpilot_tagged_orders_excluded_count": sum(
             1 for row in already_sent_rows if row.get("trustpilot_tag_detected") is True
         ),
@@ -8312,8 +8708,101 @@ def _blocked_queue_sort_key(row):
 
 
 def _already_sent_sort_key(row):
-    preferred = {"#22621": 0, "#22620": 1}
-    return (preferred.get(row.get("order"), 9), row.get("order", ""))
+    return (
+        -_already_sent_time_sort_value(row, "sent_at"),
+        -_already_sent_time_sort_value(row, "tag_written_at"),
+        -_review_queue_date_value(row),
+        -_order_number_value(row.get("order")),
+        _safe_text(row.get("order"), max_length=80),
+    )
+
+
+def _finalize_already_sent_rows(rows):
+    finalized = []
+    for row in _dedupe_already_sent_rows(rows):
+        finalized.append(_apply_already_sent_timing_fields(dict(row or {})))
+    finalized.sort(key=_already_sent_sort_key)
+    return finalized
+
+
+def _dedupe_already_sent_rows(rows):
+    rows_by_order = {}
+    order_sequence = []
+    for row in rows or []:
+        order_name = _safe_text(row.get("order") or row.get("order_name"), max_length=80)
+        if not order_name:
+            continue
+        row = dict(row)
+        row["order"] = order_name
+        existing = rows_by_order.get(order_name)
+        if not existing:
+            rows_by_order[order_name] = row
+            order_sequence.append(order_name)
+            continue
+        if _already_sent_row_quality(row) > _already_sent_row_quality(existing):
+            rows_by_order[order_name] = row
+    return [rows_by_order[order_name] for order_name in order_sequence]
+
+
+def _already_sent_row_quality(row):
+    return (
+        1 if row.get("shopify_tag_written") is True else 0,
+        1 if row.get("shopify_tag_already_existed") is True else 0,
+        1 if row.get("local_review_send_success") is True else 0,
+        1 if _safe_text(row.get("sent_at") or row.get("email_sent_at") or row.get("event_time"), max_length=80) else 0,
+        _already_sent_time_sort_value(row, "sent_at"),
+        _already_sent_time_sort_value(row, "tag_written_at"),
+    )
+
+
+def _apply_already_sent_timing_fields(row):
+    sent_at = _safe_text(row.get("sent_at") or row.get("email_sent_at"), max_length=80)
+    tag_written_at = _safe_text(row.get("tag_written_at"), max_length=80)
+    status_label = _safe_text(row.get("shopify_tag_status_label"), max_length=120)
+    if not status_label:
+        status_label = _already_sent_tag_status_label(
+            row,
+            {},
+            shopify_tag_pending=row.get("shopify_tag_pending") is True,
+            shopify_tag_written=row.get("shopify_tag_written") is True,
+            shopify_tag_already_existed=row.get("shopify_tag_already_existed") is True,
+            tag_write_failed=row.get("tag_write_failed") is True,
+            trustpilot_tag_detected=row.get("trustpilot_tag_detected") is True,
+        )
+    row.update(
+        {
+            "sent_at": sent_at,
+            "email_sent_at": sent_at,
+            "sent_time_label": _time_label(sent_at),
+            "sent_time_recorded": bool(sent_at),
+            "tag_written_at": tag_written_at,
+            "tag_written_time_label": _time_label(tag_written_at),
+            "shopify_tag_status_label": status_label,
+            "shopify_tag_status_class": _already_sent_tag_status_class(status_label),
+        }
+    )
+    return row
+
+
+def _already_sent_time_sort_value(row, key):
+    parsed = _parse_datetime_value((row or {}).get(key))
+    return parsed.timestamp() if parsed else 0
+
+
+def _latest_already_sent_record(rows):
+    sorted_rows = _finalize_already_sent_rows(rows)
+    return sorted_rows[0] if sorted_rows else {}
+
+
+def _latest_tag_write_time(rows):
+    values = [
+        _safe_text(row.get("tag_written_at"), max_length=80)
+        for row in rows or []
+        if _safe_text(row.get("tag_written_at"), max_length=80)
+    ]
+    if not values:
+        return ""
+    return max(values, key=lambda value: _parse_datetime_value(value) or datetime.min.replace(tzinfo=timezone.utc))
 
 
 def _apply_review_queue_selection(eligible_rows, batch_size=REVIEW_QUEUE_BATCH_SIZE):
@@ -8825,9 +9314,20 @@ def _already_sent_summary(row):
         "customer_history_match_label": _safe_text(row.get("customer_history_match_label"), max_length=160),
         "previous_trustpilot_order_names": _dedupe_order_names(row.get("previous_trustpilot_order_names") or []),
         "previous_trustpilot_tag_values": _dedupe_text(row.get("previous_trustpilot_tag_values") or []),
+        "sent_at": _safe_text(row.get("sent_at"), max_length=80),
+        "email_sent_at": _safe_text(row.get("email_sent_at"), max_length=80),
+        "sent_time_label": _safe_text(row.get("sent_time_label"), max_length=120) or TIME_NOT_RECORDED_LABEL,
+        "sent_time_recorded": row.get("sent_time_recorded") is True,
+        "tag_written_at": _safe_text(row.get("tag_written_at"), max_length=80),
+        "tag_written_time_label": _safe_text(row.get("tag_written_time_label"), max_length=120)
+        or TIME_NOT_RECORDED_LABEL,
         "trustpilot_email_status": _safe_text(row.get("trustpilot_email_status"), max_length=120),
         "shopify_tag_pending": row.get("shopify_tag_pending") is True,
+        "shopify_tag_written": row.get("shopify_tag_written") is True,
+        "shopify_tag_already_existed": row.get("shopify_tag_already_existed") is True,
+        "tag_write_failed": row.get("tag_write_failed") is True,
         "shopify_tag_status_label": _safe_text(row.get("shopify_tag_status_label"), max_length=120),
+        "shopify_tag_status_class": _safe_text(row.get("shopify_tag_status_class"), max_length=80),
         "evidence": _safe_text(row.get("evidence"), max_length=500),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
         "local_shopify_tags": _dedupe_text(row.get("local_shopify_tags") or []),
@@ -9927,8 +10427,8 @@ def _already_sent_rows(focus, trustpilot_email_records, invitation_history, bloc
             ),
             "status": "Already sent",
             "status_class": "rrw-badge-ok",
-            "evidence": "Trustpilot email already sent and recorded.",
-            "reason": "Trustpilot email already sent and recorded.",
+            "evidence": "Sent via Review & Send",
+            "reason": "Sent via Review & Send",
             "action_state": "already_sent",
             "prior_trustpilot_order_name": prior_order,
         }
@@ -9972,9 +10472,16 @@ def _already_sent_rows(focus, trustpilot_email_records, invitation_history, bloc
                 "reason": evidence_label,
                 "action_state": "already_sent",
                 "prior_trustpilot_order_name": order_name,
+                "sent_at": _safe_text(record.get("sent_at") or record.get("event_time"), max_length=80),
+                "email_sent_at": _safe_text(record.get("email_sent_at") or record.get("event_time"), max_length=80),
+                "tag_written_at": _safe_text(record.get("tag_written_at"), max_length=80),
+                "tag_write_status": _safe_text(record.get("tag_write_status"), max_length=120),
+                "tag_write_failed": record.get("tag_write_failed") is True,
+                "tag_write_already_complete": record.get("tag_write_already_complete") is True,
                 "local_review_send_success": local_review_send_success,
                 "shopify_tag_pending": shopify_tag_pending,
                 "shopify_tag_written": record.get("shopify_tag_written") is True,
+                "shopify_tag_already_existed": record.get("shopify_tag_already_existed") is True,
             }
         )
     for row in invitation_history or []:
@@ -9987,13 +10494,17 @@ def _already_sent_rows(focus, trustpilot_email_records, invitation_history, bloc
                 "customer": row.get("masked_email") or "Masked in reports",
                 "status": "Already sent",
                 "status_class": "rrw-badge-ok",
-                "evidence": "Trustpilot tag or invitation history found.",
-                "reason": "Trustpilot tag or invitation history found.",
+                "evidence": "Shopify tag found",
+                "reason": "Shopify tag found",
                 "action_state": "already_sent",
                 "prior_trustpilot_order_name": order_name,
+                "shopify_tag_written": True,
+                "shopify_tag_already_existed": True,
+                "trustpilot_tag_detected": True,
+                "trustpilot_tags": _dedupe_text(row.get("trustpilot_tags") or []),
             }
         )
-    return _dedupe_queue_rows(rows)
+    return _dedupe_already_sent_rows(rows)
 
 
 def _approval_queue_order_names(
@@ -10562,6 +11073,123 @@ def _local_review_send_success_order_map():
     }
 
 
+def _sent_time_from_sources(*sources):
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        has_send_evidence = (
+            source.get("email_sent") is True
+            or source.get("email_sent_confirmed") is True
+            or source.get("source_email_sent_confirmed") is True
+            or source.get("local_review_send_success") is True
+            or _safe_text(source.get("event_type"), max_length=80) in {"send_execute", "real_send_execute"}
+        )
+        if not has_send_evidence:
+            continue
+        value = _first_text(
+            source,
+            (
+                "sent_at",
+                "email_sent_at",
+                "email_sent_time",
+                "gmail_sent_at",
+                "source_email_sent_at",
+                "event_time",
+                "timestamp",
+                "report_generated_at",
+            ),
+        )
+        if value:
+            return _safe_text(value, max_length=80)
+    return ""
+
+
+def _tag_written_time_from_sources(*sources):
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        has_tag_write_evidence = (
+            source.get("shopify_tag_written") is True
+            or source.get("shopify_tag_write_confirmed") is True
+            or source.get("source_shopify_tag_write_confirmed") is True
+            or source.get("tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+            or source.get("auto_tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+        )
+        if not has_tag_write_evidence:
+            continue
+        value = _first_text(
+            source,
+            (
+                "tag_written_at",
+                "tag_write_completed_at",
+                "tag_write_timestamp",
+                "event_time",
+                "timestamp",
+                "report_generated_at",
+            ),
+        )
+        if value:
+            return _safe_text(value, max_length=80)
+    return ""
+
+
+def _tag_write_failed_from_sources(*sources):
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        status = _safe_text(
+            source.get("tag_write_status") or source.get("auto_tag_write_status"),
+            max_length=120,
+        )
+        attempted = (
+            source.get("tag_write_attempted") is True
+            or source.get("auto_tag_write_attempted") is True
+            or source.get("shopify_tag_write_performed") is True
+            or source.get("tag_write_performed") is True
+        )
+        if status.startswith("blocked") and attempted and not _shopify_tag_write_confirmed_from_payload(source):
+            return True
+    return False
+
+
+def _already_sent_tag_status_label(
+    row,
+    source_row,
+    shopify_tag_pending=False,
+    shopify_tag_written=False,
+    shopify_tag_already_existed=False,
+    tag_write_failed=False,
+    trustpilot_tag_detected=False,
+):
+    if tag_write_failed:
+        return "Tag write failed"
+    if shopify_tag_pending:
+        return "Tag pending"
+    if shopify_tag_already_existed:
+        return "Shopify tag already existed"
+    if shopify_tag_written:
+        return "Tag written"
+    if trustpilot_tag_detected or has_trustpilot_sent_tag(row.get("order_tags_display") or row.get("tags") or []):
+        return "Shopify tag already existed"
+    if source_row.get("local_review_send_success") is True or row.get("local_review_send_success") is True:
+        return "Tag pending"
+    return "Tag pending"
+
+
+def _already_sent_tag_status_class(label):
+    if label == "Tag write failed":
+        return "rrw-badge-bad"
+    if label == "Tag pending":
+        return "rrw-badge-warn"
+    if label in {"Tag written", "Shopify tag already existed"}:
+        return "rrw-badge-ok"
+    return "rrw-badge-muted"
+
+
+def _time_label(value):
+    return _safe_text(value, max_length=120) or TIME_NOT_RECORDED_LABEL
+
+
 def _customer_order_sequence(order, customer_orders):
     order_id = order.get("id")
     order_name = _safe_text(order.get("order_name"), max_length=80)
@@ -10791,6 +11419,31 @@ def _apply_queue_row_context(
     )
     if has_trustpilot_sent_tag(tags):
         shopify_tag_pending = False
+    sent_at = _sent_time_from_sources(row, source_row, local_context)
+    tag_written_at = _tag_written_time_from_sources(row, source_row, local_context)
+    tag_write_failed = _tag_write_failed_from_sources(row, source_row, local_context)
+    shopify_tag_already_existed = (
+        row.get("shopify_tag_already_existed") is True
+        or source_row.get("shopify_tag_already_existed") is True
+        or local_context.get("shopify_tag_already_existed") is True
+    )
+    shopify_tag_written = bool(
+        has_trustpilot_sent_tag(tags)
+        or row_shopify_tag_written
+        or source_shopify_tag_written
+        or row.get("shopify_tag_written") is True
+        or source_row.get("shopify_tag_written") is True
+        or local_context.get("shopify_tag_written") is True
+    )
+    shopify_tag_status = _already_sent_tag_status_label(
+        row,
+        source_row,
+        shopify_tag_pending=shopify_tag_pending,
+        shopify_tag_written=shopify_tag_written,
+        shopify_tag_already_existed=shopify_tag_already_existed,
+        tag_write_failed=tag_write_failed,
+        trustpilot_tag_detected=trustpilot_state["trustpilot_tag_detected"],
+    )
     history_label = _trustpilot_history_label(
         order_name=order_name,
         action_state=action_state,
@@ -10904,21 +11557,19 @@ def _apply_queue_row_context(
                     "Already sent" if trustpilot_sent else "No previous Trustpilot email found"
                 )
             ),
+            "sent_at": sent_at,
+            "email_sent_at": sent_at,
+            "sent_time_label": _time_label(sent_at),
+            "sent_time_recorded": bool(sent_at),
+            "tag_written_at": tag_written_at,
+            "tag_written_time_label": _time_label(tag_written_at),
+            "tag_write_failed": tag_write_failed,
+            "shopify_tag_written": shopify_tag_written,
+            "shopify_tag_already_existed": shopify_tag_already_existed,
             "local_review_send_success": local_review_send_success,
             "shopify_tag_pending": shopify_tag_pending,
-            "shopify_tag_status_label": (
-                "Tag pending"
-                if shopify_tag_pending
-                else (
-                    "Tag written"
-                    if (
-                        has_trustpilot_sent_tag(tags)
-                        or row_shopify_tag_written
-                        or source_shopify_tag_written
-                    )
-                    else ""
-                )
-            ),
+            "shopify_tag_status_label": shopify_tag_status,
+            "shopify_tag_status_class": _already_sent_tag_status_class(shopify_tag_status),
             "customer_history_match_label": _customer_history_match_label(
                 customer_history_source,
                 customer_history_confidence,

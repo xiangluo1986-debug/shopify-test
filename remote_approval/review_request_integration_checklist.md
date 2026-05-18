@@ -198,6 +198,20 @@ Phase 0.2 automation decision:
 - [x] The Trustpilot post-send tag-write task can use the same Django/web
   post-send audit builder as the Review Request workbench before any Shopify
   tag-write approval branch runs.
+
+#### Phase 5.30 Dashboard Counter Refresh and Already Sent Pagination
+
+- [x] Recalculate dashboard counters from the same live local scan used by the
+  visible Review Requests queue, merged with latest Review & Send, post-send
+  audit, tag-write reports, and local Shopify tag evidence.
+- [x] Show candidate scan freshness, last sent record time, last tag-write time,
+  and a stale-data warning when local sync/candidate evidence may be stale.
+- [x] Sort Already sent newest first, show sent time or `Time not recorded`,
+  show tag status/evidence safely, and paginate independently with
+  `sent_page` / `sent_page_size`.
+- [x] Add `shopify_review_request_dashboard_counts_audit` as a local no-write
+  audit task. It must not call Gmail, Shopify, external review APIs, or
+  `translationsRegister`.
 - [x] If host-side post-send audit evidence is missing or stale, the task checks
   the web/container audit builder and local history-ledger reports before
   deciding whether the sent order is ready.

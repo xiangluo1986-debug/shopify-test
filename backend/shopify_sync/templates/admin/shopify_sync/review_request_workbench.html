@@ -458,6 +458,11 @@
         <p>Orders with local tag data: {{ dashboard.order_data_coverage.local_orders_with_shopify_tag_data }}</p>
         <p>#22530 found: {{ dashboard.order_data_coverage.order_22530_found_label }}</p>
         <p>Candidate scan freshness: {{ dashboard.order_data_coverage.candidate_scan_freshness }}</p>
+        <p>Last sent record time: {{ dashboard.order_data_coverage.last_sent_record_time }}</p>
+        <p>Last tag write time: {{ dashboard.order_data_coverage.last_tag_write_time }}</p>
+        {% if dashboard.order_data_coverage.stale_counter_warning %}
+            <div class="rrw-warning">{{ dashboard.order_data_coverage.stale_counter_warning_message }}</div>
+        {% endif %}
         <p>Coverage warnings: {{ dashboard.order_data_coverage.warning_label }}</p>
     </div>
 
@@ -630,13 +635,41 @@
     <div class="rrw-section">
         <h2>Already sent</h2>
         <p class="rrw-muted">Successful Review &amp; Send now runs the one-order Shopify tag update automatically. Existing pending rows still need the manual post-send tag write.</p>
+        <p class="rrw-note">
+            Showing {{ dashboard.approval_queue.already_sent_showing_start }}&ndash;{{ dashboard.approval_queue.already_sent_showing_end }} of
+            {{ dashboard.approval_queue.already_sent_count }} sent records.
+        </p>
+        <div class="rrw-pagination">
+            {% if dashboard.approval_queue.already_sent_has_previous %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.already_sent_previous_page_url }}">Previous</a>
+            {% else %}
+                <span class="rrw-page-disabled">Previous</span>
+            {% endif %}
+            <span class="rrw-page-current">
+                Page {{ dashboard.approval_queue.already_sent_page }} of {{ dashboard.approval_queue.already_sent_total_pages }}
+            </span>
+            {% if dashboard.approval_queue.already_sent_has_next %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.already_sent_next_page_url }}">Next</a>
+            {% else %}
+                <span class="rrw-page-disabled">Next</span>
+            {% endif %}
+            <span class="rrw-muted">Rows per page:</span>
+            {% for option in dashboard.approval_queue.already_sent_page_size_options %}
+                {% if option.selected %}
+                    <span class="rrw-page-current">{{ option.label }}</span>
+                {% else %}
+                    <a class="rrw-page-link" href="{{ option.url }}">{{ option.label }}</a>
+                {% endif %}
+            {% endfor %}
+        </div>
         <table class="rrw-table">
             <thead>
                 <tr>
                     <th>Order</th>
                     <th>Customer</th>
-                    <th>Orders</th>
+                    <th>Sent time</th>
                     <th>Trustpilot email</th>
+                    <th>Tag status</th>
                     <th>Evidence</th>
                     <th>Tags</th>
                 </tr>
@@ -651,20 +684,14 @@
                                 <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
                             {% endif %}
                         </td>
-                        <td>
-                            {{ row.customer_orders_display }}
-                            {% if row.merged_order_group %}
-                                <div><span class="rrw-pill rrw-badge-info">Merged order group</span></div>
-                            {% endif %}
-                            <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
-                            <div class="rrw-secondary-line">{{ row.customer_history_match_label }}</div>
-                        </td>
+                        <td>{{ row.sent_time_label }}</td>
                         <td>
                             <span class="rrw-badge {{ row.status_class }}">{{ row.trustpilot_email_status }}</span>
-                            {% if row.shopify_tag_pending %}
-                                <span class="rrw-pill rrw-badge-warn">Tag pending</span>
-                            {% elif row.shopify_tag_status_label %}
-                                <span class="rrw-pill rrw-badge-ok">{{ row.shopify_tag_status_label }}</span>
+                        </td>
+                        <td>
+                            <span class="rrw-pill {{ row.shopify_tag_status_class }}">{{ row.shopify_tag_status_label }}</span>
+                            {% if row.tag_written_at %}
+                                <div class="rrw-secondary-line">Tag written: {{ row.tag_written_time_label }}</div>
                             {% endif %}
                         </td>
                         <td>{{ row.evidence }}</td>
@@ -675,10 +702,25 @@
                         </td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="6" class="rrw-muted">No sent Trustpilot emails are listed right now.</td></tr>
+                    <tr><td colspan="7" class="rrw-muted">No sent Trustpilot emails are listed right now.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
+        <div class="rrw-pagination">
+            {% if dashboard.approval_queue.already_sent_has_previous %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.already_sent_previous_page_url }}">Previous</a>
+            {% else %}
+                <span class="rrw-page-disabled">Previous</span>
+            {% endif %}
+            <span class="rrw-page-current">
+                Page {{ dashboard.approval_queue.already_sent_page }} of {{ dashboard.approval_queue.already_sent_total_pages }}
+            </span>
+            {% if dashboard.approval_queue.already_sent_has_next %}
+                <a class="rrw-page-link" href="{{ dashboard.approval_queue.already_sent_next_page_url }}">Next</a>
+            {% else %}
+                <span class="rrw-page-disabled">Next</span>
+            {% endif %}
+        </div>
     </div>
 
     <details class="rrw-section">

@@ -741,7 +741,13 @@ def _event_from_mapping(report, item, event_type, source_section):
         "email_sent": _source_bool(
             item,
             data,
-            ("email_sent", "email_sent_confirmed", "gmail_send_performed"),
+            (
+                "email_sent",
+                "email_sent_confirmed",
+                "source_email_sent_confirmed",
+                "gmail_send_performed",
+                "source_gmail_send_confirmed",
+            ),
         ),
         "gmail_draft_created": _source_bool(
             item,

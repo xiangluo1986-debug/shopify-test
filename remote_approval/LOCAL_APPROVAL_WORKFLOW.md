@@ -72,6 +72,7 @@ python remote_approval_runner.py --task shopify_review_request_customer_history_
 python remote_approval_runner.py --task shopify_review_request_review_send_reuse_gmail_helper_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_post_send_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_dashboard_counts_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -178,6 +179,14 @@ the Django/web audit builder, the latest Review & Send report, and the latest
 post-send audit were found. If the audited send is found, the report should show
 `tag_write_ready=true`, `email_sent_confirmed=true`, `sent_count=1`, and no
 Shopify API call or write.
+
+Phase 5.30 adds `shopify_review_request_dashboard_counts_audit` for the admin
+Review Requests dashboard. It reports eligible total, visible Needs review
+count, Already sent total, blocked total, older eligible hidden, latest sent
+order/time, sent row timing coverage, Already sent page size/visible count, and
+whether the dashboard should show a stale-data warning. It reads local Django
+state and local reports only; it must not call Gmail, Shopify, external review
+APIs, or `translationsRegister`.
 
 Phase 5.29 makes the admin `Review & Send` POST complete the same one-order
 Shopify tag update automatically after Gmail drafts.send succeeds. The POST

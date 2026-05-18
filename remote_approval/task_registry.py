@@ -42,6 +42,9 @@ from remote_approval.tasks.shopify_review_request_gmail_oauth_setup_helper_task 
 from remote_approval.tasks.shopify_review_request_history_ledger_audit_task import (
     run_shopify_review_request_history_ledger_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_dashboard_counts_audit_task import (
+    run_shopify_review_request_dashboard_counts_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_kudosi_api_403_diagnostics_task import (
     run_shopify_review_request_kudosi_api_403_diagnostics_task,
 )
@@ -413,6 +416,7 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_gmail_readiness_package": run_shopify_review_request_gmail_readiness_package_task,
     "shopify_review_request_gmail_oauth_setup_helper": run_shopify_review_request_gmail_oauth_setup_helper_task,
     "shopify_review_request_history_ledger_audit": run_shopify_review_request_history_ledger_audit_task,
+    "shopify_review_request_dashboard_counts_audit": run_shopify_review_request_dashboard_counts_audit_task,
     "shopify_review_request_kudosi_api_403_diagnostics": run_shopify_review_request_kudosi_api_403_diagnostics_task,
     "shopify_review_request_kudosi_api_capability_probe": run_shopify_review_request_kudosi_api_capability_probe_task,
     "shopify_review_request_manual_action_csv_export": run_shopify_review_request_manual_action_csv_export_task,
@@ -803,6 +807,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local report history audit only",
         "review_file_path": "logs/shopify_review_request_history_ledger_audit.json",
+    },
+    "shopify_review_request_dashboard_counts_audit": {
+        "description": "Audit Review Request dashboard counters and Already sent pagination without Gmail, Shopify, or external review API calls.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local dashboard count audit only",
+        "review_file_path": "logs/codex_runs/shopify_review_request_dashboard_counts_audit.json",
     },
     "shopify_review_request_kudosi_api_403_diagnostics": {
         "description": "Generate read-only Kudosi / Ali Reviews HTTP 403 diagnostics without exposing secrets.",
