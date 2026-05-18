@@ -9,11 +9,15 @@ Related non-active drafts:
 - [docker-compose.bluegreen.example.yml](../docker-compose.bluegreen.example.yml)
 - [nginx/bluegreen.example.conf](../nginx/bluegreen.example.conf)
 - [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md)
+- [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 
 ## Preconditions Before Applying
 
 - Current single-web deployment is healthy through `/healthz/`.
 - Active `docker-compose.yml` behavior is understood and still unchanged.
+- All manual decisions in
+  [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md) are marked
+  with approved choices before any apply command is run.
 - A reviewed proxy design is selected and tested away from production traffic.
 - The active color source of truth is documented and recoverable.
 - Database backup and restore process is confirmed for the production database.
@@ -24,6 +28,11 @@ Related non-active drafts:
 - Rollback authority and communication path are assigned before the switch.
 
 ## Required Manual Decisions
+
+Before applying, update
+[BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md) so every
+decision has an approved choice, approver, and date. Pending decisions mean
+NO-GO for active apply work.
 
 - Proxy technology: nginx, Caddy, Traefik, HAProxy, or existing host proxy.
 - Active color tracking: config include, state file, label, checklist, or script.

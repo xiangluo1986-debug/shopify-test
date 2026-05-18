@@ -20,6 +20,7 @@ traffic or change current deployment commands:
 - [docker-compose.bluegreen.example.yml](../docker-compose.bluegreen.example.yml)
 - [nginx/bluegreen.example.conf](../nginx/bluegreen.example.conf)
 - [BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md](BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md)
+- [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
 whether these draft files exist and whether the active Compose file still
@@ -280,6 +281,11 @@ NOT RUN IN THIS TASK:
 ```
 
 ## Manual Decisions Before Applying
+
+The detailed manual review package is
+[BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md). Every
+decision there must be marked with an approved choice before any active apply
+task.
 
 - Choose proxy technology: nginx, Caddy, Traefik, or another existing host-level proxy.
 - Decide whether the proxy owns host port `8000` or Cloudflare changes to a new local proxy port.

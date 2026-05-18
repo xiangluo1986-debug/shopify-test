@@ -152,6 +152,10 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Apply checklist"
             Path = ".\docs\BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md"
+        },
+        [pscustomobject]@{
+            Label = "Manual decision review package"
+            Path = ".\docs\BLUE_GREEN_DEPLOY_DECISIONS.md"
         }
     )
 
