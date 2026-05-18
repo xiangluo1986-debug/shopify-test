@@ -156,6 +156,10 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Manual decision review package"
             Path = ".\docs\BLUE_GREEN_DEPLOY_DECISIONS.md"
+        },
+        [pscustomobject]@{
+            Label = "Local apply dry-run review package"
+            Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md"
         }
     )
 

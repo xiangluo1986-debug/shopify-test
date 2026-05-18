@@ -10,11 +10,15 @@ Related non-active drafts:
 - [nginx/bluegreen.example.conf](../nginx/bluegreen.example.conf)
 - [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md)
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
+- [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 
 ## Current Status
 
 - Local-only planning: READY after conservative defaults were filled in
   [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md).
+- Local-only dry-run review: READY after
+  [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
+  is reviewed.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Production apply: NO-GO.
 - Runtime behavior changed by this checklist: no.
@@ -27,6 +31,9 @@ Related non-active drafts:
 - Active `docker-compose.yml` behavior is understood and still unchanged.
 - Local-only planning defaults in
   [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md) are filled.
+- The local dry-run review package in
+  [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
+  has been reviewed and accepted before any local apply simulation.
 - A separate apply task approves the exact local runtime commands before any
   container start, restart, proxy reload, or traffic switch is run.
 - A reviewed proxy design is selected and tested away from production traffic.
@@ -115,6 +122,8 @@ These actions are not approved by this checklist alone:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_deploy_dry_run.ps1
 ```
 
+- Review the local-only dry-run package:
+  [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md).
 - Validate draft Compose syntax without starting containers:
 
 ```powershell

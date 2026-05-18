@@ -21,10 +21,11 @@ traffic or change current deployment commands:
 - [nginx/bluegreen.example.conf](../nginx/bluegreen.example.conf)
 - [BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md](BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md)
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
+- [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
-whether these draft files exist and whether the active Compose file still
-appears to use the current single-web workflow.
+whether these draft files and review packages exist and whether the active
+Compose file still appears to use the current single-web workflow.
 
 ## Current Architecture
 
@@ -318,8 +319,8 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Prepare a future local-only apply dry-run task that reviews exact commands and
-rollback steps without touching production. Production should remain NO-GO until
-local or staging results are reviewed and a separate production task approves
-route, port ownership, proxy, scheduler, migration, static/media, rollback, and
-observation details.
+Review [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md),
+then prepare a separate local apply simulation task if approved. Production
+should remain NO-GO until local or staging results are reviewed and a separate
+production task approves route, port ownership, proxy, scheduler, migration,
+static/media, rollback, and observation details.
