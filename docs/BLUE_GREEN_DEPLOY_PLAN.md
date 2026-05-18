@@ -26,6 +26,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
 - [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
+- [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
 whether these draft files and review packages exist and whether the active
@@ -40,6 +41,13 @@ implement real local simulation execution even when the phrase is supplied.
 The local inactive-color startup plan is also documentation only; inactive
 startup remains NO-GO until a separate task approves one inactive service, a
 non-`8000` test port, and cleanup commands.
+The execution-gated local inactive startup runner at
+`scripts/blue_green_local_inactive_startup.ps1` is dry-run / no-action only in
+this phase. It blocks `-TestPort 8000`, blocks `-InactiveService web`, requires
+the exact phrase
+`I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC` for any
+execution request, and still reports real inactive startup execution is not
+implemented in this phase even when the phrase is supplied.
 Production remains NO-GO.
 
 ## Current Architecture
@@ -226,6 +234,12 @@ and
 are reviewed, the exact local-only approval phrase is provided in a separate
 task, and the exact commands, target color, non-`8000` test port, cleanup path,
 and no-production-traffic constraints are approved.
+The current startup runner path is
+`scripts/blue_green_local_inactive_startup.ps1`; its default behavior is
+dry-run only, and the required inactive-startup phrase is
+`I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
+`TestPort` must not be `8000`, `InactiveService` must not be `web`, and real
+container startup remains blocked in this phase.
 
 Validate the proxy and color services locally or in staging:
 
@@ -351,11 +365,12 @@ approve exact commands.
 ## Immediate Next Task Recommendation
 
 Review the dry-run output from
-`scripts/blue_green_local_apply_simulation.ps1` and the reviewed plan in
-[BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
-The recommended next separate task is to prepare an execution-gated local
-inactive-color startup runner that is still blocked by default, targets one
-inactive service on a non-`8000` test port, and includes a stop-only cleanup
-path. Production should remain NO-GO until local or staging results are
-reviewed and a separate production task approves route, port ownership, proxy,
-scheduler, migration, static/media, rollback, and observation details.
+`scripts/blue_green_local_apply_simulation.ps1`,
+`scripts/blue_green_local_apply_simulation_preview.ps1`, and
+`scripts/blue_green_local_inactive_startup.ps1`.
+The recommended next separate task is to implement an actual local-only
+inactive-color startup path only after explicit approval of the exact compose
+file, inactive service, non-`8000` test port, health check, and stop-only
+cleanup command. Production should remain NO-GO until local or staging results
+are reviewed and a separate production task approves route, port ownership,
+proxy, scheduler, migration, static/media, rollback, and observation details.

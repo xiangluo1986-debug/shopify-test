@@ -14,6 +14,7 @@ Related non-active drafts:
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
 - [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
+- [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
 
 ## Current Status
 
@@ -29,12 +30,17 @@ Related non-active drafts:
   only at `scripts/blue_green_local_apply_simulation.ps1`.
 - Local inactive startup plan: READY for review in
   [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
+- Gated local inactive startup runner: READY for dry-run / no-action status
+  checks only at `scripts/blue_green_local_inactive_startup.ps1`.
 - Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
   approval of exact commands. Real local simulation execution is not
   implemented in the current runner phase.
 - Local inactive startup: NO-GO until a separate task approves one inactive
-  service, a non-`8000` test port, and cleanup commands.
+  service, a non-`8000` test port, and cleanup commands. The current startup
+  runner blocks `-TestPort 8000`, blocks `-InactiveService web`, and still
+  blocks real startup even with the required phrase
+  `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Production apply: NO-GO.
 - Runtime behavior changed by this checklist: no.
@@ -60,6 +66,10 @@ Related non-active drafts:
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC`.
 - The future inactive service is confirmed to bind only a non-`8000` local test
   port such as `18080` or `18081`.
+- The future inactive service name is confirmed not to be `web`.
+- The future inactive startup approval phrase is present only in a separately
+  approved task:
+  `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
 - A separate apply task approves the exact local runtime commands before any
   container start, restart, proxy reload, or traffic switch is run.
 - A reviewed proxy design is selected and tested away from production traffic.
@@ -164,6 +174,31 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_a
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1
+```
+
+- Run the gated local inactive startup runner in default dry-run / no-action
+  mode:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1
+```
+
+- Confirm inactive startup execution requests remain blocked unless the exact
+  approval gate is supplied, and that even correct approval remains a future
+  placeholder in this phase:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup
+```
+
+- Confirm the startup runner blocks forbidden target choices:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC -TestPort 8000
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC -InactiveService web
 ```
 
 - Confirm execution requests are still blocked unless the exact approval gate

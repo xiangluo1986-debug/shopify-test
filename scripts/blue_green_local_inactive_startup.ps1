@@ -1,8 +1,10 @@
 [CmdletBinding()]
 param(
     [switch]$DryRun = $true,
-    [switch]$ExecuteLocalSimulation,
+    [switch]$ExecuteInactiveStartup,
     [string]$Ack = "",
+    [int]$TestPort = 18080,
+    [string]$InactiveService = "web_green_test",
     [string]$HealthUrl = "http://127.0.0.1:8000/healthz/",
     [switch]$SkipHealthCheck
 )
@@ -10,8 +12,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$RequiredApprovalPhrase = "I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC"
-$InactiveStartupApprovalPhrase = "I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC"
+$RequiredApprovalPhrase = "I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC"
+$CurrentActiveServiceName = "web"
 
 function Write-Step {
     param([string]$Message)
@@ -54,13 +56,13 @@ function Show-Mode {
         Write-Ok "Dry-run / no-action mode is active."
     }
 
-    if ($ExecuteLocalSimulation) {
-        Write-Warn "Local simulation execution was requested."
-        Write-Warn "Real local simulation execution is not implemented in this phase."
+    if ($ExecuteInactiveStartup) {
+        Write-Warn "Inactive startup execution was requested."
     } else {
-        Write-Ok "No local simulation execution was requested."
+        Write-Ok "No inactive startup execution was requested."
     }
 
+    Write-Warn "Inactive startup remains blocked by default."
     Write-Warn "Production remains NO-GO."
 }
 
@@ -82,10 +84,6 @@ function Show-ReadinessFiles {
 
     $items = @(
         [pscustomobject]@{
-            Label = "Active Compose file"
-            Path = ".\docker-compose.yml"
-        },
-        [pscustomobject]@{
             Label = "Example blue-green Compose draft"
             Path = ".\docker-compose.bluegreen.example.yml"
         },
@@ -98,14 +96,6 @@ function Show-ReadinessFiles {
             Path = ".\docs\BLUE_GREEN_DEPLOY_PLAN.md"
         },
         [pscustomobject]@{
-            Label = "Manual decision package"
-            Path = ".\docs\BLUE_GREEN_DEPLOY_DECISIONS.md"
-        },
-        [pscustomobject]@{
-            Label = "Local dry-run review package"
-            Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md"
-        },
-        [pscustomobject]@{
             Label = "Local simulation approval package"
             Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md"
         },
@@ -114,16 +104,8 @@ function Show-ReadinessFiles {
             Path = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
         },
         [pscustomobject]@{
-            Label = "Gated local inactive startup runner"
-            Path = ".\scripts\blue_green_local_inactive_startup.ps1"
-        },
-        [pscustomobject]@{
-            Label = "Local simulation preview script"
-            Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
-        },
-        [pscustomobject]@{
-            Label = "Blue-green dry-run planner"
-            Path = ".\scripts\blue_green_deploy_dry_run.ps1"
+            Label = "Apply checklist"
+            Path = ".\docs\BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md"
         }
     )
 
@@ -136,30 +118,38 @@ function Show-ReadinessFiles {
     }
 }
 
-function Show-FutureInactiveStartupPhase {
-    Write-Step "Future inactive-color startup phase"
+function Test-StartupTarget {
+    Write-Step "Startup target gate"
 
-    $planPath = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
-    if (Test-Path -LiteralPath $planPath) {
-        Write-Ok "Inactive startup plan exists: $planPath"
-    } else {
-        Write-Warn "Inactive startup plan is missing: $planPath"
+    Write-Host "Requested inactive service: $InactiveService"
+    Write-Host "Requested test port: $TestPort"
+    Write-Host "Current active service name: $CurrentActiveServiceName"
+
+    if ($TestPort -eq 8000) {
+        Write-Warn "Blocked: TestPort 8000 is forbidden."
+        Write-Warn "The current web service must keep host port 8000."
+        Write-Warn "No inactive startup was run."
+        Write-Warn "Production remains NO-GO."
+        return 2
     }
 
-    $runnerPath = ".\scripts\blue_green_local_inactive_startup.ps1"
-    if (Test-Path -LiteralPath $runnerPath) {
-        Write-Ok "Inactive startup runner exists: $runnerPath"
-    } else {
-        Write-Warn "Inactive startup runner is missing: $runnerPath"
+    if ([string]::IsNullOrWhiteSpace($InactiveService)) {
+        Write-Warn "Blocked: InactiveService must be a non-empty service name."
+        Write-Warn "No inactive startup was run."
+        Write-Warn "Production remains NO-GO."
+        return 2
     }
 
-    Write-Warn "Local inactive-color startup is planned but blocked in this phase."
-    Write-Warn "Inactive startup runner default behavior is dry-run / no-action only."
-    Write-Warn "Required inactive startup approval phrase: $InactiveStartupApprovalPhrase"
-    Write-Warn "Any future inactive test service must use a non-8000 test port such as 18080 or 18081."
-    Write-Warn "The inactive service must not be the current active service name web."
-    Write-Warn "Current web remains untouched and keeps host port 8000."
-    Write-Warn "Production remains NO-GO."
+    if ($InactiveService -eq $CurrentActiveServiceName) {
+        Write-Warn "Blocked: InactiveService must not equal the current active service name web."
+        Write-Warn "The current web service must remain untouched."
+        Write-Warn "No inactive startup was run."
+        Write-Warn "Production remains NO-GO."
+        return 2
+    }
+
+    Write-Ok "Target gate passed for dry-run planning: test port is not 8000 and inactive service is not web."
+    return 0
 }
 
 function Test-HealthUrl {
@@ -188,24 +178,31 @@ function Show-SafeConfigNote {
     Write-Step "Example Compose config validation"
 
     Write-Host "No Docker command is run by this runner in this phase."
-    Write-Host "A future separately approved phase may run this read-only validation if the example Compose file is confirmed not to expose private environment values:"
+    Write-Host "A future separately approved phase may run this read-only validation after confirming it will not expose private environment values:"
     Write-Host "  # NOT RUN IN THIS TASK"
     Write-Host "  docker compose -f docker-compose.bluegreen.example.yml config"
 }
 
-function Show-BlockedActionPlan {
-    Write-Step "Future local simulation plan"
+function Show-BlockedStartupPlan {
+    Write-Step "Future local inactive startup plan"
 
     Write-Host "The steps below are documentation only and are NOT RUN by this script in this phase."
+    Write-Host ""
+    Write-Host "Script path:"
+    Write-Host "  .\scripts\blue_green_local_inactive_startup.ps1"
+    Write-Host ""
+    Write-Host "Required approval phrase:"
+    Write-Host "  $RequiredApprovalPhrase"
     Write-Host ""
 
     $steps = @(
         "Review git status and local readiness files.",
         "Confirm active docker-compose.yml remains unchanged.",
         "Confirm current web service still owns host port 8000.",
+        "Confirm inactive service is not web.",
+        "Confirm inactive test port is not 8000.",
         "Validate example Compose/proxy config without starting containers.",
-        "Start only one inactive test service on a reviewed non-8000 local-only test port.",
-        "Run Django checks against the inactive color only.",
+        "Start only one inactive test service on the reviewed non-8000 local test port.",
         "Health-check the inactive color directly through /healthz/.",
         "Stop only the inactive local test color after validation.",
         "Leave current web, Cloudflare/domain routing, and production traffic unchanged."
@@ -225,29 +222,28 @@ function Show-BlockedActionPlan {
     Write-Host "  python manage.py collectstatic"
     Write-Host "  proxy reload or traffic switch"
     Write-Host ""
-    Write-Host "Future inactive-color startup remains blocked here:"
-    Write-Host "  - runner path: .\scripts\blue_green_local_inactive_startup.ps1"
-    Write-Host "  - default behavior is dry-run / no-action only"
-    Write-Host "  - required approval phrase: $InactiveStartupApprovalPhrase"
-    Write-Host "  - test port must be non-8000, for example 18080 or 18081"
+    Write-Host "Current phase status:"
+    Write-Host "  - inactive startup runner exists"
+    Write-Host "  - inactive startup remains blocked by default"
+    Write-Host "  - test port must not be 8000"
     Write-Host "  - inactive service must not be web"
-    Write-Host "  - current web must remain untouched"
     Write-Host "  - production remains NO-GO"
 }
 
 function Test-ExecutionGate {
     Write-Step "Execution gate"
 
-    if (-not $ExecuteLocalSimulation) {
+    if (-not $ExecuteInactiveStartup) {
         Write-Ok "No execution requested. Printed the dry-run plan only."
+        Write-Warn "Inactive startup remains blocked by default."
         Write-Warn "Production remains NO-GO."
         return 0
     }
 
     if ([string]::IsNullOrWhiteSpace($Ack)) {
-        Write-Warn "Blocked: -ExecuteLocalSimulation was provided, but -Ack is missing."
+        Write-Warn "Blocked: -ExecuteInactiveStartup was provided, but -Ack is missing."
         Write-Warn "Required approval phrase: $RequiredApprovalPhrase"
-        Write-Warn "No local simulation was run."
+        Write-Warn "No inactive startup was run."
         Write-Warn "Production remains NO-GO."
         return 2
     }
@@ -255,14 +251,13 @@ function Test-ExecutionGate {
     if ($Ack -ne $RequiredApprovalPhrase) {
         Write-Warn "Blocked: -Ack does not match the required approval phrase."
         Write-Warn "The provided value was not printed."
-        Write-Warn "No local simulation was run."
+        Write-Warn "No inactive startup was run."
         Write-Warn "Production remains NO-GO."
         return 2
     }
 
     Write-Ok "Approval phrase matched."
-    Write-Warn "Real local simulation execution is not implemented in this phase."
-    Write-Warn "Local inactive-color startup is planned but still blocked in this phase."
+    Write-Warn "Real inactive startup execution is not implemented in this phase."
     Write-Warn "No containers were started, stopped, restarted, or built."
     Write-Warn "No migration, collectstatic, proxy switch, file edit, Shopify call, Gmail call, or email send was performed."
     Write-Warn "Production remains NO-GO."
@@ -272,18 +267,27 @@ function Test-ExecutionGate {
 Show-Mode
 Show-GitStatus
 Show-ReadinessFiles
-Show-FutureInactiveStartupPhase
+
+$targetGateExitCode = Test-StartupTarget
+if ($targetGateExitCode -ne 0) {
+    Write-Step "Result"
+    Write-Warn "Local inactive-color startup runner blocked execution."
+    Write-Ok "Runtime behavior changed: no."
+    Write-Ok "Deploy, restart, build, migration, collectstatic, traffic switch, Shopify/Gmail/API write: no."
+    exit $targetGateExitCode
+}
+
 Test-HealthUrl -Url $HealthUrl
 Show-SafeConfigNote
-Show-BlockedActionPlan
+Show-BlockedStartupPlan
 
 $exitCode = Test-ExecutionGate
 
 Write-Step "Result"
 if ($exitCode -eq 0) {
-    Write-Ok "Local blue-green simulation runner completed in dry-run / no-action mode."
+    Write-Ok "Local inactive-color startup runner completed in dry-run / no-action mode."
 } else {
-    Write-Warn "Local blue-green simulation runner blocked execution."
+    Write-Warn "Local inactive-color startup runner blocked execution."
 }
 Write-Ok "Runtime behavior changed: no."
 Write-Ok "Deploy, restart, build, migration, collectstatic, traffic switch, Shopify/Gmail/API write: no."

@@ -77,6 +77,47 @@ Real local simulation execution is not implemented in this phase.
 
 Production remains NO-GO.
 
+## Current Inactive Startup Runner
+
+The execution-gated local inactive-color startup runner is:
+
+```powershell
+.\scripts\blue_green_local_inactive_startup.ps1
+```
+
+Default behavior is dry-run / no-action only:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1
+```
+
+The runner prints the future local inactive startup plan and exits without
+starting, stopping, restarting, or building containers. It does not run
+migrations, run collectstatic, switch traffic, change Cloudflare/domain routing,
+modify files, call Shopify/Gmail APIs, or send email.
+
+The inactive startup execution gate uses this separate exact approval phrase:
+
+```text
+I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC
+```
+
+Safety blocks in the runner:
+
+- `-TestPort 8000` is always blocked.
+- `-InactiveService web` is always blocked because `web` is the current active
+  service.
+- Missing or wrong `-Ack` blocks execution requests.
+- Even the correct `-Ack` remains blocked in this phase with:
+
+```text
+Real inactive startup execution is not implemented in this phase.
+```
+
+Production remains NO-GO. The next phase would implement actual local startup
+only after a separate approval of exact commands, inactive service name,
+non-`8000` test port, cleanup path, and no-production-traffic constraints.
+
 ## Future Local Simulation Scope
 
 A future simulation may only:
@@ -241,9 +282,13 @@ or production routing changes as part of failure handling.
 - Local inactive startup plan: READY for review in
   [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md).
 - Gated simulation runner: dry-run / no-action only.
+- Gated inactive startup runner: dry-run / no-action only at
+  `scripts/blue_green_local_inactive_startup.ps1`.
 - Local simulation execution: NO-GO. The approval phrase is required for a
   future phase, but real execution is not implemented in this phase.
 - Local inactive startup: NO-GO until separate approval of exact commands,
-  inactive service name, non-`8000` test port, and cleanup path.
+  inactive service name, non-`8000` test port, and cleanup path. The current
+  runner blocks `-TestPort 8000`, blocks `-InactiveService web`, and still does
+  not implement real startup even with the required approval phrase.
 - Production: NO-GO.
 - Runtime behavior changed by this package: no.

@@ -8,6 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $RequiredApprovalPhrase = "I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC"
+$InactiveStartupApprovalPhrase = "I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC"
 
 function Write-Step {
     param([string]$Message)
@@ -93,6 +94,10 @@ function Show-FileStatus {
         [pscustomobject]@{
             Label = "Gated local simulation runner"
             Path = ".\scripts\blue_green_local_apply_simulation.ps1"
+        },
+        [pscustomobject]@{
+            Label = "Gated local inactive startup runner"
+            Path = ".\scripts\blue_green_local_inactive_startup.ps1"
         }
     )
 
@@ -115,10 +120,20 @@ function Show-RunnerStatus {
         Write-Warn "Simulation runner is missing: $runnerPath"
     }
 
+    $inactiveStartupRunnerPath = ".\scripts\blue_green_local_inactive_startup.ps1"
+    if (Test-Path -LiteralPath $inactiveStartupRunnerPath) {
+        Write-Ok "Inactive startup runner exists: $inactiveStartupRunnerPath"
+    } else {
+        Write-Warn "Inactive startup runner is missing: $inactiveStartupRunnerPath"
+    }
+
     Write-Warn "Current status is dry-run / no-action only."
     Write-Warn "Real local simulation execution is not implemented in this phase."
     Write-Warn "Local inactive-color startup remains NO-GO until separate approval."
+    Write-Warn "Inactive startup runner default behavior is blocked dry-run / no-action only."
+    Write-Warn "Required inactive startup approval phrase: $InactiveStartupApprovalPhrase"
     Write-Warn "Any future inactive startup must use a non-8000 test port and leave current web untouched."
+    Write-Warn "The inactive service must not be the current active service name web."
     Write-Warn "Production remains NO-GO."
 }
 
@@ -190,7 +205,10 @@ function Show-FutureCommandPlan {
         [pscustomobject]@{
             Label = "Inactive color startup on test-only port"
             Commands = @(
+                "# Future gated runner: .\scripts\blue_green_local_inactive_startup.ps1",
+                "# Required phrase: $InactiveStartupApprovalPhrase",
                 "# Future requirement: use one inactive test service only on a non-8000 port such as 18080 or 18081.",
+                "# Future requirement: inactive service must not be web.",
                 "docker compose -f <local-simulation-compose-file> up -d web_green"
             )
         },
@@ -242,5 +260,6 @@ Write-Step "Result"
 Write-Ok "Local blue-green apply simulation preview completed."
 Write-Ok "No runtime behavior was changed."
 Write-Ok "Inactive startup plan status: exists if listed above; local inactive startup remains NO-GO."
+Write-Ok "Inactive startup runner status: dry-run / no-action only; test port 8000 and service web are blocked."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."
 Write-Ok "No docker compose up/down/restart/build, migrate, collectstatic, traffic switch, file modification, Shopify call, Gmail call, or email send was performed."

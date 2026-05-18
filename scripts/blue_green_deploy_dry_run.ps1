@@ -8,6 +8,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$InactiveStartupApprovalPhrase = "I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC"
+
 function Write-Step {
     param([string]$Message)
     Write-Host ""
@@ -176,6 +178,10 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Gated local apply simulation runner"
             Path = ".\scripts\blue_green_local_apply_simulation.ps1"
+        },
+        [pscustomobject]@{
+            Label = "Gated local inactive startup runner"
+            Path = ".\scripts\blue_green_local_inactive_startup.ps1"
         }
     )
 
@@ -300,7 +306,10 @@ function Show-FuturePlan {
     Write-Host "Local simulation runner status: dry-run / no-action only."
     Write-Host "Real local simulation execution is not implemented in this phase."
     Write-Host "Local inactive-color startup plan status: reviewed document only; startup remains NO-GO."
+    Write-Host "Local inactive-color startup runner status: exists if listed above; dry-run / no-action only and blocked by default."
+    Write-Host "Required inactive startup approval phrase: $InactiveStartupApprovalPhrase"
     Write-Host "Any future inactive startup must use one inactive test service on a non-8000 local port and leave current web untouched."
+    Write-Host "The future inactive service must not be the current active service name web."
     Write-Host "Production remains NO-GO."
     Write-Host ""
     Write-Host "This script does not call docker compose up, down, restart, build, run, exec, or migrate."
@@ -318,4 +327,5 @@ Show-FuturePlan
 Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
 Write-Ok "No runtime behavior was changed by this read-only planner."
+Write-Ok "Inactive startup runner status: dry-run / no-action only; test port 8000 and service web are blocked; production remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."

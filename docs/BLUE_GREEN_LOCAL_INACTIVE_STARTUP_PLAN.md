@@ -12,6 +12,42 @@ Cloudflare/domain routing. It does not change the active `docker-compose.yml`.
 The future test must use no production traffic, must not take over host port
 `8000`, and must not restart or replace the current `web` service.
 
+## Execution-Gated Runner
+
+The local inactive startup runner is:
+
+```powershell
+.\scripts\blue_green_local_inactive_startup.ps1
+```
+
+Default behavior is dry-run / no-action only:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1
+```
+
+The default run prints the future inactive startup plan, current readiness file
+status, git status, and current `/healthz/` status if reachable. It does not
+start containers, stop containers, restart containers, build images, run
+migrations, run collectstatic, switch traffic, change proxy routing, modify
+files, call Shopify/Gmail APIs, or send email.
+
+The execution request gate requires this exact phrase:
+
+```text
+I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC
+```
+
+Even with the correct phrase, real inactive startup execution is still blocked
+in this phase. The runner reports:
+
+```text
+Real inactive startup execution is not implemented in this phase.
+```
+
+`-TestPort 8000` is always blocked. `-InactiveService web` is always blocked
+because `web` is the current active service name. Production remains NO-GO.
+
 ## Proposed Inactive Color
 
 - Use one inactive test service only.
@@ -115,11 +151,13 @@ docker compose -f <inactive-startup-compose-file> rm -f <inactive-test-service>
 ## Safety Gates Before Future Execution
 
 - Exact approval phrase is required:
-  `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC`.
+  `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
 - Current `/healthz/` on port `8000` must pass before inactive startup.
 - Git status must be reviewed.
 - Active `docker-compose.yml` must remain unchanged.
 - Inactive service must not bind host port `8000`.
+- Inactive service must not be named `web`.
+- The runner blocks `-TestPort 8000` and `-InactiveService web`.
 - Cleanup command must be prepared before startup.
 - Current `web` must remain untouched.
 - The inactive service name, compose file, and test port must be explicitly
@@ -144,6 +182,10 @@ external API writes as part of failure handling.
 ## Go / No-Go
 
 - Plan: READY.
+- Execution-gated runner: READY for dry-run / no-action status checks only.
 - Local inactive startup: NO-GO until separate approval.
+- Real inactive startup execution: not implemented in this phase.
+- Next phase: implement actual local startup only after a separate approval of
+  exact command scope, inactive service, non-`8000` test port, and cleanup path.
 - Production: NO-GO.
 - Runtime behavior changed by this plan: no.
