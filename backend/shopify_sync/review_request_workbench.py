@@ -5215,6 +5215,130 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
     }
 
 
+def build_review_request_sent_tag_pending_repair_evidence(target_order):
+    target_order = _canonical_order_name(target_order)
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_sent_tag_pending_repair_evidence",
+        "task_name": "shopify_review_request_sent_tag_pending_repair_evidence",
+        "phase": "5.29D",
+        "mode": "dry-run-local-history-queue-evidence",
+        "repair_evidence_status": "blocked_no_sent_tag_pending_evidence",
+        "success": False,
+        "selected_order": target_order,
+        "order": target_order,
+        "allowed_repair_target_order": "#21284",
+        "target_order_allowed_for_repair_phase": target_order == "#21284",
+        "row_found": False,
+        "row_section": "not_scanned",
+        "email_sent_confirmed": False,
+        "sent_status": "",
+        "shopify_tag_pending": False,
+        "shopify_tag_status_label": "",
+        "sent_tag_pending_evidence_found": False,
+        "local_review_send_success": False,
+        "local_order_found": False,
+        "review_request_tag_alias_found": False,
+        "matched_review_request_tags": [],
+        "tag_write_completed_evidence_found": False,
+        "tags": [],
+        "evidence": "",
+        "ebay_tag_detected": False,
+        "matched_ebay_tag_value": "",
+        "blocking_statuses": [],
+        "error": "",
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "translations_register_called": False,
+        "raw_customer_email_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+    }
+    if target_order != "#21284":
+        result["repair_evidence_status"] = "blocked_target_order_not_allowed_for_repair_phase"
+        result["blocking_statuses"] = ["blocked_target_order_not_allowed_for_repair_phase"]
+        return result
+
+    try:
+        state = _build_review_send_state({})
+        scan = state["last_60_days_scan"]
+        row, section = _find_scan_order_row(scan, target_order)
+        result["local_order_found"] = _focus_order_found_locally(target_order)
+    except Exception as exc:  # pragma: no cover - defensive wrapper for runner diagnostics.
+        result["repair_evidence_status"] = "blocked_repair_evidence_builder_failed"
+        result["blocking_statuses"] = ["blocked_repair_evidence_builder_failed"]
+        result["error"] = _safe_exception_summary(exc)
+        return result
+
+    if not row:
+        result["blocking_statuses"] = ["blocked_no_sent_tag_pending_evidence"]
+        return result
+
+    tags = _dedupe_text(row.get("order_tags_display") or row.get("tags") or [])
+    matched_review_request_tags = _matched_review_request_tags(tags)
+    sent_status = _safe_text(row.get("trustpilot_email_status"), max_length=120)
+    shopify_tag_status_label = _safe_text(row.get("shopify_tag_status_label"), max_length=120)
+    local_review_send_success = row.get("local_review_send_success") is True
+    email_sent_confirmed = local_review_send_success and sent_status == "Sent"
+    shopify_tag_pending = row.get("shopify_tag_pending") is True or shopify_tag_status_label == "Tag pending"
+    tag_write_completed = _shopify_tag_write_confirmed_from_payload(row) or has_trustpilot_sent_tag(tags)
+
+    result.update(
+        {
+            "row_found": True,
+            "row_section": section,
+            "email_sent_confirmed": email_sent_confirmed,
+            "sent_status": sent_status,
+            "shopify_tag_pending": shopify_tag_pending,
+            "shopify_tag_status_label": shopify_tag_status_label,
+            "local_review_send_success": local_review_send_success,
+            "review_request_tag_alias_found": bool(matched_review_request_tags),
+            "matched_review_request_tags": matched_review_request_tags,
+            "tag_write_completed_evidence_found": tag_write_completed,
+            "tags": tags,
+            "evidence": _safe_text(row.get("evidence") or row.get("reason"), max_length=500),
+            "ebay_tag_detected": row.get("ebay_tag_detected") is True,
+            "matched_ebay_tag_value": _safe_text(row.get("matched_ebay_tag_value"), max_length=120),
+        }
+    )
+
+    blockers = []
+    if section != "already_sent":
+        blockers.append("blocked_target_order_not_in_already_sent_rows")
+    if not email_sent_confirmed:
+        blockers.append("blocked_email_sent_evidence_missing")
+    if not shopify_tag_pending:
+        blockers.append("blocked_tag_pending_evidence_missing")
+    if tag_write_completed:
+        blockers.append("blocked_completed_tag_write_evidence_found")
+    if not result["local_order_found"]:
+        blockers.append("blocked_selected_order_not_found")
+    if not (matched_review_request_tags or shopify_tag_pending):
+        blockers.append("blocked_no_review_request_alias_or_tag_pending")
+    if result["ebay_tag_detected"]:
+        blockers.append("blocked_ebay_order")
+
+    result["blocking_statuses"] = blockers
+    result["sent_tag_pending_evidence_found"] = not blockers
+    result["success"] = result["sent_tag_pending_evidence_found"]
+    result["repair_evidence_status"] = (
+        "repair_evidence_ready" if result["sent_tag_pending_evidence_found"] else blockers[0]
+    )
+    return result
+
+
 def build_review_request_tag_alias_and_candidate_correction_audit_report(params=None):
     state = _build_review_send_state()
     scan = state["last_60_days_scan"]

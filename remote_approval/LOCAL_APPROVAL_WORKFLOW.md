@@ -199,6 +199,26 @@ updates local `ShopifyOrder.shopify_tags` from Shopify so the next candidate
 scan no longer keeps the order in Sent / Tag pending because of stale local
 tags.
 
+Phase 5.29D adds a strict one-order repair path for existing Sent / Tag pending
+rows such as `#21284`. This is not a batch repair. The runner only enters
+manual repair mode when both the target order env and the approval env are
+provided, and this phase allows only:
+
+```powershell
+$env:SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE_ORDER="#21284"
+$env:SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE="YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER"
+python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
+Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE
+Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE_ORDER
+```
+
+Before any Shopify API call, the runner verifies from local Review Request
+history/queue evidence that `#21284` is already `Sent` and still `Tag pending`.
+It blocks all other target orders with
+`blocked_target_order_not_allowed_for_repair_phase`. A target-only run without
+the approval env must still stop at `blocked_missing_tag_write_approval` and
+perform no Shopify API call or write.
+
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local
 candidate scan can use Shopify order tags, `fulfillment_status`, notes, and
@@ -604,6 +624,14 @@ memory and calls the shared one-order Shopify tag-write helper. If the audit or
 tag write fails, Gmail is not retried and the order remains Sent / Tag pending
 for the manual runner. If Gmail send fails, the Shopify tag-write helper is not
 called.
+
+Phase 5.29D adds a manual repair runner path for exactly one sent/tag-pending
+order, currently locked to `#21284`. It requires
+`SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE_ORDER="#21284"` plus the exact
+tag-write approval env. The repair source must come from local Review Request
+history/queue evidence showing `Sent` and `Tag pending`, or from a safe local
+post-send report. It must not resend Gmail, call external review APIs, or repair
+more than one order.
 
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 

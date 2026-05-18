@@ -26,6 +26,8 @@ REPORT_HTML_PATH = LOG_DIR / "codex_runs" / "shopify_review_request_trustpilot_p
 EXPECTED_POST_SEND_AUDIT_STATUS = "review_send_post_send_audit_passed"
 APPROVAL_ENV = "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE"
 APPROVAL_VALUE = "YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER"
+TARGET_ORDER_ENV = "SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE_ORDER"
+REPAIR_PHASE_ALLOWED_TARGET_ORDER = "#21284"
 CANONICAL_TRUSTPILOT_TAG = "1: trustpilot"
 REVIEW_REQUEST_REMOVE_ALIASES = [
     "1: review request",
@@ -39,11 +41,18 @@ SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
 REVIEW_REQUEST_ALIAS_STILL_PRESENT_STATUS = "blocked_review_request_tag_still_present"
 MISSING_APPROVAL_STATUS = "blocked_missing_tag_write_approval"
 INVALID_APPROVAL_STATUS = "blocked_invalid_tag_write_approval"
+TARGET_ORDER_NOT_ALLOWED_STATUS = "blocked_target_order_not_allowed_for_repair_phase"
+NO_SENT_TAG_PENDING_EVIDENCE_STATUS = "blocked_no_sent_tag_pending_evidence"
+COMPLETED_TAG_WRITE_EVIDENCE_STATUS = "blocked_completed_tag_write_evidence_found"
+NO_REVIEW_REQUEST_ALIAS_OR_PENDING_STATUS = "blocked_no_review_request_alias_or_tag_pending"
 EBAY_BLOCK_REASON = "eBay order 鈥?Trustpilot email not allowed."
 
 SHOP_DOMAIN = "kidstoylover.myshopify.com"
 SHOPIFY_API_VERSION = "2026-01"
 SHOPIFY_TAG_WRITE_TIMEOUT_SECONDS = 150
+REPAIR_EVIDENCE_TIMEOUT_SECONDS = 180
+REPAIR_EVIDENCE_JSON_BEGIN = "SHOPIFY_REVIEW_REQUEST_TAG_PENDING_REPAIR_EVIDENCE_JSON_BEGIN"
+REPAIR_EVIDENCE_JSON_END = "SHOPIFY_REVIEW_REQUEST_TAG_PENDING_REPAIR_EVIDENCE_JSON_END"
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SECRET_RE = re.compile(
@@ -67,7 +76,11 @@ def run_shopify_review_request_trustpilot_post_send_tag_write_task(mode: str) ->
         raise ValueError(f"{TASK_NAME} only supports dry-run mode.")
 
     started = time.time()
-    source_report, source_error, source_diagnostics = _read_source_post_send_audit()
+    target_override = _target_order_override()
+    if target_override["target_order_env_present"]:
+        source_report, source_error, source_diagnostics = _read_manual_repair_source(target_override)
+    else:
+        source_report, source_error, source_diagnostics = _read_source_post_send_audit()
     source_blockers = _source_blocking_conditions(source_report, source_error)
     approval = _approval_gate()
     write_result = _write_result(source_report, source_blockers, approval)
@@ -106,6 +119,327 @@ def run_shopify_review_request_trustpilot_post_send_tag_write_task(mode: str) ->
     json_path = _write_json_report(payload)
     html_path = _write_html_report(payload)
     return _task_result(payload, json_path, html_path)
+
+
+def _target_order_override() -> dict:
+    raw_value = os.environ.get(TARGET_ORDER_ENV, "").strip()
+    return {
+        "target_order_env_name": TARGET_ORDER_ENV,
+        "target_order_env_present": bool(raw_value),
+        "target_order_env": _safe_text(raw_value, max_length=80),
+        "target_order": _canonical_order_name(raw_value),
+        "target_order_allowed_for_repair_phase": raw_value == REPAIR_PHASE_ALLOWED_TARGET_ORDER,
+    }
+
+
+def _read_manual_repair_source(target_override: dict) -> tuple[dict, str, dict]:
+    diagnostics = _manual_repair_diagnostics(target_override)
+    target_order = _canonical_order_name(target_override.get("target_order"))
+    target_env = _safe_text(target_override.get("target_order_env"), max_length=80)
+
+    if target_override.get("target_order_allowed_for_repair_phase") is not True:
+        return (
+            _blocked_manual_repair_source(
+                target_order=target_order,
+                target_env=target_env,
+                repair_source=TARGET_ORDER_NOT_ALLOWED_STATUS,
+                evidence={},
+            ),
+            "",
+            diagnostics,
+        )
+
+    evidence_result = _load_django_sent_tag_pending_repair_evidence(target_order, diagnostics)
+    evidence = evidence_result.get("payload") if isinstance(evidence_result.get("payload"), dict) else {}
+    if evidence.get("sent_tag_pending_evidence_found") is True:
+        diagnostics["repair_source"] = "review_request_history_queue_sent_tag_pending"
+        return _manual_repair_source_from_evidence(evidence, target_env), "", diagnostics
+
+    local_report = _load_manual_repair_local_post_send_source(target_order, target_env, diagnostics)
+    if local_report:
+        diagnostics["repair_source"] = "local_post_send_report"
+        return local_report, "", diagnostics
+
+    diagnostics["repair_source"] = NO_SENT_TAG_PENDING_EVIDENCE_STATUS
+    return (
+        _blocked_manual_repair_source(
+            target_order=target_order,
+            target_env=target_env,
+            repair_source=NO_SENT_TAG_PENDING_EVIDENCE_STATUS,
+            evidence=evidence,
+        ),
+        "",
+        diagnostics,
+    )
+
+
+def _manual_repair_diagnostics(target_override: dict) -> dict:
+    return {
+        "source_paths_checked": [],
+        "source_candidates": [],
+        "host_report_found": False,
+        "django_audit_source_found": False,
+        "django_audit_error": "",
+        "latest_review_send_report_found": False,
+        "latest_post_send_audit_found": False,
+        "history_ledger_error": "",
+        "selected_source": "",
+        "selected_source_path": "",
+        "source_selection_why_not_ready": [],
+        "manual_repair_mode": True,
+        "target_order_env_name": TARGET_ORDER_ENV,
+        "target_order_env_present": target_override.get("target_order_env_present") is True,
+        "target_order_env": _safe_text(target_override.get("target_order_env"), max_length=80),
+        "target_order_allowed_for_repair_phase": (
+            target_override.get("target_order_allowed_for_repair_phase") is True
+        ),
+        "repair_source": "",
+        "repair_evidence_status": "",
+        "repair_evidence_error": "",
+    }
+
+
+def _load_django_sent_tag_pending_repair_evidence(target_order: str, diagnostics: dict) -> dict:
+    source_label = "django_web_container:build_review_request_sent_tag_pending_repair_evidence"
+    _record_source_path(diagnostics, source_label)
+    if target_order != REPAIR_PHASE_ALLOWED_TARGET_ORDER:
+        return {
+            "success": False,
+            "payload": {},
+            "failure_type": TARGET_ORDER_NOT_ALLOWED_STATUS,
+            "error": TARGET_ORDER_NOT_ALLOWED_STATUS,
+        }
+    script = (
+        "import json; "
+        "from shopify_sync.review_request_workbench import "
+        "build_review_request_sent_tag_pending_repair_evidence; "
+        f"payload = build_review_request_sent_tag_pending_repair_evidence({json.dumps(target_order)}); "
+        f"print('{REPAIR_EVIDENCE_JSON_BEGIN}'); "
+        "print(json.dumps(payload, ensure_ascii=False, sort_keys=True)); "
+        f"print('{REPAIR_EVIDENCE_JSON_END}')"
+    )
+    command = ["docker", "compose", "exec", "-T", "web", "python", "manage.py", "shell", "-c", script]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=False,
+            timeout=REPAIR_EVIDENCE_TIMEOUT_SECONDS,
+            shell=False,
+        )
+    except FileNotFoundError:
+        error = "docker_command_not_found"
+        diagnostics["repair_evidence_error"] = error
+        return {"success": False, "payload": {}, "failure_type": error, "error": error}
+    except PermissionError:
+        error = "docker_permission_denied"
+        diagnostics["repair_evidence_error"] = error
+        return {"success": False, "payload": {}, "failure_type": error, "error": error}
+    except subprocess.TimeoutExpired as exc:
+        error = "repair_evidence_timeout"
+        diagnostics["repair_evidence_error"] = error
+        return {
+            "success": False,
+            "payload": {},
+            "failure_type": error,
+            "error": _sanitize_text(_to_text(exc.stderr) or _to_text(exc.stdout) or error),
+        }
+
+    stdout = _to_text(completed.stdout)
+    stderr = _to_text(completed.stderr)
+    payload = _extract_repair_evidence_payload(stdout)
+    if completed.returncode != 0 and not payload:
+        error = _safe_text(stderr or stdout or "repair_evidence_failed", max_length=300)
+        diagnostics["repair_evidence_error"] = error
+        return {"success": False, "payload": {}, "failure_type": "repair_evidence_failed", "error": error}
+    if not payload:
+        error = "repair_evidence_payload_missing"
+        diagnostics["repair_evidence_error"] = error
+        return {"success": False, "payload": {}, "failure_type": error, "error": error}
+
+    diagnostics["django_audit_source_found"] = True
+    diagnostics["repair_evidence_status"] = _safe_text(payload.get("repair_evidence_status"), max_length=120)
+    diagnostics["selected_source"] = "review_request_history_queue_sent_tag_pending"
+    diagnostics["selected_source_path"] = source_label
+    diagnostics["source_candidates"].append(
+        {
+            "source_name": "review_request_history_queue_sent_tag_pending",
+            "source_path": source_label,
+            "found": payload.get("row_found") is True,
+            "ready": payload.get("sent_tag_pending_evidence_found") is True,
+            "audit_status": _safe_text(payload.get("repair_evidence_status"), max_length=120),
+            "selected_order": _canonical_order_name(payload.get("selected_order") or payload.get("order")),
+            "email_sent_confirmed": payload.get("email_sent_confirmed") is True,
+            "sent_count": 1 if payload.get("email_sent_confirmed") is True else 0,
+            "blocking_statuses": payload.get("blocking_statuses") or [],
+            "error": _safe_text(payload.get("error"), max_length=180),
+        }
+    )
+    return {"success": True, "payload": payload, "failure_type": "", "error": ""}
+
+
+def _extract_repair_evidence_payload(stdout: str) -> dict:
+    if REPAIR_EVIDENCE_JSON_BEGIN not in (stdout or "") or REPAIR_EVIDENCE_JSON_END not in (stdout or ""):
+        return {}
+    fragment = stdout.split(REPAIR_EVIDENCE_JSON_BEGIN, 1)[1].split(REPAIR_EVIDENCE_JSON_END, 1)[0].strip()
+    try:
+        payload = json.loads(fragment)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _manual_repair_source_from_evidence(evidence: dict, target_env: str) -> dict:
+    selected_order = _canonical_order_name(evidence.get("selected_order") or evidence.get("order"))
+    tags = [_safe_text(tag, max_length=120) for tag in (evidence.get("tags") or [])]
+    matched_review_request_tags = [
+        _safe_text(tag, max_length=120) for tag in (evidence.get("matched_review_request_tags") or [])
+    ]
+    return {
+        "timestamp": utc_now_iso(),
+        "report_generated_at": utc_now_iso(),
+        "task": TASK_NAME,
+        "task_name": TASK_NAME,
+        "phase": "5.29D",
+        "mode": "manual-one-order-sent-tag-pending-repair-source",
+        "audit_status": EXPECTED_POST_SEND_AUDIT_STATUS,
+        "report_status": EXPECTED_POST_SEND_AUDIT_STATUS,
+        "success": True,
+        "manual_repair_mode": True,
+        "target_order_env_name": TARGET_ORDER_ENV,
+        "target_order_env": target_env,
+        "target_order_allowed_for_repair_phase": target_env == REPAIR_PHASE_ALLOWED_TARGET_ORDER,
+        "selected_order": selected_order,
+        "expected_order": selected_order,
+        "repair_source": "review_request_history_queue_sent_tag_pending",
+        "repair_evidence_status": _safe_text(evidence.get("repair_evidence_status"), max_length=120),
+        "sent_tag_pending_evidence_found": evidence.get("sent_tag_pending_evidence_found") is True,
+        "email_sent_confirmed": evidence.get("email_sent_confirmed") is True,
+        "gmail_send_confirmed": True,
+        "sent_count": 1,
+        "shopify_write_confirmed_false": True,
+        "shopify_tag_write_confirmed": False,
+        "shopify_tag_write_confirmed_false": True,
+        "ready_for_shopify_tag_write_next_phase": True,
+        "shopify_tag_pending": evidence.get("shopify_tag_pending") is True,
+        "shopify_tag_status_label": _safe_text(evidence.get("shopify_tag_status_label"), max_length=120)
+        or "Tag pending",
+        "local_order_found": evidence.get("local_order_found") if "local_order_found" in evidence else None,
+        "review_request_tag_alias_found": evidence.get("review_request_tag_alias_found") is True,
+        "matched_review_request_tags": matched_review_request_tags,
+        "tag_write_completed_evidence_found": evidence.get("tag_write_completed_evidence_found") is True,
+        "ebay_tag_detected": evidence.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": _safe_text(evidence.get("matched_ebay_tag_value"), max_length=120),
+        "tags": tags,
+        "already_sent_rows": [
+            {
+                "order": selected_order,
+                "order_name": selected_order,
+                "status": "Sent",
+                "shopify_tag_status_label": "Tag pending",
+                "shopify_tag_pending": True,
+                "tag_write_pending": True,
+                "local_review_send_success": evidence.get("local_review_send_success") is True,
+                "evidence": _safe_text(evidence.get("evidence"), max_length=500),
+                "tags": tags,
+                "matched_review_request_tags": matched_review_request_tags,
+            }
+        ],
+        "blocking_conditions": [],
+        "no_gmail_api_call_in_repair_source": True,
+        "repair_source_gmail_api_call_performed": False,
+        "repair_source_shopify_api_call_performed": False,
+        "repair_source_shopify_write_performed": False,
+        "repair_source_external_review_api_call_performed": False,
+        "repair_source_translations_register_called": False,
+    }
+
+
+def _load_manual_repair_local_post_send_source(target_order: str, target_env: str, diagnostics: dict) -> dict:
+    source_report, source_error, source_diagnostics = _read_source_post_send_audit()
+    diagnostics["host_report_found"] = source_diagnostics.get("host_report_found") is True
+    diagnostics["latest_review_send_report_found"] = source_diagnostics.get("latest_review_send_report_found") is True
+    diagnostics["latest_post_send_audit_found"] = source_diagnostics.get("latest_post_send_audit_found") is True
+    diagnostics["history_ledger_error"] = _safe_text(source_diagnostics.get("history_ledger_error"), max_length=300)
+    for path in source_diagnostics.get("source_paths_checked") or []:
+        _record_source_path(diagnostics, path)
+
+    selected_order = _canonical_order_name(source_report.get("selected_order"))
+    if source_error or selected_order != target_order:
+        return {}
+    if _source_blocking_conditions(source_report, source_error):
+        return {}
+
+    report = dict(source_report)
+    report.update(
+        {
+            "manual_repair_mode": True,
+            "target_order_env_name": TARGET_ORDER_ENV,
+            "target_order_env": target_env,
+            "target_order_allowed_for_repair_phase": target_env == REPAIR_PHASE_ALLOWED_TARGET_ORDER,
+            "repair_source": "local_post_send_report",
+            "sent_tag_pending_evidence_found": True,
+            "shopify_tag_pending": True,
+            "shopify_tag_status_label": "Tag pending",
+            "tag_write_completed_evidence_found": False,
+        }
+    )
+    if not report.get("gmail_send_confirmed"):
+        report["gmail_send_confirmed"] = _local_post_send_source_has_safe_send_confirmation(report)
+    return report
+
+
+def _local_post_send_source_has_safe_send_confirmation(source_report: dict) -> bool:
+    return bool(
+        source_report.get("gmail_drafts_send_confirmed") is True
+        or source_report.get("gmail_drafts_send_called") is True
+        or source_report.get("gmail_send_confirmed") is True
+        or source_report.get("gmail_send_performed") is True
+        or source_report.get("email_sent_confirmed") is True
+    )
+
+
+def _blocked_manual_repair_source(target_order: str, target_env: str, repair_source: str, evidence: dict) -> dict:
+    return {
+        "timestamp": utc_now_iso(),
+        "report_generated_at": utc_now_iso(),
+        "task": TASK_NAME,
+        "task_name": TASK_NAME,
+        "phase": "5.29D",
+        "mode": "manual-one-order-sent-tag-pending-repair-source-blocked",
+        "audit_status": repair_source,
+        "report_status": repair_source,
+        "success": False,
+        "manual_repair_mode": True,
+        "target_order_env_name": TARGET_ORDER_ENV,
+        "target_order_env": target_env,
+        "target_order_allowed_for_repair_phase": target_env == REPAIR_PHASE_ALLOWED_TARGET_ORDER,
+        "selected_order": target_order,
+        "expected_order": target_order,
+        "repair_source": repair_source,
+        "repair_evidence_status": _safe_text(evidence.get("repair_evidence_status"), max_length=120),
+        "sent_tag_pending_evidence_found": evidence.get("sent_tag_pending_evidence_found") is True,
+        "email_sent_confirmed": evidence.get("email_sent_confirmed") is True,
+        "sent_count": 1 if evidence.get("email_sent_confirmed") is True else 0,
+        "shopify_write_confirmed_false": True,
+        "shopify_tag_write_confirmed": evidence.get("tag_write_completed_evidence_found") is True,
+        "shopify_tag_write_confirmed_false": evidence.get("tag_write_completed_evidence_found") is not True,
+        "ready_for_shopify_tag_write_next_phase": False,
+        "shopify_tag_pending": evidence.get("shopify_tag_pending") is True,
+        "shopify_tag_status_label": _safe_text(evidence.get("shopify_tag_status_label"), max_length=120),
+        "local_order_found": evidence.get("local_order_found") if "local_order_found" in evidence else None,
+        "review_request_tag_alias_found": evidence.get("review_request_tag_alias_found") is True,
+        "matched_review_request_tags": [
+            _safe_text(tag, max_length=120) for tag in (evidence.get("matched_review_request_tags") or [])
+        ],
+        "tag_write_completed_evidence_found": evidence.get("tag_write_completed_evidence_found") is True,
+        "ebay_tag_detected": evidence.get("ebay_tag_detected") is True,
+        "matched_ebay_tag_value": _safe_text(evidence.get("matched_ebay_tag_value"), max_length=120),
+        "tags": [_safe_text(tag, max_length=120) for tag in (evidence.get("tags") or [])],
+        "already_sent_rows": [],
+        "blocking_conditions": [],
+    }
 
 
 def _read_source_post_send_audit() -> tuple[dict, str, dict]:
@@ -366,9 +700,50 @@ def _source_blocking_conditions(source_report: dict, source_error: str) -> list[
         return [{"status": source_error, "detail": "Post-send audit report was not available."}]
 
     selected_order = _canonical_order_name(source_report.get("selected_order"))
+    manual_repair_mode = source_report.get("manual_repair_mode") is True
     audit_status = _safe_text(source_report.get("audit_status") or source_report.get("report_status"))
     sent_count = _safe_int(source_report.get("sent_count"))
     pending_count = _pending_tag_write_count(source_report)
+    if manual_repair_mode:
+        target_env = _safe_text(source_report.get("target_order_env"), max_length=80)
+        if target_env != REPAIR_PHASE_ALLOWED_TARGET_ORDER or selected_order != REPAIR_PHASE_ALLOWED_TARGET_ORDER:
+            conditions.append(
+                {
+                    "status": TARGET_ORDER_NOT_ALLOWED_STATUS,
+                    "detail": "Phase 5.29D manual repair is locked to target order #21284.",
+                }
+            )
+        if source_report.get("sent_tag_pending_evidence_found") is not True:
+            conditions.append(
+                {
+                    "status": NO_SENT_TAG_PENDING_EVIDENCE_STATUS,
+                    "detail": "Review Request history/queue did not confirm Sent with Tag pending for the target order.",
+                }
+            )
+        if source_report.get("tag_write_completed_evidence_found") is True:
+            conditions.append(
+                {
+                    "status": COMPLETED_TAG_WRITE_EVIDENCE_STATUS,
+                    "detail": "Local history already contains completed Shopify tag-write evidence.",
+                }
+            )
+        if source_report.get("local_order_found") is False:
+            conditions.append(
+                {
+                    "status": "blocked_selected_order_not_found",
+                    "detail": "Target order was not found in local ShopifyOrder data.",
+                }
+            )
+        if source_report.get("sent_tag_pending_evidence_found") is True and not (
+            source_report.get("review_request_tag_alias_found") is True
+            or source_report.get("shopify_tag_pending") is True
+        ):
+            conditions.append(
+                {
+                    "status": NO_REVIEW_REQUEST_ALIAS_OR_PENDING_STATUS,
+                    "detail": "Target order must still have a review-request tag alias or a Tag pending state.",
+                }
+            )
     if not selected_order:
         conditions.append(
             {
@@ -461,6 +836,12 @@ def _write_result(source_report: dict, source_blockers: list[dict], approval: di
         "mode": "dry-run-approval-missing",
         "blocking_conditions": [],
         "tag_write_ready": not source_blockers,
+        "manual_repair_mode": source_report.get("manual_repair_mode") is True,
+        "target_order_env_name": TARGET_ORDER_ENV,
+        "target_order_env_present": bool(source_report.get("target_order_env")),
+        "target_order_env": _safe_text(source_report.get("target_order_env"), max_length=80),
+        "repair_source": _safe_text(source_report.get("repair_source"), max_length=120),
+        "sent_tag_pending_evidence_found": source_report.get("sent_tag_pending_evidence_found") is True,
         "selected_order": _canonical_order_name(source_report.get("selected_order")),
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
@@ -506,6 +887,11 @@ def _write_result(source_report: dict, source_blockers: list[dict], approval: di
         "shopify_order_name_confirmed": "",
         "shopify_tag_write_error_sanitized": "",
     }
+    disallowed_target = _first_blocking_condition(source_blockers, TARGET_ORDER_NOT_ALLOWED_STATUS)
+    if disallowed_target:
+        base["tag_write_status"] = TARGET_ORDER_NOT_ALLOWED_STATUS
+        base["blocking_conditions"].append(disallowed_target)
+        return base
     if not approval["approval_env_present"]:
         base["tag_write_status"] = MISSING_APPROVAL_STATUS
         base["blocking_conditions"].append(
@@ -645,12 +1031,26 @@ def _build_payload(
         "report_generated_at": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.29C",
+        "phase": "5.29D",
         "mode": write_result.get("mode", "dry-run-approval-missing"),
         "command_label": COMMAND_LABEL,
         "tag_write_status": status,
         "report_status": status,
         "success": status in {SUCCESS_STATUS, MISSING_APPROVAL_STATUS},
+        "manual_repair_mode": source_report.get("manual_repair_mode") is True
+        or write_result.get("manual_repair_mode") is True,
+        "target_order_env_name": TARGET_ORDER_ENV,
+        "target_order_env_present": bool(source_report.get("target_order_env"))
+        or write_result.get("target_order_env_present") is True,
+        "target_order_env": _safe_text(
+            source_report.get("target_order_env") or write_result.get("target_order_env"),
+            max_length=80,
+        ),
+        "repair_source": _safe_text(source_report.get("repair_source") or write_result.get("repair_source"), max_length=120),
+        "repair_evidence_status": _safe_text(source_report.get("repair_evidence_status"), max_length=120),
+        "repair_evidence_error": _safe_text(source_diagnostics.get("repair_evidence_error"), max_length=300),
+        "sent_tag_pending_evidence_found": source_report.get("sent_tag_pending_evidence_found") is True
+        or write_result.get("sent_tag_pending_evidence_found") is True,
         "source_post_send_audit_json_path": SOURCE_POST_SEND_AUDIT_LOGICAL_PATH,
         "source_post_send_audit_found": bool(source_report),
         "source_post_send_audit_error": _sanitize_text(source_error),
@@ -696,6 +1096,15 @@ def _build_payload(
         "tags_before": [_safe_text(tag, max_length=120) for tag in (write_result.get("tags_before") or [])],
         "tags_to_write": [_safe_text(tag, max_length=120) for tag in (write_result.get("tags_to_write") or [])],
         "tags_after_readback": [
+            _safe_text(tag, max_length=120) for tag in (write_result.get("tags_after_readback") or [])
+        ],
+        "shopify_tags_before": [
+            _safe_text(tag, max_length=120) for tag in (write_result.get("tags_before") or [])
+        ],
+        "shopify_tags_to_write": [
+            _safe_text(tag, max_length=120) for tag in (write_result.get("tags_to_write") or [])
+        ],
+        "shopify_tags_after_readback": [
             _safe_text(tag, max_length=120) for tag in (write_result.get("tags_after_readback") or [])
         ],
         "matched_review_request_tags_to_remove": [
@@ -758,6 +1167,13 @@ def _why_not_ready(blocking_conditions: list[dict], source_diagnostics: dict) ->
     return _dedupe_text(source_diagnostics.get("source_selection_why_not_ready") or [])
 
 
+def _first_blocking_condition(blocking_conditions: list[dict], status: str) -> dict:
+    for item in blocking_conditions or []:
+        if isinstance(item, dict) and item.get("status") == status:
+            return item
+    return {}
+
+
 def _safety_summary(write_result: dict) -> dict:
     return {
         "shopify_api_call_performed": write_result.get("shopify_api_call_performed") is True,
@@ -802,7 +1218,12 @@ def _render_html_report(payload: dict) -> str:
         f"<tr><th>{escape(label)}</th><td>{escape(str(value))}</td></tr>"
         for label, value in (
             ("Tag write status", payload.get("tag_write_status")),
+            ("Manual repair mode", payload.get("manual_repair_mode")),
+            ("Target order env", payload.get("target_order_env")),
             ("Selected order", payload.get("selected_order")),
+            ("Repair source", payload.get("repair_source")),
+            ("Repair evidence error", payload.get("repair_evidence_error")),
+            ("Sent / tag pending evidence found", payload.get("sent_tag_pending_evidence_found")),
             ("Source audit status", payload.get("source_audit_status")),
             ("Selected source", payload.get("selected_source")),
             ("Host report found", payload.get("host_report_found")),
@@ -827,9 +1248,9 @@ def _render_html_report(payload: dict) -> str:
             ("All review request aliases removed", payload.get("all_review_request_aliases_removed")),
             ("Readback verified", payload.get("readback_verified")),
             ("Local ShopifyOrder tags updated", payload.get("local_shopify_tags_updated")),
-            ("Tags before", ", ".join(payload.get("tags_before") or [])),
-            ("Tags to write", ", ".join(payload.get("tags_to_write") or [])),
-            ("Tags after readback", ", ".join(payload.get("tags_after_readback") or [])),
+            ("Tags before", ", ".join(payload.get("shopify_tags_before") or [])),
+            ("Tags to write", ", ".join(payload.get("shopify_tags_to_write") or [])),
+            ("Tags after readback", ", ".join(payload.get("shopify_tags_after_readback") or [])),
             ("Local tags after update", ", ".join(payload.get("local_tags_after_update") or [])),
         )
     )
@@ -882,6 +1303,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "history_ledger_error": payload.get("history_ledger_error"),
         "selected_source": payload.get("selected_source"),
         "why_not_ready": payload.get("why_not_ready"),
+        "manual_repair_mode": payload.get("manual_repair_mode"),
+        "target_order_env": payload.get("target_order_env"),
+        "repair_source": payload.get("repair_source"),
+        "repair_evidence_error": payload.get("repair_evidence_error"),
+        "sent_tag_pending_evidence_found": payload.get("sent_tag_pending_evidence_found"),
         "selected_order": payload.get("selected_order"),
         "email_sent_confirmed": payload.get("email_sent_confirmed"),
         "sent_count": payload.get("sent_count"),
@@ -904,6 +1330,9 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "shopify_tag_write_performed": payload.get("shopify_tag_write_performed"),
         "shopify_write_performed": payload.get("shopify_write_performed"),
         "shopify_api_call_performed": payload.get("shopify_api_call_performed"),
+        "shopify_tags_before": payload.get("shopify_tags_before"),
+        "shopify_tags_to_write": payload.get("shopify_tags_to_write"),
+        "shopify_tags_after_readback": payload.get("shopify_tags_after_readback"),
         "gmail_api_call_performed": payload.get("gmail_api_call_performed"),
         "email_sent": payload.get("email_sent"),
         "blocking_condition_count": payload.get("blocking_condition_count"),
@@ -917,7 +1346,12 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
         "Trustpilot post-send Shopify tag-write task completed.\n"
         f"Status: {payload.get('tag_write_status')}\n"
+        f"Manual repair mode: {payload.get('manual_repair_mode')}\n"
+        f"Target order env: {payload.get('target_order_env')}\n"
         f"Selected order: {payload.get('selected_order')}\n"
+        f"Repair source: {payload.get('repair_source')}\n"
+        f"Repair evidence error: {payload.get('repair_evidence_error')}\n"
+        f"Sent / tag pending evidence found: {payload.get('sent_tag_pending_evidence_found')}\n"
         f"Source audit status: {payload.get('source_audit_status')}\n"
         f"Selected source: {payload.get('selected_source')}\n"
         f"Source paths checked: {', '.join(payload.get('source_paths_checked') or [])}\n"
@@ -955,6 +1389,11 @@ def _issue_summary(status: str, selected_order: str, blockers: list[dict], write
             "No Gmail or external review API call was performed."
         )
     if status == MISSING_APPROVAL_STATUS:
+        if not selected_order:
+            return (
+                f"No selected post-send order is ready in the default source path. For the #21284 one-order "
+                f"repair, set {TARGET_ORDER_ENV}=#21284 with the approval env before any Shopify write."
+            )
         return (
             f"{selected_order} is gated for Shopify tag write. Missing exact approval env; "
             "no Shopify API call or write was performed."
@@ -991,6 +1430,14 @@ def _safe_int(value) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _to_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _canonical_order_name(value) -> str:

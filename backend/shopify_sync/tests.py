@@ -1,12 +1,18 @@
 import hashlib
 import hmac
 import urllib.parse
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from .models import ShopifyInstallation
+from .translation_apply_plan import (
+    ALL_LANGUAGES_MAPPING_BLOCKED_REASON,
+    build_translation_workspace_all_languages_update_state,
+    validate_and_update_all_languages_to_shopify,
+)
 from .views import SHOPIFY_OAUTH_STATE_SESSION_KEY
 
 
@@ -169,3 +175,226 @@ class ShopifyOAuthTests(TestCase):
             installation.scope,
             "read_orders,read_translations,write_translations,read_locales",
         )
+
+
+class TranslationAllLanguagesShopifyUpdateTests(SimpleTestCase):
+    product_gid = "gid://shopify/Product/111"
+
+    def _report(self, rows, status="completed"):
+        return {
+            "exists": True,
+            "job_id": "translation_workspace_job_test",
+            "status": status,
+            "product_gid": self.product_gid,
+            "product_title": "Test Product",
+            "selected_locales": ["ja", "de", "fr", "es", "it"],
+            "per_locale_status": [
+                {"locale": locale, "status": "completed"} for locale in ["ja", "de", "fr", "es", "it"]
+            ],
+            "review_rows": rows,
+        }
+
+    def _title_row(self, locale, proposed, **overrides):
+        row = {
+            "locale": locale,
+            "language": locale,
+            "resource_group": "product_basics",
+            "field": "title",
+            "key": "title",
+            "resource_id": self.product_gid,
+            "source_digest": f"digest-title-{locale}",
+            "source_value": "RC plane spare part",
+            "proposed_translation": proposed,
+            "has_generated_draft": True,
+            "validation_status": "draft_ready_for_manual_review",
+            "seo_validation_status": "seo_ready",
+        }
+        row.update(overrides)
+        return row
+
+    def test_all_languages_state_blocks_mapping_and_invalid_body_html(self):
+        rows = [
+            self._title_row("ja", "RC飛行機スペアパーツ"),
+            {
+                "locale": "ja",
+                "resource_group": "product_basics",
+                "field": "body_html",
+                "key": "body_html",
+                "resource_id": self.product_gid,
+                "source_digest": "digest-body-ja",
+                "source_value": '<p>Part <img src="part.jpg"></p>',
+                "proposed_translation": "<p>部品</p>",
+                "has_generated_draft": True,
+                "validation_status": "draft_ready_for_manual_review",
+                "seo_validation_status": "seo_ready",
+            },
+            {
+                "locale": "ja",
+                "resource_group": "options",
+                "field": "option.name",
+                "key": "option.name",
+                "resource_id": "gid://shopify/ProductOption/1",
+                "source_digest": "digest-option-ja",
+                "source_value": "Color",
+                "proposed_translation": "色",
+                "has_generated_draft": True,
+                "validation_status": "draft_ready_for_manual_review",
+                "seo_validation_status": "seo_ready",
+            },
+        ]
+
+        state = build_translation_workspace_all_languages_update_state(
+            self._report(rows),
+            selected_product_gid=self.product_gid,
+        )
+
+        self.assertEqual(state["write_ready_count"], 1)
+        blocked = {entry["key"]: entry for entry in state["entries"] if entry["status"] == "blocked"}
+        self.assertIn("blocked_html_media_or_link_tag_broken", blocked["body_html"]["blocking_reasons"])
+        self.assertEqual(
+            blocked["option.name"]["blocking_reason"],
+            ALL_LANGUAGES_MAPPING_BLOCKED_REASON,
+        )
+
+    @patch("shopify_sync.translation_apply_plan.requests.post")
+    def test_all_languages_update_prefers_manual_edit_and_verifies_readback(self, mock_post):
+        rows = [
+            self._title_row(
+                locale,
+                f"OpenAI {locale}",
+                **(
+                    {
+                        "manual_edit_value": "Manual Japanese title",
+                        "manual_translation_override_value": "Manual Japanese title",
+                        "using_manual_edit": True,
+                    }
+                    if locale == "ja"
+                    else {}
+                ),
+            )
+            for locale in ["ja", "de", "fr", "es", "it"]
+        ]
+        captured = {}
+
+        class Response:
+            status_code = 200
+
+            def __init__(self, data):
+                self._data = data
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self._data
+
+        def fake_post(_url, headers=None, json=None, timeout=None):
+            variables = (json or {}).get("variables") or {}
+            if "translations" in variables:
+                translations = []
+                for item in variables["translations"]:
+                    key = (variables["resourceId"], item["locale"], item["key"])
+                    captured[key] = item["value"]
+                    translations.append(
+                        {
+                            "key": item["key"],
+                            "locale": item["locale"],
+                            "value": item["value"],
+                            "outdated": False,
+                        }
+                    )
+                return Response(
+                    {
+                        "data": {
+                            "translationsRegister": {
+                                "translations": translations,
+                                "userErrors": [],
+                            }
+                        }
+                    }
+                )
+            resource_id = variables["id"]
+            locale = variables["locale"]
+            return Response(
+                {
+                    "data": {
+                        "translatableResource": {
+                            "resourceId": resource_id,
+                            "translations": [
+                                {
+                                    "key": key,
+                                    "locale": item_locale,
+                                    "value": value,
+                                    "outdated": False,
+                                }
+                                for (item_resource, item_locale, key), value in captured.items()
+                                if item_resource == resource_id and item_locale == locale
+                            ],
+                        }
+                    }
+                }
+            )
+
+        mock_post.side_effect = fake_post
+        result = validate_and_update_all_languages_to_shopify(
+            self._report(rows),
+            installation=SimpleNamespace(shop="example.myshopify.com", access_token="token"),
+            selected_product_gid=self.product_gid,
+            write_reports=False,
+        )
+
+        self.assertEqual(
+            result["status"],
+            "all_languages_shopify_translations_written_and_verified",
+        )
+        self.assertEqual(result["updated_count"], 5)
+        self.assertEqual(result["verified_count"], 5)
+        self.assertTrue(result["translations_register_called"])
+        self.assertEqual(
+            captured[(self.product_gid, "ja", "title")],
+            "Manual Japanese title",
+        )
+
+    @patch("shopify_sync.translation_apply_plan.requests.post")
+    def test_all_languages_update_with_no_safe_candidates_does_not_mutate(self, mock_post):
+        rows = [
+            {
+                "locale": "de",
+                "resource_group": "variants",
+                "field": "variant.title",
+                "key": "variant.title",
+                "resource_id": "gid://shopify/ProductVariant/1",
+                "source_digest": "digest-variant-de",
+                "source_value": "Blue",
+                "proposed_translation": "Blau",
+                "has_generated_draft": True,
+                "validation_status": "draft_ready_for_manual_review",
+                "seo_validation_status": "seo_ready",
+            }
+        ]
+
+        result = validate_and_update_all_languages_to_shopify(
+            self._report(rows),
+            installation=SimpleNamespace(shop="example.myshopify.com", access_token="token"),
+            selected_product_gid=self.product_gid,
+            write_reports=False,
+        )
+
+        self.assertEqual(result["status"], "all_languages_shopify_translations_blocked")
+        self.assertFalse(result["mutation_called"])
+        self.assertFalse(result["shopify_write_performed"])
+        mock_post.assert_not_called()
+
+    @patch("shopify_sync.translation_apply_plan.requests.post")
+    def test_all_languages_update_without_selected_product_is_blocked(self, mock_post):
+        result = validate_and_update_all_languages_to_shopify(
+            self._report([self._title_row("fr", "Piece RC")]),
+            installation=SimpleNamespace(shop="example.myshopify.com", access_token="token"),
+            selected_product_gid="",
+            write_reports=False,
+        )
+
+        self.assertEqual(result["status"], "all_languages_shopify_translations_blocked")
+        self.assertIn("blocked_missing_selected_product", result["blocking_conditions"])
+        self.assertFalse(result["mutation_called"])
+        mock_post.assert_not_called()

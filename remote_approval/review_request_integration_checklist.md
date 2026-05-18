@@ -230,6 +230,14 @@ Phase 0.2 automation decision:
   verified only when `1: trustpilot` is present and every review-request alias
   is absent, and the local `ShopifyOrder.shopify_tags` cache is updated from
   the verified Shopify readback before the order is treated as Tag written.
+- [x] Phase 5.29D adds a strict one-order Sent / Tag pending repair path for
+  `#21284` only. It requires
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE_ORDER="#21284"` and the exact
+  tag-write approval env before any Shopify API call.
+- [x] The Phase 5.29D repair path verifies local Review Request history/queue
+  evidence that the target row is `Sent` and `Tag pending`, blocks any other
+  target with `blocked_target_order_not_allowed_for_repair_phase`, and does
+  not provide a batch repair path.
 
 ### Shopify Admin API Tag Permissions
 
@@ -1294,3 +1302,9 @@ Future tracking design note:
   repaired by the manual one-order tag-write runner without resending Gmail.
 - [x] If Gmail send fails or server-side revalidation blocks before send,
   Shopify tag write is not attempted.
+- [x] Phase 5.29D manual repair is locked to `#21284` and requires both
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE_ORDER="#21284"` and
+  `SHOPIFY_REVIEW_REQUEST_TRUSTPILOT_TAG_WRITE=YES_I_APPROVE_TRUSTPILOT_TAG_WRITE_FOR_SENT_ORDER`.
+- [x] The repair path is for Sent / Tag pending evidence only; it does not batch
+  repair orders, resend Gmail, call external review APIs, or write Shopify for
+  any unrelated order.
