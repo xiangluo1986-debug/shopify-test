@@ -89,18 +89,35 @@ confirmed that a local inactive test service can reach `/healthz/`, but it does
 not remove the need for the deployment lock. The lock addresses a separate
 risk: overlapping deployment tasks racing with each other.
 
-Current status:
+Runtime-changing actions covered by this rule include container start,
+container stop, container restart, image build, migration, collectstatic, proxy
+switch, traffic switch, blue/green cleanup, production apply, and rollback. A
+future rollback is also runtime-changing if it switches proxy upstreams,
+starts/stops services, restarts a service, or restores a previous runtime
+target.
+
+Every future runtime-changing blue-green script must acquire the deployment
+lock before the first runtime action. If the lock exists, it must block and
+exit non-zero, not auto-queue. It must release only the matching `lock_id` in
+cleanup/finally handling. Stale locks require manual review before release.
+Normal non-deploy tasks are not blocked.
+
+## Deployment Lock Coverage Status
 
 - Real helper exists: `scripts/deploy_lock.ps1`.
 - Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
+- `safe_deploy.ps1`: enforced in real mode.
 - `scripts/safe_deploy.ps1` reports lock status in `-DryRun` and supports
   `-CheckDeployLock`.
 - `scripts/safe_deploy.ps1` acquires the lock in real non-dry-run mode before
   build/check/migrate/collectstatic/restart/health check, then releases only
   the matching `lock_id` in cleanup/finally handling.
-- Production blue-green apply remains NO-GO until a separate apply task
-  approves exact runtime commands and confirms every runtime-changing path uses
-  the deployment lock.
+- Blue-green production apply script: not implemented yet.
+- Proxy switch script: not implemented yet.
+- Cleanup script: not implemented yet.
+- Local inactive startup: separate local-only gate, not production traffic.
+- Production apply: NO-GO until all runtime-changing scripts use deployment
+  lock.
 
 ## Current Architecture
 
@@ -427,10 +444,11 @@ Review the dry-run output from
 `scripts/blue_green_local_apply_simulation.ps1`,
 `scripts/blue_green_local_apply_simulation_preview.ps1`, and
 `scripts/blue_green_local_inactive_startup.ps1`.
-The recommended next separate task is to extend the same deployment lock rule
-to any future blue-green runtime-changing script design, still without
-deploying or switching traffic in that preparation task. Production should
-remain NO-GO until local or staging results are reviewed and a separate
-production task approves route, port ownership, proxy, scheduler, migration,
-static/media, rollback, observation details, and lock enforcement for the exact
-runtime path being used.
+The recommended next separate task is to design a no-action blue-green
+production apply script skeleton that refuses to run runtime-changing commands
+until the shared deployment lock acquisition, existing-lock blocking,
+matching-`lock_id` release, stale-lock review, and no-auto-queue behavior are
+implemented. Production should remain NO-GO until local or staging results are
+reviewed and a separate production task approves route, port ownership, proxy,
+scheduler, migration, static/media, rollback, observation details, and lock
+enforcement for the exact runtime path being used.

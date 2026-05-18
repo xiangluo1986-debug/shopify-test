@@ -36,6 +36,25 @@ The existing local inactive-color startup success on non-production port
 deploy-related tasks, which is separate from proving that an inactive local
 service can become healthy.
 
+## Deployment Lock Coverage Status
+
+- `safe_deploy.ps1`: enforced in real mode.
+- Blue-green production apply script: not implemented yet.
+- Proxy switch script: not implemented yet.
+- Cleanup script: not implemented yet.
+- Local inactive startup: separate local-only gate, not production traffic.
+- Production apply: NO-GO until all runtime-changing scripts use deployment
+  lock.
+
+Runtime-changing deploy paths include container start, container stop,
+container restart, image build, migration, collectstatic, proxy switch, traffic
+switch, cleanup of blue/green services, production apply, and rollback. Future
+scripts for those paths must acquire the deployment lock before changing
+runtime state. If the lock exists, they must block and exit non-zero, not
+auto-queue. They must release only the matching `lock_id` in cleanup/finally
+handling. Stale locks require manual review. Normal non-deploy tasks are not
+blocked.
+
 ## Current project deploy command
 
 From the project root:

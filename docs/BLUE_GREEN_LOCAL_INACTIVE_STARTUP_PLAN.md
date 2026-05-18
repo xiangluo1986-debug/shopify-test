@@ -74,6 +74,20 @@ only the inactive test service with `--no-deps` and `--no-build`, checks
 if health fails, and stops only that inactive service during cleanup. This task
 must not run that executable path.
 
+## Deployment Lock Note
+
+The current local inactive startup runner uses separate local-only execution
+gates and does not switch production traffic. Do not treat that local gate as a
+production deployment lock.
+
+Any future production or runtime-changing blue-green version of this path must
+use the shared deployment lock before container start, container stop,
+container restart, image build, migration, collectstatic, proxy switch, traffic
+switch, cleanup, production apply, or rollback. If the lock exists, it must
+block and exit non-zero, not auto-queue. It must release only the matching
+`lock_id` in cleanup/finally handling. Stale locks require manual review.
+Normal non-deploy tasks are not blocked.
+
 ## Proposed Inactive Color
 
 - Use one inactive test service only.

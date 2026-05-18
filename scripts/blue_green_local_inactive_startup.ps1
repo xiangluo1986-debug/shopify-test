@@ -316,6 +316,17 @@ function Show-SafeConfigNote {
     Write-Host "  docker compose -f docker-compose.bluegreen.local-test.example.yml config"
 }
 
+function Show-DeploymentLockNote {
+    Write-Step "Deployment lock note"
+
+    Write-Host "This runner has separate local-only gates and does not switch production traffic."
+    Write-Host "Do not treat the local inactive startup gate as a production deployment lock."
+    Write-Host "Future production/runtime-changing blue-green scripts must acquire .deploy/deploy.lock before container start, container stop, container restart, image build, migration, collectstatic, proxy switch, traffic switch, cleanup, production apply, or rollback."
+    Write-Host "If the deployment lock exists, the future runtime-changing script must block and exit non-zero. It must not auto-queue."
+    Write-Host "Future runtime-changing scripts must release only the matching lock_id in cleanup/finally handling."
+    Write-Host "Stale locks require manual review. Normal non-deploy tasks are not blocked."
+}
+
 function Show-BlockedStartupPlan {
     Write-Step "Future local inactive startup plan"
 
@@ -558,6 +569,7 @@ if ($targetGateExitCode -ne 0) {
 
 Test-HealthUrl -Url $HealthUrl
 Show-SafeConfigNote
+Show-DeploymentLockNote
 Show-BlockedStartupPlan
 Show-CleanupPlan
 

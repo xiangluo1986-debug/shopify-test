@@ -139,6 +139,8 @@ function Show-RunnerStatus {
     Write-Warn "Future real local inactive startup also requires -AllowContainerAction."
     Write-Warn "Any future inactive startup must use a non-8000 test port and leave current web untouched."
     Write-Warn "The inactive service must not be the current active service name web."
+    Write-Warn "Future production/runtime-changing blue-green paths must acquire the deployment lock before container, build, migration, collectstatic, proxy switch, traffic switch, cleanup, apply, or rollback actions."
+    Write-Warn "A second deploy task must block on an existing deployment lock; it must not auto-queue."
     Write-Warn "Production remains NO-GO."
 }
 
@@ -219,6 +221,7 @@ function Show-FutureCommandPlan {
                 "# Future requirement: if aftersales-web is missing, run a separate explicit image build/preparation task first.",
                 "# Future requirement: use one inactive test service only on a non-8000 port such as 18080 or 18081.",
                 "# Future requirement: inactive service must not be web.",
+                "# Future production switch requirement: acquire the shared deployment lock first.",
                 ".\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -Ack <approval-phrase> -AllowContainerAction -TestPort 18080 -InactiveService web_green_test"
             )
         },

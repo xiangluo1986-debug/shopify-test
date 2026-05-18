@@ -119,8 +119,10 @@ function Show-ImplementationPlan {
     Write-Host "3. safe_deploy -CheckDeployLock is read-only and blocks when a lock exists."
     Write-Host "4. Real safe_deploy acquires the lock before build/check/migrate/collectstatic/restart/health check."
     Write-Host "5. Real safe_deploy releases only the matching lock_id in cleanup/finally handling."
-    Write-Host "6. Future blue-green runtime-changing paths must use the same lock before deploy/switch/cleanup actions."
-    Write-Host "7. Production blue-green apply remains NO-GO until a separate apply task approves exact runtime commands."
+    Write-Host "6. Future blue-green runtime-changing paths must use the same lock before container start/stop/restart, image build, migration, collectstatic, proxy switch, traffic switch, cleanup, production apply, or rollback."
+    Write-Host "7. If the lock exists, future runtime-changing scripts must block and exit non-zero; they must not auto-queue."
+    Write-Host "8. Stale locks require manual review, and normal non-deploy tasks are not blocked."
+    Write-Host "9. Production blue-green apply remains NO-GO until a separate apply task approves exact runtime commands."
 }
 
 function Show-RealHelperExamples {

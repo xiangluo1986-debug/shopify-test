@@ -67,6 +67,24 @@ Related non-active drafts:
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
 
+## Deployment Lock Coverage Status
+
+- `safe_deploy.ps1`: enforced in real mode.
+- Blue-green production apply script: not implemented yet.
+- Proxy switch script: not implemented yet.
+- Cleanup script: not implemented yet.
+- Local inactive startup: separate local-only gate, not production traffic.
+- Production apply: NO-GO until all runtime-changing scripts use deployment
+  lock.
+
+Runtime-changing actions that require the deployment lock before any future
+apply include container start, container stop, container restart, image build,
+migration, collectstatic, proxy switch, traffic switch, cleanup of blue/green
+services, production apply, and rollback. If a lock exists, the task must block
+and exit non-zero, not auto-queue. The task must release only the matching
+`lock_id` in cleanup/finally handling. Stale lock removal requires manual
+review. Normal non-deploy tasks are not blocked.
+
 ## Preconditions Before Applying
 
 - Current single-web deployment is healthy through `/healthz/`.

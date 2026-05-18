@@ -29,6 +29,30 @@ The goal is to prevent overlapping operations such as two builds racing, one
 task switching traffic while another restarts a service, or one cleanup command
 stopping a service another task just made active.
 
+## Runtime-Changing Path Inventory
+
+The following current or future actions are runtime-changing deployment paths.
+Each one must acquire the deployment lock before it starts, must block and exit
+non-zero if the lock already exists, must not auto-queue, and must release only
+the matching `lock_id` in cleanup/finally handling:
+
+- Container start for an inactive blue/green service.
+- Container stop for an inactive, previous-active, or cleanup service.
+- Container restart or replacement for any serving web path.
+- Image build or image preparation tied to a deploy.
+- Django migration during a deploy.
+- `collectstatic` or another deploy-time static asset update.
+- Proxy reload, proxy upstream edit, or proxy configuration apply.
+- Traffic switch from one color to another.
+- Cleanup of blue/green services after an observation window.
+- Production apply for `safe_deploy` or future blue-green deploys.
+- Rollback, including proxy switchback, service restart, service stop/start, or
+  restoring a previously approved runtime target.
+
+Stale locks require manual review before any release attempt. Normal
+non-deploy tasks, read-only diagnostics, and documentation updates are not
+blocked by the deployment lock.
+
 ## What The Lock Does Not Protect
 
 The deployment lock is not required for normal read-only or non-runtime work,
@@ -222,6 +246,16 @@ Integrate the deployment lock into:
 Local simulation may use a separate local-simulation lock if needed, especially
 when test ports or temporary inactive services are involved. Production and
 runtime-changing actions should use the shared deployment lock.
+
+## Deployment Lock Coverage Status
+
+- `safe_deploy.ps1`: enforced in real mode.
+- Blue-green production apply script: not implemented yet.
+- Proxy switch script: not implemented yet.
+- Cleanup script: not implemented yet.
+- Local inactive startup: separate local-only gate, not production traffic.
+- Production apply: NO-GO until all runtime-changing scripts use deployment
+  lock.
 
 ## Current Status
 

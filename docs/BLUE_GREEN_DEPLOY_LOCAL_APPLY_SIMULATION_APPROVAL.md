@@ -158,6 +158,20 @@ The current active `docker-compose.yml` must remain unchanged. The current web
 service must keep serving the existing local runtime path while the simulation
 is performed.
 
+## Deployment Lock Note
+
+The local simulation and local inactive startup gates are local-only safeguards.
+They do not approve production traffic changes and do not replace the shared
+deployment lock.
+
+Any future production or runtime-changing blue-green script must acquire the
+deployment lock before container start, container stop, container restart,
+image build, migration, collectstatic, proxy switch, traffic switch, cleanup,
+production apply, or rollback. If a lock exists, the task must block and exit
+non-zero, not auto-queue. It must release only the matching `lock_id` in
+cleanup/finally handling. Stale locks require manual review. Normal non-deploy
+tasks are not blocked.
+
 ## Future Command Plan
 
 All commands below are examples for a later approved task and are marked:

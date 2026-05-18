@@ -246,9 +246,13 @@ function Show-DeploymentLockStatus {
         Write-Warn "safe_deploy script is missing: $safeDeployPath"
     }
 
-    Write-Ok "safe_deploy enforces the deployment lock in real non-dry-run mode."
-    Write-Warn "Production blue-green apply remains NO-GO until a separate apply task approves exact runtime commands."
-    Write-Host "Any future production deploy, proxy switch, restart, rolling update, or cleanup path must acquire the deployment lock first."
+    Write-Ok "safe_deploy lock enforcement is active in real non-dry-run mode."
+    Write-Warn "Blue-green production apply remains blocked until future runtime-changing scripts enforce the same deployment lock."
+    Write-Host "Local inactive startup has separate local-only gates; production switch still requires the deployment lock."
+    Write-Host "Runtime-changing paths requiring the lock: container start, container stop, container restart, image build, migration, collectstatic, proxy switch, traffic switch, cleanup, production apply, and rollback."
+    Write-Host "If a second deploy task sees an existing lock, it must block and exit non-zero. It must not auto-queue."
+    Write-Host "Future runtime-changing scripts must release only the matching lock_id in cleanup/finally handling."
+    Write-Host "Stale locks require manual review. Normal non-deploy tasks are not blocked."
     Write-Host "Proposed lock path: .deploy/deploy.lock"
     Write-Host "Current status: helper exists if listed above; safe_deploy dry-run reports lock state without acquiring it, -CheckDeployLock is read-only, and real safe_deploy acquires/releases the lock."
 }
@@ -371,6 +375,8 @@ function Show-FuturePlan {
     Write-Host "If aftersales-web is missing, run a separate explicit image build/preparation task before startup."
     Write-Host "Any future inactive startup must use one inactive test service on a non-8000 local port and leave current web untouched."
     Write-Host "The future inactive service must not be the current active service name web."
+    Write-Host "Production/runtime-changing blue-green scripts must acquire the deployment lock before any future container, build, migration, collectstatic, proxy switch, traffic switch, cleanup, apply, or rollback action."
+    Write-Host "An existing deployment lock must block the second deploy task; no automatic queue is allowed."
     Write-Host "Production remains NO-GO."
     Write-Host ""
     Write-Host "This script does not call docker compose up, down, restart, build, run, exec, or migrate."

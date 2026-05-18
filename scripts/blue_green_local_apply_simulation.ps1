@@ -170,6 +170,8 @@ function Show-FutureInactiveStartupPhase {
     Write-Warn "Future real local inactive startup also requires -AllowContainerAction."
     Write-Warn "Any future inactive test service must use a non-8000 test port such as 18080 or 18081."
     Write-Warn "The inactive service must not be the current active service name web."
+    Write-Warn "Future production/runtime-changing blue-green paths must acquire the deployment lock before container, build, migration, collectstatic, proxy switch, traffic switch, cleanup, apply, or rollback actions."
+    Write-Warn "A second deploy task must block on an existing deployment lock; it must not auto-queue."
     Write-Warn "Current web remains untouched and keeps host port 8000."
     Write-Warn "Production remains NO-GO."
 }
@@ -246,6 +248,7 @@ function Show-BlockedActionPlan {
     Write-Host "  - test port must be non-8000, for example 18080 or 18081"
     Write-Host "  - inactive service must not be web"
     Write-Host "  - current web must remain untouched"
+    Write-Host "  - production switch still requires the shared deployment lock"
     Write-Host "  - production remains NO-GO"
 }
 
