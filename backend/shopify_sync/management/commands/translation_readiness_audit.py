@@ -34,6 +34,14 @@ TECHNICAL_METAFIELD_MARKERS = (
     "_id",
     "sku",
     "barcode",
+    "gid://",
+    "_gid",
+    "token",
+    "sync",
+    "feed",
+    "feeds",
+    "internal",
+    "technical",
     "wishlist",
     "count",
 )
@@ -41,17 +49,24 @@ CUSTOMER_FACING_METAFIELD_MARKERS = (
     "benefit",
     "bullet",
     "compat",
+    "compatibility",
     "description",
     "feature",
+    "features",
     "highlight",
+    "highlights",
     "included",
     "material",
     "model",
     "package",
+    "package_included",
+    "package included",
     "scale",
     "short_description",
     "size",
     "spec",
+    "specification",
+    "specifications",
     "subtitle",
     "summary",
 )
@@ -233,6 +248,19 @@ def _print_summary(payload, write_line):
         "Media alt rows classified: "
         f"{media_summary.get('row_count', 0)}; "
         f"recommendation: {media_summary.get('recommendation', '')}"
+    )
+    variant_meta = payload.get("variant_metafield_quick_audit") or {}
+    write_line(
+        "Variants classified: "
+        f"{variant_meta.get('variant_row_count', 0)}; "
+        f"ready for next enablement: "
+        f"{variant_meta.get('variant_ready_for_next_enablement_count', 0)}"
+    )
+    write_line(
+        "Customer-facing metafields: "
+        f"{variant_meta.get('customer_facing_metafield_ready_for_next_enablement_count', 0)} ready / "
+        f"{variant_meta.get('customer_facing_metafield_blocked_count', 0)} blocked; "
+        f"technical/internal: {variant_meta.get('technical_or_internal_metafield_count', 0)}"
     )
 
 
@@ -611,16 +639,16 @@ def _media_alt_summary(media_rows):
     readback_count = sum(1 for row in media_rows if row.get("readback_method_available"))
     all_safe = bool(media_rows) and safe_mapping_count == len(media_rows)
     if not media_rows:
-        recommendation = "No sampled media alt rows were found; keep media alt text preview-only."
+        recommendation = "No sampled media alt rows were found; empty media alt values stay skipped."
     elif all_safe and input_ready_count == len(media_rows) and readback_count == len(media_rows):
         recommendation = (
-            "All sampled media alt rows have safe resource mapping. Enable media alt "
-            "text in a later explicitly approved task."
+            "All sampled media alt rows have safe resource mapping for the existing "
+            "enabled write path when validation passes."
         )
     else:
         recommendation = (
-            "Keep media alt text preview-only until every sampled row has resource "
-            "ID, key, digest, proposed text, and readback mapping."
+            "Only media alt rows with resource ID, key, digest, proposed text, and "
+            "readback mapping can use the existing enabled write path."
         )
     return {
         "row_count": len(media_rows),
@@ -701,15 +729,56 @@ def _variant_rows(rows, product_gid):
         if group != "variants" and not key.startswith("variant."):
             continue
         resource_id = _text(row.get("resource_id"))
+        locale = _text(row.get("locale") or row.get("target_locale"))
+        digest = _text(row.get("digest") or row.get("source_digest"))
+        proposed = _proposed_translation(row)
+        marker_text = " ".join(
+            _text(value).lower()
+            for value in (
+                key,
+                row.get("field_label"),
+                row.get("context_label"),
+                row.get("resource_note"),
+            )
+        )
+        technical = any(marker in marker_text for marker in ("sku", "barcode"))
+        missing = _missing_enablement_requirements(
+            resource_id=resource_id,
+            key=key,
+            digest=digest,
+            locale=locale,
+            proposed=proposed,
+        )
+        empty_value = not bool(proposed)
+        ready_later = not technical and not missing and not empty_value
         variants.append(
             {
                 "product_gid": product_gid,
-                "locale": _text(row.get("locale") or row.get("target_locale")),
+                "locale": locale,
+                "locale_exists": bool(locale),
                 "key": key,
+                "key_exists": bool(key),
+                "resource_id": resource_id,
                 "resource_id_exists": bool(resource_id),
                 "resource_id_is_real_shopify_gid": _real_shopify_gid(resource_id),
-                "digest_exists": bool(_text(row.get("digest") or row.get("source_digest"))),
+                "digest": digest,
+                "digest_exists": bool(digest),
+                "proposed_translation_exists": bool(proposed),
+                "readback_method_available": bool(resource_id and locale),
+                "customer_facing": not technical,
+                "technical_or_sku": technical,
+                "missing_requirements": missing,
+                "missing_mapping": _missing_mapping_blocked(missing),
+                "empty_value_skipped": empty_value,
+                "ready_for_next_enablement_task": ready_later,
+                "safe_to_write_now": False,
                 "write_disabled": True,
+                "classification": _future_enablement_classification(
+                    ready_later=ready_later,
+                    technical=technical,
+                    empty_value=empty_value,
+                    missing=missing,
+                ),
             }
         )
     return variants
@@ -725,24 +794,51 @@ def _metafield_rows(rows, product_gid):
         namespace, key = _metafield_namespace_key(row)
         marker_text = f"{namespace} {key} {_text(row.get('resource_note'))} {_text(row.get('context_label'))}".lower()
         technical = _is_technical_metafield(marker_text)
-        future_candidate = (
+        customer_candidate = (
             not technical
             and any(marker in marker_text for marker in CUSTOMER_FACING_METAFIELD_MARKERS)
-            and _real_shopify_gid(resource_id)
-            and bool(_text(row.get("digest") or row.get("source_digest")))
         )
+        locale = _text(row.get("locale") or row.get("target_locale"))
+        digest = _text(row.get("digest") or row.get("source_digest"))
+        proposed = _proposed_translation(row)
+        missing = _missing_enablement_requirements(
+            resource_id=resource_id,
+            key=key,
+            digest=digest,
+            locale=locale,
+            proposed=proposed,
+        )
+        empty_value = not bool(proposed)
+        ready_later = customer_candidate and not missing and not empty_value
         metafields.append(
             {
                 "product_gid": product_gid,
-                "locale": _text(row.get("locale") or row.get("target_locale")),
+                "locale": locale,
+                "locale_exists": bool(locale),
                 "namespace": namespace,
                 "key": key,
+                "key_exists": bool(key),
+                "resource_id": resource_id,
                 "resource_id_exists": bool(resource_id),
                 "resource_id_is_real_shopify_gid": _real_shopify_gid(resource_id),
-                "digest_exists": bool(_text(row.get("digest") or row.get("source_digest"))),
-                "customer_facing_candidate": future_candidate,
+                "digest": digest,
+                "digest_exists": bool(digest),
+                "proposed_translation_exists": bool(proposed),
+                "readback_method_available": bool(resource_id and locale),
+                "missing_requirements": missing,
+                "missing_mapping": _missing_mapping_blocked(missing),
+                "empty_value_skipped": empty_value,
+                "customer_facing_candidate": customer_candidate,
                 "technical_or_internal": technical,
+                "ready_for_next_enablement_task": ready_later,
+                "safe_to_write_now": False,
                 "write_disabled": True,
+                "classification": _future_enablement_classification(
+                    ready_later=ready_later,
+                    technical=technical,
+                    empty_value=empty_value,
+                    missing=missing,
+                ),
             }
         )
     return metafields
@@ -769,9 +865,36 @@ def _variant_metafield_summary(variant_rows, metafield_rows):
         for key, row in unique_metafields.items()
         if row.get("customer_facing_candidate")
     )
+    variant_ready = sum(
+        1 for row in variant_rows if row.get("ready_for_next_enablement_task")
+    )
+    customer_metafield_ready = sum(
+        1 for row in metafield_rows if row.get("ready_for_next_enablement_task")
+    )
+    customer_metafield_blocked = sum(
+        1
+        for row in metafield_rows
+        if row.get("customer_facing_candidate")
+        and not row.get("ready_for_next_enablement_task")
+        and not row.get("empty_value_skipped")
+    )
+    missing_mapping = sum(
+        1 for row in variant_rows + metafield_rows if row.get("missing_mapping")
+    )
+    empty_values = sum(
+        1 for row in variant_rows + metafield_rows if row.get("empty_value_skipped")
+    )
     return {
         "variant_row_count": variant_count,
         "variant_rows_with_resource_key_digest": variants_with_mapping,
+        "variant_ready_for_next_enablement_count": variant_ready,
+        "variant_status": (
+            "ready_for_next_enablement_task"
+            if variant_ready
+            else "no_rows_found"
+            if not variant_count
+            else "not_ready"
+        ),
         "variant_writes_enabled": False,
         "metafield_row_count": len(metafield_rows),
         "unique_metafield_count": len(unique_metafields),
@@ -781,13 +904,87 @@ def _variant_metafield_summary(variant_rows, metafield_rows):
         "customer_facing_future_candidate_count": sum(
             1 for row in metafield_rows if row.get("customer_facing_candidate")
         ),
+        "customer_facing_metafield_ready_for_next_enablement_count": (
+            customer_metafield_ready
+        ),
+        "customer_facing_metafield_blocked_count": customer_metafield_blocked,
+        "missing_mapping_blocked_count": missing_mapping,
+        "empty_value_skipped_count": empty_values,
         "permanently_blocked_namespaces_keys": blocked,
         "future_candidate_namespaces_keys": candidates,
-        "summary": (
-            "Variants and metafields remain write-disabled. Sampled metafields are "
-            "technical/internal unless listed as future candidates."
+        "ready_for_next_enablement_namespaces_keys": sorted(
+            {
+                f"{row.get('namespace', '')}.{row.get('key', '')}".strip(".")
+                for row in metafield_rows
+                if row.get("ready_for_next_enablement_task")
+            }
         ),
+        "ready_for_next_enablement_variant_row_count": variant_ready,
+        "summary": (
+            "Variants and metafields remain write-disabled in this audit. "
+            "Rows marked ready still require a separate enablement task before "
+            "any Shopify write path is opened."
+        ),
+        "variant_rows": variant_rows,
+        "metafield_rows": metafield_rows,
     }
+
+
+def _missing_enablement_requirements(*, resource_id, key, digest, locale, proposed):
+    missing = []
+    if not resource_id:
+        missing.append("resource_id")
+    elif not _real_shopify_gid(resource_id):
+        missing.append("real Shopify resource_id")
+    if not key:
+        missing.append("key")
+    if not digest:
+        missing.append("digest")
+    if not locale:
+        missing.append("locale")
+    if not proposed:
+        missing.append("proposed translation")
+    if not (resource_id and locale):
+        missing.append("readback path")
+    return _unique_strings(missing)
+
+
+def _proposed_translation(row):
+    return _text(
+        row.get("proposed_translation_value")
+        or row.get("proposed_translation")
+        or row.get("manual_edit_value")
+        or row.get("generated_draft_display")
+        or row.get("draft_value")
+    )
+
+
+def _future_enablement_classification(*, ready_later, technical, empty_value, missing):
+    if ready_later:
+        return "ready_for_next_enablement_task"
+    if technical:
+        return "technical_or_internal_blocked"
+    if empty_value:
+        return "empty_value_skipped"
+    if missing:
+        return "missing_mapping_blocked"
+    return "not_ready"
+
+
+def _missing_mapping_blocked(missing):
+    return any(item != "proposed translation" for item in missing or [])
+
+
+def _unique_strings(values):
+    unique = []
+    seen = set()
+    for value in values or []:
+        text = _text(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        unique.append(text)
+    return unique
 
 
 def _workflow_readiness_summary(product_audits):
@@ -814,6 +1011,7 @@ def _workflow_readiness_summary(product_audits):
             "SEO description",
             "Product description when HTML validation passes",
             "Product options when Shopify mapping is confirmed",
+            "Media alt text when validation passes",
         ],
         "sampled_products_with_update_report": len(products_with_update),
         "verified_update_count_across_sample": verified_total,
@@ -829,15 +1027,34 @@ def _workflow_readiness_summary(product_audits):
 
 def _overall_recommendation(payload):
     media = payload.get("media_alt_text_mapping_audit") or {}
+    variant_meta = payload.get("variant_metafield_quick_audit") or {}
     if media.get("all_sampled_rows_mapping_safe"):
-        media_text = "Media alt text can be prepared for enablement in a later no-write task."
+        media_text = "Keep enabled with current mapping, validation, and readback gates."
     else:
-        media_text = "Keep media alt text preview-only."
+        media_text = "Keep unsafe media alt rows blocked by the current gates."
+    variant_ready = int(
+        variant_meta.get("variant_ready_for_next_enablement_count") or 0
+    )
+    metafield_ready = int(
+        variant_meta.get(
+            "customer_facing_metafield_ready_for_next_enablement_count"
+        )
+        or 0
+    )
     return {
         "existing_safe_fields": "Keep enabled with current validation gates.",
         "media_alt_text": media_text,
-        "variants": "Keep disabled.",
-        "metafields": "Keep technical/internal metafields blocked.",
+        "variants": (
+            "Ready for a separate enablement task."
+            if variant_ready
+            else "Keep disabled."
+        ),
+        "metafields": (
+            "Some customer-facing metafields are ready for a separate enablement task; "
+            "technical/internal metafields stay blocked."
+            if metafield_ready
+            else "Keep technical/internal metafields blocked."
+        ),
     }
 
 
@@ -1002,6 +1219,12 @@ def _render_html(payload):
             [],
         )
     )
+    ready_metafields = ", ".join(
+        (payload.get("variant_metafield_quick_audit") or {}).get(
+            "ready_for_next_enablement_namespaces_keys",
+            [],
+        )
+    )
     media = payload.get("media_alt_text_mapping_audit") or {}
     workflow = payload.get("existing_translation_workflow_readiness_summary") or {}
     variant_meta = payload.get("variant_metafield_quick_audit") or {}
@@ -1034,7 +1257,7 @@ def _render_html(payload):
   <ul>
     <li>Ready now: {escape(', '.join(workflow.get('ready_now') or []))}</li>
     <li>Needs review: fields with validation blockers stay out of update.</li>
-    <li>Preview only: media alt text, variants, and metafields remain disabled in this audit.</li>
+    <li>Not enabled here: variants and metafields remain disabled in this audit.</li>
     <li>Future candidate: {escape((payload.get('recommendation') or {}).get('media_alt_text', ''))}</li>
     <li>Blocked technical fields: {escape(blocked_metafields or 'None found in sample.')}</li>
   </ul>
@@ -1058,13 +1281,50 @@ def _render_html(payload):
   </details>
   <h2>Variants and metafields</h2>
   <ul>
-    <li>Variant rows: {escape(str(variant_meta.get('variant_row_count', 0)))}; rows with resource/key/digest: {escape(str(variant_meta.get('variant_rows_with_resource_key_digest', 0)))}.</li>
-    <li>Metafield rows: {escape(str(variant_meta.get('metafield_row_count', 0)))}; technical/internal rows: {escape(str(variant_meta.get('technical_or_internal_metafield_count', 0)))}.</li>
+    <li>Variants: {escape(str(variant_meta.get('variant_status', 'not_ready')))}; rows: {escape(str(variant_meta.get('variant_row_count', 0)))}; ready for next enablement: {escape(str(variant_meta.get('variant_ready_for_next_enablement_count', 0)))}.</li>
+    <li>Customer-facing metafields: {escape(str(variant_meta.get('customer_facing_metafield_ready_for_next_enablement_count', 0)))} ready / {escape(str(variant_meta.get('customer_facing_metafield_blocked_count', 0)))} blocked.</li>
+    <li>Technical fields: blocked; technical/internal rows: {escape(str(variant_meta.get('technical_or_internal_metafield_count', 0)))}.</li>
+    <li>Missing mapping: blocked; rows: {escape(str(variant_meta.get('missing_mapping_blocked_count', 0)))}.</li>
+    <li>Empty values: skipped; rows: {escape(str(variant_meta.get('empty_value_skipped_count', 0)))}.</li>
     <li>Future candidate metafields: {escape(future_metafields or 'None found in sample.')}</li>
+    <li>Ready for next enablement task: {escape(ready_metafields or 'None found in sample.')}</li>
+    <li>Write status: variants and metafields remain disabled by this audit.</li>
   </ul>
+  <details>
+    <summary>Variant row classification</summary>
+    <table>
+      <thead><tr><th>Product</th><th>Locale</th><th>Key</th><th>Resource ID</th><th>Digest</th><th>Proposed text</th><th>Readback</th><th>Classification</th></tr></thead>
+      <tbody>{_future_field_rows(variant_meta.get('variant_rows') or [])}</tbody>
+    </table>
+  </details>
+  <details>
+    <summary>Metafield row classification</summary>
+    <table>
+      <thead><tr><th>Product</th><th>Locale</th><th>Key</th><th>Resource ID</th><th>Digest</th><th>Proposed text</th><th>Readback</th><th>Classification</th></tr></thead>
+      <tbody>{_future_field_rows(variant_meta.get('metafield_rows') or [])}</tbody>
+    </table>
+  </details>
 </body>
 </html>
 """
+
+
+def _future_field_rows(rows):
+    if not rows:
+        return "<tr><td colspan='8'>No rows found.</td></tr>"
+    return "\n".join(
+        "<tr>"
+        f"<td><code>{escape(row.get('product_gid', ''))}</code></td>"
+        f"<td>{escape(row.get('locale', ''))}</td>"
+        f"<td>{escape(row.get('key', ''))}</td>"
+        f"<td><code>{escape(row.get('resource_id', ''))}</code></td>"
+        f"<td>{escape('Yes' if row.get('digest_exists') else 'No')}</td>"
+        f"<td>{escape('Yes' if row.get('proposed_translation_exists') else 'No')}</td>"
+        f"<td>{escape('Yes' if row.get('readback_method_available') else 'No')}</td>"
+        f"<td>{escape(row.get('classification', ''))}</td>"
+        "</tr>"
+        for row in rows
+    )
 
 
 def _product_html_row(product):

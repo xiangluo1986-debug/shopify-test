@@ -462,15 +462,15 @@ TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME = "save_translation_manual_edit"
 TRANSLATION_WORKSPACE_RETRY_LOCALE_ACTION_NAME = "retry_failed_translation_language"
 TRANSLATION_WORKSPACE_ADMIN_GROUPS = {"Admin", "Super Admin"}
 TRANSLATION_WORKSPACE_REVIEW_ONLY_MESSAGE = (
-    "You can review translations. Ask an admin to update Shopify."
+    "Staff permission is required to update Shopify translations."
 )
 TRANSLATION_WORKSPACE_UPDATE_PERMISSION_MESSAGE = (
-    "Only admins can update Shopify translations."
+    "Only staff users can update Shopify translations."
 )
 TRANSLATION_CONSOLE_ADMIN_URL = "/admin/shopify_sync/translation-console/"
 TRANSLATION_CONSOLE_ADMIN_LABEL = "Shopify 翻译工作台"
 TRANSLATION_CONSOLE_ADMIN_OBJECT_NAME = "TranslationWorkspace"
-TRANSLATION_WORKSPACE_ADMIN_ONLY_WRITE_ACTIONS = {
+TRANSLATION_WORKSPACE_STAFF_WRITE_ACTIONS = {
     ALL_LANGUAGES_REAL_WRITE_ACTION_NAME,
     REAL_WRITE_ACTION_NAME,
     SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME,
@@ -1125,20 +1125,11 @@ def _user_has_review_request_admin_access(request):
 
 def _user_can_update_shopify_translations(request):
     user = getattr(request, "user", None)
-    if not user or not user.is_authenticated or not user.is_staff:
+    if not user or not user.is_authenticated:
         return False
     if user.is_superuser:
         return True
-    has_perm = getattr(user, "has_perm", None)
-    if callable(has_perm) and has_perm("shopify_sync.can_update_shopify_translations"):
-        return True
-    groups = getattr(user, "groups", None)
-    if groups is None:
-        return False
-    try:
-        return groups.filter(name__in=TRANSLATION_WORKSPACE_ADMIN_GROUPS).exists()
-    except (AttributeError, TypeError, ValueError):
-        return False
+    return bool(user.is_staff)
 
 
 def _user_can_access_translation_console_admin(request):
@@ -1223,14 +1214,14 @@ def _install_translation_console_admin_navigation():
 _install_translation_console_admin_navigation()
 
 
-def _translation_workspace_admin_only_update_result(action: str):
+def _translation_workspace_staff_required_update_result(action: str):
     return _translation_console_safe_action_result(
         action=action,
-        action_status="shopify_update_admin_required",
+        action_status="shopify_update_staff_required",
         message=TRANSLATION_WORKSPACE_UPDATE_PERMISSION_MESSAGE,
         summary={
             "attempted_action": action,
-            "blocking_conditions": ["admin_required_for_shopify_update"],
+            "blocking_conditions": ["staff_required_for_shopify_update"],
             "shopify_write_performed": False,
             "mutation_performed": False,
             "translations_register_called": False,
@@ -1304,9 +1295,9 @@ def review_request_workbench(request):
 def translation_console(request):
     post_action = (request.POST.get("action") or "").strip() if request.method == "POST" else ""
     can_update_shopify_translations = _user_can_update_shopify_translations(request)
-    is_admin_only_shopify_update_post = (
+    is_staff_shopify_update_post = (
         request.method == "POST"
-        and post_action in TRANSLATION_WORKSPACE_ADMIN_ONLY_WRITE_ACTIONS
+        and post_action in TRANSLATION_WORKSPACE_STAFF_WRITE_ACTIONS
     )
     is_refresh_status_post = post_action == "refresh_status"
     is_translation_job_refresh_post = post_action == "refresh_translation_job_status"
@@ -2093,8 +2084,8 @@ def translation_console(request):
         selected_translations_apply_state,
         all_languages_update_state,
     )
-    if is_admin_only_shopify_update_post and not can_update_shopify_translations:
-        safe_action_result = _translation_workspace_admin_only_update_result(post_action)
+    if is_staff_shopify_update_post and not can_update_shopify_translations:
+        safe_action_result = _translation_workspace_staff_required_update_result(post_action)
     elif is_manual_translation_edit_post:
         blocking_conditions = list(
             (manual_translation_edit_result or {}).get("blocking_conditions") or []

@@ -2558,7 +2558,7 @@
       <h1>Shopify 翻译工作台</h1>
       <span class="tw-safety">Preview and review first</span>
     </div>
-    <p>Search a Shopify product, preview translations, review safe fields, then ask an admin to update Shopify.</p>
+    <p>Search a Shopify product, preview translations, review safe fields, then update safe validated fields in Shopify.</p>
   </div>
   {% endif %}
 
@@ -2889,7 +2889,7 @@
     <div class="tw-intro-heading">
       <div>
         <h1 id="tw-intro-title">Shopify 翻译工作台</h1>
-        <p class="tw-intro-lede">Search a Shopify product, preview translations, review safe fields, then ask an admin to update Shopify.</p>
+        <p class="tw-intro-lede">Search a Shopify product, preview translations, review safe fields, then update safe validated fields in Shopify.</p>
       </div>
       <span class="tw-safety">Preview and review first</span>
     </div>
@@ -3437,7 +3437,44 @@
           {% endif %}
           {% if all_languages_update_display.translation_readiness_audit %}
             <details class="tw-shopify-update-details">
-              <summary>Translation readiness audit</summary>
+              <summary>More fields we can enable later</summary>
+              {% with more_fields=all_languages_update_display.translation_readiness_audit.more_fields_enablement %}
+                {% if more_fields %}
+                  <h4>More fields we can enable later</h4>
+                  <div class="tw-shopify-diagnostic-card-grid">
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">Variants</div>
+                      <div class="tw-shopify-diagnostic-meta">{{ more_fields.variants.status }} - {{ more_fields.variants.row_count }} checked</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ more_fields.variants.plain_reason }}</div>
+                    </article>
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">Customer-facing metafields</div>
+                      <div class="tw-shopify-diagnostic-meta">{{ more_fields.customer_facing_metafields.ready_count }} ready / {{ more_fields.customer_facing_metafields.blocked_count }} blocked</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ more_fields.customer_facing_metafields.plain_reason }}</div>
+                    </article>
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">Technical fields</div>
+                      <div class="tw-shopify-diagnostic-meta">{{ more_fields.technical_fields.status }} - {{ more_fields.technical_fields.row_count }} blocked</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ more_fields.technical_fields.plain_reason }}</div>
+                    </article>
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">Missing mapping</div>
+                      <div class="tw-shopify-diagnostic-meta">{{ more_fields.missing_mapping.status }} - {{ more_fields.missing_mapping.row_count }} blocked</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ more_fields.missing_mapping.plain_reason }}</div>
+                    </article>
+                    <article class="tw-shopify-diagnostic-card">
+                      <div class="tw-shopify-diagnostic-title">Empty values</div>
+                      <div class="tw-shopify-diagnostic-meta">{{ more_fields.empty_values.status }} - {{ more_fields.empty_values.row_count }} skipped</div>
+                      <div class="tw-shopify-diagnostic-reason">{{ more_fields.empty_values.plain_reason }}</div>
+                    </article>
+                  </div>
+                  {% if more_fields.ready_for_next_enablement_count %}
+                    <p class="tw-shopify-not-updated-note">Ready for next enablement task: {{ more_fields.ready_for_next_enablement_labels|join:", " }}</p>
+                  {% else %}
+                    <p class="tw-shopify-not-updated-note">No additional variant or metafield write scope is ready from this report.</p>
+                  {% endif %}
+                {% endif %}
+              {% endwith %}
               <h4>Ready now</h4>
               <div class="tw-shopify-diagnostic-card-grid">
                 {% for item in all_languages_update_display.translation_readiness_audit.ready_now %}
@@ -3458,7 +3495,7 @@
                   </article>
                 {% endfor %}
               </div>
-              <h4>Preview only</h4>
+              <h4>Not enabled in this task</h4>
               <div class="tw-shopify-diagnostic-card-grid">
                 {% for item in all_languages_update_display.translation_readiness_audit.preview_only %}
                   <article class="tw-shopify-diagnostic-card">
@@ -3468,7 +3505,7 @@
                   </article>
                 {% endfor %}
               </div>
-              <h4>Future candidate</h4>
+              <h4>Future candidates</h4>
               {% if all_languages_update_display.translation_readiness_audit.future_candidate %}
                 <div class="tw-shopify-diagnostic-card-grid">
                   {% for item in all_languages_update_display.translation_readiness_audit.future_candidate %}
@@ -3971,7 +4008,7 @@
                         {% if not can_update_shopify_translations %}
                           <label>
                             <input type="checkbox" disabled>
-                            <span>Shopify update requires admin</span>
+                            <span>Shopify update requires staff permission</span>
                           </label>
                           <span class="tw-muted">{{ translation_workspace_review_only_message }}</span>
                         {% elif row.shopify_apply_selectable %}
@@ -4226,7 +4263,7 @@
         <li>Choose product and language.</li>
         <li>{% if can_update_shopify_translations %}Click Translate and update Shopify.{% else %}Click Translate all languages.{% endif %}</li>
         <li>Review the result cards in the Translation results area.</li>
-        <li>{% if can_update_shopify_translations %}Review any item that was not updated.{% else %}Ask an admin to update Shopify after review.{% endif %}</li>
+        <li>{% if can_update_shopify_translations %}Review any item that was not updated.{% else %}Staff permission is required before Shopify update.{% endif %}</li>
       </ol>
     </div>
   </details>

@@ -124,6 +124,14 @@ ALL_LANGUAGES_TECHNICAL_METAFIELD_MARKERS = (
     "_id",
     "sku",
     "barcode",
+    "gid://",
+    "_gid",
+    "token",
+    "sync",
+    "feed",
+    "feeds",
+    "internal",
+    "technical",
     "wishlist",
     "count",
 )
@@ -131,17 +139,24 @@ ALL_LANGUAGES_CUSTOMER_FACING_METAFIELD_MARKERS = (
     "benefit",
     "bullet",
     "compat",
+    "compatibility",
     "description",
     "feature",
+    "features",
     "highlight",
+    "highlights",
     "included",
     "material",
     "model",
     "package",
+    "package_included",
+    "package included",
     "scale",
     "short_description",
     "size",
     "spec",
+    "specification",
+    "specifications",
     "subtitle",
     "summary",
 )
@@ -4083,13 +4098,12 @@ def _all_languages_translation_readiness_audit(
     option_audit: dict,
     media_alt_audit: dict,
 ):
-    technical_fields, future_metafields = _all_languages_metafield_readiness(entries)
-    variant_entries = [
-        entry
-        for entry in entries or []
-        if str(entry.get("field_group") or "") == "variants"
-        or str(entry.get("key") or "").startswith("variant.")
-    ]
+    more_fields = _all_languages_more_fields_enablement(entries)
+    variant_summary = more_fields["variants"]
+    customer_metafield_summary = more_fields["customer_facing_metafields"]
+    technical_summary = more_fields["technical_fields"]
+    missing_mapping_summary = more_fields["missing_mapping"]
+    empty_values_summary = more_fields["empty_values"]
     ready_now = [
         _all_languages_readiness_area("Product title", entries, key="title"),
         _all_languages_readiness_area("SEO title", entries, key="meta_title"),
@@ -4133,34 +4147,50 @@ def _all_languages_translation_readiness_audit(
     preview_only = [
         {
             "area": "Variants",
-            "status": "Preview only",
-            "plain_reason": (
-                "Variant writes remain disabled; variant rows need a separate mapping audit."
-                if variant_entries
-                else "No variant rows were present in this report."
-            ),
-            "checked_count": len(variant_entries),
+            "status": variant_summary["status"],
+            "plain_reason": variant_summary["plain_reason"],
+            "checked_count": variant_summary["row_count"],
         },
         {
-            "area": "Metafields",
-            "status": "Preview only",
-            "plain_reason": "Metafield writes remain disabled.",
-            "checked_count": len(
-                [
-                    entry
-                    for entry in entries or []
-                    if "metafield" in str(entry.get("field_group") or "")
-                ]
-            ),
+            "area": "Customer-facing metafields",
+            "status": customer_metafield_summary["status"],
+            "plain_reason": customer_metafield_summary["plain_reason"],
+            "checked_count": customer_metafield_summary["row_count"],
+        },
+        {
+            "area": "Technical fields",
+            "status": technical_summary["status"],
+            "plain_reason": technical_summary["plain_reason"],
+            "checked_count": technical_summary["row_count"],
+        },
+        {
+            "area": "Missing mapping",
+            "status": missing_mapping_summary["status"],
+            "plain_reason": missing_mapping_summary["plain_reason"],
+            "checked_count": missing_mapping_summary["row_count"],
+        },
+        {
+            "area": "Empty values",
+            "status": empty_values_summary["status"],
+            "plain_reason": empty_values_summary["plain_reason"],
+            "checked_count": empty_values_summary["row_count"],
         },
     ]
     future_candidate = []
-    for namespace_key in future_metafields:
+    for item in more_fields["ready_for_next_enablement_items"]:
         future_candidate.append(
             {
-                "area": namespace_key,
-                "status": "Future candidate",
-                "plain_reason": "Customer-facing metafield candidate; keep disabled until a dedicated audit approves it.",
+                "area": item["label"],
+                "status": "Ready for next enablement task",
+                "plain_reason": item["plain_reason"],
+            }
+        )
+    for item in more_fields["blocked_customer_facing_items"]:
+        future_candidate.append(
+            {
+                "area": item["label"],
+                "status": "Blocked",
+                "plain_reason": item["plain_reason"],
             }
         )
     return {
@@ -4168,15 +4198,328 @@ def _all_languages_translation_readiness_audit(
         "needs_review": needs_review,
         "preview_only": preview_only,
         "future_candidate": future_candidate,
+        "more_fields_enablement": {
+            "title": "More fields we can enable later",
+            "variants": variant_summary,
+            "customer_facing_metafields": customer_metafield_summary,
+            "technical_fields": technical_summary,
+            "missing_mapping": missing_mapping_summary,
+            "empty_values": empty_values_summary,
+            "ready_for_next_enablement_count": more_fields[
+                "ready_for_next_enablement_count"
+            ],
+            "ready_for_next_enablement_labels": [
+                item["label"]
+                for item in more_fields["ready_for_next_enablement_items"]
+            ],
+        },
         "blocked_technical_fields": [
             {
-                "area": namespace_key,
+                "area": item["label"],
                 "status": "Blocked technical field",
-                "plain_reason": "Technical/internal metafield; do not enable automatic translation writes.",
+                "plain_reason": item["plain_reason"],
             }
-            for namespace_key in technical_fields
+            for item in more_fields["blocked_technical_items"]
         ],
     }
+
+
+def _all_languages_more_fields_enablement(entries: list[dict]):
+    variant_rows = [
+        _all_languages_variant_enablement_row(entry)
+        for entry in entries or []
+        if str(entry.get("field_group") or "") == "variants"
+        or str(entry.get("key") or "").startswith("variant.")
+    ]
+    metafield_rows = [
+        _all_languages_metafield_enablement_row(entry)
+        for entry in entries or []
+        if "metafield" in str(entry.get("field_group") or "")
+    ]
+    customer_metafield_rows = [
+        row for row in metafield_rows if row["customer_facing_candidate"]
+    ]
+    technical_rows = [row for row in metafield_rows if row["technical_or_internal"]]
+    all_rows = variant_rows + metafield_rows
+    ready_items = _all_languages_unique_enablement_items(
+        [
+            row
+            for row in variant_rows + customer_metafield_rows
+            if row["ready_for_next_enablement_task"]
+        ]
+    )
+    blocked_customer_items = _all_languages_unique_enablement_items(
+        [
+            row
+            for row in customer_metafield_rows
+            if not row["ready_for_next_enablement_task"]
+            and not row["empty_value_skipped"]
+            and not row["already_current"]
+        ]
+    )
+    blocked_technical_items = _all_languages_unique_enablement_items(technical_rows)
+    return {
+        "variants": _all_languages_enablement_summary(
+            "Variants",
+            variant_rows,
+            no_rows_reason="No variant rows were present in this report.",
+        ),
+        "customer_facing_metafields": _all_languages_enablement_summary(
+            "Customer-facing metafields",
+            customer_metafield_rows,
+            no_rows_reason="No customer-facing metafield rows were found in this report.",
+        ),
+        "technical_fields": _all_languages_blocked_summary(
+            "Technical fields",
+            technical_rows,
+            status_when_rows="Blocked",
+            no_rows_status="No rows found",
+            no_rows_reason="No technical/internal metafields were found in this report.",
+            rows_reason="Technical/internal metafields stay blocked.",
+        ),
+        "missing_mapping": _all_languages_blocked_summary(
+            "Missing mapping",
+            [row for row in all_rows if row["missing_mapping"]],
+            status_when_rows="Blocked",
+            no_rows_status="No missing mapping found",
+            no_rows_reason="No variant or metafield rows are missing required mapping in this report.",
+            rows_reason=(
+                "Rows without resource_id, key, digest, locale, proposed text, "
+                "or readback path stay blocked."
+            ),
+        ),
+        "empty_values": _all_languages_blocked_summary(
+            "Empty values",
+            [row for row in all_rows if row["empty_value_skipped"]],
+            status_when_rows="Skipped",
+            no_rows_status="No empty values found",
+            no_rows_reason="No empty variant or metafield values were found in this report.",
+            rows_reason="Empty values are skipped, not treated as Shopify update errors.",
+        ),
+        "ready_for_next_enablement_count": len(ready_items),
+        "ready_for_next_enablement_items": ready_items,
+        "blocked_customer_facing_items": blocked_customer_items,
+        "blocked_technical_items": blocked_technical_items,
+    }
+
+
+def _all_languages_enablement_summary(label: str, rows: list[dict], *, no_rows_reason: str):
+    row_count = len(rows)
+    ready_count = sum(1 for row in rows if row["ready_for_next_enablement_task"])
+    empty_count = sum(1 for row in rows if row["empty_value_skipped"])
+    already_current_count = sum(1 for row in rows if row["already_current"])
+    blocked_count = max(0, row_count - ready_count - empty_count - already_current_count)
+    if not row_count:
+        status = "No rows found"
+        reason = no_rows_reason
+    elif ready_count:
+        status = "Ready for next enablement task"
+        reason = (
+            f"{ready_count} {label.lower()} row(s) have resource_id, key, digest, "
+            "locale, proposed text, and a readback path. Writes remain disabled "
+            "until a dedicated enablement task."
+        )
+    else:
+        status = "Not ready"
+        reason = (
+            f"{blocked_count} row(s) are blocked, {empty_count} empty row(s) are "
+            f"skipped, and {already_current_count} row(s) are already current."
+        )
+    return {
+        "area": label,
+        "status": status,
+        "plain_reason": reason,
+        "row_count": row_count,
+        "ready_count": ready_count,
+        "blocked_count": blocked_count,
+        "empty_skipped_count": empty_count,
+        "already_current_count": already_current_count,
+        "write_enabled_now": False,
+    }
+
+
+def _all_languages_blocked_summary(
+    label: str,
+    rows: list[dict],
+    *,
+    status_when_rows: str,
+    no_rows_status: str,
+    no_rows_reason: str,
+    rows_reason: str,
+):
+    row_count = len(rows)
+    return {
+        "area": label,
+        "status": status_when_rows if row_count else no_rows_status,
+        "plain_reason": f"{row_count} row(s). {rows_reason}" if row_count else no_rows_reason,
+        "row_count": row_count,
+        "ready_count": 0,
+        "blocked_count": row_count,
+        "empty_skipped_count": (
+            row_count if status_when_rows.lower() == "skipped" else 0
+        ),
+        "already_current_count": 0,
+        "write_enabled_now": False,
+    }
+
+
+def _all_languages_variant_enablement_row(entry: dict):
+    base = _all_languages_enablement_base_row(entry)
+    marker_text = " ".join(
+        str(value or "").lower()
+        for value in (
+            entry.get("key"),
+            entry.get("source_key"),
+            entry.get("field_label"),
+            entry.get("context_label"),
+            entry.get("resource_note"),
+        )
+    )
+    technical = any(marker in marker_text for marker in ("sku", "barcode"))
+    customer_facing = not technical
+    label = entry.get("field_label") or entry.get("key") or "Variant field"
+    return _all_languages_finish_enablement_row(
+        base,
+        label=f"Variant: {label}",
+        customer_facing_candidate=customer_facing,
+        technical_or_internal=technical,
+        technical_reason="Variant SKU/barcode fields stay blocked.",
+    )
+
+
+def _all_languages_metafield_enablement_row(entry: dict):
+    base = _all_languages_enablement_base_row(entry)
+    namespace_key = _all_languages_metafield_namespace_key(entry) or "metafield"
+    marker_text = " ".join(
+        str(value or "").lower()
+        for value in (
+            namespace_key,
+            entry.get("context_label"),
+            entry.get("resource_note"),
+            entry.get("key"),
+        )
+    )
+    technical = any(marker in marker_text for marker in ALL_LANGUAGES_TECHNICAL_METAFIELD_MARKERS)
+    customer_facing = (
+        not technical
+        and any(
+            marker in marker_text
+            for marker in ALL_LANGUAGES_CUSTOMER_FACING_METAFIELD_MARKERS
+        )
+    )
+    return _all_languages_finish_enablement_row(
+        base,
+        label=f"Metafield: {namespace_key}",
+        customer_facing_candidate=customer_facing,
+        technical_or_internal=technical,
+        technical_reason="Technical/internal metafield; do not enable automatic translation writes.",
+    )
+
+
+def _all_languages_enablement_base_row(entry: dict):
+    resource_id = str(entry.get("resource_id") or "").strip()
+    key = str(entry.get("key") or entry.get("source_key") or "").strip()
+    digest = str(entry.get("digest") or entry.get("source_digest") or "").strip()
+    locale = _safe_write_canonical_locale(entry.get("locale")) or str(
+        entry.get("locale") or ""
+    ).strip()
+    proposed = str(entry.get("proposed_translation_value") or "").strip()
+    missing = []
+    if not resource_id:
+        missing.append("resource_id")
+    if not key:
+        missing.append("key")
+    if not digest:
+        missing.append("digest")
+    if not locale:
+        missing.append("locale")
+    readback_path_available = bool(resource_id and locale)
+    if not readback_path_available:
+        missing.append("readback path")
+    mapping_missing = list(missing)
+    if not proposed:
+        missing.append("proposed translation")
+    already_current = (
+        entry.get("status") == "written_verified"
+        or "existing_translation_current_same_value"
+        in (entry.get("blocking_reasons") or [])
+    )
+    return {
+        "resource_id_exists": bool(resource_id),
+        "key_exists": bool(key),
+        "digest_exists": bool(digest),
+        "locale_exists": bool(locale),
+        "proposed_translation_exists": bool(proposed),
+        "readback_path_available": readback_path_available,
+        "missing_requirements": _unique_strings(missing),
+        "missing_mapping": bool(mapping_missing),
+        "empty_value_skipped": not bool(proposed),
+        "already_current": already_current,
+    }
+
+
+def _all_languages_finish_enablement_row(
+    row: dict,
+    *,
+    label: str,
+    customer_facing_candidate: bool,
+    technical_or_internal: bool,
+    technical_reason: str,
+):
+    row.update(
+        {
+            "label": label,
+            "customer_facing_candidate": customer_facing_candidate,
+            "technical_or_internal": technical_or_internal,
+            "safe_to_write_now": False,
+            "write_enabled_now": False,
+        }
+    )
+    ready = (
+        customer_facing_candidate
+        and not technical_or_internal
+        and not row["missing_mapping"]
+        and not row["empty_value_skipped"]
+    )
+    row["ready_for_next_enablement_task"] = ready
+    if ready:
+        row["plain_reason"] = (
+            "Ready for next enablement task: resource_id, key, digest, locale, "
+            "proposed text, and readback path are present. Writes remain disabled "
+            "in this task."
+        )
+    elif row["already_current"]:
+        row["plain_reason"] = "Already updated or already current."
+    elif row["empty_value_skipped"]:
+        row["plain_reason"] = "Empty value; skipped rather than treated as an error."
+    elif technical_or_internal:
+        row["plain_reason"] = technical_reason
+    elif row["missing_requirements"]:
+        row["plain_reason"] = (
+            "Blocked: missing "
+            + ", ".join(row["missing_requirements"])
+            + "."
+        )
+    else:
+        row["plain_reason"] = "Blocked until a dedicated mapping/readback audit approves it."
+    return row
+
+
+def _all_languages_unique_enablement_items(rows: list[dict]):
+    items = []
+    seen = set()
+    for row in rows:
+        label = row.get("label") or ""
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        items.append(
+            {
+                "label": label,
+                "plain_reason": row.get("plain_reason", ""),
+            }
+        )
+    return items
 
 
 def _all_languages_media_alt_entry(entry: dict):
