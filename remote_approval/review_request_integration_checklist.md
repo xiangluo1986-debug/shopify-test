@@ -1308,3 +1308,13 @@ Future tracking design note:
 - [x] The repair path is for Sent / Tag pending evidence only; it does not batch
   repair orders, resend Gmail, call external review APIs, or write Shopify for
   any unrelated order.
+- [x] Phase 5.29E excludes any order/customer with Trustpilot sent tag aliases
+  such as `1: trustpilot`, `1: trustpoilt`, `trustpilot`, `trustpoilt`, and
+  spacing/case variants before Needs review or Review & Send can appear.
+- [x] `#21225` is audited as an Already sent row when local Shopify tags include
+  `1: trustpilot`; it must show `Tag written`, not `Tag pending`, and evidence
+  `Trustpilot tag found on Shopify order.`
+- [x] Added `shopify_review_request_trustpilot_tag_exclusion_audit` under
+  `logs/codex_runs/` to report `#21225` local tags, Trustpilot tag detection,
+  Needs review removal, Already sent display, exclusion count, and no-write /
+  no-API safety flags.

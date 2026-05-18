@@ -66,6 +66,9 @@ from remote_approval.tasks.shopify_review_request_shopify_order_sync_coverage_ta
 from remote_approval.tasks.shopify_review_request_order_tags_persistence_audit_task import (
     run_shopify_review_request_order_tags_persistence_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_trustpilot_tag_exclusion_audit_task import (
+    run_shopify_review_request_trustpilot_tag_exclusion_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_tag_alias_and_candidate_correction_audit_task import (
     run_shopify_review_request_tag_alias_and_candidate_correction_audit_task,
 )
@@ -425,6 +428,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_order_tags_persistence_audit": (
         run_shopify_review_request_order_tags_persistence_audit_task
+    ),
+    "shopify_review_request_trustpilot_tag_exclusion_audit": (
+        run_shopify_review_request_trustpilot_tag_exclusion_audit_task
     ),
     "shopify_review_request_tag_alias_and_candidate_correction_audit": (
         run_shopify_review_request_tag_alias_and_candidate_correction_audit_task
@@ -845,6 +851,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local ShopifyOrder tag storage and report-only candidate scan",
         "review_file_path": "logs/shopify_review_request_order_tags_persistence_audit.json",
+    },
+    "shopify_review_request_trustpilot_tag_exclusion_audit": {
+        "description": "Audit that Trustpilot sent tag aliases exclude #21225 and any tagged order from Needs review without APIs or writes.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local candidate scan/report audit only",
+        "review_file_path": "logs/codex_runs/shopify_review_request_trustpilot_tag_exclusion_audit.json",
     },
     "shopify_review_request_tag_alias_and_candidate_correction_audit": {
         "description": "Audit review-request tag alias detection and #22562 eligibility correction without APIs or writes.",

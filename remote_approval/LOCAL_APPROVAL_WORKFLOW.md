@@ -66,6 +66,7 @@ python remote_approval_runner.py --task shopify_review_request_candidate_scan --
 python remote_approval_runner.py --task shopify_review_request_last_60_days_candidate_scan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_order_sync_coverage --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_order_tags_persistence_audit --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_trustpilot_tag_exclusion_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_customer_history_trustpilot_guard_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_reuse_gmail_helper_audit --mode dry-run --approval local
@@ -632,6 +633,19 @@ tag-write approval env. The repair source must come from local Review Request
 history/queue evidence showing `Sent` and `Tag pending`, or from a safe local
 post-send report. It must not resend Gmail, call external review APIs, or repair
 more than one order.
+
+Phase 5.29E makes Trustpilot sent tag aliases a hard exclusion before the Needs
+review queue. Current local Shopify tags, same-customer history tags, and local
+send/tag-write reports are checked before a Review & Send action can appear.
+Orders with `1: trustpilot`, `1: trustpoilt`, `trustpilot`, `trustpoilt`, or
+spacing/case variants move to Already sent with local evidence instead of
+remaining sendable.
+
+`shopify_review_request_trustpilot_tag_exclusion_audit` audits this guard for
+`#21225` and writes its local report under `logs/codex_runs/`. It reports local
+tags, Trustpilot tag detection/source, before/after queue section, Needs review
+removal, Already sent display, the Trustpilot-tagged exclusion count, and
+no-Gmail/no-Shopify/no-external-API/no-write safety flags.
 
 ## Review Request Trustpilot Gmail Draft-Only Preflight
 

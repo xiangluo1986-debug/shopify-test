@@ -103,6 +103,14 @@ NOTE_RISK_KEYWORDS = (
 )
 NOTE_RISK_REASON = "Aftersales/ticket note found"
 MANUAL_CONFIRMED_ORDER_EVIDENCE = {
+    "#21225": {
+        "order_name": "#21225",
+        "source_report": "user_confirmed_shopify_ui_evidence",
+        "tags": ["1: trustpilot"],
+        "trustpilot_invitation_present": True,
+        "blocking_reasons": [],
+        "reason": "Trustpilot tag found on Shopify order.",
+    },
     "#22562": {
         "order_name": "#22562",
         "source_report": "user_confirmed_shopify_ui_evidence",
@@ -125,6 +133,7 @@ FOCUS_ORDER_NAMES = (
     "#21075",
     "#21076",
     "#21102",
+    "#21225",
     "#21778",
     "#22530",
     "#22562",
@@ -308,6 +317,7 @@ def _walk_dict_rows(value):
 def _public_report_row(row: dict, source_name: str, order_name: str) -> dict:
     tags = _collect_tags(row)
     matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_trustpilot_tags = _matched_trustpilot_tags(tags)
     matched_ebay_tags = _matched_ebay_tags(tags)
     blocking_reasons = _collect_list(row.get("blocking_reasons"))
     classification = _safe_text(row.get("classification") or row.get("candidate_status") or row.get("status"))
@@ -480,7 +490,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     order_names.update(name for name in FOCUS_ORDER_NAMES if name in source_by_order or name in local_by_order)
     order_names = {name for name in order_names if not _is_simulator_order_name(name)}
 
-    already_sent_rows = _already_sent_rows_from_sources(source_by_order)
+    already_sent_rows = _already_sent_rows_from_sources(source_by_order, local_by_order)
     already_sent_orders = {row["order"] for row in already_sent_rows}
     already_sent_customers = {row.get("masked_customer") for row in already_sent_rows if row.get("masked_customer")}
 
@@ -521,6 +531,15 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         coverage_warnings.append("order_not_found_in_local_data")
     if any(row.get("delivered_confirmed") is not True for row in candidate_rows):
         coverage_warnings.append("delivered_order_data_missing")
+    stale_trustpilot_rows = [
+        row
+        for row in already_sent_rows
+        if row.get("trustpilot_tag_detected") is True
+        and row.get("local_shopify_tags")
+        and not has_trustpilot_sent_tag(row.get("local_shopify_tags"))
+    ]
+    if stale_trustpilot_rows:
+        coverage_warnings.append("Shopify tag may be stale locally; run sync.")
     order_22530_diagnosis = _sqlite_focus_order_diagnosis(
         "#22530",
         local_by_order,
@@ -546,6 +565,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     order_21075_diagnosis = _sqlite_focus_order_diagnosis("#21075", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     order_21076_diagnosis = _sqlite_focus_order_diagnosis("#21076", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     order_21102_diagnosis = _sqlite_focus_order_diagnosis("#21102", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
+    order_21225_diagnosis = _sqlite_focus_order_diagnosis("#21225", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     order_21778_diagnosis = _sqlite_focus_order_diagnosis("#21778", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     eligible_candidate_count_total = len(eligible_rows)
     review_queue_visible_count = len(review_queue_rows)
@@ -570,13 +590,16 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "report_only_context_count": len([name for name in source_by_order if name not in local_by_order]),
         "order_22530_found": order_22530_found,
         "order_22562_found": "#22562" in local_by_order,
+        "stale_trustpilot_tag_order_names": [
+            row.get("order") for row in stale_trustpilot_rows if row.get("order")
+        ],
     }
 
     return {
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28I",
+        "phase": "5.29E",
         "mode": "dry-run-local-synced-order-scan",
         "command_label": COMMAND_LABEL,
         "window_days": 60,
@@ -590,6 +613,16 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "order_21075_diagnosis": order_21075_diagnosis,
         "order_21076_diagnosis": order_21076_diagnosis,
         "order_21102_diagnosis": order_21102_diagnosis,
+        "order_21225_diagnosis": order_21225_diagnosis,
+        "order_21225_trustpilot_tag_detection": {
+            "order_name": "#21225",
+            "found_in_local_shopify_order": order_21225_diagnosis.get("found_in_local_shopify_order") is True,
+            "tag_data_available": order_21225_diagnosis.get("tag_data_available") is True,
+            "trustpilot_tag_detected": bool(_matched_trustpilot_tags(order_21225_diagnosis.get("order_tags_display", []))),
+            "matched_trustpilot_tag_values": _matched_trustpilot_tags(order_21225_diagnosis.get("order_tags_display", [])),
+            "trustpilot_tag_source": order_21225_diagnosis.get("trustpilot_tag_source", ""),
+            "already_sent_reason": order_21225_diagnosis.get("already_sent_reason", ""),
+        },
         "order_21778_diagnosis": order_21778_diagnosis,
         "order_21778_trustpilot_tag_detection": {
             "order_name": "#21778",
@@ -613,6 +646,9 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "eligible_candidate_count": eligible_candidate_count_total,
         "eligible_candidate_count_total": eligible_candidate_count_total,
         "already_sent_count": len(already_sent_rows),
+        "trustpilot_tagged_orders_excluded_count": sum(
+            1 for row in already_sent_rows if row.get("trustpilot_tag_detected") is True
+        ),
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if row.get("merged_order_group")),
         "blocked_duplicate_customer_count": sum(1 for row in blocked_rows if "prior Trustpilot" in row.get("block_reason", "") or "already" in row.get("block_reason", "").lower()),
@@ -684,7 +720,8 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     }
 
 
-def _already_sent_rows_from_sources(source_by_order: dict) -> list[dict]:
+def _already_sent_rows_from_sources(source_by_order: dict, local_by_order: dict | None = None) -> list[dict]:
+    local_by_order = local_by_order or {}
     rows = []
     for order_name in ("#22621", "#22620"):
         source = source_by_order.get(order_name, {})
@@ -695,6 +732,9 @@ def _already_sent_rows_from_sources(source_by_order: dict) -> list[dict]:
             prior = _canonical_order_name(source.get("prior_trustpilot_order_name")) or "#22621"
             evidence = f"Already sent to this customer via {prior}."
         scan_dt, basis = _scan_date({}, source)
+        local_tags = _shopify_tags_from_order(local_by_order.get(order_name, {}))
+        tags = _dedupe(local_tags + (source.get("tags", []) or []))
+        matched_trustpilot_tags = _matched_trustpilot_tags(tags)
         rows.append(
             {
                 "order": order_name,
@@ -702,7 +742,16 @@ def _already_sent_rows_from_sources(source_by_order: dict) -> list[dict]:
                 "masked_customer": source.get("masked_email", ""),
                 "trustpilot_email_status": "Already sent",
                 "evidence": evidence,
-                "tags": source.get("tags", []),
+                "tags": tags,
+                "local_shopify_tags": local_tags,
+                "trustpilot_tag_detected": bool(matched_trustpilot_tags),
+                "trustpilot_tag_source": "local_report_tags" if matched_trustpilot_tags else "",
+                "matched_trustpilot_tag_values": matched_trustpilot_tags,
+                "already_sent_reason": (
+                    "Shopify tag shows Trustpilot already sent." if matched_trustpilot_tags else evidence
+                ),
+                "shopify_tag_pending": False,
+                "shopify_tag_status_label": "Tag written" if matched_trustpilot_tags else "",
                 "prior_trustpilot_order_name": prior,
                 "delivered_confirmed": source.get("delivered_tag_present") is True,
                 "canonical_review_request_tag_present": source.get("canonical_review_request_tag_present") is True,
@@ -717,14 +766,28 @@ def _already_sent_rows_from_sources(source_by_order: dict) -> list[dict]:
             continue
         if source.get("trustpilot_invitation_present") is True and order_name not in {"#22621", "#22620"}:
             scan_dt, basis = _scan_date({}, source)
+            local_tags = _shopify_tags_from_order(local_by_order.get(order_name, {}))
+            tags = _dedupe(local_tags + (source.get("tags", []) or []))
+            matched_trustpilot_tags = _matched_trustpilot_tags(tags)
             rows.append(
                 {
                     "order": order_name,
                     "customer": source.get("customer_display_name") or "Masked in reports",
                     "masked_customer": source.get("masked_email", ""),
                     "trustpilot_email_status": "Already sent",
-                    "evidence": "Trustpilot tag or invitation history found.",
-                    "tags": source.get("tags", []),
+                    "evidence": "Trustpilot tag found on Shopify order."
+                    if matched_trustpilot_tags
+                    else "Trustpilot tag or invitation history found.",
+                    "tags": tags,
+                    "local_shopify_tags": local_tags,
+                    "trustpilot_tag_detected": bool(matched_trustpilot_tags),
+                    "trustpilot_tag_source": "local_report_tags" if matched_trustpilot_tags else "local_report",
+                    "matched_trustpilot_tag_values": matched_trustpilot_tags,
+                    "already_sent_reason": "Shopify tag shows Trustpilot already sent."
+                    if matched_trustpilot_tags
+                    else "Local report shows Trustpilot already sent.",
+                    "shopify_tag_pending": False,
+                    "shopify_tag_status_label": "Tag written" if matched_trustpilot_tags else "",
                     "prior_trustpilot_order_name": order_name,
                     "delivered_confirmed": source.get("delivered_tag_present") is True,
                     "canonical_review_request_tag_present": source.get("canonical_review_request_tag_present") is True,
@@ -949,6 +1012,7 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         source,
     )
     matched_review_request_tags = _matched_review_request_tags(tags)
+    matched_trustpilot_tags = _matched_trustpilot_tags(tags)
     matched_ebay_tags = _matched_ebay_tags(tags)
     masked_customer = source.get("masked_email") or _mask_email(local.get("customer_email"))
     delivered = _sqlite_delivered_confirmed(local, source, tags)
@@ -972,6 +1036,7 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         order_name in already_sent_orders
         or bool(prior_order)
         or source.get("trustpilot_invitation_present") is True
+        or bool(matched_trustpilot_tags)
         or (masked_customer and masked_customer in already_sent_customers)
     )
     trustpilot_sent = current_order_already_sent or bool(previous_trustpilot_order_names)
@@ -990,9 +1055,12 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
             f"Already sent Trustpilot to this customer via {_join_order_names(previous_trustpilot_order_names)}."
         )
     if trustpilot_sent:
-        blockers.append(
-            f"Already sent to this customer via {prior_order or _join_order_names(previous_trustpilot_order_names) or order_name}."
-        )
+        if matched_trustpilot_tags:
+            blockers.append("Shopify tag shows Trustpilot already sent.")
+        else:
+            blockers.append(
+                f"Already sent to this customer via {prior_order or _join_order_names(previous_trustpilot_order_names) or order_name}."
+            )
     if not delivered:
         blockers.append("Not delivered.")
     if canonical_tag is None:
@@ -1027,6 +1095,17 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         "note_risk_keywords": note_risk["note_risk_keywords"],
         "note_risk_reason": note_risk["note_risk_reason"],
         "tags": tags,
+        "local_shopify_tags": _shopify_tags_from_order(local),
+        "trustpilot_tag_detected": bool(matched_trustpilot_tags),
+        "trustpilot_tag_source": "local_shopify_tags" if matched_trustpilot_tags else (
+            "customer_history_tags" if previous_trustpilot_tag_values else ""
+        ),
+        "matched_trustpilot_tag_values": matched_trustpilot_tags or previous_trustpilot_tag_values,
+        "already_sent_reason": (
+            "Shopify tag shows Trustpilot already sent."
+            if matched_trustpilot_tags
+            else ("Customer history shows Trustpilot already sent." if previous_trustpilot_order_names else "")
+        ),
         "ebay_tag_detected": ebay_blocked,
         "matched_ebay_tag_value": (
             _safe_text(source.get("matched_ebay_tag_value"), 120)
@@ -1045,6 +1124,8 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
             or (matched_review_request_tags[0] if matched_review_request_tags else "")
         ),
         "trustpilot_email_status": "Already sent" if trustpilot_sent else "No previous Trustpilot email found",
+        "shopify_tag_pending": False,
+        "shopify_tag_status_label": "Tag written" if matched_trustpilot_tags else "",
         "trustpilot_history": (
             f"Already sent via {prior_order or _join_order_names(previous_trustpilot_order_names) or order_name}"
             if trustpilot_sent
@@ -1072,10 +1153,14 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
         "customer_identity_source": identity["customer_identity_source"],
         "customer_identity_confidence": identity["customer_identity_confidence"],
         "customer_level_trustpilot_already_sent": bool(previous_trustpilot_order_names),
-        "candidate_status": "blocked" if ebay_blocked else ("already_sent" if current_order_already_sent else status),
+        "candidate_status": "already_sent" if current_order_already_sent else ("blocked" if ebay_blocked else status),
         "block_reason": "; ".join(_dedupe(blockers)) if blockers else "Delivered, tagged, and no duplicate or risk found.",
         "missing_requirement": _missing_requirement(delivered, canonical_tag, trustpilot_sent, blockers),
-        "evidence": source.get("reason") or "; ".join(_dedupe(blockers)) or "Local synced order and report evidence.",
+        "evidence": (
+            "Trustpilot tag found on Shopify order."
+            if matched_trustpilot_tags
+            else source.get("reason") or "; ".join(_dedupe(blockers)) or "Local synced order and report evidence."
+        ),
         "scan_date": scan_dt.isoformat() if scan_dt else "",
         "scan_date_basis": basis,
         "scan_date_fallback_used": basis != "delivered_date",
@@ -1290,6 +1375,7 @@ def _sqlite_focus_order_diagnosis(order_name, local_by_order, eligible_rows, blo
     else:
         review_request_tag_status = "missing"
     tags = _dedupe(row.get("tags") or local_tags or []) if row or local else []
+    matched_trustpilot_tags = _matched_trustpilot_tags(tags)
     matched_ebay_tags = _matched_ebay_tags(tags)
     return {
         "order_name": order_name,
@@ -1312,6 +1398,15 @@ def _sqlite_focus_order_diagnosis(order_name, local_by_order, eligible_rows, blo
         "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
         "tags_summary": _tags_summary(tags, tag_data_loaded),
         "order_tags_display": tags,
+        "local_shopify_tags": local_tags,
+        "trustpilot_tag_detected": bool(matched_trustpilot_tags) or row.get("trustpilot_tag_detected") is True if row else bool(matched_trustpilot_tags),
+        "trustpilot_tag_source": _safe_text(row.get("trustpilot_tag_source", ""), 120) if row else (
+            "local_shopify_tags" if matched_trustpilot_tags else ""
+        ),
+        "matched_trustpilot_tag_values": row.get("matched_trustpilot_tag_values", []) if row else matched_trustpilot_tags,
+        "already_sent_reason": _safe_text(row.get("already_sent_reason", ""), 300) if row else (
+            "Shopify tag shows Trustpilot already sent." if matched_trustpilot_tags else ""
+        ),
         "ebay_tag_detected": (
             bool(matched_ebay_tags) or row.get("ebay_tag_detected") is True
             if row
@@ -1406,7 +1501,7 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.28I",
+        "phase": "5.29E",
         "mode": "dry-run-local-synced-order-scan",
         "command_label": COMMAND_LABEL,
         "report_status": "blocked_last_60_days_candidate_scan_failed",
@@ -1910,6 +2005,11 @@ def _eligible_summary(row: dict) -> dict:
         "note_risk_keywords": row.get("note_risk_keywords", []),
         "note_risk_reason": row.get("note_risk_reason", ""),
         "tags": row.get("tags", []),
+        "local_shopify_tags": row.get("local_shopify_tags", []),
+        "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
+        "trustpilot_tag_source": row.get("trustpilot_tag_source", ""),
+        "matched_trustpilot_tag_values": row.get("matched_trustpilot_tag_values", []),
+        "already_sent_reason": row.get("already_sent_reason", ""),
         "ebay_tag_detected": row.get("ebay_tag_detected") is True,
         "matched_ebay_tag_value": row.get("matched_ebay_tag_value", ""),
         "tag_data_available": row.get("tag_data_available") is True,
@@ -1958,6 +2058,11 @@ def _blocked_summary(row: dict) -> dict:
         "note_risk_keywords": row.get("note_risk_keywords", []),
         "note_risk_reason": row.get("note_risk_reason", ""),
         "tags": row.get("tags", []),
+        "local_shopify_tags": row.get("local_shopify_tags", []),
+        "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
+        "trustpilot_tag_source": row.get("trustpilot_tag_source", ""),
+        "matched_trustpilot_tag_values": row.get("matched_trustpilot_tag_values", []),
+        "already_sent_reason": row.get("already_sent_reason", ""),
         "ebay_tag_detected": row.get("ebay_tag_detected") is True,
         "matched_ebay_tag_value": row.get("matched_ebay_tag_value", ""),
         "tag_data_available": row.get("tag_data_available") is True,
@@ -1987,8 +2092,15 @@ def _already_sent_public_summary(row: dict) -> dict:
         "previous_trustpilot_order_names": row.get("previous_trustpilot_order_names", []),
         "previous_trustpilot_tag_values": row.get("previous_trustpilot_tag_values", []),
         "trustpilot_email_status": row.get("trustpilot_email_status", "Already sent"),
+        "shopify_tag_pending": row.get("shopify_tag_pending") is True,
+        "shopify_tag_status_label": row.get("shopify_tag_status_label", ""),
         "evidence": row.get("evidence", ""),
         "tags": row.get("tags", []),
+        "local_shopify_tags": row.get("local_shopify_tags", []),
+        "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
+        "trustpilot_tag_source": row.get("trustpilot_tag_source", ""),
+        "matched_trustpilot_tag_values": row.get("matched_trustpilot_tag_values", []),
+        "already_sent_reason": row.get("already_sent_reason", ""),
         "ebay_tag_detected": row.get("ebay_tag_detected") is True,
         "matched_ebay_tag_value": row.get("matched_ebay_tag_value", ""),
         "tag_data_available": row.get("tag_data_available") is True,

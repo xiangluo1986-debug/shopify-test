@@ -47,9 +47,21 @@ EBAY_BLOCK_REASON = "eBay order — Trustpilot email not allowed."
 CANONICAL_TRUSTPILOT_TAG = "1: trustpilot"
 TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
 TRUSTPILOT_TAG_WRITE_ALIAS_BLOCKED_STATUS = "blocked_review_request_tag_still_present"
+TRUSTPILOT_TAG_FOUND_EVIDENCE = "Trustpilot tag found on Shopify order."
+TRUSTPILOT_TAG_ALREADY_SENT_REASON = "Shopify tag shows Trustpilot already sent."
 SHOPIFY_TRUSTPILOT_TAG_WRITE_SHOP_DOMAIN = "kidstoylover.myshopify.com"
 SHOPIFY_TRUSTPILOT_TAG_WRITE_API_VERSION = "2026-01"
 MANUAL_CONFIRMED_ORDER_EVIDENCE = {
+    "#21225": {
+        "order_name": "#21225",
+        "source": "User-confirmed Shopify UI evidence",
+        "source_section": "manual_confirmed_shopify_ui_evidence",
+        "tags": [CANONICAL_TRUSTPILOT_TAG],
+        "trustpilot_tags": [CANONICAL_TRUSTPILOT_TAG],
+        "trustpilot_invitation_present": True,
+        "contains_trustpilot_alias": True,
+        "reason": TRUSTPILOT_TAG_FOUND_EVIDENCE,
+    },
     "#22562": {
         "order_name": "#22562",
         "source": "User-confirmed Shopify UI evidence",
@@ -156,6 +168,7 @@ REVIEW_REQUEST_FOCUS_ORDER_NAMES = (
     "#21075",
     "#21076",
     "#21102",
+    "#21225",
     "#21778",
     "#22530",
     "#22562",
@@ -334,6 +347,12 @@ REPORT_DEFINITIONS = (
         "Shopify order tags persistence audit",
         "shopify_review_request_order_tags_persistence_audit.json",
         ("report_status", "status"),
+    ),
+    (
+        "trustpilot_tag_exclusion_audit",
+        "Trustpilot tag exclusion audit",
+        "codex_runs/shopify_review_request_trustpilot_tag_exclusion_audit.json",
+        ("audit_status", "report_status", "status"),
     ),
     (
         "customer_history_trustpilot_guard_audit",
@@ -5135,7 +5154,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "task": LAST_60_DAY_SCAN_TASK_NAME,
         "task_name": LAST_60_DAY_SCAN_TASK_NAME,
-        "phase": "5.28I",
+        "phase": "5.29E",
         "mode": "dry-run-local-synced-order-scan",
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "report_status": "last_60_days_candidate_scan_ready",
@@ -5148,6 +5167,8 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "order_21075_diagnosis": scan["order_21075_diagnosis"],
         "order_21076_diagnosis": scan["order_21076_diagnosis"],
         "order_21102_diagnosis": scan["order_21102_diagnosis"],
+        "order_21225_diagnosis": scan["order_21225_diagnosis"],
+        "order_21225_trustpilot_tag_detection": scan["order_21225_trustpilot_tag_detection"],
         "order_21778_diagnosis": scan["order_21778_diagnosis"],
         "order_21778_trustpilot_tag_detection": scan["order_21778_trustpilot_tag_detection"],
         "order_22530_diagnosis": scan["order_22530_diagnosis"],
@@ -5163,6 +5184,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "eligible_candidate_count": scan["eligible_candidate_count"],
         "eligible_candidate_count_total": scan["eligible_candidate_count_total"],
         "already_sent_count": scan["already_sent_count"],
+        "trustpilot_tagged_orders_excluded_count": scan["trustpilot_tagged_orders_excluded_count"],
         "blocked_count": scan["blocked_count"],
         "blocked_merged_group_count": scan["blocked_merged_group_count"],
         "blocked_duplicate_customer_count": scan["blocked_duplicate_customer_count"],
@@ -5391,6 +5413,122 @@ def build_review_request_tag_alias_and_candidate_correction_audit_report(params=
         "all_new_actions_no_write_confirmed": True,
         "detected_issue_summary": _candidate_22562_audit_issue_summary(candidate_audit, scan),
     }
+
+
+def build_review_request_trustpilot_tag_exclusion_audit_report(params=None):
+    state = _build_review_send_state()
+    scan = state["last_60_days_scan"]
+    approval_queue = state["approval_queue"]
+    row, section = _find_scan_order_row(scan, "#21225")
+    diagnosis = scan.get("order_21225_diagnosis") or {}
+    detection = scan.get("order_21225_trustpilot_tag_detection") or _order_trustpilot_tag_detection(diagnosis)
+    local_tags = _dedupe_text(
+        diagnosis.get("local_shopify_tags")
+        or diagnosis.get("order_tags_display")
+        or (row or {}).get("local_shopify_tags")
+        or (row or {}).get("order_tags_display")
+        or []
+    )
+    needs_review_orders = {
+        _safe_text(item.get("order"), max_length=80)
+        for item in (approval_queue.get("all_needs_review_rows") or scan.get("eligible_queue_rows") or [])
+    }
+    visible_review_orders = {
+        _safe_text(item.get("order"), max_length=80)
+        for item in approval_queue.get("needs_review_rows", [])
+    }
+    already_sent_orders = {
+        _safe_text(item.get("order"), max_length=80)
+        for item in (approval_queue.get("already_sent_rows") or scan.get("already_sent_queue_rows") or [])
+    }
+    removed_from_needs_review = "#21225" not in needs_review_orders and "#21225" not in visible_review_orders
+    shown_in_already_sent = "#21225" in already_sent_orders or section == "already_sent"
+    trustpilot_detected = (
+        detection.get("trustpilot_tag_detected") is True
+        or (row or {}).get("trustpilot_tag_detected") is True
+        or bool(_matched_trustpilot_tags({}, local_tags))
+    )
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_trustpilot_tag_exclusion_audit",
+        "task_name": "shopify_review_request_trustpilot_tag_exclusion_audit",
+        "phase": "5.29E",
+        "mode": "dry-run-local-trustpilot-tag-exclusion-audit",
+        "audit_status": "trustpilot_tag_exclusion_audit_ready",
+        "report_status": "trustpilot_tag_exclusion_audit_ready",
+        "success": True,
+        "order_21225_found": bool(row) or diagnosis.get("found_in_local_shopify_order") is True,
+        "order_21225_local_tags": local_tags,
+        "order_21225_trustpilot_tag_detected": trustpilot_detected,
+        "order_21225_trustpilot_tag_source": _safe_text(
+            (row or {}).get("trustpilot_tag_source")
+            or detection.get("trustpilot_tag_source")
+            or diagnosis.get("trustpilot_tag_source"),
+            max_length=120,
+        ),
+        "order_21225_matched_trustpilot_tag_values": _dedupe_text(
+            (row or {}).get("matched_trustpilot_tag_values")
+            or detection.get("matched_trustpilot_tag_values")
+            or _matched_trustpilot_tags({}, local_tags)
+        ),
+        "order_21225_candidate_section_before": _safe_text(
+            (row or {}).get("candidate_section_before_trustpilot_exclusion")
+            or "not_reconstructed_current_scan",
+            max_length=120,
+        ),
+        "order_21225_candidate_section_after": section,
+        "order_21225_removed_from_needs_review": removed_from_needs_review,
+        "order_21225_shown_in_already_sent": shown_in_already_sent,
+        "order_21225_review_send_button_absent": "#21225" not in visible_review_orders,
+        "order_21225_shopify_tag_status_label": _safe_text(
+            (row or {}).get("shopify_tag_status_label"),
+            max_length=120,
+        ),
+        "order_21225_shopify_tag_pending": (row or {}).get("shopify_tag_pending") is True,
+        "order_21225_already_sent_reason": _safe_text(
+            (row or {}).get("already_sent_reason")
+            or diagnosis.get("already_sent_reason")
+            or (TRUSTPILOT_TAG_ALREADY_SENT_REASON if trustpilot_detected else ""),
+            max_length=300,
+        ),
+        "order_21225_evidence": _safe_text(
+            (row or {}).get("evidence")
+            or (row or {}).get("reason")
+            or (TRUSTPILOT_TAG_FOUND_EVIDENCE if trustpilot_detected else ""),
+            max_length=500,
+        ),
+        "order_21225_diagnosis": diagnosis,
+        "order_21225_trustpilot_tag_detection": detection,
+        "trustpilot_tagged_orders_excluded_count": _int_or_zero(
+            scan.get("trustpilot_tagged_orders_excluded_count")
+        ),
+        "coverage_warnings": scan.get("coverage_warnings") or [],
+        "needs_review_order_count": len(needs_review_orders),
+        "already_sent_order_count": len(already_sent_orders),
+        "review_send_action_enabled_count": _int_or_zero(
+            approval_queue.get("review_send_action_enabled_count")
+        ),
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+    }
+    payload["detected_issue_summary"] = _trustpilot_tag_exclusion_audit_summary(payload)
+    return payload
 
 
 def build_review_request_customer_history_trustpilot_guard_audit_report(params=None):
@@ -6676,6 +6814,26 @@ def _candidate_22562_audit_issue_summary(candidate_audit, scan):
     )
 
 
+def _trustpilot_tag_exclusion_audit_summary(payload):
+    if (
+        payload.get("order_21225_trustpilot_tag_detected") is True
+        and payload.get("order_21225_removed_from_needs_review") is True
+        and payload.get("order_21225_shown_in_already_sent") is True
+    ):
+        return (
+            "#21225 has Trustpilot sent tag evidence, is excluded from Needs review, "
+            "and is shown in Already sent. No Gmail, Shopify, Trustpilot, Kudosi, "
+            "or Ali Reviews API calls were performed."
+        )
+    return (
+        "#21225 Trustpilot exclusion needs review: "
+        f"detected={payload.get('order_21225_trustpilot_tag_detected')}; "
+        f"removed_from_needs_review={payload.get('order_21225_removed_from_needs_review')}; "
+        f"shown_in_already_sent={payload.get('order_21225_shown_in_already_sent')}. "
+        "No Gmail, Shopify, Trustpilot, Kudosi, or Ali Reviews API calls were performed."
+    )
+
+
 def _gmail_setup_from_reports(reports):
     return _gmail_setup_summary(
         _trustpilot_gmail_oauth_config_helper_status(
@@ -7086,11 +7244,21 @@ def _last_60_days_candidate_scan(
         cutoff=cutoff,
         local_db_error=local_db_error,
     )
+    stale_trustpilot_tag_rows = _stale_trustpilot_tag_rows(already_sent_rows)
+    if stale_trustpilot_tag_rows:
+        order_data_coverage["coverage_warnings"] = _dedupe_text(
+            (order_data_coverage.get("coverage_warnings") or [])
+            + ["Shopify tag may be stale locally; run sync."]
+        )
+        order_data_coverage["stale_trustpilot_tag_order_names"] = [
+            row.get("order") for row in stale_trustpilot_tag_rows if row.get("order")
+        ]
     order_21083_diagnosis = _focus_order_diagnosis("#21083", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21070_diagnosis = _focus_order_diagnosis("#21070", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21075_diagnosis = _focus_order_diagnosis("#21075", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21076_diagnosis = _focus_order_diagnosis("#21076", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21102_diagnosis = _focus_order_diagnosis("#21102", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
+    order_21225_diagnosis = _focus_order_diagnosis("#21225", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21778_diagnosis = _focus_order_diagnosis("#21778", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_22530_diagnosis = _focus_order_diagnosis("#22530", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_22562_diagnosis = _focus_order_diagnosis("#22562", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
@@ -7108,6 +7276,8 @@ def _last_60_days_candidate_scan(
         "order_21075_diagnosis": order_21075_diagnosis,
         "order_21076_diagnosis": order_21076_diagnosis,
         "order_21102_diagnosis": order_21102_diagnosis,
+        "order_21225_diagnosis": order_21225_diagnosis,
+        "order_21225_trustpilot_tag_detection": _order_trustpilot_tag_detection(order_21225_diagnosis),
         "order_21778_diagnosis": order_21778_diagnosis,
         "order_21778_trustpilot_tag_detection": _order_trustpilot_tag_detection(order_21778_diagnosis),
         "order_22530_diagnosis": order_22530_diagnosis,
@@ -7128,6 +7298,9 @@ def _last_60_days_candidate_scan(
         "eligible_candidate_count": eligible_candidate_count_total,
         "eligible_candidate_count_total": eligible_candidate_count_total,
         "already_sent_count": len(already_sent_rows),
+        "trustpilot_tagged_orders_excluded_count": sum(
+            1 for row in already_sent_rows if row.get("trustpilot_tag_detected") is True
+        ),
         "blocked_count": len(blocked_rows),
         "blocked_merged_group_count": sum(1 for row in blocked_rows if _row_blocked_by_merged_group(row)),
         "blocked_duplicate_customer_count": sum(1 for row in blocked_rows if _row_blocked_by_duplicate(row)),
@@ -7332,11 +7505,18 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         review_request_tag_status = "present"
     else:
         review_request_tag_status = "missing"
-    tags = _dedupe_text(
+    tags = _combined_queue_tags(row or {}, scan_context=context)
+    local_shopify_tags = _dedupe_text(
         context.get("order_tags_display")
-        or (row or {}).get("order_tags_display")
-        or (row or {}).get("tags")
+        or (row or {}).get("local_shopify_tags")
         or []
+    )
+    matched_trustpilot_tags = _matched_trustpilot_tags(row or {}, tags)
+    trustpilot_tag_source = _trustpilot_tag_source(
+        tags,
+        local_shopify_tags=local_shopify_tags,
+        previous_trustpilot_tags=(row or {}).get("previous_trustpilot_tag_values") or [],
+        source_row=row or {},
     )
     matched_ebay_tags = _matched_ebay_tags(tags)
     final_blockers = _focus_final_blockers(found_locally, row, tag_data_loaded)
@@ -7361,6 +7541,21 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         "selected_local_tag_field": context.get("selected_local_tag_field") or SHOPIFY_ORDER_TAG_FIELD_LABEL,
         "tags_summary": _tags_summary(tags, tag_data_loaded),
         "order_tags_display": tags,
+        "local_shopify_tags": local_shopify_tags,
+        "trustpilot_tag_detected": bool(matched_trustpilot_tags)
+        or (row or {}).get("trustpilot_tag_detected") is True,
+        "trustpilot_tag_source": _safe_text(
+            (row or {}).get("trustpilot_tag_source") or trustpilot_tag_source,
+            max_length=120,
+        ),
+        "matched_trustpilot_tag_values": _dedupe_text(
+            (row or {}).get("matched_trustpilot_tag_values") or matched_trustpilot_tags
+        ),
+        "already_sent_reason": _safe_text(
+            (row or {}).get("already_sent_reason")
+            or (TRUSTPILOT_TAG_ALREADY_SENT_REASON if matched_trustpilot_tags else ""),
+            max_length=300,
+        ),
         "ebay_tag_detected": bool(matched_ebay_tags) or (row or {}).get("ebay_tag_detected") is True,
         "matched_ebay_tag_value": (
             _safe_text((row or {}).get("matched_ebay_tag_value"), max_length=120)
@@ -7445,7 +7640,20 @@ def _order_trustpilot_tag_detection(diagnosis):
         "tag_data_available": (diagnosis or {}).get("tag_data_available") is True,
         "trustpilot_tag_detected": bool(matched),
         "matched_trustpilot_tag_values": matched,
+        "trustpilot_tag_source": _safe_text((diagnosis or {}).get("trustpilot_tag_source"), max_length=120),
+        "already_sent_reason": _safe_text((diagnosis or {}).get("already_sent_reason"), max_length=300),
     }
+
+
+def _stale_trustpilot_tag_rows(rows):
+    stale_rows = []
+    for row in rows or []:
+        if row.get("trustpilot_tag_detected") is not True:
+            continue
+        local_tags = _dedupe_text(row.get("local_shopify_tags") or [])
+        if local_tags and not has_trustpilot_sent_tag(local_tags):
+            stale_rows.append(row)
+    return stale_rows
 
 
 def _focus_final_eligibility_status(found_locally, row, tag_data_loaded):
@@ -7704,6 +7912,37 @@ def _source_row_tags(source_row):
     )
 
 
+def _combined_queue_tags(source_row=None, local_context=None, scan_context=None, row=None):
+    tags = []
+    for mapping in (local_context, scan_context, source_row, row):
+        if not isinstance(mapping, dict):
+            continue
+        tags.extend(_source_row_tags(mapping))
+        tags.extend(_collect_tag_values(mapping.get("local_shopify_tags")))
+        tags.extend(_collect_tag_values(mapping.get("matched_trustpilot_tag_values")))
+    return _dedupe_text(tags)
+
+
+def _local_shopify_tags_for_queue(local_context=None, scan_context=None):
+    tags = []
+    for mapping in (local_context, scan_context):
+        if not isinstance(mapping, dict):
+            continue
+        tags.extend(_collect_tag_values(mapping.get("order_tags_display")))
+        tags.extend(_collect_tag_values(mapping.get("local_shopify_tags")))
+    return _dedupe_text(tags)
+
+
+def _trustpilot_tag_source(tags, local_shopify_tags=None, previous_trustpilot_tags=None, source_row=None):
+    if _matched_trustpilot_tags({}, local_shopify_tags or []):
+        return "local_shopify_tags"
+    if previous_trustpilot_tags:
+        return "customer_history_tags"
+    if _matched_trustpilot_tags(source_row or {}, tags or []):
+        return "local_report_tags"
+    return ""
+
+
 def _shopify_tags_loaded_from_order(order):
     return isinstance(order, dict) and SHOPIFY_ORDER_TAG_FIELD in order and order.get(SHOPIFY_ORDER_TAG_FIELD) is not None
 
@@ -7920,11 +8159,12 @@ def _tag_payload_available(value):
 
 def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
     row = dict(source_row or {})
-    tags = _source_row_tags(row) or _dedupe_text(
-        scan_context.get("order_tags_display")
-        or local_context.get("order_tags_display")
-        or []
+    tags = _combined_queue_tags(
+        row,
+        local_context=local_context,
+        scan_context=scan_context,
     )
+    local_shopify_tags = _local_shopify_tags_for_queue(local_context, scan_context)
     trustpilot_tags = _matched_trustpilot_tags(row, tags)
     matched_review_request_tags = _matched_review_request_tags(tags)
     matched_ebay_tags = _matched_ebay_tags(tags)
@@ -7985,12 +8225,21 @@ def _scan_queue_source_row(order_name, source_row, scan_context, local_context):
             "note_risk_keywords": note_risk["note_risk_keywords"],
             "note_risk_reason": note_risk["note_risk_reason"],
             "tags": tags,
+            "local_shopify_tags": local_shopify_tags,
             "tag_data_available": scan_context.get("tag_data_available") is True,
             "tag_data_missing_source": _safe_text(scan_context.get("tag_data_missing_source"), max_length=240),
             "tag_data_recommended_action": _safe_text(scan_context.get("tag_data_recommended_action"), max_length=300),
             "trustpilot_tags": trustpilot_tags,
             "trustpilot_invitation_present": bool(trustpilot_tags)
             or row.get("trustpilot_invitation_present") is True,
+            "trustpilot_tag_detected": bool(trustpilot_tags),
+            "trustpilot_tag_source": _trustpilot_tag_source(
+                tags,
+                local_shopify_tags=local_shopify_tags,
+                previous_trustpilot_tags=[],
+                source_row=row,
+            ),
+            "matched_trustpilot_tag_values": trustpilot_tags,
             "ebay_tag_detected": bool(matched_ebay_tags),
             "matched_ebay_tag_value": matched_ebay_tags[0] if matched_ebay_tags else "",
             "delivered_tag_present": delivered is True,
@@ -8476,6 +8725,11 @@ def _queue_candidate_summary(row):
         "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
         "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "local_shopify_tags": _dedupe_text(row.get("local_shopify_tags") or []),
+        "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
+        "trustpilot_tag_source": _safe_text(row.get("trustpilot_tag_source"), max_length=120),
+        "matched_trustpilot_tag_values": _dedupe_text(row.get("matched_trustpilot_tag_values") or []),
+        "already_sent_reason": _safe_text(row.get("already_sent_reason"), max_length=300),
         "ebay_tag_detected": row.get("ebay_tag_detected") is True,
         "matched_ebay_tag_value": _safe_text(row.get("matched_ebay_tag_value"), max_length=120),
         "tag_data_available": row.get("tag_data_available") is True,
@@ -8535,6 +8789,11 @@ def _blocked_candidate_summary(row):
         "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
         "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "local_shopify_tags": _dedupe_text(row.get("local_shopify_tags") or []),
+        "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
+        "trustpilot_tag_source": _safe_text(row.get("trustpilot_tag_source"), max_length=120),
+        "matched_trustpilot_tag_values": _dedupe_text(row.get("matched_trustpilot_tag_values") or []),
+        "already_sent_reason": _safe_text(row.get("already_sent_reason"), max_length=300),
         "ebay_tag_detected": row.get("ebay_tag_detected") is True,
         "matched_ebay_tag_value": _safe_text(row.get("matched_ebay_tag_value"), max_length=120),
         "tag_data_available": row.get("tag_data_available") is True,
@@ -8571,6 +8830,11 @@ def _already_sent_summary(row):
         "shopify_tag_status_label": _safe_text(row.get("shopify_tag_status_label"), max_length=120),
         "evidence": _safe_text(row.get("evidence"), max_length=500),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "local_shopify_tags": _dedupe_text(row.get("local_shopify_tags") or []),
+        "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
+        "trustpilot_tag_source": _safe_text(row.get("trustpilot_tag_source"), max_length=120),
+        "matched_trustpilot_tag_values": _dedupe_text(row.get("matched_trustpilot_tag_values") or []),
+        "already_sent_reason": _safe_text(row.get("already_sent_reason"), max_length=300),
         "ebay_tag_detected": row.get("ebay_tag_detected") is True,
         "matched_ebay_tag_value": _safe_text(row.get("matched_ebay_tag_value"), max_length=120),
         "tag_data_available": row.get("tag_data_available") is True,
@@ -9368,6 +9632,25 @@ def _needs_review_queue_row(
         or _safe_text((local_context or {}).get("masked_email"), max_length=120)
         or "Masked in reports"
     )
+    trustpilot_state = _trustpilot_sent_state(row, local_context or {})
+    if trustpilot_state["already_sent"]:
+        return _apply_queue_row_context(
+            {
+                "candidate_id": order_name,
+                "order": order_name,
+                "customer": customer,
+                "status": "Already sent",
+                "status_class": "rrw-badge-ok",
+                "reason": trustpilot_state["evidence"],
+                "evidence": trustpilot_state["evidence"],
+                "already_sent_reason": trustpilot_state["already_sent_reason"],
+                "action_state": "already_sent",
+                "source": _safe_text(row.get("source"), max_length=120),
+            },
+            row,
+            local_context or {},
+            action_state="already_sent",
+        )
     blockers = _candidate_send_blockers(
         row,
         already_sent_orders=already_sent_orders,
@@ -9447,14 +9730,12 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
     blockers = []
     order_name = _safe_text(row.get("order_name"), max_length=80)
     customer = _safe_text(row.get("masked_email"), max_length=120)
-    tags = _dedupe_text(
-        row.get("tags")
-        or row.get("order_tags_display")
-        or local_context.get("order_tags_display")
-        or []
-    )
+    tags = _combined_queue_tags(row, local_context=local_context)
     if row.get("ebay_tag_detected") is True or has_ebay_tag(tags):
         return [EBAY_BLOCK_REASON]
+    trustpilot_state = _trustpilot_sent_state(row, local_context)
+    if trustpilot_state["already_sent"]:
+        return [trustpilot_state["already_sent_reason"]]
     algorithm_ready = (
         row.get("eligible_for_trustpilot") is True
         or row.get("source_section") == "ready_candidate_queue"
@@ -9518,6 +9799,89 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
     ):
         blockers.append("Related orders are not ready.")
     return _dedupe_text(blockers)
+
+
+def _trustpilot_sent_state(row, local_context=None):
+    row = row or {}
+    local_context = local_context or {}
+    tags = _combined_queue_tags(row, local_context=local_context)
+    local_shopify_tags = _local_shopify_tags_for_queue(local_context)
+    local_matches = _matched_trustpilot_tags({}, local_shopify_tags)
+    matched_tags = _matched_trustpilot_tags(row, tags)
+    previous_orders = _dedupe_order_names(
+        local_context.get("previous_trustpilot_order_names")
+        or row.get("previous_trustpilot_order_names")
+        or []
+    )
+    previous_tags = _dedupe_text(
+        local_context.get("previous_trustpilot_tag_values")
+        or row.get("previous_trustpilot_tag_values")
+        or []
+    )
+    local_send_success = (
+        row.get("local_review_send_success") is True
+        or local_context.get("local_review_send_success") is True
+    )
+    tag_write_confirmed = (
+        _shopify_tag_write_confirmed_from_payload(row)
+        or _shopify_tag_write_confirmed_from_payload(local_context)
+    )
+    if local_matches:
+        return {
+            "already_sent": True,
+            "evidence": TRUSTPILOT_TAG_FOUND_EVIDENCE,
+            "already_sent_reason": TRUSTPILOT_TAG_ALREADY_SENT_REASON,
+            "trustpilot_tag_detected": True,
+            "trustpilot_tag_source": "local_shopify_tags",
+            "matched_trustpilot_tag_values": local_matches,
+            "local_shopify_tags": local_shopify_tags,
+        }
+    if matched_tags or row.get("trustpilot_invitation_present") is True:
+        return {
+            "already_sent": True,
+            "evidence": TRUSTPILOT_TAG_FOUND_EVIDENCE,
+            "already_sent_reason": TRUSTPILOT_TAG_ALREADY_SENT_REASON,
+            "trustpilot_tag_detected": bool(matched_tags),
+            "trustpilot_tag_source": _trustpilot_tag_source(
+                tags,
+                local_shopify_tags=local_shopify_tags,
+                previous_trustpilot_tags=[],
+                source_row=row,
+            )
+            or "local_report_tags",
+            "matched_trustpilot_tag_values": matched_tags,
+            "local_shopify_tags": local_shopify_tags,
+        }
+    if previous_orders or previous_tags:
+        prior = _join_order_names(previous_orders) or "another order"
+        return {
+            "already_sent": True,
+            "evidence": f"Already sent Trustpilot to this customer via {prior}.",
+            "already_sent_reason": "Customer history shows Trustpilot already sent.",
+            "trustpilot_tag_detected": bool(previous_tags),
+            "trustpilot_tag_source": "customer_history_tags" if previous_tags else "customer_history",
+            "matched_trustpilot_tag_values": previous_tags,
+            "local_shopify_tags": local_shopify_tags,
+        }
+    if local_send_success or tag_write_confirmed:
+        return {
+            "already_sent": True,
+            "evidence": "Trustpilot email already sent and recorded.",
+            "already_sent_reason": "Local send report shows Trustpilot already sent.",
+            "trustpilot_tag_detected": False,
+            "trustpilot_tag_source": "local_send_report",
+            "matched_trustpilot_tag_values": [],
+            "local_shopify_tags": local_shopify_tags,
+        }
+    return {
+        "already_sent": False,
+        "evidence": "",
+        "already_sent_reason": "",
+        "trustpilot_tag_detected": False,
+        "trustpilot_tag_source": "",
+        "matched_trustpilot_tag_values": [],
+        "local_shopify_tags": local_shopify_tags,
+    }
 
 
 def _known_not_ready_queue_row(order_name, customer, source_row=None, local_context=None):
@@ -10346,11 +10710,12 @@ def _apply_queue_row_context(
     related_order_names = explicit_related_order_names or _dedupe_order_names(
         source_row.get("related_order_names") or []
     )
-    tags = _source_row_tags(source_row) or _dedupe_text(
-        row.get("order_tags_display")
-        or local_context.get("order_tags_display")
-        or []
+    tags = _combined_queue_tags(
+        source_row,
+        local_context=local_context,
+        row=row,
     )
+    local_shopify_tags = _local_shopify_tags_for_queue(local_context)
     matched_ebay_tags = _dedupe_text(
         [source_row.get("matched_ebay_tag_value"), local_context.get("matched_ebay_tag_value")]
         + _matched_ebay_tags(tags)
@@ -10361,7 +10726,11 @@ def _apply_queue_row_context(
         or local_context.get("ebay_tag_detected") is True
         or bool(matched_ebay_tags)
     )
-    trustpilot_tags = _dedupe_text(source_row.get("trustpilot_tags") or [])
+    trustpilot_tags = _dedupe_text(
+        _as_text_list(source_row.get("trustpilot_tags"))
+        + _as_text_list(row.get("trustpilot_tags"))
+        + _matched_trustpilot_tags(source_row, tags)
+    )
     delivered = _queue_delivered_status(source_row, tags, row.get("reason", ""))
     review_request_present = _queue_review_request_tag_present(source_row, tags, row.get("reason", ""))
     matched_review_request_tags = _matched_review_request_tags(tags)
@@ -10391,6 +10760,17 @@ def _apply_queue_row_context(
         trustpilot_tags,
         prior_order_name,
     ) or bool(previous_trustpilot_order_names)
+    trustpilot_state = _trustpilot_sent_state(
+        {
+            **source_row,
+            **row,
+            "trustpilot_tags": trustpilot_tags,
+            "previous_trustpilot_order_names": previous_trustpilot_order_names,
+            "previous_trustpilot_tag_values": previous_trustpilot_tag_values,
+        },
+        local_context,
+    )
+    trustpilot_sent = trustpilot_sent or trustpilot_state["already_sent"]
     local_review_send_success = (
         row.get("local_review_send_success") is True
         or source_row.get("local_review_send_success") is True
@@ -10464,6 +10844,7 @@ def _apply_queue_row_context(
             "explicit_related_order_names": explicit_related_order_names,
             "explicit_related_order_reference": bool(explicit_related_order_names),
             "order_tags_display": tags,
+            "local_shopify_tags": local_shopify_tags,
             "has_order_tags": bool(tags),
             "tag_data_available": review_request_tag_data_loaded,
             "tag_data_missing_source": (
@@ -10496,6 +10877,13 @@ def _apply_queue_row_context(
             "review_request_tag_match_detail": _review_request_tag_match_detail(matched_review_request_tag_value),
             "ebay_tag_detected": ebay_tag_detected,
             "matched_ebay_tag_value": matched_ebay_tags[0] if matched_ebay_tags else "",
+            "trustpilot_tag_detected": trustpilot_state["trustpilot_tag_detected"],
+            "trustpilot_tag_source": trustpilot_state["trustpilot_tag_source"],
+            "matched_trustpilot_tag_values": trustpilot_state["matched_trustpilot_tag_values"],
+            "already_sent_reason": (
+                _safe_text(row.get("already_sent_reason"), max_length=300)
+                or trustpilot_state["already_sent_reason"]
+            ),
             "review_request_tag_status_label": (
                 "Review request tag found"
                 if review_request_present is True

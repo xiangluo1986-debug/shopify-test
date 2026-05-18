@@ -61,6 +61,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("report_status", "status"),
     },
     {
+        "key": "trustpilot_tag_exclusion_audit",
+        "label": "Trustpilot tag exclusion audit",
+        "filename": "codex_runs/shopify_review_request_trustpilot_tag_exclusion_audit.json",
+        "channel": "trustpilot",
+        "event_type": "duplicate_block",
+        "status_keys": ("audit_status", "report_status", "status"),
+    },
+    {
         "key": "customer_history_trustpilot_guard_audit",
         "label": "Customer history Trustpilot guard audit",
         "filename": "shopify_review_request_customer_history_trustpilot_guard_audit.json",
