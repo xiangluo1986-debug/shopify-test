@@ -8,6 +8,7 @@ The current production-safety foundation remains:
 
 - Public lightweight `/healthz/` endpoint.
 - `scripts/safe_deploy.ps1` validation and post-restart health check.
+- Deployment lock design and read-only dry-run helper.
 - `docs/SAFE_DEPLOY.md` operational notes.
 - No secrets, logs, or generated deployment output committed.
 
@@ -24,7 +25,9 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+- [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md)
 - [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
+- [scripts/deploy_lock_dry_run.ps1](../scripts/deploy_lock_dry_run.ps1)
 - [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
@@ -56,6 +59,34 @@ declare a build for the inactive service because the runner intentionally uses
 `--no-build`. If the image is missing, run a separate explicit image
 build/preparation task before attempting local inactive startup.
 Production remains NO-GO.
+
+## Deployment Lock Gate
+
+Production apply must not proceed until the deployment lock is implemented and
+enforced in runtime-changing deploy paths. The proposed shared lock is
+documented in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md), with the runtime-only
+path:
+
+```text
+.deploy/deploy.lock
+```
+
+Any future production deploy, proxy switch, restart, rolling update, or cleanup
+must acquire the deployment lock before changing runtime state. If the lock is
+already present, the operation should block and print sanitized lock owner
+metadata for manual review.
+
+The successful local inactive-color startup on non-production port `18080`
+confirmed that a local inactive test service can reach `/healthz/`, but it does
+not remove the need for the deployment lock. The lock addresses a separate
+risk: overlapping deployment tasks racing with each other.
+
+Current status:
+
+- Design/dry-run only.
+- Read-only helper: `scripts/deploy_lock_dry_run.ps1`.
+- Active deploy scripts do not enforce the lock yet.
+- Production apply remains NO-GO until lock enforcement is implemented.
 
 ## Current Architecture
 
@@ -175,14 +206,16 @@ The proxy should be the only service exposed on the stable external port. The co
 
 Future deployment flow:
 
-1. Identify active color.
-2. Build or start the inactive color.
-3. Run Django checks against the inactive color.
-4. Run a direct inactive-color `/healthz/` check.
-5. Switch proxy traffic to the inactive color only after health passes.
-6. Run public `/healthz/` through the stable domain.
-7. Keep the previous color running briefly for rollback.
-8. Stop the previous color only after the new color has been stable for an agreed observation window.
+1. Acquire the deployment lock before any runtime-changing action.
+2. Identify active color.
+3. Build or start the inactive color.
+4. Run Django checks against the inactive color.
+5. Run a direct inactive-color `/healthz/` check.
+6. Switch proxy traffic to the inactive color only after health passes.
+7. Run public `/healthz/` through the stable domain.
+8. Keep the previous color running briefly for rollback.
+9. Stop the previous color only after the new color has been stable for an agreed observation window.
+10. Release the deployment lock in cleanup/finally handling.
 
 This reduces update-time server errors because the serving container is not replaced while it is receiving traffic. Users continue hitting the old color until the new color has already started and passed health checks.
 
@@ -387,4 +420,5 @@ the exact compose file, inactive service, non-`8000` test port, health check,
 stop-only cleanup command. Production should remain NO-GO until local or
 staging results are reviewed and a separate production task approves route,
 port ownership, proxy, scheduler, migration, static/media, rollback, and
-observation details.
+observation details. Before any production apply or proxy switch, implement and
+enforce the deployment lock described in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md).

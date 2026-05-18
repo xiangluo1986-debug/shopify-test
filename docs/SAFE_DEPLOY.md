@@ -18,6 +18,21 @@ The current Compose setup has one `web` container serving port `8000`. `safe_dep
 
 For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md). That plan is documentation only until a separate reviewed apply task is approved.
 
+The current safe deploy flow also does not yet enforce a deployment
+single-flight lock. Before any production apply, proxy switch, rolling restart,
+or cleanup work, the deployment lock design in
+[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must be implemented and enforced.
+The proposed runtime-only lock path is:
+
+```text
+.deploy/deploy.lock
+```
+
+The existing local inactive-color startup success on non-production port
+`18080` does not remove this requirement. The lock protects against overlapping
+deploy-related tasks, which is separate from proving that an inactive local
+service can become healthy.
+
 ## Current project deploy command
 
 From the project root:
@@ -31,6 +46,15 @@ Dry run:
 ```powershell
 .\scripts\safe_deploy.ps1 -DryRun
 ```
+
+Deployment lock dry-run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_run.ps1 -Purpose "safe-deploy-preflight" -Target "production" -ShowPlan
+```
+
+This helper is read-only. It does not create or delete `.deploy/deploy.lock`.
+`scripts/safe_deploy.ps1` does not enforce the lock yet.
 
 Optional flags:
 

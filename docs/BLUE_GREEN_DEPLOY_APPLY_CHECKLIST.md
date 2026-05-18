@@ -13,7 +13,9 @@ Related non-active drafts:
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+- [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md)
 - [BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md](BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md)
+- [scripts/deploy_lock_dry_run.ps1](../scripts/deploy_lock_dry_run.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
 
@@ -47,7 +49,9 @@ Related non-active drafts:
   The local inactive service reuses the existing `aftersales-web` image; the
   startup runner intentionally uses `--no-build`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
-- Production apply: NO-GO.
+- Deployment lock: design/dry-run only. Active deploy scripts do not enforce
+  the lock yet.
+- Production apply: NO-GO until deployment lock enforcement is implemented.
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
@@ -73,6 +77,15 @@ Related non-active drafts:
   a build for `web_green_test`, and to reuse image `aftersales-web`.
 - The existing `aftersales-web` image is present locally, or a separate
   explicit image build/preparation task has been completed first.
+- The deployment lock design in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) has
+  been reviewed.
+- The deployment lock is implemented and enforced before any production deploy,
+  build, restart, proxy switch, rolling update, or cleanup action.
+- Any future production switch acquires the deployment lock first and releases
+  it only after switch validation and cleanup/finally handling.
+- The completed local inactive startup success on non-production port `18080`
+  is understood as a local runtime test only; it does not waive deployment lock
+  enforcement for future production apply.
 - The future local simulation approval phrase is present:
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC`.
 - The future inactive service is confirmed to bind only a non-`8000` local test
@@ -122,19 +135,21 @@ and rollback steps.
 
 ## Future Apply Flow
 
-1. Confirm the current active color and record it in the approved tracking
+1. Acquire the deployment lock before changing runtime state.
+2. Confirm the current active color and record it in the approved tracking
    location.
-2. Build or start only the inactive color.
-3. Run `python manage.py check` against the inactive color.
-4. Run migrations only when they are reviewed as safe for both old and new code.
-5. Run any approved static asset step without disrupting the active color.
-6. Check the inactive color directly through `/healthz/`.
-7. Run any agreed smoke tests against the inactive color.
-8. Switch the proxy from the old active color to the inactive healthy color.
-9. Check public `/healthz/` through the stable domain or routing path.
-10. Monitor web and proxy logs during the observation window.
-11. Keep the previous color running until rollback is no longer needed.
-12. Stop or recycle the previous color only after the observation window passes.
+3. Build or start only the inactive color.
+4. Run `python manage.py check` against the inactive color.
+5. Run migrations only when they are reviewed as safe for both old and new code.
+6. Run any approved static asset step without disrupting the active color.
+7. Check the inactive color directly through `/healthz/`.
+8. Run any agreed smoke tests against the inactive color.
+9. Switch the proxy from the old active color to the inactive healthy color.
+10. Check public `/healthz/` through the stable domain or routing path.
+11. Monitor web and proxy logs during the observation window.
+12. Keep the previous color running until rollback is no longer needed.
+13. Stop or recycle the previous color only after the observation window passes.
+14. Release the deployment lock in cleanup/finally handling.
 
 ## Do Not Run Yet
 
@@ -151,6 +166,7 @@ These actions are not approved by this checklist alone:
   separate approved apply task.
 - Switching traffic between colors.
 - Stopping the previous active color.
+- Proceeding with production apply before deployment lock enforcement is active.
 
 ## Rollback Steps
 
@@ -169,6 +185,12 @@ These actions are not approved by this checklist alone:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_deploy_dry_run.ps1
+```
+
+- Run the read-only deployment lock dry-run helper:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_run.ps1 -Purpose "blue-green-production-preflight" -Target "production" -ShowPlan
 ```
 
 - Review the local-only dry-run package:

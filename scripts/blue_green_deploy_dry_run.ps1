@@ -172,6 +172,14 @@ function Show-DraftArtifactSummary {
             Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md"
         },
         [pscustomobject]@{
+            Label = "Deployment lock design"
+            Path = ".\docs\DEPLOYMENT_LOCK.md"
+        },
+        [pscustomobject]@{
+            Label = "Deployment lock dry-run helper"
+            Path = ".\scripts\deploy_lock_dry_run.ps1"
+        },
+        [pscustomobject]@{
             Label = "Local inactive startup plan"
             Path = ".\docs\BLUE_GREEN_LOCAL_INACTIVE_STARTUP_PLAN.md"
         },
@@ -198,6 +206,30 @@ function Show-DraftArtifactSummary {
     }
 
     Write-Host "These files are examples/checklists only. They are not loaded by the current docker compose command unless explicitly passed with -f."
+}
+
+function Show-DeploymentLockStatus {
+    Write-Step "Deployment lock status"
+
+    $lockDocPath = ".\docs\DEPLOYMENT_LOCK.md"
+    $lockDryRunPath = ".\scripts\deploy_lock_dry_run.ps1"
+
+    if (Test-Path -LiteralPath $lockDocPath) {
+        Write-Ok "Deployment lock design doc exists: $lockDocPath"
+    } else {
+        Write-Warn "Deployment lock design doc is missing: $lockDocPath"
+    }
+
+    if (Test-Path -LiteralPath $lockDryRunPath) {
+        Write-Ok "Deploy lock dry-run helper exists: $lockDryRunPath"
+    } else {
+        Write-Warn "Deploy lock dry-run helper is missing: $lockDryRunPath"
+    }
+
+    Write-Warn "Production apply remains blocked until deployment lock enforcement is implemented in active runtime-changing scripts."
+    Write-Host "Any future production deploy, proxy switch, restart, rolling update, or cleanup must acquire the deployment lock first."
+    Write-Host "Proposed lock path: .deploy/deploy.lock"
+    Write-Host "Current status: design/dry-run only; active deploy scripts do not enforce this lock yet."
 }
 
 function Show-DecisionStatus {
@@ -328,6 +360,7 @@ Show-GitStatus
 Show-ComposeSummary -Path $ComposeFile
 Show-ActiveComposeShape -Path $ComposeFile
 Show-DraftArtifactSummary
+Show-DeploymentLockStatus
 Show-DecisionStatus
 Test-HealthUrl -Url $HealthUrl
 Show-FuturePlan
@@ -335,5 +368,6 @@ Show-FuturePlan
 Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
 Write-Ok "No runtime behavior was changed by this read-only planner."
+Write-Ok "Deployment lock design status: dry-run helper and doc are checked above; production apply remains blocked until enforcement exists."
 Write-Ok "Inactive startup runner status: dry-run / no-action by default; future execution requires Ack plus -AllowContainerAction; test port 8000 and service web are blocked; production remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."
