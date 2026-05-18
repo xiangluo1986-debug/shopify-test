@@ -22,10 +22,14 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md](BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md)
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
+- [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+- [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
 whether these draft files and review packages exist and whether the active
-Compose file still appears to use the current single-web workflow.
+Compose file still appears to use the current single-web workflow. The local
+apply simulation preview script is also read-only and only prints status,
+approval-marker state, current `/healthz/` status, and future command examples.
 
 ## Current Architecture
 
@@ -196,6 +200,11 @@ requires a separate approved task.
 
 Future task after Phase 1 review.
 
+Local validation remains NO-GO until
+[BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+is reviewed and the exact local-only approval phrase is provided in a separate
+task.
+
 Validate the proxy and color services locally or in staging:
 
 - Confirm both colors can start.
@@ -319,8 +328,9 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Review [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md),
-then prepare a separate local apply simulation task if approved. Production
-should remain NO-GO until local or staging results are reviewed and a separate
-production task approves route, port ownership, proxy, scheduler, migration,
-static/media, rollback, and observation details.
+Review [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+and provide the exact local-only approval phrase only if the next separate
+task should run a local simulation. Production should remain NO-GO until local
+or staging results are reviewed and a separate production task approves route,
+port ownership, proxy, scheduler, migration, static/media, rollback, and
+observation details.

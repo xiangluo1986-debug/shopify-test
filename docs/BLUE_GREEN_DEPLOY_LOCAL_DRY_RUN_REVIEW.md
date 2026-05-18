@@ -12,6 +12,10 @@ performed by this document.
 
 Production remains NO-GO.
 
+The next local-only gate is the approval package:
+[BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md).
+That package prepares a future simulation but still does not run it.
+
 ## Preconditions
 
 Before a separate local apply task can run, confirm:
@@ -26,6 +30,13 @@ Before a separate local apply task can run, confirm:
 - The rollback plan below has been reviewed by the operator.
 - No migration, scheduler, static/media, or proxy change is being bundled into
   the first local apply simulation.
+- The local apply simulation approval package has been reviewed.
+- The exact approval phrase is present before any future simulation command is
+  run:
+
+```text
+I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC
+```
 
 ## Future Local-Only Dry-Run Command Sequence
 
@@ -184,6 +195,9 @@ cleanup, or automatic rollback.
 ## Go / No-Go
 
 - Local dry-run review: READY after this document is reviewed.
-- Local apply: requires separate approval with exact runtime commands.
+- Local apply simulation approval package: READY after
+  [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+  is reviewed.
+- Local simulation: NO-GO until a separate task provides the exact approval
+  phrase and exact runtime commands.
 - Production apply: NO-GO.
-

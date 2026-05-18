@@ -11,6 +11,7 @@ Related non-active drafts:
 - [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md)
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
+- [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
 
 ## Current Status
 
@@ -19,6 +20,12 @@ Related non-active drafts:
 - Local-only dry-run review: READY after
   [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
   is reviewed.
+- Local apply simulation approval package: READY after
+  [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+  is reviewed.
+- Local simulation: NO-GO until a separate task provides
+  `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
+  approves exact commands.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Production apply: NO-GO.
 - Runtime behavior changed by this checklist: no.
@@ -34,6 +41,11 @@ Related non-active drafts:
 - The local dry-run review package in
   [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
   has been reviewed and accepted before any local apply simulation.
+- The local apply simulation approval package in
+  [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+  has been reviewed and accepted before any local apply simulation.
+- The future local simulation approval phrase is present:
+  `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC`.
 - A separate apply task approves the exact local runtime commands before any
   container start, restart, proxy reload, or traffic switch is run.
 - A reviewed proxy design is selected and tested away from production traffic.
@@ -124,6 +136,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_deploy_
 
 - Review the local-only dry-run package:
   [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md).
+- Review the local apply simulation approval package:
+  [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md).
+- Run the read-only local simulation preview:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation_preview.ps1
+```
+
 - Validate draft Compose syntax without starting containers:
 
 ```powershell

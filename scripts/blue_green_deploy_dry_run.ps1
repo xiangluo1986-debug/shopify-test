@@ -160,6 +160,14 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Local apply dry-run review package"
             Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md"
+        },
+        [pscustomobject]@{
+            Label = "Local apply simulation approval package"
+            Path = ".\docs\BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md"
+        },
+        [pscustomobject]@{
+            Label = "Local apply simulation read-only preview"
+            Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
         }
     )
 
