@@ -34,6 +34,7 @@ traffic or change current deployment commands:
 - [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
 - [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 - [scripts/blue_green_local_inactive_startup.ps1](../scripts/blue_green_local_inactive_startup.ps1)
+- [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
 whether these draft files and review packages exist and whether the active
@@ -61,15 +62,37 @@ reuses the existing `aftersales-web` image for `web_green_test` and does not
 declare a build for the inactive service because the runner intentionally uses
 `--no-build`. If the image is missing, run a separate explicit image
 build/preparation task before attempting local inactive startup.
+
+The production apply skeleton at
+`scripts/blue_green_production_apply.ps1` is skeleton only / no-action by
+default. It prints the future production apply plan, required deployment lock
+flow, and approval gate, then exits without acquiring the production lock,
+running Docker commands, running migrations, running collectstatic, switching
+traffic, or modifying files. The required approval phrase for a future
+execution request is:
+
+```text
+I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK
+```
+
+Even with the correct approval phrase, real production blue-green apply remains
+blocked in this skeleton phase and prints:
+
+```text
+Real production blue-green apply is not implemented in this phase.
+```
+
 Production remains NO-GO.
 
 ## Deployment Lock Gate
 
 `scripts/safe_deploy.ps1` now enforces the deployment lock in real mode.
-Production blue-green apply must still not proceed until the same lock rule is
-integrated and enforced in the exact runtime-changing blue-green path. The
-shared lock is documented in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md), with the
-runtime-only path:
+`scripts/blue_green_production_apply.ps1` now documents the future production
+apply lock gates, but remains no-action and does not implement real apply.
+Production blue-green apply must still not proceed until a future phase
+implements and validates the same lock rule in the exact runtime-changing
+blue-green path. The shared lock is documented in
+[DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md), with the runtime-only path:
 
 ```text
 .deploy/deploy.lock
@@ -112,12 +135,15 @@ Normal non-deploy tasks are not blocked.
 - `scripts/safe_deploy.ps1` acquires the lock in real non-dry-run mode before
   build/check/migrate/collectstatic/restart/health check, then releases only
   the matching `lock_id` in cleanup/finally handling.
-- Blue-green production apply script: not implemented yet.
+- Blue-green production apply skeleton:
+  `scripts/blue_green_production_apply.ps1`; no-action by default and real
+  apply remains blocked.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
-- Production apply: NO-GO until all runtime-changing scripts use deployment
-  lock.
+- Production apply: NO-GO until a future runtime-changing implementation uses
+  the deployment lock before any build/start/migrate/collectstatic/proxy
+  switch/cleanup action.
 
 ## Current Architecture
 
@@ -442,13 +468,12 @@ approve exact commands.
 
 Review the dry-run output from
 `scripts/blue_green_local_apply_simulation.ps1`,
-`scripts/blue_green_local_apply_simulation_preview.ps1`, and
-`scripts/blue_green_local_inactive_startup.ps1`.
-The recommended next separate task is to design a no-action blue-green
-production apply script skeleton that refuses to run runtime-changing commands
-until the shared deployment lock acquisition, existing-lock blocking,
-matching-`lock_id` release, stale-lock review, and no-auto-queue behavior are
-implemented. Production should remain NO-GO until local or staging results are
-reviewed and a separate production task approves route, port ownership, proxy,
-scheduler, migration, static/media, rollback, observation details, and lock
-enforcement for the exact runtime path being used.
+`scripts/blue_green_local_apply_simulation_preview.ps1`,
+`scripts/blue_green_local_inactive_startup.ps1`, and
+`scripts/blue_green_production_apply.ps1`.
+The recommended next separate task is to review the production apply skeleton
+output and decide the next non-production validation phase for exact route,
+port ownership, proxy, scheduler, migration, static/media, rollback,
+observation, and deployment lock handling. Production should remain NO-GO until
+local or staging results are reviewed and a separate production task approves
+the exact runtime path being used.

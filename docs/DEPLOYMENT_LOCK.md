@@ -9,9 +9,11 @@ flow from running at the same time. It is intended to protect both the current
 The standalone helper now exists at `scripts/deploy_lock.ps1`.
 `scripts/safe_deploy.ps1` now enforces the deployment lock in real
 non-dry-run mode. It also has dry-run/check-only lock awareness for validation
-without deployment. Production blue-green apply remains NO-GO until a separate
-apply task approves exact runtime commands and any future blue-green
-runtime-changing deploy paths use the same lock.
+without deployment. `scripts/blue_green_production_apply.ps1` now exists as a
+no-action production apply skeleton that documents the future lock gates, but
+real production blue-green apply remains NO-GO until a future apply task
+implements exact runtime commands and uses the same lock before any
+runtime-changing action.
 
 ## What The Lock Protects
 
@@ -19,6 +21,8 @@ The lock should be acquired before any task that could change the runtime web
 deployment state, including:
 
 - `scripts/safe_deploy.ps1`.
+- `scripts/blue_green_production_apply.ps1` in any future runtime-changing
+  phase.
 - Future blue-green deploy scripts.
 - Future proxy switch scripts.
 - Future production cleanup scripts.
@@ -194,6 +198,39 @@ releases only the matching `lock_id` in cleanup/finally handling. If the lock
 already exists, safe deploy blocks before build/check/migrate/collectstatic or
 restart and requires a manual rerun after the current deployment finishes.
 
+## Blue-Green Production Apply Skeleton
+
+The production apply skeleton is:
+
+```powershell
+scripts/blue_green_production_apply.ps1
+```
+
+Current status: skeleton only / no-action. Default execution prints the
+production apply plan, required lock behavior, future steps, and exits `0`
+without acquiring the deployment lock or changing runtime state.
+
+The required approval phrase for any future production apply execution request
+is:
+
+```text
+I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK
+```
+
+The skeleton blocks execution requests without the exact phrase, blocks missing
+or same target/active color choices, and blocks any `DeployLockPath` outside
+`.deploy/`. Even with the correct phrase, it still blocks real production apply
+with:
+
+```text
+Real production blue-green apply is not implemented in this phase.
+```
+
+The skeleton does not run Docker Compose commands, start/stop/restart/build
+containers, run migrations, run collectstatic, switch proxy traffic, modify
+active `docker-compose.yml`, modify production nginx/proxy configuration, or
+call Shopify/Gmail/review/translation workflows.
+
 ## Lock Behavior
 
 Future deploy scripts should follow this behavior:
@@ -239,7 +276,8 @@ deletion.
 Integrate the deployment lock into:
 
 - `scripts/safe_deploy.ps1`.
-- The future blue-green deploy script.
+- The future real implementation behind
+  `scripts/blue_green_production_apply.ps1`.
 - The future proxy switch script.
 - Future production cleanup and rolling restart scripts.
 
@@ -250,12 +288,15 @@ runtime-changing actions should use the shared deployment lock.
 ## Deployment Lock Coverage Status
 
 - `safe_deploy.ps1`: enforced in real mode.
-- Blue-green production apply script: not implemented yet.
+- Blue-green production apply skeleton:
+  `scripts/blue_green_production_apply.ps1`; no-action by default and real
+  production apply remains blocked.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
-- Production apply: NO-GO until all runtime-changing scripts use deployment
-  lock.
+- Production apply: NO-GO until a future runtime-changing implementation uses
+  deployment lock acquisition before build/start/migrate/collectstatic/proxy
+  switch/cleanup and releases only the matching `lock_id`.
 
 ## Current Status
 
@@ -268,6 +309,9 @@ runtime-changing actions should use the shared deployment lock.
 - `scripts/safe_deploy.ps1 -CheckDeployLock` is read-only.
 - `scripts/safe_deploy.ps1 -ValidateDeployLockOnly` validates acquire/release
   with a selected lock path and runs no deploy commands.
-- Production blue-green apply remains NO-GO until a separate apply task
+- `scripts/blue_green_production_apply.ps1` exists as a no-action skeleton. It
+  prints the future lock flow but does not acquire the lock in default or
+  blocked execution modes.
+- Production blue-green apply remains NO-GO until a separate future apply task
   approves exact runtime commands and confirms every runtime-changing path uses
   the deployment lock.

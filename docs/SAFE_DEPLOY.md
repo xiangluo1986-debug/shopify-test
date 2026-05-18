@@ -25,6 +25,15 @@ dry-run/check-only modes without acquiring the real lock. Before any future
 blue-green production apply, proxy switch, rolling restart, or cleanup work,
 the deployment lock described in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must
 also be enforced by that runtime-changing path.
+`scripts/blue_green_production_apply.ps1` now exists as a no-action production
+apply skeleton. It prints the future lock and apply plan, requires the approval
+phrase below for any execution request, and still blocks real production apply
+in this phase:
+
+```text
+I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK
+```
+
 The runtime-only lock path is:
 
 ```text
@@ -39,12 +48,15 @@ service can become healthy.
 ## Deployment Lock Coverage Status
 
 - `safe_deploy.ps1`: enforced in real mode.
-- Blue-green production apply script: not implemented yet.
+- Blue-green production apply skeleton:
+  `scripts/blue_green_production_apply.ps1`; no-action by default and real
+  production apply remains blocked.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
-- Production apply: NO-GO until all runtime-changing scripts use deployment
-  lock.
+- Production apply: NO-GO until a future runtime-changing implementation uses
+  deployment lock acquisition before any build/start/migrate/collectstatic,
+  proxy switch, traffic switch, cleanup, or rollback action.
 
 Runtime-changing deploy paths include container start, container stop,
 container restart, image build, migration, collectstatic, proxy switch, traffic
@@ -110,6 +122,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy_lock_dry_ru
 This helper is read-only. It does not create or delete `.deploy/deploy.lock`.
 `scripts/safe_deploy.ps1` has dry-run/check-only awareness of the lock, and
 real non-dry-run deploy enforces it before the first Docker deploy command.
+
+Blue-green production apply skeleton:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_production_apply.ps1
+```
+
+This skeleton is no-action by default. It does not deploy, acquire the
+deployment lock, run Docker commands, run migrations, run collectstatic, switch
+traffic, or modify files. Execution requests remain blocked unless the exact
+approval phrase, valid target/active colors, and `.deploy/` lock path gate are
+present; even then real production apply remains blocked because it is not
+implemented in this phase.
 
 Deployment lock helper status:
 

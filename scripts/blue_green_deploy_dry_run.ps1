@@ -198,6 +198,10 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Gated local inactive startup runner"
             Path = ".\scripts\blue_green_local_inactive_startup.ps1"
+        },
+        [pscustomobject]@{
+            Label = "No-action production apply skeleton"
+            Path = ".\scripts\blue_green_production_apply.ps1"
         }
     )
 
@@ -219,6 +223,7 @@ function Show-DeploymentLockStatus {
     $lockDryRunPath = ".\scripts\deploy_lock_dry_run.ps1"
     $lockHelperPath = ".\scripts\deploy_lock.ps1"
     $safeDeployPath = ".\scripts\safe_deploy.ps1"
+    $productionApplyPath = ".\scripts\blue_green_production_apply.ps1"
 
     if (Test-Path -LiteralPath $lockDocPath) {
         Write-Ok "Deployment lock design doc exists: $lockDocPath"
@@ -246,15 +251,25 @@ function Show-DeploymentLockStatus {
         Write-Warn "safe_deploy script is missing: $safeDeployPath"
     }
 
+    if (Test-Path -LiteralPath $productionApplyPath) {
+        $productionApplyText = Get-Content -LiteralPath $productionApplyPath -Raw
+        $productionApplySkeletonExists = ($productionApplyText -match "I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK") -and ($productionApplyText -match "Real production blue-green apply is not implemented in this phase")
+        Write-Ok "Blue-green production apply skeleton exists: $productionApplyPath"
+        Write-Host "Blue-green production apply skeleton no-action gate present: $productionApplySkeletonExists"
+    } else {
+        Write-Warn "Blue-green production apply skeleton is missing: $productionApplyPath"
+    }
+
     Write-Ok "safe_deploy lock enforcement is active in real non-dry-run mode."
-    Write-Warn "Blue-green production apply remains blocked until future runtime-changing scripts enforce the same deployment lock."
+    Write-Warn "Blue-green production real apply remains NO-GO. The skeleton is no-action by default and still blocks real execution."
     Write-Host "Local inactive startup has separate local-only gates; production switch still requires the deployment lock."
+    Write-Host "Deployment lock is required for any future runtime-changing production apply."
     Write-Host "Runtime-changing paths requiring the lock: container start, container stop, container restart, image build, migration, collectstatic, proxy switch, traffic switch, cleanup, production apply, and rollback."
     Write-Host "If a second deploy task sees an existing lock, it must block and exit non-zero. It must not auto-queue."
     Write-Host "Future runtime-changing scripts must release only the matching lock_id in cleanup/finally handling."
     Write-Host "Stale locks require manual review. Normal non-deploy tasks are not blocked."
     Write-Host "Proposed lock path: .deploy/deploy.lock"
-    Write-Host "Current status: helper exists if listed above; safe_deploy dry-run reports lock state without acquiring it, -CheckDeployLock is read-only, and real safe_deploy acquires/releases the lock."
+    Write-Host "Current status: helper exists if listed above; safe_deploy dry-run reports lock state without acquiring it, -CheckDeployLock is read-only, real safe_deploy acquires/releases the lock, and production apply skeleton remains no-action."
 }
 
 function Show-DecisionStatus {
@@ -377,6 +392,8 @@ function Show-FuturePlan {
     Write-Host "The future inactive service must not be the current active service name web."
     Write-Host "Production/runtime-changing blue-green scripts must acquire the deployment lock before any future container, build, migration, collectstatic, proxy switch, traffic switch, cleanup, apply, or rollback action."
     Write-Host "An existing deployment lock must block the second deploy task; no automatic queue is allowed."
+    Write-Host "Production apply skeleton path: .\scripts\blue_green_production_apply.ps1."
+    Write-Host "Production apply skeleton status: no-action by default; real apply remains NO-GO."
     Write-Host "Production remains NO-GO."
     Write-Host ""
     Write-Host "This script does not call docker compose up, down, restart, build, run, exec, or migrate."
@@ -396,6 +413,7 @@ Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
 Write-Ok "No runtime behavior was changed by this read-only planner."
 Write-Ok "Deployment lock status: helper/doc/safe_deploy enforcement are checked above; dry-run still acquires no lock."
-Write-Ok "Production blue-green apply remains NO-GO until a separate apply task approves exact runtime commands."
+Write-Ok "Production apply skeleton status: exists if reported above; no-action by default."
+Write-Ok "Production blue-green real apply remains NO-GO until a separate future phase implements exact runtime commands behind deployment lock gates."
 Write-Ok "Inactive startup runner status: dry-run / no-action by default; future execution requires Ack plus -AllowContainerAction; test port 8000 and service web are blocked; production remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."
