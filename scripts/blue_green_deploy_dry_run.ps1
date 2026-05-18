@@ -170,6 +170,82 @@ function Show-DraftArtifactSummary {
     Write-Host "These files are examples/checklists only. They are not loaded by the current docker compose command unless explicitly passed with -f."
 }
 
+function Show-DecisionStatus {
+    Write-Step "Blue-green decision status"
+
+    $decisionPath = ".\docs\BLUE_GREEN_DEPLOY_DECISIONS.md"
+    if (-not (Test-Path -LiteralPath $decisionPath)) {
+        Write-Warn "Decision document is missing: $decisionPath"
+        return
+    }
+
+    Write-Ok "Decision document exists: $decisionPath"
+
+    $content = Get-Content -LiteralPath $decisionPath -Raw
+    $checks = @(
+        [pscustomobject]@{
+            Label = "Local-only planning approval marker"
+            Needle = "Local-only planning status: approved"
+        },
+        [pscustomobject]@{
+            Label = "Production apply remains NO-GO"
+            Needle = "Production apply status: NO-GO."
+        },
+        [pscustomobject]@{
+            Label = "nginx example-only default"
+            Needle = "nginx, example-only"
+        },
+        [pscustomobject]@{
+            Label = "Host port 8000 stays with current web service"
+            Needle = 'Keep the current `web` service owning host port `8000`'
+        },
+        [pscustomobject]@{
+            Label = "No Cloudflare or external routing change for local-only phase"
+            Needle = "Make no Cloudflare, domain, tunnel, or external routing change"
+        },
+        [pscustomobject]@{
+            Label = "File-based active color marker remains draft/example only"
+            Needle = "Do not create an active runtime state file in this task."
+        },
+        [pscustomobject]@{
+            Label = "Backward-compatible migration default"
+            Needle = "Migrations must be backward-compatible"
+        },
+        [pscustomobject]@{
+            Label = "Shared media remains unchanged"
+            Needle = "Keep the current shared media volume behavior unchanged."
+        },
+        [pscustomobject]@{
+            Label = "Scheduler remains singleton"
+            Needle = "Scheduler remains singleton."
+        },
+        [pscustomobject]@{
+            Label = "10-minute local/test observation minimum"
+            Needle = "Minimum observation window: 10 minutes for local/test."
+        },
+        [pscustomobject]@{
+            Label = "First apply scope is local-only dry-run planning"
+            Needle = "First apply scope is local-only apply dry-run planning."
+        }
+    )
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($check in $checks) {
+        if ($content.Contains($check.Needle)) {
+            Write-Ok "$($check.Label): present"
+        } else {
+            Write-Warn "$($check.Label): missing"
+            $missing.Add($check.Label)
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Write-Ok "Local-only defaults appear filled, and production apply remains NO-GO."
+    } else {
+        Write-Warn "Decision defaults may be incomplete. Review missing markers before relying on local-only planning status."
+    }
+}
+
 function Test-HealthUrl {
     param([string]$Url)
 
@@ -209,6 +285,7 @@ Show-GitStatus
 Show-ComposeSummary -Path $ComposeFile
 Show-ActiveComposeShape -Path $ComposeFile
 Show-DraftArtifactSummary
+Show-DecisionStatus
 Test-HealthUrl -Url $HealthUrl
 Show-FuturePlan
 

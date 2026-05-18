@@ -11,13 +11,24 @@ Related non-active drafts:
 - [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md)
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 
+## Current Status
+
+- Local-only planning: READY after conservative defaults were filled in
+  [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md).
+- Local runtime apply: NO-GO until a separate task approves exact commands.
+- Production apply: NO-GO.
+- Runtime behavior changed by this checklist: no.
+- Active Compose/proxy changes: require separate approval.
+- Host port `8000` ownership change: requires separate approval.
+
 ## Preconditions Before Applying
 
 - Current single-web deployment is healthy through `/healthz/`.
 - Active `docker-compose.yml` behavior is understood and still unchanged.
-- All manual decisions in
-  [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md) are marked
-  with approved choices before any apply command is run.
+- Local-only planning defaults in
+  [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md) are filled.
+- A separate apply task approves the exact local runtime commands before any
+  container start, restart, proxy reload, or traffic switch is run.
 - A reviewed proxy design is selected and tested away from production traffic.
 - The active color source of truth is documented and recoverable.
 - Database backup and restore process is confirmed for the production database.
@@ -29,24 +40,29 @@ Related non-active drafts:
 
 ## Required Manual Decisions
 
-Before applying, update
-[BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md) so every
-decision has an approved choice, approver, and date. Pending decisions mean
-NO-GO for active apply work.
+The local-only planning defaults in
+[BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md) are filled.
+They approve planning only, not runtime changes. Active apply work remains
+NO-GO until a separate task approves exact commands, operator responsibility,
+and rollback steps.
 
-- Proxy technology: nginx, Caddy, Traefik, HAProxy, or existing host proxy.
-- Active color tracking: config include, state file, label, checklist, or script.
-- Port ownership: whether the proxy takes host port `8000` or external routing
-  moves to a different local proxy port.
+- Proxy technology: nginx is the local-only planning default, example-only
+  until apply phase.
+- Active color tracking: future file-based marker, documented as draft/example
+  only until an apply task creates real runtime state.
+- Port ownership: current `web` service keeps host port `8000`; changing this
+  requires separate approval.
 - Cloudflare/external routing impact: tunnel target, DNS/proxy behavior, and
-  any planned maintenance window.
-- Migration compatibility rules: expand/contract sequencing, old-code/new-code
-  overlap, and rollback limits.
-- Static/media handling: shared volume, host mount, collectstatic process, and
-  upload/media consistency.
-- Scheduler handling: singleton scheduler update timing and rollback behavior.
-- Rollback authority: who can switch back, when to decide, and how long to keep
-  the previous color running.
+  any planned maintenance window are not approved for local-only planning.
+- Migration compatibility rules: backward-compatible only during blue-green
+  switch; risky schema changes require separate migration planning.
+- Static/media handling: shared media remains unchanged; `collectstatic`
+  behavior remains current safe-deploy behavior until apply design is finalized.
+- Scheduler handling: singleton scheduler only; no blue/green scheduler
+  replicas.
+- Rollback authority: manual admin approval required; keep old color running;
+  observe at least 10 minutes for local/test.
+- First apply scope: local-only apply dry-run first; production remains NO-GO.
 
 ## Future Apply Flow
 
@@ -69,10 +85,14 @@ NO-GO for active apply work.
 These actions are not approved by this checklist alone:
 
 - Starting blue/green services in production.
+- Starting, restarting, or replacing local runtime services without a separate
+  approved apply task.
 - Moving host port `8000` from `web` to a proxy.
 - Changing Cloudflare tunnel targets or public routing.
 - Running migrations.
 - Reloading or replacing production proxy configuration.
+- Reloading or replacing any active local proxy configuration without a
+  separate approved apply task.
 - Switching traffic between colors.
 - Stopping the previous active color.
 

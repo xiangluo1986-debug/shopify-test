@@ -283,18 +283,27 @@ NOT RUN IN THIS TASK:
 ## Manual Decisions Before Applying
 
 The detailed manual review package is
-[BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md). Every
-decision there must be marked with an approved choice before any active apply
-task.
+[BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md). It now records
+conservative defaults approved for local-only planning, while local runtime
+changes and production apply both remain blocked until separate apply tasks
+approve exact commands.
 
-- Choose proxy technology: nginx, Caddy, Traefik, or another existing host-level proxy.
-- Decide whether the proxy owns host port `8000` or Cloudflare changes to a new local proxy port.
-- Decide how the active color is recorded: config file, proxy upstream file, label, or operator checklist.
-- Decide whether color services are separate Compose services or generated from one template in a later script.
-- Decide how migrations are handled for zero-downtime compatibility.
-- Decide static/media handling for multiple web containers.
-- Decide observation window before stopping the previous color.
-- Decide rollback authority and exact operator checklist.
+- Proxy technology default: nginx, example-only until apply phase.
+- Port ownership default: current `web` service keeps host port `8000` until
+  a separate approval changes it.
+- Cloudflare/external routing default: no local-only routing change; production
+  routing requires separate approval.
+- Active color tracking default: future file-based marker, documented as
+  draft/example only until an apply task creates real runtime state.
+- Migration default: backward-compatible migrations only during blue-green
+  switch; risky schema changes require separate planning.
+- Static/media default: shared media unchanged and current safe-deploy static
+  behavior retained until apply design is finalized.
+- Scheduler default: singleton scheduler only; no blue/green scheduler
+  replicas.
+- Rollback default: manual admin approval, old color kept running, and at least
+  10 minutes of local/test observation.
+- First apply scope: local-only apply dry-run first; production remains NO-GO.
 - Confirm Windows Docker Compose behavior on the production host.
 - Confirm Cloudflare tunnel or external domain routing outside this repository without exposing tokens.
 
@@ -309,7 +318,8 @@ task.
 
 ## Immediate Next Task Recommendation
 
-Review the non-active Compose draft, proxy draft, and apply checklist. The next
-task should decide the proxy technology, active color tracking, port ownership,
-Cloudflare routing impact, migration rules, static/media handling, and rollback
-authority before any production apply work is considered.
+Prepare a future local-only apply dry-run task that reviews exact commands and
+rollback steps without touching production. Production should remain NO-GO until
+local or staging results are reviewed and a separate production task approves
+route, port ownership, proxy, scheduler, migration, static/media, rollback, and
+observation details.
