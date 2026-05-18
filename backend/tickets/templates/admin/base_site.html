@@ -28,8 +28,8 @@
 {% block nav-global %}
   {{ block.super }}
   <nav class="internal-module-nav" aria-label="Internal modules">
-    <a href="{% url 'admin:tickets_ticket_changelist' %}">Tickets</a>
-    <a href="{% url 'admin:shopify_sync_settlementbatch_changelist' %}">Settlement</a>
+    <a href="{% url 'admin:tickets_ticket_changelist' %}">工单系统</a>
+    <a href="{% url 'admin:shopify_sync_settlementbatch_changelist' %}">深圳仓结算系统</a>
     {% if request.user.is_superuser %}
       <a href="{% url 'shopify_review_request_workbench' %}">Review Requests</a>
     {% else %}
@@ -39,6 +39,7 @@
         {% endif %}
       {% endfor %}
     {% endif %}
-    <a href="{% url 'shopify_sync_dashboard' %}">Shopify Sync / Translation</a>
+    <a href="{% url 'shopify_translation_console' %}">Shopify 翻译工作台</a>
+    <a href="{% url 'shopify_sync_dashboard' %}">Shopify Sync</a>
   </nav>
 {% endblock %}

@@ -460,6 +460,18 @@ TRANSLATION_WORKSPACE_JOB_ID_RE = re.compile(
 )
 TRANSLATION_WORKSPACE_MANUAL_EDIT_ACTION_NAME = "save_translation_manual_edit"
 TRANSLATION_WORKSPACE_RETRY_LOCALE_ACTION_NAME = "retry_failed_translation_language"
+TRANSLATION_WORKSPACE_ADMIN_GROUPS = {"Admin", "Super Admin"}
+TRANSLATION_WORKSPACE_REVIEW_ONLY_MESSAGE = (
+    "You can review translations. Ask an admin to update Shopify."
+)
+TRANSLATION_WORKSPACE_UPDATE_PERMISSION_MESSAGE = (
+    "Only admins can update Shopify translations."
+)
+TRANSLATION_WORKSPACE_ADMIN_ONLY_WRITE_ACTIONS = {
+    ALL_LANGUAGES_REAL_WRITE_ACTION_NAME,
+    REAL_WRITE_ACTION_NAME,
+    SELECTED_TRANSLATIONS_REAL_WRITE_ACTION_NAME,
+}
 TRANSLATION_WORKSPACE_JOB_DETAIL_PREVIEW_LIMIT = 60
 TRANSLATION_WORKSPACE_JOB_REVIEW_ROW_LIMIT = 1000
 TRANSLATION_WORKSPACE_JOB_ERROR_LIMIT = 20
@@ -1108,6 +1120,39 @@ def _user_has_review_request_admin_access(request):
     return request.user.groups.filter(name="Admin").exists()
 
 
+def _user_can_update_shopify_translations(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated or not user.is_staff:
+        return False
+    if user.is_superuser:
+        return True
+    has_perm = getattr(user, "has_perm", None)
+    if callable(has_perm) and has_perm("shopify_sync.can_update_shopify_translations"):
+        return True
+    groups = getattr(user, "groups", None)
+    if groups is None:
+        return False
+    try:
+        return groups.filter(name__in=TRANSLATION_WORKSPACE_ADMIN_GROUPS).exists()
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def _translation_workspace_admin_only_update_result(action: str):
+    return _translation_console_safe_action_result(
+        action=action,
+        action_status="shopify_update_admin_required",
+        message=TRANSLATION_WORKSPACE_UPDATE_PERMISSION_MESSAGE,
+        summary={
+            "attempted_action": action,
+            "blocking_conditions": ["admin_required_for_shopify_update"],
+            "shopify_write_performed": False,
+            "mutation_performed": False,
+            "translations_register_called": False,
+        },
+    )
+
+
 def _translation_console_editor_redirect_url(
     request,
     *,
@@ -1173,6 +1218,11 @@ def review_request_workbench(request):
 @staff_member_required
 def translation_console(request):
     post_action = (request.POST.get("action") or "").strip() if request.method == "POST" else ""
+    can_update_shopify_translations = _user_can_update_shopify_translations(request)
+    is_admin_only_shopify_update_post = (
+        request.method == "POST"
+        and post_action in TRANSLATION_WORKSPACE_ADMIN_ONLY_WRITE_ACTIONS
+    )
     is_refresh_status_post = post_action == "refresh_status"
     is_translation_job_refresh_post = post_action == "refresh_translation_job_status"
     is_safe_write_readiness_package_post = post_action == SAFE_WRITE_READINESS_ACTION_NAME
@@ -1958,7 +2008,9 @@ def translation_console(request):
         selected_translations_apply_state,
         all_languages_update_state,
     )
-    if is_manual_translation_edit_post:
+    if is_admin_only_shopify_update_post and not can_update_shopify_translations:
+        safe_action_result = _translation_workspace_admin_only_update_result(post_action)
+    elif is_manual_translation_edit_post:
         blocking_conditions = list(
             (manual_translation_edit_result or {}).get("blocking_conditions") or []
         )
@@ -2778,6 +2830,8 @@ def translation_console(request):
     workspace_locked_execution_display = workspace_locked_execution_result or {}
     workspace_real_write_display = workspace_real_write_result or {}
     workspace_real_write_can_submit = (
+        can_update_shopify_translations
+        and
         workspace_locked_execution_display.get("package_status")
         == "locked_execution_ready_for_manual_ack"
         and workspace_locked_execution_display.get("selected_entry_count") == 1
@@ -2811,6 +2865,9 @@ def translation_console(request):
             "editor_filter": editor_filter,
             "editor_search_query": editor_search_query,
             "translation_console_warnings": translation_console_warnings,
+            "can_update_shopify_translations": can_update_shopify_translations,
+            "translation_workspace_review_only_message": TRANSLATION_WORKSPACE_REVIEW_ONLY_MESSAGE,
+            "translation_workspace_update_permission_message": TRANSLATION_WORKSPACE_UPDATE_PERMISSION_MESSAGE,
             "editor_view": editor_view,
             "single_product_mvp": single_product_mvp,
             "shop_domain": shop_domain,

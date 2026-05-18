@@ -2491,6 +2491,12 @@
     </div>
   {% endif %}
 
+  {% if not can_update_shopify_translations %}
+    <div class="tw-shopify-apply-disabled-reason" style="margin-bottom: 16px;">
+      {{ translation_workspace_review_only_message }}
+    </div>
+  {% endif %}
+
   {% if ui_mode == "workbench" %}
     <div class="tw-mode-bar">
       <div class="tw-tabs">
@@ -2788,9 +2794,11 @@
         <h3>Dry-run / verification command</h3>
         <pre style="white-space: pre-wrap;">{{ manual_command_package.dry_run_verification_command }}</pre>
       {% endif %}
-      {% if manual_command_package.show_real_run_command_preview %}
+      {% if manual_command_package.show_real_run_command_preview and can_update_shopify_translations %}
         <h3>Manual command preview</h3>
         <pre style="white-space: pre-wrap;">{{ manual_command_package.manual_real_run_command_preview }}</pre>
+      {% elif manual_command_package.show_real_run_command_preview %}
+        <p>{{ translation_workspace_review_only_message }}</p>
       {% else %}
         <p>Manual command preview is hidden until the checklist is safe.</p>
       {% endif %}
@@ -2886,19 +2894,19 @@
             <form method="post" action="{% url 'shopify_translation_console' %}" data-job-start-form>
               {% csrf_token %}
               <input type="hidden" name="ui_mode" value="editor">
-              <input type="hidden" name="action" value="{% if translation_background_job.show_translation_results and not translation_background_job.is_active and not all_languages_update_display.is_successfully_updated %}{{ all_languages_real_write_action_name }}{% else %}translate_all_languages_all_content{% endif %}">
+              <input type="hidden" name="action" value="{% if can_update_shopify_translations and translation_background_job.show_translation_results and not translation_background_job.is_active and not all_languages_update_display.is_successfully_updated %}{{ all_languages_real_write_action_name }}{% else %}translate_all_languages_all_content{% endif %}">
               <input type="hidden" name="product_search" value="{{ product_search_text }}">
               <input type="hidden" name="selected_product_gid" value="{{ selected_product_gid }}">
               <input type="hidden" name="target_locale" value="{{ selected_locale }}">
               <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
               <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
-              <button type="submit" class="button tw-main-action-button" data-job-start-button data-label-initial="Translate and update Shopify" data-label-rerun="Translate again / Update again" data-label-running="Updating&hellip;"{% if translation_background_job.is_active %} disabled{% endif %}>{% if translation_background_job.is_active %}Updating&hellip;{% elif translation_background_job.show_translation_results or all_languages_update_display.is_successfully_updated %}Translate again / Update again{% else %}Translate and update Shopify{% endif %}</button>
+              <button type="submit" class="button tw-main-action-button" data-job-start-button data-label-initial="{% if can_update_shopify_translations %}Translate and update Shopify{% else %}Translate all languages{% endif %}" data-label-rerun="{% if can_update_shopify_translations %}Translate again / Update again{% else %}Translate again{% endif %}" data-label-running="Updating&hellip;"{% if translation_background_job.is_active %} disabled{% endif %}>{% if translation_background_job.is_active %}Updating&hellip;{% elif not can_update_shopify_translations and translation_background_job.show_translation_results %}Translate again{% elif not can_update_shopify_translations %}Translate all languages{% elif translation_background_job.show_translation_results or all_languages_update_display.is_successfully_updated %}Translate again / Update again{% else %}Translate and update Shopify{% endif %}</button>
             </form>
           {% else %}
-            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>Translate and update Shopify</button>
+            <button type="button" class="button tw-main-action-button" data-job-start-button disabled>{% if can_update_shopify_translations %}Translate and update Shopify{% else %}Translate all languages{% endif %}</button>
           {% endif %}
           <span class="tw-compact-safe-text">Safe fields only.</span>
-          <span class="tw-compact-safe-text">{% if translation_background_job.is_active %}Updating now. The button unlocks when the job finishes.{% elif all_languages_update_display.is_successfully_updated %}Already updated. Run again only if translations changed.{% elif translation_background_job.show_translation_results %}Translation is ready. Click Translate again / Update again to sync safe translations.{% else %}Translation runs first. Shopify update only runs after an explicit click when results are ready.{% endif %}</span>
+          <span class="tw-compact-safe-text">{% if not can_update_shopify_translations %}{{ translation_workspace_review_only_message }}{% elif translation_background_job.is_active %}Updating now. The button unlocks when the job finishes.{% elif all_languages_update_display.is_successfully_updated %}Already updated. Run again only if translations changed.{% elif translation_background_job.show_translation_results %}Translation is ready. Click Translate again / Update again to sync safe translations.{% else %}Translation runs first. Shopify update only runs after an explicit click when results are ready.{% endif %}</span>
         </div>
         <div class="tw-job-pill is-{{ translation_background_job.compact_status_key|default:'not_started' }}" data-job-status-pill>
           <div class="tw-job-pill-head">
@@ -3080,17 +3088,17 @@
         {% if all_languages_update_display.status == "all_languages_shopify_update_not_submitted" %}
           <div class="tw-shopify-apply-disabled-reason">
             <div>Shopify has not been updated yet.</div>
-            <div>Click Translate and update Shopify to sync safe translations.</div>
+            <div>{% if can_update_shopify_translations %}Click Translate and update Shopify to sync safe translations.{% else %}{{ translation_workspace_review_only_message }}{% endif %}</div>
           </div>
         {% elif all_languages_update_display.result_message %}
           <div class="tw-shopify-apply-disabled-reason">{{ all_languages_update_display.result_message }}</div>
         {% else %}
           <div class="tw-shopify-apply-disabled-reason">
             <div>Shopify has not been updated yet.</div>
-            <div>Click Translate and update Shopify to sync safe translations.</div>
+            <div>{% if can_update_shopify_translations %}Click Translate and update Shopify to sync safe translations.{% else %}{{ translation_workspace_review_only_message }}{% endif %}</div>
           </div>
         {% endif %}
-        {% if not all_languages_update_display.is_successfully_updated %}
+        {% if not all_languages_update_display.is_successfully_updated and can_update_shopify_translations %}
           <form method="post" action="{% url 'shopify_translation_console' %}" class="tw-shopify-panel-action-form" data-job-start-form>
             {% csrf_token %}
             <input type="hidden" name="ui_mode" value="editor">
@@ -3103,6 +3111,10 @@
             <button type="submit" class="button tw-main-action-button" data-job-start-button{% if translation_background_job.is_active %} disabled{% endif %}>Translate and update Shopify</button>
             <span class="tw-compact-safe-text">Safe fields only</span>
           </form>
+        {% elif not all_languages_update_display.is_successfully_updated %}
+          <div class="tw-shopify-apply-disabled-reason">
+            {{ translation_workspace_review_only_message }}
+          </div>
         {% endif %}
         {% if all_languages_update_display.safe_field_diagnostic_summary and not all_languages_update_display.updated_count %}
           <details class="tw-shopify-update-details" aria-label="Safe field Shopify update diagnostic">
@@ -3718,6 +3730,7 @@
           </details>
         {% endif %}
       </div>
+      {% if can_update_shopify_translations %}
       <details id="tw-advanced-single-field-update" class="tw-advanced-single-field-panel tw-advanced-details" data-advanced-single-field-update>
         <summary>Advanced: single-field Shopify update test</summary>
         <p class="tw-muted">Legacy selected-entry update controls are kept here for testing only. Opening this section also shows the per-row update selectors in the result cards.</p>
@@ -3794,6 +3807,11 @@
           {% endif %}
         </div>
       </details>
+      {% else %}
+        <div class="tw-shopify-apply-disabled-reason">
+          {{ translation_workspace_review_only_message }}
+        </div>
+      {% endif %}
       {% for language_group in translation_background_job.translation_result_groups %}
         <section class="tw-language-panel" data-language-panel="{{ language_group.language }}"{% if not language_group.is_default %} hidden{% endif %}>
           {% if language_group.retry_allowed %}
@@ -3839,7 +3857,13 @@
                         <span class="tw-status-badge is-{{ row.result_status_key }}">{{ row.result_status_label }}</span>
                       </div>
                       <div class="tw-shopify-select-row{% if row.shopify_apply_selectable %} is-eligible{% else %} is-blocked{% endif %}">
-                        {% if row.shopify_apply_selectable %}
+                        {% if not can_update_shopify_translations %}
+                          <label>
+                            <input type="checkbox" disabled>
+                            <span>Shopify update requires admin</span>
+                          </label>
+                          <span class="tw-muted">{{ translation_workspace_review_only_message }}</span>
+                        {% elif row.shopify_apply_selectable %}
                           <label>
                             <input type="checkbox" name="selected_shopify_entry_ids" value="{{ row.safe_write_entry_id|default:row.entry_id }}" form="id_selected_translations_apply_form" data-shopify-apply-checkbox data-field="{{ row.shopify_apply_field|default:row.field }}" data-field-label="{{ row.field_label }}" data-locale="{{ row.language }}" data-current-value="{{ row.existing_translation_summary|default:row.existing_translation_display|default:'-' }}" data-new-value="{{ row.generated_draft_summary|default:row.generated_draft_display|default:'Translation result ready' }}" data-manual-edit="{% if row.using_manual_edit %}true{% else %}false{% endif %}">
                             <span>Select for Shopify update</span>
@@ -3997,7 +4021,11 @@
         <span class="tw-count-badge">Preview only</span>
       </div>
       <div class="tw-empty-result-panel">
-        {% if selected_product_gid %}{{ translation_report_guard.empty_message|default:"Select this product and click Translate and update Shopify." }}{% else %}Select a product and click Translate and update Shopify.{% endif %}
+        {% if not can_update_shopify_translations %}
+          {% if selected_product_gid %}Select this product and click Translate all languages.{% else %}Select a product and click Translate all languages.{% endif %}
+        {% else %}
+          {% if selected_product_gid %}{{ translation_report_guard.empty_message|default:"Select this product and click Translate and update Shopify." }}{% else %}Select a product and click Translate and update Shopify.{% endif %}
+        {% endif %}
       </div>
     </div>
   {% endif %}
@@ -4085,9 +4113,9 @@
       <h3>What to do next</h3>
       <ol>
         <li>Choose product and language.</li>
-        <li>Click Translate and update Shopify.</li>
+        <li>{% if can_update_shopify_translations %}Click Translate and update Shopify.{% else %}Click Translate all languages.{% endif %}</li>
         <li>Review the result cards in the Translation results area.</li>
-        <li>Review any item that was not updated.</li>
+        <li>{% if can_update_shopify_translations %}Review any item that was not updated.{% else %}Ask an admin to update Shopify after review.{% endif %}</li>
       </ol>
     </div>
   </details>
@@ -4344,9 +4372,11 @@
                     {% endif %}
                   {% endfor %}
                 </div>
-                {% if safe_write_readiness_state.can_prepare %}
+                {% if safe_write_readiness_state.can_prepare and can_update_shopify_translations %}
                   <button type="submit" class="button" name="action" value="prepare_translation_safe_write_readiness_package">Prepare safe write package</button>
                   <button type="submit" class="button" name="action" value="prepare_translation_locked_execution_shell">Prepare locked execution</button>
+                {% elif safe_write_readiness_state.can_prepare %}
+                  <p class="tw-muted">{{ translation_workspace_review_only_message }}</p>
                 {% else %}
                   <p class="tw-muted">No selectable entries are ready for package preparation yet.</p>
                 {% endif %}
@@ -4448,6 +4478,7 @@
                   <tr><th>Package status</th><td>{{ workspace_locked_execution_display.package_status|default:"locked_execution_not_prepared" }}</td></tr>
                 </tbody>
               </table>
+              {% if can_update_shopify_translations %}
               <form method="post" action="{% url 'shopify_translation_console' %}" style="margin-top: 12px;">
                 {% csrf_token %}
                 <input type="hidden" name="ui_mode" value="editor">
@@ -4478,6 +4509,9 @@
                   <p class="tw-muted">Submit is disabled until one locked package is ready for manual ACK with exactly one selected title/meta_title/meta_description entry.</p>
                 {% endif %}
               </form>
+              {% else %}
+                <p class="tw-muted">{{ translation_workspace_update_permission_message }}</p>
+              {% endif %}
               {% if workspace_real_write_display.execution_status %}
                 <h4>Real update audit result</h4>
                 <table class="tw-results-table">
@@ -4588,9 +4622,11 @@
                     <input id="id_locked_execution_ack_preview" type="text" name="locked_execution_ack_preview" value="" style="min-width: 420px;" placeholder="{{ locked_execution_ack_phrase }}">
                     <div class="tw-muted">ACK entry is not effective in this step.</div>
                   </div>
-                  {% if safe_write_readiness_state.can_prepare %}
+                  {% if safe_write_readiness_state.can_prepare and can_update_shopify_translations %}
                     <button type="submit" class="button" name="action" value="prepare_translation_safe_write_readiness_package">Prepare selected translations for Shopify update</button>
                     <button type="submit" class="button" name="action" value="prepare_translation_locked_execution_shell">Prepare locked Shopify update</button>
+                  {% elif safe_write_readiness_state.can_prepare %}
+                    <span class="tw-muted">{{ translation_workspace_review_only_message }}</span>
                   {% endif %}
                   <span class="tw-muted">Readiness accepts 1 to 3 enabled entries. Locked update preparation requires exactly 1 enabled title/meta_title/meta_description entry.</span>
                 </div>
@@ -5663,12 +5699,14 @@
       <p><strong>Generate locked package dry-run report first.</strong></p>
     {% endif %}
 
-    {% if manual_command_package.show_real_run_command_preview %}
+    {% if manual_command_package.show_real_run_command_preview and can_update_shopify_translations %}
       <h3>Manual real-run command preview</h3>
       <p><strong>Manual copy only after approval.</strong> Verify report path and entry count before running. This page does not run this command.</p>
       <pre style="white-space: pre-wrap;">{{ manual_command_package.manual_real_run_command_preview }}</pre>
       <h3>Copy-friendly text</h3>
       <pre style="white-space: pre-wrap;">{{ manual_command_package.copy_friendly_text }}</pre>
+    {% elif manual_command_package.show_real_run_command_preview %}
+      <p>{{ translation_workspace_review_only_message }}</p>
     {% else %}
       <p><strong>Manual real-run command preview is blocked.</strong> Fix the checklist warnings and regenerate the locked dry-run report first.</p>
     {% endif %}
@@ -7352,7 +7390,7 @@
           panel.setAttribute("data-product-gid", normalizedNextProductGid);
           panel.setAttribute("data-job-initial-status", "not_started");
         }
-        setText("[data-job-current-line]", "Select this product and click Translate and update Shopify.");
+        setText("[data-job-current-line]", "{% if can_update_shopify_translations %}Select this product and click Translate and update Shopify.{% else %}Select this product and click Translate all languages.{% endif %}");
         setText("[data-job-field='completed_locales']", "0 / 0");
         setText("[data-job-field='failed_locales']", "0");
         setText("[data-job-field='generated_draft_count']", "0");
