@@ -11,6 +11,20 @@ The current production-safety foundation remains:
 - `docs/SAFE_DEPLOY.md` operational notes.
 - No secrets, logs, or generated deployment output committed.
 
+## Non-Active Draft Artifacts
+
+The following files are drafts for future review only. They are not active,
+are not referenced by the current `docker-compose.yml`, and do not switch
+traffic or change current deployment commands:
+
+- [docker-compose.bluegreen.example.yml](../docker-compose.bluegreen.example.yml)
+- [nginx/bluegreen.example.conf](../nginx/bluegreen.example.conf)
+- [BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md](BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md)
+
+The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
+whether these draft files exist and whether the active Compose file still
+appears to use the current single-web workflow.
+
 ## Current Architecture
 
 The current Docker Compose topology has three services:
@@ -163,9 +177,9 @@ Not allowed:
 
 ### Phase 1: Draft Proxy And Compose Design
 
-Future task after human review.
+Current draft artifacts for human review.
 
-Draft a non-active Compose override or separate design file for:
+The non-active draft files propose:
 
 - `proxy`.
 - `web_blue`.
@@ -173,7 +187,8 @@ Draft a non-active Compose override or separate design file for:
 - Internal-only web networking.
 - Proxy health routing.
 
-Do not replace the current production command in this phase unless explicitly approved.
+They do not replace the current production command. Any apply work still
+requires a separate approved task.
 
 ### Phase 2: Local Or Staging Validation
 
@@ -288,4 +303,7 @@ NOT RUN IN THIS TASK:
 
 ## Immediate Next Task Recommendation
 
-Create a reviewed draft Compose/proxy design in a separate task, still without production traffic switching. The next task should produce either a non-active Compose override or a proxy config draft, plus a validation checklist for starting both colors locally without replacing the current production path.
+Review the non-active Compose draft, proxy draft, and apply checklist. The next
+task should decide the proxy technology, active color tracking, port ownership,
+Cloudflare routing impact, migration rules, static/media handling, and rollback
+authority before any production apply work is considered.

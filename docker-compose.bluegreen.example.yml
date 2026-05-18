@@ -1,0 +1,109 @@
+# NOT ACTIVE / EXAMPLE ONLY.
+# This file is a draft for future review. It is not used by the current
+# `docker compose up` workflow unless an operator explicitly passes `-f`.
+# Do not run this against production until a separate apply task is approved.
+#
+# The example intentionally avoids referencing ./.env so `docker compose config`
+# can validate syntax without expanding or printing private environment values.
+# A future apply task must decide the approved runtime env_file/secret handling.
+name: aftersales-bluegreen-example
+
+x-django-web: &django-web
+  build:
+    context: ./backend
+  environment:
+    TZ: Asia/Shanghai
+    SHOPIFY_TRANSLATION_WORKFLOW_LOG_DIR: /app/workflow_logs
+  volumes:
+    - ./backend:/app
+    - media:/app/media
+    # Future apply decision: keep workflow logs read-only if the web app still
+    # needs local report access, without committing or exposing log contents.
+    # - ./logs:/app/workflow_logs:ro
+  expose:
+    - "8000"
+  depends_on:
+    - db
+  networks:
+    - app_net
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - 'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/healthz/\", timeout=5).read()"'
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 20s
+
+services:
+  # Shared database concept for both colors.
+  # Future apply must map this to the approved production database/volume
+  # without printing credentials. This example omits database credentials and
+  # host ports because it is not meant to be started as-is.
+  db:
+    image: postgres:16
+    volumes:
+      - bluegreen_pgdata_example:/var/lib/postgresql/data
+    networks:
+      - app_net
+
+  web_blue:
+    <<: *django-web
+    labels:
+      com.kidstoylover.deploy.role: django-web
+      com.kidstoylover.deploy.color: blue
+
+  web_green:
+    <<: *django-web
+    labels:
+      com.kidstoylover.deploy.role: django-web
+      com.kidstoylover.deploy.color: green
+
+  bluegreen_proxy:
+    image: nginx:1.27-alpine
+    # Startup ordering only. A future switch process should health-check the
+    # inactive color before routing traffic to it; the proxy should not require
+    # both colors to be healthy just to start.
+    depends_on:
+      - web_blue
+      - web_green
+    volumes:
+      - ./nginx/bluegreen.example.conf:/etc/nginx/conf.d/default.conf:ro
+    expose:
+      - "80"
+    # Future manual decision: the proxy should own the stable public/local port
+    # only after the current single web service is no longer publishing it.
+    # Example choices, DO NOT ENABLE WITHOUT AN APPLY TASK:
+    # ports:
+    #   - "8000:80"
+    networks:
+      - app_net
+
+  # Scheduler recommendation:
+  # Keep exactly one scheduler instance. Do not run separate blue and green
+  # schedulers. Update/restart it only after migration compatibility and task
+  # behavior are reviewed for the same release.
+  scheduler:
+    profiles:
+      - scheduler-example
+    build:
+      context: ./backend
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./backend:/app
+      - media:/app/media
+    depends_on:
+      - db
+    command: bash -c "bash /app/run_scheduler.sh"
+    networks:
+      - app_net
+
+volumes:
+  # Isolated example volume names avoid implying that this draft should attach
+  # to the active production volumes before review.
+  bluegreen_pgdata_example:
+  media:
+
+networks:
+  app_net:

@@ -111,6 +111,61 @@ function Show-ComposeSummary {
     }
 }
 
+function Show-ActiveComposeShape {
+    param([string]$Path)
+
+    Write-Step "Active Compose runtime shape"
+    Write-Host "Checking whether the active Compose file still appears compatible with the current single-web workflow."
+
+    $services = @(Get-ComposeServiceNames -Path $Path)
+    if ($services.Count -eq 0) {
+        Write-Warn "Could not confirm active Compose shape because no services were detected."
+        return
+    }
+
+    $hasCurrentWeb = $services -contains "web"
+    $webServices = @($services | Where-Object { $_ -match '^web' })
+    $colorServices = @($services | Where-Object { $_ -match '^web_(blue|green)$' })
+    $proxyServices = @($services | Where-Object { $_ -match '^(bluegreen_proxy|nginx|proxy|caddy|traefik|haproxy)$' })
+
+    if ($hasCurrentWeb -and $webServices.Count -eq 1 -and $colorServices.Count -eq 0 -and $proxyServices.Count -eq 0) {
+        Write-Ok "Current active Compose still appears single-web: service 'web' is present, and no active blue/green/proxy service was detected."
+        return
+    }
+
+    Write-Warn "Active Compose no longer looks like the original single-web shape. Review before relying on this planner."
+    Write-Host ("Detected services: " + ($services -join ", "))
+}
+
+function Show-DraftArtifactSummary {
+    Write-Step "Non-active blue-green draft artifacts"
+
+    $artifacts = @(
+        [pscustomobject]@{
+            Label = "Blue-green example compose"
+            Path = ".\docker-compose.bluegreen.example.yml"
+        },
+        [pscustomobject]@{
+            Label = "Proxy example config"
+            Path = ".\nginx\bluegreen.example.conf"
+        },
+        [pscustomobject]@{
+            Label = "Apply checklist"
+            Path = ".\docs\BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md"
+        }
+    )
+
+    foreach ($artifact in $artifacts) {
+        if (Test-Path -LiteralPath $artifact.Path) {
+            Write-Ok "$($artifact.Label) exists: $($artifact.Path)"
+        } else {
+            Write-Warn "$($artifact.Label) is missing: $($artifact.Path)"
+        }
+    }
+
+    Write-Host "These files are examples/checklists only. They are not loaded by the current docker compose command unless explicitly passed with -f."
+}
+
 function Test-HealthUrl {
     param([string]$Url)
 
@@ -148,8 +203,11 @@ function Show-FuturePlan {
 
 Show-GitStatus
 Show-ComposeSummary -Path $ComposeFile
+Show-ActiveComposeShape -Path $ComposeFile
+Show-DraftArtifactSummary
 Test-HealthUrl -Url $HealthUrl
 Show-FuturePlan
 
 Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
+Write-Ok "No runtime behavior was changed by this read-only planner."
