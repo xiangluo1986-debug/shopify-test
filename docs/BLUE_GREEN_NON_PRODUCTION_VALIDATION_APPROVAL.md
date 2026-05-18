@@ -22,12 +22,33 @@ the exact approval phrase before any runtime validation command is run.
 
 ## Required Approval Phrase
 
-Future non-production runtime validation is NO-GO until a separate task
-provides this exact phrase:
+Additional future non-production runtime validation is NO-GO until a separate
+task provides this exact phrase:
 
 ```text
 I_APPROVE_NON_PRODUCTION_BLUE_GREEN_RUNTIME_VALIDATION_NO_PRODUCTION_TRAFFIC
 ```
+
+## Manual Validation Result - 2026-05-18
+
+- Manual validation: completed and PASSED.
+- Scope: local/non-production inactive-service startup only.
+- Command path: `scripts/blue_green_local_inactive_startup.ps1`.
+- Target service: `web_green_test`.
+- Test port: `18080`.
+- Image: `aftersales-web:latest`.
+- Current active service: `web` on port `8000` remained healthy before and
+  after validation.
+- Inactive service health: `18080 /healthz/` eventually returned HTTP 200.
+- Cleanup: `web_green_test` was stopped and `18080` was no longer serving.
+- Production approval: NOT granted.
+- Production apply: NOT approved by this validation.
+- Proxy validation: still required before any production apply can be
+  considered.
+
+This manual result does not approve production traffic switching, production
+proxy changes, migrations, collectstatic, Shopify/Gmail/external API calls, or
+email sending.
 
 ## Fixed Future Validation Parameters
 
@@ -164,6 +185,8 @@ path remains the fallback and must stay untouched.
 ## Go / No-Go
 
 - Approval package: READY after review.
-- Non-production runtime validation: NO-GO until the exact separate approval
-  phrase is provided.
+- Manual non-production inactive runtime validation: completed and PASSED on
+  2026-05-18.
+- Additional local/test proxy routing validation: still required.
+- Production approval: NOT granted.
 - Production apply: NO-GO.

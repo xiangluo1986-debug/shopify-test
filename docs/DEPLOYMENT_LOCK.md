@@ -12,8 +12,8 @@ non-dry-run mode. It also has dry-run/check-only lock awareness for validation
 without deployment. `scripts/blue_green_production_apply.ps1` now exists as a
 no-action production apply skeleton that documents the future lock gates, but
 real production blue-green apply remains NO-GO until a future apply task
-implements exact runtime commands, follows the non-production validation gate,
-and uses the same lock before any runtime-changing action.
+implements exact runtime commands, follows the remaining local/test proxy
+validation gate, and uses the same lock before any runtime-changing action.
 
 ## What The Lock Protects
 
@@ -238,8 +238,8 @@ containers, run migrations, run collectstatic, switch proxy traffic, modify
 active `docker-compose.yml`, modify production nginx/proxy configuration, or
 call Shopify/Gmail/review/translation workflows.
 
-Production apply also requires successful non-production blue-green runtime
-validation first, documented in
+Production apply also requires local/test proxy validation after the successful
+local inactive runtime validation documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
 The separate approval package is
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
@@ -313,16 +313,17 @@ runtime-changing actions should use the shared deployment lock.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
 - Non-production validation plan:
-  `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION.md`; separate approval required
-  before any runtime validation.
+  `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION.md`; local inactive runtime
+  validation passed on 2026-05-18, and separate approval remains required
+  before additional runtime validation.
 - Non-production validation approval package:
-  `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md`; future validation
-  remains NO-GO until the exact approval phrase is provided, and the validation
-  lock path is `.deploy/bluegreen-nonprod-validation.lock`.
+  `docs/BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md`; production approval
+  remains not granted, local/test proxy validation is pending, and the
+  validation lock path is `.deploy/bluegreen-nonprod-validation.lock`.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
-  switch/cleanup, successful non-production validation has been reviewed, and
-  only the matching `lock_id` is released.
+  switch/cleanup, local/test proxy validation has passed, and only the matching
+  `lock_id` is released.
 
 ## Current Status
 
@@ -340,4 +341,4 @@ runtime-changing actions should use the shared deployment lock.
   blocked execution modes.
 - Production blue-green apply remains NO-GO until a separate future apply task
   approves exact runtime commands, confirms every runtime-changing path uses
-  the deployment lock, and reviews successful non-production validation.
+  the deployment lock, and reviews successful local/test proxy validation.

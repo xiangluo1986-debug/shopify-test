@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This document defines a future non-production validation phase for the
-blue-green runtime path before any production apply is considered.
+This document tracks the non-production validation phase for the blue-green
+runtime path before any production apply is considered.
 
 Production remains NO-GO. This phase must not switch production traffic, change
 Cloudflare or domain routing, replace the current production web container, or
@@ -19,8 +19,8 @@ The separate approval package exists at
 It prepares a future validation only; it does not run commands and does not
 approve production.
 
-Future non-production runtime validation remains NO-GO until a separate task
-provides the exact approval phrase:
+Additional future non-production runtime validation remains NO-GO until a
+separate task provides the exact approval phrase:
 
 ```text
 I_APPROVE_NON_PRODUCTION_BLUE_GREEN_RUNTIME_VALIDATION_NO_PRODUCTION_TRAFFIC
@@ -30,6 +30,40 @@ The future validation must use a deployment lock, such as
 `.deploy/bluegreen-nonprod-validation.lock`, before test-only runtime actions.
 Production remains NO-GO. Normal non-deploy tasks are not blocked by this
 deployment lock.
+
+## Validation Result - 2026-05-18
+
+- Validation status: PASSED.
+- Scope: local/non-production only.
+- Validation command:
+  `scripts/blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup`.
+- Approval acknowledgement used:
+  `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
+- Test port: `18080`.
+- Target service: `web_green_test`.
+- Image: `aftersales-web:latest`.
+- Compose file: `docker-compose.bluegreen.local-test.example.yml`.
+- Active service: current `web` on port `8000` remained healthy.
+- Active service health before validation: `8000 /healthz/` returned HTTP 200
+  OK.
+- Inactive service health: `18080 /healthz/` initially failed while starting,
+  then returned HTTP 200.
+- Cleanup: `web_green_test` was stopped.
+- Post-cleanup target state: `18080 /healthz/` was unable to connect, meaning
+  cleanup succeeded.
+- Current web protection: current `web` was not targeted.
+- Port protection: port `8000` was not targeted.
+- Production traffic switch: no.
+- Migrations/collectstatic: no.
+- External APIs: no Shopify, Gmail, Trustpilot, Kudosi, Ali Reviews, or email
+  send path was requested.
+- Production status: still NO-GO.
+
+This result proves the local inactive-service startup and direct health-check
+path only. It does not approve production apply, production proxy changes,
+traffic switching, migrations, collectstatic, or external API workflows.
+Local/test proxy routing validation is still required before production apply
+can be reconsidered.
 
 ## Validation Scope
 
@@ -181,5 +215,6 @@ the test-only resources.
 - Approval package:
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
   exists for separate review.
-- Non-production runtime validation: separate approval required.
+- Non-production inactive runtime validation: PASSED on 2026-05-18.
+- Local/test proxy routing validation: still required.
 - Production apply: NO-GO.

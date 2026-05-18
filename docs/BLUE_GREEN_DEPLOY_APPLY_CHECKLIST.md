@@ -42,13 +42,17 @@ Related non-active drafts:
   local-only execution is gated by the exact Ack and `-AllowContainerAction`.
 - Non-production validation plan: READY after review at
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
-  Future runtime validation requires separate approval, deployment lock
+  Non-production inactive runtime validation PASSED on 2026-05-18 using
+  `web_green_test` on test port `18080` with image `aftersales-web:latest`.
+  Future runtime validation still requires separate approval, deployment lock
   acquisition/release, non-`8000` test ports, test-only proxy routing, and no
   production traffic switch.
 - Non-production runtime validation approval package: READY after review at
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
-  It does not deploy and requires the exact future approval phrase
-  `I_APPROVE_NON_PRODUCTION_BLUE_GREEN_RUNTIME_VALIDATION_NO_PRODUCTION_TRAFFIC`.
+  It records the completed/passed manual inactive runtime validation, does not
+  approve production apply, and requires separate approval for additional
+  validation.
+- Next required blue-green step: local/test proxy routing validation.
 - Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
   approval of exact commands. Real local simulation execution is not
@@ -77,8 +81,8 @@ Related non-active drafts:
   production lock, run Docker commands, run migrations, run collectstatic,
   switch traffic, or modify files. Required future approval phrase:
   `I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK`.
-- Production apply: NO-GO until non-production runtime validation passes and a
-  separate production task approves exact runtime commands, route, port
+- Production apply: NO-GO until local/test proxy routing validation also passes
+  and a separate production task approves exact runtime commands, route, port
   ownership, proxy, scheduler, migration, static/media, rollback, observation,
   and lock handling.
 - Runtime behavior changed by this checklist: no.
@@ -97,9 +101,9 @@ Related non-active drafts:
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before any build/start/migrate/collectstatic,
   proxy switch, traffic switch, cleanup, or rollback action.
-- Non-production runtime validation: future approved runtime validation must
-  also use the deployment lock before any test-only container start, proxy
-  validation route, cleanup, or rollback/no-switch handling.
+- Non-production inactive runtime validation: PASSED on 2026-05-18 for
+  `web_green_test` on `18080`; future proxy validation route, cleanup, or
+  rollback/no-switch handling must still use the deployment lock.
 
 Runtime-changing actions that require the deployment lock before any future
 apply include container start, container stop, container restart, image build,
@@ -147,8 +151,9 @@ review. Normal non-deploy tasks are not blocked.
 - Any future production switch acquires the deployment lock first and releases
   it only after switch validation and cleanup/finally handling.
 - The production apply skeleton has been reviewed in default no-action mode.
-- Successful non-production runtime validation has been reviewed before any
-  future production apply request.
+- Successful non-production inactive runtime validation has been reviewed, and
+  local/test proxy routing validation has passed, before any future production
+  apply request.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply is not implemented in this phase.`
 - Deployment tasks do not auto-queue behind an existing lock. A second deploy
@@ -244,8 +249,8 @@ These actions are not approved by this checklist alone:
 - Stopping the previous active color.
 - Proceeding with production apply before deployment lock enforcement is active
   for the exact runtime path being used.
-- Proceeding with production apply before successful non-production validation
-  and separate manual production approval.
+- Proceeding with production apply before successful local/test proxy routing
+  validation and separate manual production approval.
 
 ## Rollback Steps
 

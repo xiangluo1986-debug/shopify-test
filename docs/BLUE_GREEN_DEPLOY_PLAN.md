@@ -91,10 +91,10 @@ The non-production validation plan exists at
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
 The separate non-production runtime validation approval package exists at
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
-It does not run commands, does not approve production, and requires a future
-separate task with the exact phrase
-`I_APPROVE_NON_PRODUCTION_BLUE_GREEN_RUNTIME_VALIDATION_NO_PRODUCTION_TRAFFIC`.
-Production apply remains blocked until a separate non-production runtime
+It records that local inactive runtime validation PASSED on 2026-05-18 for
+`web_green_test` on test port `18080` using image `aftersales-web:latest`.
+It does not approve production. The next phase is local/test proxy routing
+simulation and validation. Production apply remains blocked until proxy
 validation passes and manual production approval is given.
 
 ## Deployment Lock Gate
@@ -121,9 +121,10 @@ sees the lock, it should stop and require a manual rerun after the first deploy
 is complete. Normal non-deploy tasks are not blocked by this deployment lock.
 
 The successful local inactive-color startup on non-production port `18080`
-confirmed that a local inactive test service can reach `/healthz/`, but it does
-not remove the need for the deployment lock. The lock addresses a separate
-risk: overlapping deployment tasks racing with each other.
+confirmed that a local inactive test service can reach `/healthz/`, and the
+manual non-production inactive runtime validation is recorded as PASSED on
+2026-05-18. This does not remove the need for the deployment lock. The lock
+addresses a separate risk: overlapping deployment tasks racing with each other.
 
 Runtime-changing actions covered by this rule include container start,
 container stop, container restart, image build, migration, collectstatic, proxy
@@ -154,6 +155,8 @@ Normal non-deploy tasks are not blocked.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
+- Non-production inactive runtime validation: PASSED on 2026-05-18.
+- Local/test proxy routing validation: pending.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   the deployment lock before any build/start/migrate/collectstatic/proxy
   switch/cleanup action.
@@ -327,7 +330,7 @@ requires a separate approved task.
 
 ### Phase 2: Local Or Staging Validation
 
-Future task after Phase 1 review.
+Current phase after Phase 1 review.
 
 Non-production validation is documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
@@ -339,8 +342,14 @@ and must leave the current production web path untouched. Runtime validation
 requires the deployment lock and a separate approval phrase. Normal non-deploy
 tasks are not blocked by this deployment lock.
 
-Local validation remains NO-GO unless separately approved. The current gated
-runner is available only for dry-run / no-action status checks:
+Status: local inactive runtime validation PASSED on 2026-05-18 for
+`web_green_test` on test port `18080`. The active `web` service on port `8000`
+remained healthy, the inactive service eventually returned HTTP 200 on
+`18080 /healthz/`, cleanup stopped `web_green_test`, and production remained
+NO-GO.
+
+Additional local validation remains gated unless separately approved. The
+current gated runner is available only for dry-run / no-action status checks:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1
@@ -374,6 +383,8 @@ Validate the proxy and color services locally or in staging:
 - Confirm rollback switch behavior.
 - Confirm scheduler behavior is unchanged.
 - Confirm media and static file behavior.
+
+Next phase: proxy local simulation / validation. Production remains NO-GO.
 
 ### Phase 3: One-Time Traffic Path Introduction
 
@@ -489,14 +500,9 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Review the dry-run output from
-`scripts/blue_green_local_apply_simulation.ps1`,
-`scripts/blue_green_local_apply_simulation_preview.ps1`,
-`scripts/blue_green_local_inactive_startup.ps1`, and
-`scripts/blue_green_production_apply.ps1`.
-The recommended next separate task is to review the production apply skeleton
-output and decide the next non-production validation phase for exact route,
-port ownership, proxy, scheduler, migration, static/media, rollback,
-observation, and deployment lock handling. Production should remain NO-GO until
-local or staging results are reviewed and a separate production task approves
-the exact runtime path being used.
+Run local/test proxy routing simulation and validation without touching
+production traffic. The recommended next separate task is to validate the proxy
+route, port ownership, scheduler, migration, static/media, rollback,
+observation, and deployment lock handling in a local/test scope. Production
+remains NO-GO until proxy validation is reviewed and a separate production task
+approves the exact runtime path being used.

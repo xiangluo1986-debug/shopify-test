@@ -20,8 +20,9 @@ For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](B
 The non-production runtime validation gate for that future path is documented
 in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
-Production apply remains blocked until non-production validation passes and a
-separate manual production approval is given.
+The local inactive runtime validation passed on 2026-05-18. Production apply
+remains blocked until local/test proxy validation passes and a separate manual
+production approval is given.
 
 The current safe deploy flow now enforces a deployment single-flight lock in
 real non-dry-run mode. The standalone helper exists at
@@ -59,11 +60,13 @@ service can become healthy.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
-- Non-production validation: documented for future local/staging runtime
-  validation, separate approval required, and production remains NO-GO.
+- Non-production inactive runtime validation: passed on 2026-05-18 for
+  `web_green_test` on test port `18080`; local/test proxy validation is still
+  pending and production remains NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before any build/start/migrate/collectstatic,
-  proxy switch, traffic switch, cleanup, or rollback action.
+  proxy switch, traffic switch, cleanup, or rollback action, and local/test
+  proxy validation has passed.
 
 Runtime-changing deploy paths include container start, container stop,
 container restart, image build, migration, collectstatic, proxy switch, traffic
@@ -142,8 +145,8 @@ deployment lock, run Docker commands, run migrations, run collectstatic, switch
 traffic, or modify files. Execution requests remain blocked unless the exact
 approval phrase, valid target/active colors, and `.deploy/` lock path gate are
 present; even then real production apply remains blocked because it is not
-implemented in this phase. It also reports that successful non-production
-blue-green runtime validation is required before any future production apply.
+implemented in this phase. It also reports that local/test proxy validation is
+still required before any future production apply.
 
 Deployment lock helper status:
 
