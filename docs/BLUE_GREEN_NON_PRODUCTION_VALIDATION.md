@@ -45,7 +45,10 @@ That future proxy validation must use deployment lock path
 `.deploy/bluegreen-proxy-validation.lock`, Compose project
 `aftersales-bluegreen-proxy-validation`, inactive service `web_green_test` on
 `18080`, and test proxy service `bluegreen_proxy_test` on `19080`. The current
-`web` service and production port `8000` must remain untouched.
+`web` service and production port `8000` must remain untouched. Before the
+proxy service is started, `web_green_test` must be started with
+`-HoldOpenForProxyValidation`; otherwise the inactive startup runner cleans it
+up immediately after direct health validation.
 
 ## Validation Result - 2026-05-18
 
@@ -79,7 +82,10 @@ This result proves the local inactive-service startup and direct health-check
 path only. It does not approve production apply, production proxy changes,
 traffic switching, migrations, collectstatic, or external API workflows.
 Local/test proxy routing validation is still pending and required before
-production apply can be reconsidered.
+production apply can be reconsidered. The next proxy validation must use
+hold-open mode so `web_green_test` remains running on `18080` long enough for
+`bluegreen_proxy_test` on `19080` to route to it. Cleanup after that proxy
+validation is mandatory and must stop only `web_green_test`.
 
 ## Validation Scope
 
@@ -94,6 +100,8 @@ The future validation should cover:
 - Test-only proxy routing validation through `19080` to `web_green_test` on
   `18080`, gated by
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
+- Hold-open inactive startup before proxy validation, with mandatory cleanup
+  of only `web_green_test` afterward.
 - Rollback/no-switch behavior when validation fails.
 - Cleanup of test-only services.
 - Confirmation that the current production web service remains untouched.
@@ -134,7 +142,9 @@ Before any non-production runtime validation, confirm:
 - The exact approval phrase has been provided in a separate task.
 - For proxy validation, the proxy approval package has been reviewed, the
   local proxy approval phrase has been provided in a separate task, the proxy
-  test port is `19080`, and production port `8000` is not used.
+  test port is `19080`, hold-open mode is used for `web_green_test` on
+  `18080`, cleanup stops only `web_green_test`, and production port `8000` is
+  not used.
 
 If any gate is uncertain, stop before starting test-only services.
 
@@ -167,6 +177,7 @@ NOT RUN IN THIS TASK:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 `
   -ExecuteInactiveStartup `
+  -HoldOpenForProxyValidation `
   -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC `
   -AllowContainerAction `
   -ComposeFile .\docker-compose.bluegreen.local-test.example.yml `
@@ -198,6 +209,15 @@ NOT RUN IN THIS TASK:
 docker compose -p aftersales-bluegreen-test -f .\docker-compose.bluegreen.local-test.example.yml stop web_green_test
 docker compose -p aftersales-bluegreen-test -f .\docker-compose.bluegreen.local-test.example.yml rm -f web_green_test
 ```
+
+The minimum mandatory cleanup command after a hold-open proxy validation is:
+
+```powershell
+docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test
+```
+
+Cleanup must not stop current `web`, must not use `docker compose down`, and
+must not change production routing.
 
 NOT RUN IN THIS TASK:
 
@@ -240,4 +260,6 @@ the test-only resources.
 - Non-production inactive runtime validation: PASSED on 2026-05-18.
 - Local/test proxy routing validation: pending; approval package exists at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
+  The pending proxy validation requires hold-open inactive startup first and
+  mandatory cleanup of only `web_green_test` afterward.
 - Production apply: NO-GO.

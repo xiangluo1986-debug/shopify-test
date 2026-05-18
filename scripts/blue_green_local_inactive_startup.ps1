@@ -2,6 +2,8 @@
 param(
     [switch]$DryRun = $true,
     [switch]$ExecuteInactiveStartup,
+    [switch]$HoldOpenForProxyValidation,
+    [switch]$CleanupOnly,
     [string]$Ack = "",
     [int]$TestPort = 18080,
     [string]$InactiveService = "web_green_test",
@@ -155,6 +157,18 @@ function Show-Mode {
         Write-Ok "No inactive startup execution was requested."
     }
 
+    if ($HoldOpenForProxyValidation) {
+        Write-Warn "Hold-open mode was requested for local proxy validation."
+    } else {
+        Write-Ok "Hold-open mode is not supplied; successful startup will clean up by default."
+    }
+
+    if ($CleanupOnly) {
+        Write-Warn "Cleanup-only mode was requested."
+    } else {
+        Write-Ok "Cleanup-only mode is not supplied."
+    }
+
     if ($AllowContainerAction) {
         Write-Warn "AllowContainerAction was supplied. Container actions can run only after all other gates pass."
     } else {
@@ -231,6 +245,20 @@ function Test-StartupTarget {
     Write-Host "Requested test port: $TestPort"
     Write-Host "Requested compose file: $ComposeFile"
     Write-Host "Current active service name: $CurrentActiveServiceName"
+
+    if ($CleanupOnly -and $ExecuteInactiveStartup) {
+        Write-Warn "Blocked: choose either -CleanupOnly or -ExecuteInactiveStartup, not both."
+        Write-Warn "No container action was run."
+        Write-Warn "Production remains NO-GO."
+        return 2
+    }
+
+    if ($CleanupOnly -and $HoldOpenForProxyValidation) {
+        Write-Warn "Blocked: -HoldOpenForProxyValidation is only valid with inactive startup, not cleanup-only mode."
+        Write-Warn "No container action was run."
+        Write-Warn "Production remains NO-GO."
+        return 2
+    }
 
     if ($TestPort -lt 1 -or $TestPort -gt 65535) {
         Write-Warn "Blocked: TestPort must be between 1 and 65535."
@@ -354,7 +382,9 @@ function Show-BlockedStartupPlan {
         "Start only one inactive test service on the reviewed non-8000 local test port.",
         "Health-check the inactive color directly through /healthz/.",
         "Print inactive service logs if health check fails.",
-        "Stop only the inactive local test color after validation.",
+        "Stop only the inactive local test color after validation by default.",
+        "If hold-open mode is explicitly requested and health passes, leave only the inactive local test color running for proxy validation.",
+        "Always stop the inactive local test color if health fails, including in hold-open mode.",
         "Leave current web, Cloudflare/domain routing, and production traffic unchanged."
     )
 
@@ -378,7 +408,8 @@ function Show-BlockedStartupPlan {
     Write-Host "  - docker compose -f $ComposeFile up -d --no-deps --no-build $InactiveService"
     Write-Host "  - Invoke-WebRequest http://127.0.0.1:$TestPort/healthz/"
     Write-Host "  - docker compose -f $ComposeFile logs --tail=100 $InactiveService only if health fails"
-    Write-Host "  - docker compose -f $ComposeFile stop $InactiveService during cleanup"
+    Write-Host "  - docker compose -f $ComposeFile stop $InactiveService during cleanup by default"
+    Write-Host "  - optional hold-open mode leaves $InactiveService running only after health passes, then requires manual cleanup"
     Write-Host ""
     Write-Host "Current phase status:"
     Write-Host "  - inactive startup runner exists"
@@ -394,6 +425,11 @@ function Show-CleanupPlan {
 
     Write-Host "Cleanup for a future approved local startup is limited to the inactive test service:"
     Write-Host "  docker compose -f $ComposeFile stop $InactiveService"
+    Write-Host ""
+    Write-Host "If hold-open mode is used for proxy validation, cleanup after proxy validation is mandatory:"
+    Write-Host "  docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test"
+    Write-Host ""
+    Write-Host "Cleanup-only mode is available for the inactive service only and still requires -AllowContainerAction."
     Write-Host ""
     Write-Host "Cleanup must not:"
     Write-Host "  - stop current web"
@@ -445,6 +481,54 @@ function Test-ExecutionGate {
     return 10
 }
 
+function Get-CleanupCommandText {
+    $displayComposeFile = $ComposeFile
+    if ($displayComposeFile.StartsWith(".\")) {
+        $displayComposeFile = $displayComposeFile.Substring(2)
+    }
+
+    return "docker compose -f $displayComposeFile stop $InactiveService"
+}
+
+function Invoke-CleanupOnly {
+    Write-Step "Cleanup-only execution"
+
+    if (-not $AllowContainerAction) {
+        Write-Warn "Blocked: cleanup-only mode requires -AllowContainerAction."
+        Write-Warn "No Docker container action was run."
+        Write-Warn "No containers were started, stopped, restarted, or built."
+        Write-Warn "Production remains NO-GO."
+        return 2
+    }
+
+    if (-not (Test-Path -LiteralPath $ComposeFile)) {
+        Write-Warn "Blocked: Compose file was not found: $ComposeFile"
+        Write-Warn "No Docker container action was run."
+        Write-Warn "Production remains NO-GO."
+        return 2
+    }
+
+    Write-Warn "Cleanup-only mode will stop only inactive service '$InactiveService' from '$ComposeFile'."
+    Write-Host "Cleanup command:"
+    Write-Host "  $(Get-CleanupCommandText)"
+    $stop = Invoke-CaptureCommand -Command @("docker", "compose", "-f", $ComposeFile, "stop", $InactiveService)
+    if ($stop.ExitCode -ne 0) {
+        Write-Warn "Inactive service stop command failed. Review the inactive test service manually."
+        Write-CapturedOutput -Result $stop
+        Write-Warn "Current web was not targeted."
+        Write-Warn "Port 8000 was not targeted."
+        Write-Warn "Production remains NO-GO."
+        return 2
+    }
+
+    Write-Ok "Inactive test service stop command completed."
+    Write-Warn "Current web was not targeted."
+    Write-Warn "Port 8000 was not targeted."
+    Write-Warn "No migration, collectstatic, proxy switch, Shopify call, Gmail call, or email send was requested."
+    Write-Warn "Production remains NO-GO."
+    return 0
+}
+
 function Test-InactiveHealth {
     param([string]$Url)
 
@@ -485,6 +569,7 @@ function Invoke-InactiveStartup {
     $inactiveHealthUrl = "http://127.0.0.1:$TestPort/healthz/"
     $startedInactiveService = $false
     $startupAttempted = $false
+    $healthPassed = $false
     $exitCode = 0
     $previousLocalTestPort = [Environment]::GetEnvironmentVariable("BLUE_GREEN_LOCAL_TEST_PORT", "Process")
 
@@ -527,10 +612,12 @@ function Invoke-InactiveStartup {
             Write-CapturedOutput -Result $logs
             $exitCode = 2
         } else {
+            $healthPassed = $true
             Write-Ok "Inactive local startup validation passed."
         }
     } finally {
-        if ($startedInactiveService -or $startupAttempted) {
+        $shouldHoldOpen = $HoldOpenForProxyValidation -and $healthPassed -and $exitCode -eq 0
+        if (($startedInactiveService -or $startupAttempted) -and -not $shouldHoldOpen) {
             Write-Step "Cleanup inactive test service only"
             Write-Host "Stopping only inactive service '$InactiveService'."
             $stop = Invoke-CaptureCommand -Command @("docker", "compose", "-f", $ComposeFile, "stop", $InactiveService)
@@ -541,6 +628,13 @@ function Invoke-InactiveStartup {
             } else {
                 Write-Ok "Inactive test service stop command completed."
             }
+        } elseif ($shouldHoldOpen) {
+            Write-Step "Hold-open for proxy validation"
+            Write-Warn "Hold-open mode active: $InactiveService remains running for proxy validation."
+            Write-Host "Cleanup command:"
+            Write-Host "  $(Get-CleanupCommandText)"
+            Write-Warn "You must run cleanup after proxy validation."
+            Write-Warn "Still no production traffic switch."
         }
 
         [Environment]::SetEnvironmentVariable("BLUE_GREEN_LOCAL_TEST_PORT", $previousLocalTestPort, "Process")
@@ -573,14 +667,20 @@ Show-DeploymentLockNote
 Show-BlockedStartupPlan
 Show-CleanupPlan
 
-$exitCode = Test-ExecutionGate
-if ($exitCode -eq 10) {
-    $exitCode = Invoke-InactiveStartup
+if ($CleanupOnly) {
+    $exitCode = Invoke-CleanupOnly
+} else {
+    $exitCode = Test-ExecutionGate
+    if ($exitCode -eq 10) {
+        $exitCode = Invoke-InactiveStartup
+    }
 }
 
 Write-Step "Result"
 if ($exitCode -eq 0) {
-    if ($ExecuteInactiveStartup -and $AllowContainerAction -and $Ack -eq $RequiredApprovalPhrase) {
+    if ($CleanupOnly -and $AllowContainerAction) {
+        Write-Ok "Local inactive-color startup runner completed cleanup-only mode."
+    } elseif ($ExecuteInactiveStartup -and $AllowContainerAction -and $Ack -eq $RequiredApprovalPhrase) {
         Write-Ok "Local inactive-color startup runner completed the gated local execution path."
     } else {
         Write-Ok "Local inactive-color startup runner completed in dry-run / no-action mode."
@@ -589,7 +689,9 @@ if ($exitCode -eq 0) {
     Write-Warn "Local inactive-color startup runner blocked execution."
 }
 Write-Ok "Runtime behavior changed: no."
-if ($ExecuteInactiveStartup -and $AllowContainerAction -and $Ack -eq $RequiredApprovalPhrase) {
+if ($CleanupOnly -and $AllowContainerAction) {
+    Write-Warn "Cleanup-only container action gate was supplied; review execution sections above for inactive-service stop results."
+} elseif ($ExecuteInactiveStartup -and $AllowContainerAction -and $Ack -eq $RequiredApprovalPhrase) {
     Write-Warn "Container action gate was supplied; review execution sections above for inactive-service start/stop results."
 } else {
     Write-Ok "Container start/stop/restart/build: no."

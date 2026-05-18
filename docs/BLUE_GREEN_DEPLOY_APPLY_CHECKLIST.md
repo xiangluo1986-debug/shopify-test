@@ -78,7 +78,9 @@ Related non-active drafts:
   Ack without `-AllowContainerAction`. Required phrase:
   `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
   The local inactive service reuses the existing `aftersales-web` image; the
-  startup runner intentionally uses `--no-build`.
+  startup runner intentionally uses `--no-build`. Hold-open mode is available
+  behind the same gates for local/test proxy validation only; after proxy
+  validation, cleanup is mandatory and must stop only `web_green_test`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Deployment lock helper: available at `scripts/deploy_lock.ps1`.
 - safe_deploy lock awareness: READY for dry-run/check-only status reporting at
@@ -119,7 +121,8 @@ Related non-active drafts:
   `web_green_test` on `18080`; future proxy validation route, cleanup, or
   rollback/no-switch handling must still use the deployment lock.
 - Local/test proxy routing validation: pending; approval package exists and
-  future validation requires the local proxy approval phrase and deployment
+  future validation requires hold-open inactive startup, the local proxy
+  approval phrase, mandatory cleanup of only `web_green_test`, and deployment
   lock.
 
 Runtime-changing actions that require the deployment lock before any future
@@ -176,6 +179,13 @@ review. Normal non-deploy tasks are not blocked.
   has been reviewed, the exact local proxy approval phrase is supplied in a
   separate task, and the future run uses `19080` for the test proxy while
   leaving `8000` untouched.
+- The inactive startup runner is run with `-HoldOpenForProxyValidation` before
+  the local/test proxy validation so `web_green_test` remains reachable on
+  `18080`.
+- The cleanup command is ready before hold-open startup:
+  `docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test`.
+- Cleanup after proxy validation stops only `web_green_test`; the current
+  `web` service remains untouched.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply is not implemented in this phase.`
 - Deployment tasks do not auto-queue behind an existing lock. A second deploy
@@ -267,6 +277,8 @@ These actions are not approved by this checklist alone:
 - Reloading or replacing production proxy configuration.
 - Reloading or replacing any active local proxy configuration without a
   separate approved apply task.
+- Running local/test proxy validation unless hold-open inactive startup and
+  cleanup of only `web_green_test` are explicitly included.
 - Switching traffic between colors.
 - Stopping the previous active color.
 - Proceeding with production apply before deployment lock enforcement is active
@@ -371,6 +383,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_a
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1
+```
+
+- Confirm hold-open execution requests still require the same gates and do not
+  use port `8000`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -HoldOpenForProxyValidation
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -HoldOpenForProxyValidation -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC
 ```
 
 - Confirm the local-test inactive Compose example validates without starting

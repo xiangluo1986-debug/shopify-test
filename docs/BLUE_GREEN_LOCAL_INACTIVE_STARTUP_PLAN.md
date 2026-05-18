@@ -71,8 +71,43 @@ The future executable path is local-only and test-only. It validates the
 local-test compose file, reuses the existing `aftersales-web` image, starts
 only the inactive test service with `--no-deps` and `--no-build`, checks
 `/healthz/` on the non-`8000` test port, prints logs for that inactive service
-if health fails, and stops only that inactive service during cleanup. This task
-must not run that executable path.
+if health fails, and stops only that inactive service during cleanup by
+default. This task must not run that executable path.
+
+For local/test proxy validation only, the runner supports hold-open mode:
+
+```powershell
+-HoldOpenForProxyValidation
+```
+
+Hold-open mode still requires every existing execution gate:
+`-ExecuteInactiveStartup`, the exact approval phrase, `-AllowContainerAction`,
+a non-`8000` `-TestPort`, an inactive service other than `web`, and a
+non-active Compose file. If direct `/healthz/` passes, the runner leaves
+`web_green_test` running so the test proxy can route to it on `18080`. If
+health fails, the runner still prints inactive logs and stops
+`web_green_test`; failed services must not remain running.
+
+The hold-open success output includes this mandatory cleanup command:
+
+```powershell
+docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test
+```
+
+Cleanup after proxy validation is mandatory and must stop only
+`web_green_test`. The current `web` service, port `8000`, production traffic,
+Cloudflare/domain routing, migrations, collectstatic, Shopify/Gmail/API paths,
+and email sending must remain untouched.
+
+Cleanup-only mode is available for the inactive service only:
+
+```powershell
+-CleanupOnly
+```
+
+It blocks `-InactiveService web`, blocks the active `docker-compose.yml`, and
+requires `-AllowContainerAction`. It is intended only to stop the reviewed
+inactive test service from the reviewed local-test Compose file.
 
 ## Deployment Lock Note
 
@@ -174,6 +209,21 @@ host port, for example `18080` or `18081`. The service must reuse the existing
 docker compose -f docker-compose.bluegreen.local-test.example.yml up -d --no-deps --no-build web_green_test
 ```
 
+For the future proxy validation, use the gated runner with hold-open instead
+of the default auto-cleanup path:
+
+```powershell
+# NOT RUN IN THIS TASK
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_inactive_startup.ps1 `
+  -ExecuteInactiveStartup `
+  -HoldOpenForProxyValidation `
+  -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC `
+  -AllowContainerAction `
+  -ComposeFile .\docker-compose.bluegreen.local-test.example.yml `
+  -InactiveService web_green_test `
+  -TestPort 18080
+```
+
 ### Check `/healthz/` On Inactive Color
 
 ```powershell
@@ -206,6 +256,10 @@ current `web`, or change active routing.
 docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test
 ```
 
+After hold-open proxy validation, this cleanup is mandatory. It must stop only
+`web_green_test`; do not stop current `web`, do not use port `8000`, do not
+switch traffic, and do not change Cloudflare/domain routing.
+
 ## Safety Gates Before Future Execution
 
 - Exact approval phrase is required:
@@ -221,7 +275,11 @@ docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green
 - Inactive service must not bind host port `8000`.
 - Inactive service must not be named `web`.
 - The runner blocks `-TestPort 8000` and `-InactiveService web`.
+- Hold-open mode is required before local/test proxy routing validation and is
+  local/test only.
 - Cleanup command must be prepared before startup.
+- Cleanup after hold-open proxy validation is mandatory and must stop only
+  `web_green_test`.
 - Current `web` must remain untouched.
 - The inactive service name, compose file, and test port must be explicitly
   named in the future task.
@@ -248,6 +306,8 @@ external API writes as part of failure handling.
 - Local-test Compose example: READY as a non-active local-only example.
 - Execution-gated runner: READY for dry-run / no-action status checks and for a
   future local-only startup path only after all gates are supplied.
+- Hold-open mode: READY behind the same gates for local/test proxy validation
+  only; production remains NO-GO.
 - Local inactive startup: NO-GO in this task. Future execution requires the
   exact approval phrase, `-AllowContainerAction`, a non-`8000` test port, an
   inactive service other than `web`, the reviewed local-test compose file, and
