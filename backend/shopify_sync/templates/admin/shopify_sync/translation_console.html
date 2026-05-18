@@ -214,6 +214,73 @@
     font-weight: 600;
     font-size: 12px;
   }
+  .tw-intro {
+    display: grid;
+    gap: 16px;
+    margin-bottom: 16px;
+    border: 1px solid #cbd5e1;
+    border-left: 4px solid #2563eb;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #111827;
+    padding: 20px;
+  }
+  .tw-intro-heading {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .tw-intro h1 {
+    margin-bottom: 6px;
+    font-size: 28px;
+  }
+  .tw-intro-lede {
+    max-width: 880px;
+    color: #1f2937;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+  .tw-intro-steps {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 10px;
+  }
+  .tw-intro-step {
+    min-width: 0;
+    border: 1px solid #dbe1e8;
+    border-radius: 8px;
+    background: #f8fbff;
+    color: #111827;
+    padding: 12px;
+  }
+  .tw-intro-step-number {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+    border-radius: 999px;
+    background: #1d4ed8;
+    color: #ffffff;
+    font-weight: 800;
+  }
+  .tw-intro-step-title {
+    color: #111827;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .tw-permission-note {
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    background: #f0fdf4;
+    color: #14532d;
+    font-size: 15px;
+    font-weight: 700;
+    padding: 11px 12px;
+  }
   .tw-workspace-header {
     position: static;
     padding: 6px 8px;
@@ -235,13 +302,16 @@
     padding: 8px;
   }
   .tw-top-product-picker .tw-picker-controls {
-    grid-template-columns: minmax(240px, 1fr) auto auto;
-    gap: 5px;
+    grid-template-columns: minmax(380px, 1fr) auto auto;
+    gap: 8px;
   }
   .tw-top-product-picker input[type="search"],
   .tw-top-product-picker .button {
-    min-height: 32px;
-    padding: 5px 9px;
+    min-height: 38px;
+    padding: 7px 10px;
+  }
+  .tw-top-product-picker input[type="search"] {
+    font-size: 15px;
   }
   .tw-top-product-picker .tw-product-selected {
     min-height: 44px;
@@ -901,6 +971,9 @@
     .tw-simple-action-grid {
       grid-template-columns: 1fr;
     }
+    .tw-intro-steps {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
   .tw-hero-header,
   .tw-mode-bar,
@@ -1269,6 +1342,12 @@
     .tw-product-results {
       width: 100%;
       max-height: 390px;
+    }
+    .tw-intro {
+      padding: 16px;
+    }
+    .tw-intro-steps {
+      grid-template-columns: 1fr;
     }
   }
   .tw-draft-card {
@@ -2476,10 +2555,10 @@
   {% if ui_mode == "workbench" %}
   <div class="tw-hero">
     <div class="tw-hero-header">
-      <h1>Translation Workspace</h1>
-      <span class="tw-safety">Preview only</span>
+      <h1>Shopify 翻译工作台</h1>
+      <span class="tw-safety">Preview and review first</span>
     </div>
-    <p>Select one product, translate all supported languages, then review the original and translated content. Shopify has not been updated yet.</p>
+    <p>Search a Shopify product, preview translations, review safe fields, then ask an admin to update Shopify.</p>
   </div>
   {% endif %}
 
@@ -2500,7 +2579,7 @@
   {% if ui_mode == "workbench" %}
     <div class="tw-mode-bar">
       <div class="tw-tabs">
-        <a class="tw-tab" href="?ui_mode=editor&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Translation Workspace</a>
+        <a class="tw-tab" href="?ui_mode=editor&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}&editor_filter={{ editor_filter|urlencode }}&editor_search={{ editor_search_query|urlencode }}">Shopify 翻译工作台</a>
         <a class="tw-tab is-active" href="?ui_mode=workbench&product_search={{ product_search_text|urlencode }}&product_gid={{ selected_product_gid|urlencode }}&locale={{ selected_locale|urlencode }}">Advanced workflow</a>
       </div>
       <span class="tw-muted">Technical translation workflow</span>
@@ -2806,6 +2885,38 @@
   </div>
 
   {% elif ui_mode == "editor" %}
+  <section class="tw-intro" aria-labelledby="tw-intro-title">
+    <div class="tw-intro-heading">
+      <div>
+        <h1 id="tw-intro-title">Shopify 翻译工作台</h1>
+        <p class="tw-intro-lede">Search a Shopify product, preview translations, review safe fields, then ask an admin to update Shopify.</p>
+      </div>
+      <span class="tw-safety">Preview and review first</span>
+    </div>
+    {% if not selected_product_gid %}
+      <div class="tw-intro-steps" aria-label="Translation workspace steps">
+        <div class="tw-intro-step">
+          <span class="tw-intro-step-number">1</span>
+          <div class="tw-intro-step-title">Search product</div>
+        </div>
+        <div class="tw-intro-step">
+          <span class="tw-intro-step-number">2</span>
+          <div class="tw-intro-step-title">Preview translation</div>
+        </div>
+        <div class="tw-intro-step">
+          <span class="tw-intro-step-number">3</span>
+          <div class="tw-intro-step-title">Review fields</div>
+        </div>
+        <div class="tw-intro-step">
+          <span class="tw-intro-step-number">4</span>
+          <div class="tw-intro-step-title">Admin updates Shopify</div>
+        </div>
+      </div>
+    {% endif %}
+    <div class="tw-permission-note">
+      Staff can preview/review/save local edits. Admins can update Shopify.
+    </div>
+  </section>
   <div class="module tw-workspace-header tw-compact-topbar" data-workspace-header>
     <div class="tw-topbar">
       <form method="get" action="{% url 'shopify_translation_console' %}" class="tw-product-picker tw-top-product-picker" data-product-picker data-product-search-url="{% url 'shopify_translation_console_product_search' %}" data-selected-product-gid="{{ selected_product_gid }}">

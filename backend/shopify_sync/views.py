@@ -467,6 +467,9 @@ TRANSLATION_WORKSPACE_REVIEW_ONLY_MESSAGE = (
 TRANSLATION_WORKSPACE_UPDATE_PERMISSION_MESSAGE = (
     "Only admins can update Shopify translations."
 )
+TRANSLATION_CONSOLE_ADMIN_URL = "/admin/shopify_sync/translation-console/"
+TRANSLATION_CONSOLE_ADMIN_LABEL = "Shopify 翻译工作台"
+TRANSLATION_CONSOLE_ADMIN_OBJECT_NAME = "TranslationWorkspace"
 TRANSLATION_WORKSPACE_ADMIN_ONLY_WRITE_ACTIONS = {
     ALL_LANGUAGES_REAL_WRITE_ACTION_NAME,
     REAL_WRITE_ACTION_NAME,
@@ -1136,6 +1139,88 @@ def _user_can_update_shopify_translations(request):
         return groups.filter(name__in=TRANSLATION_WORKSPACE_ADMIN_GROUPS).exists()
     except (AttributeError, TypeError, ValueError):
         return False
+
+
+def _user_can_access_translation_console_admin(request):
+    user = getattr(request, "user", None)
+    return bool(
+        user
+        and getattr(user, "is_authenticated", False)
+        and getattr(user, "is_active", False)
+        and getattr(user, "is_staff", False)
+    )
+
+
+def _translation_console_admin_model_entry():
+    return {
+        "name": TRANSLATION_CONSOLE_ADMIN_LABEL,
+        "object_name": TRANSLATION_CONSOLE_ADMIN_OBJECT_NAME,
+        "perms": {"view": True, "add": False, "change": False, "delete": False},
+        "admin_url": TRANSLATION_CONSOLE_ADMIN_URL,
+        "add_url": None,
+        "view_only": True,
+    }
+
+
+def _available_apps_with_translation_console_link(request, app_list, *, app_label=None):
+    if app_label not in (None, "shopify_sync"):
+        return app_list
+    if not _user_can_access_translation_console_admin(request):
+        return app_list
+
+    link_entry = _translation_console_admin_model_entry()
+    updated_apps = []
+    shopify_app_found = False
+
+    for app in app_list:
+        app_copy = {**app}
+        models = list(app_copy.get("models") or [])
+        if app_copy.get("app_label") == "shopify_sync":
+            shopify_app_found = True
+            has_link = any(
+                model.get("admin_url") == TRANSLATION_CONSOLE_ADMIN_URL
+                or model.get("object_name") == TRANSLATION_CONSOLE_ADMIN_OBJECT_NAME
+                for model in models
+            )
+            if not has_link:
+                models.insert(0, link_entry)
+            app_copy["models"] = models
+        updated_apps.append(app_copy)
+
+    if not shopify_app_found:
+        updated_apps.append(
+            {
+                "name": "Shopify Sync",
+                "app_label": "shopify_sync",
+                "app_url": "/admin/shopify_sync/",
+                "has_module_perms": True,
+                "models": [link_entry],
+            }
+        )
+
+    return updated_apps
+
+
+def _install_translation_console_admin_navigation():
+    if getattr(admin.site, "_translation_console_admin_navigation_installed", False):
+        return
+
+    original_get_app_list = admin.site.get_app_list
+
+    def get_app_list_with_translation_console(request, app_label=None):
+        app_list = original_get_app_list(request, app_label)
+        return _available_apps_with_translation_console_link(
+            request,
+            app_list,
+            app_label=app_label,
+        )
+
+    admin.site.get_app_list = get_app_list_with_translation_console
+    admin.site._translation_console_admin_navigation_installed = True
+    admin.site._translation_console_original_get_app_list = original_get_app_list
+
+
+_install_translation_console_admin_navigation()
 
 
 def _translation_workspace_admin_only_update_result(action: str):
@@ -2842,7 +2927,8 @@ def translation_console(request):
         request,
         "admin/shopify_sync/translation_console.html",
         {
-            "title": "Shopify Product Translation Console",
+            **admin.site.each_context(request),
+            "title": TRANSLATION_CONSOLE_ADMIN_LABEL,
             "search_text": search_text,
             "product_search_text": product_search_text,
             "product_selector": product_selector,
