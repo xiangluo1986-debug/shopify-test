@@ -17,6 +17,12 @@ docker-compose.bluegreen.local-test.example.yml
 It is marked EXAMPLE ONLY, NOT ACTIVE, NOT USED BY NORMAL `docker compose`
 COMMANDS, LOCAL TEST ONLY, and MUST NOT BIND `8000`.
 
+The local-test Compose example intentionally reuses the existing
+`aftersales-web` image for `web_green_test`. It does not declare a build for
+the inactive service because the gated startup runner uses `--no-build`. If the
+`aftersales-web` image is missing, stop and run a separate explicit image
+build/preparation task before any local inactive startup attempt.
+
 The future test must use no production traffic, must not take over host port
 `8000`, and must not restart or replace the current `web` service.
 Current project commands remain unchanged; normal `docker compose` commands do
@@ -62,10 +68,11 @@ always blocked because `web` is the current active service name. The active
 Production remains NO-GO.
 
 The future executable path is local-only and test-only. It validates the
-local-test compose file, starts only the inactive test service with `--no-deps`
-and `--no-build`, checks `/healthz/` on the non-`8000` test port, prints logs
-for that inactive service if health fails, and stops only that inactive service
-during cleanup. This task must not run that executable path.
+local-test compose file, reuses the existing `aftersales-web` image, starts
+only the inactive test service with `--no-deps` and `--no-build`, checks
+`/healthz/` on the non-`8000` test port, prints logs for that inactive service
+if health fails, and stops only that inactive service during cleanup. This task
+must not run that executable path.
 
 ## Proposed Inactive Color
 
@@ -73,6 +80,8 @@ during cleanup. This task must not run that executable path.
 - Default service concept: `web_green_test`.
 - Default local-test compose file:
   `docker-compose.bluegreen.local-test.example.yml`.
+- Default image strategy: reuse existing image `aftersales-web`; do not build
+  during local inactive startup.
 - Use a non-production local test port such as `18080` or `18081`.
 - Do not bind host port `8000`.
 - Do not replace, rename, stop, restart, or scale the current `web` service.
@@ -128,6 +137,10 @@ config:
 docker compose -f docker-compose.bluegreen.local-test.example.yml config --quiet
 ```
 
+The config must show `web_green_test` using image `aftersales-web`. If that
+image is not present locally, run a separate reviewed image preparation task
+first. Do not add a build step to the inactive startup runner.
+
 If proxy syntax is included in a future local-only test file, validate it
 without changing active routing:
 
@@ -139,7 +152,8 @@ docker run --rm -v "${PWD}\nginx\<inactive-test-proxy-file>:/etc/nginx/conf.d/de
 ### Start Inactive Color On Test-Only Port
 
 The future startup must target one inactive test service and one non-`8000`
-host port, for example `18080` or `18081`.
+host port, for example `18080` or `18081`. The service must reuse the existing
+`aftersales-web` image and the startup command must keep `--no-build`.
 
 ```powershell
 # NOT RUN IN THIS TASK
@@ -186,6 +200,8 @@ docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green
 - Current `/healthz/` on port `8000` must pass before inactive startup.
 - Git status must be reviewed.
 - Active `docker-compose.yml` must remain unchanged.
+- Existing image `aftersales-web` must be present before startup, or a separate
+  explicit image build/preparation task must be run first.
 - Startup compose file must be the reviewed local-test example, not the active
   `docker-compose.yml`.
 - Inactive service must not bind host port `8000`.
@@ -220,7 +236,8 @@ external API writes as part of failure handling.
   future local-only startup path only after all gates are supplied.
 - Local inactive startup: NO-GO in this task. Future execution requires the
   exact approval phrase, `-AllowContainerAction`, a non-`8000` test port, an
-  inactive service other than `web`, and the reviewed local-test compose file.
+  inactive service other than `web`, the reviewed local-test compose file, and
+  an existing `aftersales-web` image prepared by a separate task if needed.
 - Real inactive startup execution: implemented behind gates but not run in this
   task.
 - Next phase: decide whether to run the gated local startup path and capture the

@@ -44,6 +44,8 @@ Related non-active drafts:
   `-InactiveService web`, blocks active `docker-compose.yml`, and blocks correct
   Ack without `-AllowContainerAction`. Required phrase:
   `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
+  The local inactive service reuses the existing `aftersales-web` image; the
+  startup runner intentionally uses `--no-build`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Production apply: NO-GO.
 - Runtime behavior changed by this checklist: no.
@@ -67,7 +69,10 @@ Related non-active drafts:
   has been reviewed before any inactive-color startup.
 - The local-test inactive Compose example
   [docker-compose.bluegreen.local-test.example.yml](../docker-compose.bluegreen.local-test.example.yml)
-  has been reviewed and confirmed not to bind host port `8000`.
+  has been reviewed and confirmed not to bind host port `8000`, not to declare
+  a build for `web_green_test`, and to reuse image `aftersales-web`.
+- The existing `aftersales-web` image is present locally, or a separate
+  explicit image build/preparation task has been completed first.
 - The future local simulation approval phrase is present:
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC`.
 - The future inactive service is confirmed to bind only a non-`8000` local test
@@ -197,6 +202,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_i
 ```powershell
 docker compose -f docker-compose.bluegreen.local-test.example.yml config
 ```
+
+- Confirm the local-test inactive Compose example uses the existing image
+  `aftersales-web` and does not require a build. If the image is missing, run a
+  separate reviewed image preparation task first; do not add build behavior to
+  the inactive startup script.
 
 - Confirm inactive startup execution requests remain blocked unless the exact
   approval gate is supplied:

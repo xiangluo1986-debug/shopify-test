@@ -215,6 +215,8 @@ function Show-FutureCommandPlan {
                 "# Required phrase: $InactiveStartupApprovalPhrase",
                 "# Future requirement: -AllowContainerAction is required before any container action.",
                 "# Future requirement: use docker-compose.bluegreen.local-test.example.yml.",
+                "# Future requirement: reuse existing image aftersales-web; do not build in the inactive startup runner.",
+                "# Future requirement: if aftersales-web is missing, run a separate explicit image build/preparation task first.",
                 "# Future requirement: use one inactive test service only on a non-8000 port such as 18080 or 18081.",
                 "# Future requirement: inactive service must not be web.",
                 ".\scripts\blue_green_local_inactive_startup.ps1 -ExecuteInactiveStartup -Ack <approval-phrase> -AllowContainerAction -TestPort 18080 -InactiveService web_green_test"

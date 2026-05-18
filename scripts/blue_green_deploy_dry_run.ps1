@@ -314,6 +314,8 @@ function Show-FuturePlan {
     Write-Host "Required inactive startup approval phrase: $InactiveStartupApprovalPhrase"
     Write-Host "Future real local inactive startup also requires -AllowContainerAction."
     Write-Host "Local-test compose example: docker-compose.bluegreen.local-test.example.yml."
+    Write-Host "Local inactive startup reuses the existing aftersales-web image and intentionally does not build images."
+    Write-Host "If aftersales-web is missing, run a separate explicit image build/preparation task before startup."
     Write-Host "Any future inactive startup must use one inactive test service on a non-8000 local port and leave current web untouched."
     Write-Host "The future inactive service must not be the current active service name web."
     Write-Host "Production remains NO-GO."

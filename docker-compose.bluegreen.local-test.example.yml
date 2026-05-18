@@ -14,11 +14,14 @@
 # The local inactive startup runner sets BLUE_GREEN_LOCAL_TEST_PORT from its
 # reviewed -TestPort parameter. The runner blocks port 8000 before Docker is
 # called. With no override, the host test port is 18080.
+#
+# The web_green_test service reuses the existing active web image instead of
+# declaring a build. The runner intentionally uses --no-build; if aftersales-web
+# is missing, prepare that image in a separate explicit task before startup.
 name: aftersales-bluegreen-local-test-example
 
 x-local-django-web: &local-django-web
-  build:
-    context: ./backend
+  image: aftersales-web
   environment:
     TZ: Asia/Shanghai
     DJANGO_DEBUG: "0"

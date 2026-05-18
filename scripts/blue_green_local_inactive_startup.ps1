@@ -17,6 +17,7 @@ $ErrorActionPreference = "Stop"
 $RequiredApprovalPhrase = "I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC"
 $CurrentActiveServiceName = "web"
 $ForbiddenHostPort = 8000
+$LocalTestWebImage = "aftersales-web"
 
 function Write-Step {
     param([string]$Message)
@@ -307,6 +308,8 @@ function Show-SafeConfigNote {
     Write-Step "Example Compose config validation"
 
     Write-Host "No Docker command is run unless -ExecuteInactiveStartup, the exact -Ack, and -AllowContainerAction are all supplied."
+    Write-Host "The local-test Compose file reuses the existing '$LocalTestWebImage' image and does not declare a build for the inactive service."
+    Write-Host "The startup path intentionally uses --no-build; if the image is missing, stop and run a separate explicit image preparation task first."
     Write-Host "A future execution path validates the local-test compose file before any startup:"
     Write-Host "  docker compose -f $ComposeFile config --quiet"
     Write-Host "The separate validation command requested for this task is config-only and does not start containers:"
@@ -333,6 +336,7 @@ function Show-BlockedStartupPlan {
         "Review git status and local readiness files.",
         "Confirm active docker-compose.yml remains unchanged.",
         "Confirm current web service still owns host port 8000.",
+        "Confirm the existing $LocalTestWebImage image is present for the local inactive service.",
         "Confirm inactive service is not web.",
         "Confirm inactive test port is not 8000.",
         "Validate the local-test Compose file before startup.",
@@ -359,6 +363,7 @@ function Show-BlockedStartupPlan {
     Write-Host ""
     Write-Host "Future executable path:"
     Write-Host "  - validate compose config with --quiet"
+    Write-Host "  - reuse existing image $LocalTestWebImage without building"
     Write-Host "  - docker compose -f $ComposeFile up -d --no-deps --no-build $InactiveService"
     Write-Host "  - Invoke-WebRequest http://127.0.0.1:$TestPort/healthz/"
     Write-Host "  - docker compose -f $ComposeFile logs --tail=100 $InactiveService only if health fails"
@@ -489,6 +494,7 @@ function Invoke-InactiveStartup {
 
         Write-Step "Start inactive test service only"
         Write-Host "Starting only inactive service '$InactiveService' from '$ComposeFile'."
+        Write-Host "Reusing existing image '$LocalTestWebImage'; no build is requested by this runner."
         Write-Host "Command uses --no-deps and --no-build."
         $startupAttempted = $true
         $start = Invoke-CaptureCommand -Command @("docker", "compose", "-f", $ComposeFile, "up", "-d", "--no-deps", "--no-build", $InactiveService)

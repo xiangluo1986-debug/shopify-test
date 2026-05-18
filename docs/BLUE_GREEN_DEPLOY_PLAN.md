@@ -50,7 +50,11 @@ phrase
 `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC` for any
 execution request, and requires `-AllowContainerAction` before any future local
 container action. The default compose path is the non-active local-test example
-`docker-compose.bluegreen.local-test.example.yml`.
+`docker-compose.bluegreen.local-test.example.yml`. That local-test example
+reuses the existing `aftersales-web` image for `web_green_test` and does not
+declare a build for the inactive service because the runner intentionally uses
+`--no-build`. If the image is missing, run a separate explicit image
+build/preparation task before attempting local inactive startup.
 Production remains NO-GO.
 
 ## Current Architecture
@@ -244,7 +248,10 @@ dry-run only, and the required inactive-startup phrase is
 `I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC`.
 `TestPort` must not be `8000`, `InactiveService` must not be `web`, the active
 `docker-compose.yml` must not be used for this local startup path, and correct
-Ack alone is blocked unless `-AllowContainerAction` is present.
+Ack alone is blocked unless `-AllowContainerAction` is present. The local-test
+inactive service reuses image `aftersales-web`; the startup path does not build
+images. If that image is not present, image preparation must be handled by a
+separate reviewed task first.
 
 Validate the proxy and color services locally or in staging:
 
@@ -376,7 +383,8 @@ Review the dry-run output from
 The recommended next separate task is to implement an actual local-only
 inactive-color startup run using the gated path only after explicit approval of
 the exact compose file, inactive service, non-`8000` test port, health check,
-`-AllowContainerAction`, and stop-only cleanup command. Production should remain
-NO-GO until local or staging results are reviewed and a separate production task
-approves route, port ownership, proxy, scheduler, migration, static/media,
-rollback, and observation details.
+`-AllowContainerAction`, existing `aftersales-web` image readiness, and
+stop-only cleanup command. Production should remain NO-GO until local or
+staging results are reviewed and a separate production task approves route,
+port ownership, proxy, scheduler, migration, static/media, rollback, and
+observation details.
