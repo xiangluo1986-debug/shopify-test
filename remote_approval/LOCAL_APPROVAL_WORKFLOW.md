@@ -192,6 +192,13 @@ runner passes source audit data into Django shell as a JSON string and parses it
 with `json.loads(...)`, so generated Python code does not contain raw JSON
 `true` / `false` literals. The approval gate is unchanged.
 
+Phase 5.29C tightens post-send tag-write verification. A Shopify readback is
+treated as written only when `1: trustpilot` is present and all
+review-request aliases are absent. After that verified readback, the runner
+updates local `ShopifyOrder.shopify_tags` from Shopify so the next candidate
+scan no longer keeps the order in Sent / Tag pending because of stale local
+tags.
+
 Phase 5.28D makes per-order fulfillment-order details opt-in for Review Request
 sync. The default and recommended path skips those detail reads so the local
 candidate scan can use Shopify order tags, `fulfillment_status`, notes, and

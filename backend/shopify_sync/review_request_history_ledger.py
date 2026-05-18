@@ -9,6 +9,7 @@ DEFAULT_HISTORY_LIMIT = 50
 HISTORY_LIMIT_OPTIONS = (25, 50, 100)
 MAX_REPORT_BYTES = 4_000_000
 MAX_EVENTS = 700
+TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
 
 HISTORY_REPORT_DEFINITIONS = (
     {
@@ -744,19 +745,7 @@ def _event_from_mapping(report, item, event_type, source_section):
                 "real_gmail_draft_create_executed",
             ),
         ),
-        "shopify_tag_written": _source_bool(
-            item,
-            data,
-            (
-                "shopify_tag_written",
-                "shopify_tag_write_confirmed",
-                "source_shopify_tag_write_confirmed",
-            ),
-        )
-        or _first_text(item, ("tag_write_status", "auto_tag_write_status"))
-        == "trustpilot_tag_written_and_review_request_removed"
-        or _first_text(data, ("tag_write_status", "auto_tag_write_status"))
-        == "trustpilot_tag_written_and_review_request_removed",
+        "shopify_tag_written": _shopify_tag_written_from_sources(item, data),
         "partial_draft_id": partial_draft_id,
         "partial_message_id": partial_message_id,
         "next_candidate_order_name": _safe_text(
@@ -1015,6 +1004,62 @@ def _source_bool(item, data, keys):
             if key in mapping:
                 return mapping.get(key) is True
     return None
+
+
+def _shopify_tag_written_from_sources(item, data):
+    for mapping in (item, data):
+        if _shopify_tag_write_confirmed_mapping(mapping):
+            return True
+    return False
+
+
+def _shopify_tag_write_confirmed_mapping(mapping):
+    if not isinstance(mapping, dict):
+        return False
+    status = _first_text(mapping, ("tag_write_status", "auto_tag_write_status"))
+    if status == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS:
+        return _tag_write_readback_clean_mapping(mapping)
+    if status.startswith("blocked"):
+        return False
+    explicit_confirmed = (
+        mapping.get("shopify_tag_written") is True
+        or mapping.get("shopify_tag_write_confirmed") is True
+        or mapping.get("source_shopify_tag_write_confirmed") is True
+    )
+    if not explicit_confirmed:
+        return False
+    if _mapping_has_tag_write_readback_fields(mapping):
+        return _tag_write_readback_clean_mapping(mapping)
+    return True
+
+
+def _mapping_has_tag_write_readback_fields(mapping):
+    return any(
+        key in mapping
+        for key in (
+            "readback_verified",
+            "tag_write_readback_verified",
+            "all_review_request_aliases_removed",
+            "trustpilot_tag_present_after",
+            "review_request_tag_present_after",
+            "typo_review_request_tag_present_after",
+        )
+    )
+
+
+def _tag_write_readback_clean_mapping(mapping):
+    if mapping.get("review_request_tag_present_after") is True:
+        return False
+    if mapping.get("typo_review_request_tag_present_after") is True:
+        return False
+    if mapping.get("all_review_request_aliases_removed") is False:
+        return False
+    if mapping.get("trustpilot_tag_present_after") is False:
+        return False
+    readback_value = mapping.get("readback_verified")
+    if readback_value is None:
+        readback_value = mapping.get("tag_write_readback_verified")
+    return readback_value is not False
 
 
 def _bool_or_none(value):

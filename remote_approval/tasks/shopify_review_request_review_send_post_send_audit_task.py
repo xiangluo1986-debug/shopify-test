@@ -201,13 +201,7 @@ def _build_payload(source_report: dict, source_error: str, source_html: str) -> 
     gmail_api_call_confirmed = source_report.get("gmail_api_call_performed") is True
     gmail_messages_send_confirmed_false = source_report.get("gmail_messages_send_called") is False
     shopify_write_confirmed = source_report.get("shopify_write_performed") is True
-    shopify_tag_write_confirmed = (
-        source_report.get("shopify_tag_write_performed") is True
-        or source_report.get("shopify_tag_write_confirmed") is True
-        or source_report.get("shopify_tag_written") is True
-        or source_report.get("auto_tag_write_status") == "trustpilot_tag_written_and_review_request_removed"
-        or source_report.get("tag_write_status") == "trustpilot_tag_written_and_review_request_removed"
-    )
+    shopify_tag_write_confirmed = _shopify_tag_write_confirmed_from_source(source_report)
     shopify_write_confirmed_false = not shopify_write_confirmed
     shopify_tag_write_confirmed_false = not shopify_tag_write_confirmed
     customer_level_sent_record_available = bool(selected_order and email_sent_confirmed)
@@ -280,6 +274,56 @@ def _build_payload(source_report: dict, source_error: str, source_html: str) -> 
             sent_count,
         ),
     }
+
+
+def _shopify_tag_write_confirmed_from_source(source_report: dict) -> bool:
+    if not isinstance(source_report, dict):
+        return False
+    success_status = "trustpilot_tag_written_and_review_request_removed"
+    status = _safe_text(source_report.get("tag_write_status") or source_report.get("auto_tag_write_status"))
+    if status == success_status:
+        return _tag_write_readback_clean_from_source(source_report)
+    if status.startswith("blocked"):
+        return False
+    explicit_confirmed = (
+        source_report.get("shopify_tag_write_confirmed") is True
+        or source_report.get("shopify_tag_written") is True
+        or source_report.get("source_shopify_tag_write_confirmed") is True
+    )
+    if not explicit_confirmed:
+        return False
+    if _source_has_tag_write_readback_fields(source_report):
+        return _tag_write_readback_clean_from_source(source_report)
+    return True
+
+
+def _source_has_tag_write_readback_fields(source_report: dict) -> bool:
+    return any(
+        key in source_report
+        for key in (
+            "readback_verified",
+            "tag_write_readback_verified",
+            "all_review_request_aliases_removed",
+            "trustpilot_tag_present_after",
+            "review_request_tag_present_after",
+            "typo_review_request_tag_present_after",
+        )
+    )
+
+
+def _tag_write_readback_clean_from_source(source_report: dict) -> bool:
+    if source_report.get("review_request_tag_present_after") is True:
+        return False
+    if source_report.get("typo_review_request_tag_present_after") is True:
+        return False
+    if source_report.get("all_review_request_aliases_removed") is False:
+        return False
+    if source_report.get("trustpilot_tag_present_after") is False:
+        return False
+    readback_value = source_report.get("readback_verified")
+    if readback_value is None:
+        readback_value = source_report.get("tag_write_readback_verified")
+    return readback_value is not False
 
 
 def _blocking_conditions(

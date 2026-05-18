@@ -226,6 +226,10 @@ Phase 0.2 automation decision:
   source audit data is passed as a JSON string and parsed with `json.loads(...)`
   inside Django shell, so generated code does not inject JSON `true` / `false`
   literals into Python.
+- [x] Phase 5.29C tightens post-send tag-write verification: readback is
+  verified only when `1: trustpilot` is present and every review-request alias
+  is absent, and the local `ShopifyOrder.shopify_tags` cache is updated from
+  the verified Shopify readback before the order is treated as Tag written.
 
 ### Shopify Admin API Tag Permissions
 

@@ -46,6 +46,7 @@ TRUSTPILOT_TAG_ALIASES = (
 EBAY_BLOCK_REASON = "eBay order — Trustpilot email not allowed."
 CANONICAL_TRUSTPILOT_TAG = "1: trustpilot"
 TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
+TRUSTPILOT_TAG_WRITE_ALIAS_BLOCKED_STATUS = "blocked_review_request_tag_still_present"
 SHOPIFY_TRUSTPILOT_TAG_WRITE_SHOP_DOMAIN = "kidstoylover.myshopify.com"
 SHOPIFY_TRUSTPILOT_TAG_WRITE_API_VERSION = "2026-01"
 MANUAL_CONFIRMED_ORDER_EVIDENCE = {
@@ -1034,7 +1035,9 @@ def _apply_auto_tag_write_result_to_review_send(result, tag_write_result):
     result["trustpilot_tag_added"] = tag_write_result.get("trustpilot_tag_added") is True
     result["review_request_tag_removed"] = tag_write_result.get("review_request_tag_removed") is True
     result["typo_review_request_tag_removed"] = tag_write_result.get("typo_review_request_tag_removed") is True
+    result["all_review_request_aliases_removed"] = tag_write_result.get("all_review_request_aliases_removed") is True
     result["tag_write_readback_verified"] = tag_write_result.get("readback_verified") is True
+    result["local_shopify_tags_updated"] = tag_write_result.get("local_shopify_tags_updated") is True
     result["shopify_tag_write_confirmed"] = status == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
     result["shopify_tag_written"] = result["shopify_tag_write_confirmed"]
     if result["shopify_tag_write_confirmed"]:
@@ -2930,13 +2933,7 @@ def _local_review_send_record_from_payload(payload, source_label="", source_path
     )
     if not order_name:
         return {}
-    shopify_tag_written = (
-        payload.get("shopify_tag_write_confirmed") is True
-        or payload.get("shopify_tag_written") is True
-        or payload.get("source_shopify_tag_write_confirmed") is True
-        or payload.get("auto_tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
-        or payload.get("tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
-    )
+    shopify_tag_written = _shopify_tag_write_confirmed_from_payload(payload)
     masked = (
         mask_email(payload.get("selected_masked_email"))
         or mask_email(payload.get("selected_customer"))
@@ -3006,6 +3003,58 @@ def _dedupe_local_review_send_records(records):
         if record.get("shopify_tag_written") is True and existing.get("shopify_tag_written") is not True:
             result_by_key[key] = record
     return [result_by_key[key] for key in order_keys]
+
+
+def _shopify_tag_write_confirmed_from_payload(payload):
+    if not isinstance(payload, dict):
+        return False
+    status = _safe_text(
+        payload.get("tag_write_status") or payload.get("auto_tag_write_status"),
+        max_length=120,
+    )
+    if status == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS:
+        return _tag_write_readback_clean_from_payload(payload)
+    if status.startswith("blocked"):
+        return False
+    explicit_confirmed = (
+        payload.get("shopify_tag_write_confirmed") is True
+        or payload.get("shopify_tag_written") is True
+        or payload.get("source_shopify_tag_write_confirmed") is True
+    )
+    if not explicit_confirmed:
+        return False
+    if _payload_has_tag_write_readback_fields(payload):
+        return _tag_write_readback_clean_from_payload(payload)
+    return True
+
+
+def _payload_has_tag_write_readback_fields(payload):
+    return any(
+        key in payload
+        for key in (
+            "readback_verified",
+            "tag_write_readback_verified",
+            "all_review_request_aliases_removed",
+            "trustpilot_tag_present_after",
+            "review_request_tag_present_after",
+            "typo_review_request_tag_present_after",
+        )
+    )
+
+
+def _tag_write_readback_clean_from_payload(payload):
+    if payload.get("review_request_tag_present_after") is True:
+        return False
+    if payload.get("typo_review_request_tag_present_after") is True:
+        return False
+    if payload.get("all_review_request_aliases_removed") is False:
+        return False
+    if payload.get("trustpilot_tag_present_after") is False:
+        return False
+    readback_value = payload.get("readback_verified")
+    if readback_value is None:
+        readback_value = payload.get("tag_write_readback_verified")
+    return readback_value is not False
 
 
 def _ali_reviews_status(history_focus):
@@ -5697,13 +5746,7 @@ def _review_send_post_send_audit_payload(
     matched_ebay_tag_value = _safe_text(source_report.get("matched_ebay_tag_value"), max_length=120)
     should_move_to_already_sent = bool(email_sent_confirmed and sent_count == 1)
     shopify_write_confirmed = source_report.get("shopify_write_performed") is True
-    shopify_tag_write_confirmed = (
-        source_report.get("shopify_tag_write_performed") is True
-        or source_report.get("shopify_tag_write_confirmed") is True
-        or source_report.get("shopify_tag_written") is True
-        or source_report.get("auto_tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
-        or source_report.get("tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
-    )
+    shopify_tag_write_confirmed = _shopify_tag_write_confirmed_from_payload(source_report)
     ready_for_shopify_tag_write_next_phase = (
         should_move_to_already_sent
         and not ebay_tag_detected
@@ -5914,6 +5957,9 @@ def _base_post_send_tag_write_result(
         "removed_tag_count": 0,
         "tag_count_before": 0,
         "tag_count_after": 0,
+        "tags_before": [],
+        "tags_to_write": [],
+        "tags_after_readback": [],
         "matched_review_request_tags_to_remove": [],
         "removed_tag_values": [],
         "trustpilot_tag_present_before": False,
@@ -5921,6 +5967,7 @@ def _base_post_send_tag_write_result(
         "trustpilot_tag_added": False,
         "review_request_tag_removed": False,
         "typo_review_request_tag_removed": False,
+        "all_review_request_aliases_removed": False,
         "review_request_tag_present_after": False,
         "typo_review_request_tag_present_after": False,
         "ebay_tag_detected_from_shopify": False,
@@ -5930,6 +5977,9 @@ def _base_post_send_tag_write_result(
         "shopify_installation_found": False,
         "shopify_credentials_found": False,
         "local_order_found": False,
+        "local_shopify_tags_updated": False,
+        "local_tags_after_update": [],
+        "local_shopify_tags_update_error_sanitized": "",
         "shopify_tags_add_user_errors": [],
         "shopify_tags_remove_user_errors": [],
         "shopify_tag_write_error_sanitized": "",
@@ -6099,6 +6149,8 @@ def _execute_trustpilot_post_send_shopify_tag_write(order_name):
     order_query = Q(order_name__in=[result["selected_order"], raw_order, "#" + raw_order]) | Q(
         order_number__in=[raw_order]
     )
+    if raw_order.isdigit():
+        order_query |= Q(shopify_order_id=int(raw_order))
     order = (
         ShopifyOrder.objects.filter(installation=installation)
         .filter(order_query)
@@ -6191,9 +6243,10 @@ mutation TrustpilotPostSendTagsRemove($id: ID!, $tags: [String!]!) {
             result["shopify_tag_write_error_sanitized"] = "Shopify readback returned an unexpected order name."
             return result
 
-        current_tags = [str(tag) for tag in (node.get("tags") or [])]
+        current_tags = _dedupe_text(str(tag) for tag in (node.get("tags") or []))
+        result["tags_before"] = current_tags
         result["tag_count_before"] = len(current_tags)
-        result["trustpilot_tag_present_before"] = CANONICAL_TRUSTPILOT_TAG in current_tags
+        result["trustpilot_tag_present_before"] = _has_canonical_trustpilot_tag(current_tags)
         ebay_matches = _matched_ebay_tags(current_tags)
         if ebay_matches:
             result["tag_write_status"] = "blocked_ebay_order"
@@ -6204,6 +6257,7 @@ mutation TrustpilotPostSendTagsRemove($id: ID!, $tags: [String!]!) {
 
         remove_tags = _matched_review_request_tags(current_tags)
         result["matched_review_request_tags_to_remove"] = remove_tags
+        result["tags_to_write"] = _post_send_tags_to_write(current_tags)
         add_needed = CANONICAL_TRUSTPILOT_TAG not in current_tags
         remove_needed = bool(remove_tags)
         final_tags = current_tags
@@ -6291,23 +6345,40 @@ mutation TrustpilotPostSendTagsRemove($id: ID!, $tags: [String!]!) {
             result["tag_write_status"] = "blocked_target_order_mismatch"
             result["shopify_tag_write_error_sanitized"] = "Post-write readback returned an unexpected order name."
             return result
-        final_tags = [str(tag) for tag in (readback_node.get("tags") or final_tags)]
+        final_tags = _dedupe_text(str(tag) for tag in (readback_node.get("tags") or final_tags))
+        result["tags_after_readback"] = final_tags
         result["tag_count_after"] = len(final_tags)
         remaining_review_tags = _matched_review_request_tags(final_tags)
-        result["trustpilot_tag_present_after"] = CANONICAL_TRUSTPILOT_TAG in final_tags
+        result["trustpilot_tag_present_after"] = _has_canonical_trustpilot_tag(final_tags)
         result["review_request_tag_present_after"] = bool(remaining_review_tags)
         result["typo_review_request_tag_present_after"] = any(
-            _normalize_trustpilot_tag(tag) == _normalize_trustpilot_tag(TYPO_REVIEW_REQUEST_TAG)
+            normalize_tag(tag) == normalize_tag(TYPO_REVIEW_REQUEST_TAG)
             for tag in final_tags
         )
+        result["all_review_request_aliases_removed"] = not remaining_review_tags
         result["readback_verified"] = (
             result["trustpilot_tag_present_after"]
-            and not result["review_request_tag_present_after"]
+            and result["all_review_request_aliases_removed"]
             and not result["typo_review_request_tag_present_after"]
         )
         result["tag_write_readback_verified"] = result["readback_verified"]
         if result["readback_verified"]:
+            local_update = _update_local_order_tags_from_shopify_readback(order, final_tags)
+            result.update(local_update)
+            if not result["local_shopify_tags_updated"]:
+                result["tag_write_status"] = "blocked_local_shopify_tags_update_failed"
+                result["shopify_tag_write_error_sanitized"] = (
+                    result.get("local_shopify_tags_update_error_sanitized")
+                    or "Post-write readback passed, but local ShopifyOrder.shopify_tags was not updated."
+                )
+                return result
             result["tag_write_status"] = TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+            return result
+        if remaining_review_tags:
+            result["tag_write_status"] = TRUSTPILOT_TAG_WRITE_ALIAS_BLOCKED_STATUS
+            result["shopify_tag_write_error_sanitized"] = (
+                "Post-write readback still showed a review-request trigger alias."
+            )
             return result
         result["tag_write_status"] = "blocked_post_write_tag_verification_failed"
         result["shopify_tag_write_error_sanitized"] = (
@@ -6346,6 +6417,42 @@ def _shopify_tag_write_user_errors(payload, key):
         for error in errors
         if isinstance(error, dict)
     ]
+
+
+def _post_send_tags_to_write(current_tags):
+    tags = [
+        tag
+        for tag in _dedupe_text(current_tags)
+        if not is_review_request_tag_alias(tag)
+    ]
+    if CANONICAL_TRUSTPILOT_TAG not in tags:
+        tags.append(CANONICAL_TRUSTPILOT_TAG)
+    return tags
+
+
+def _has_canonical_trustpilot_tag(tags):
+    return CANONICAL_TRUSTPILOT_TAG in _as_text_list(tags)
+
+
+def _update_local_order_tags_from_shopify_readback(order, tags):
+    result = {
+        "local_shopify_tags_updated": False,
+        "local_tags_after_update": [],
+        "local_shopify_tags_update_error_sanitized": "",
+    }
+    try:
+        readback_tags = _dedupe_text(tags)
+        storage_value = ", ".join(readback_tags)
+        if getattr(order, SHOPIFY_ORDER_TAG_FIELD, None) != storage_value:
+            setattr(order, SHOPIFY_ORDER_TAG_FIELD, storage_value)
+            order.save(update_fields=[SHOPIFY_ORDER_TAG_FIELD])
+        result["local_shopify_tags_updated"] = True
+        result["local_tags_after_update"] = _split_shopify_tag_string(
+            getattr(order, SHOPIFY_ORDER_TAG_FIELD, storage_value)
+        )
+    except Exception as exc:  # pragma: no cover - defensive database update guard.
+        result["local_shopify_tags_update_error_sanitized"] = _safe_exception_summary(exc)
+    return result
 
 
 def _candidate_22562_alias_audit_from_scan(scan):
@@ -10165,15 +10272,16 @@ def _apply_queue_row_context(
         or source_row.get("local_review_send_success") is True
         or local_context.get("local_review_send_success") is True
     )
+    row_shopify_tag_written = _shopify_tag_write_confirmed_from_payload(row)
+    source_shopify_tag_written = _shopify_tag_write_confirmed_from_payload(source_row)
     shopify_tag_pending = (
         row.get("shopify_tag_pending") is True
         or source_row.get("shopify_tag_pending") is True
         or (
             local_review_send_success
             and not (
-                row.get("shopify_tag_written") is True
-                or source_row.get("shopify_tag_written") is True
-                or source_row.get("shopify_tag_write_performed") is True
+                row_shopify_tag_written
+                or source_shopify_tag_written
             )
         )
     )
@@ -10293,10 +10401,8 @@ def _apply_queue_row_context(
                     "Tag written"
                     if (
                         has_trustpilot_sent_tag(tags)
-                        or row.get("shopify_tag_written") is True
-                        or source_row.get("shopify_tag_written") is True
-                        or source_row.get("shopify_tag_write_performed") is True
-                        or source_row.get("shopify_tag_write_confirmed") is True
+                        or row_shopify_tag_written
+                        or source_shopify_tag_written
                     )
                     else ""
                 )
@@ -12574,7 +12680,7 @@ def has_ebay_tag(tags):
 
 
 def _matched_review_request_tags(tags):
-    return _matched_tag_alias_values(tags, REVIEW_REQUEST_TAG_ALIASES)
+    return _dedupe_text(tag for tag in _as_text_list(tags) if is_review_request_tag_alias(tag))
 
 
 def _matched_delivered_tags(tags):
@@ -12582,11 +12688,11 @@ def _matched_delivered_tags(tags):
 
 
 def _matched_tag_alias_values(tags, aliases):
-    normalized_aliases = {_normalize_trustpilot_tag(tag) for tag in aliases}
+    normalized_aliases = {normalize_tag(tag) for tag in aliases}
     return _dedupe_text(
         tag
         for tag in _as_text_list(tags)
-        if _normalize_trustpilot_tag(tag) in normalized_aliases
+        if normalize_tag(tag) in normalized_aliases
     )
 
 
@@ -12617,7 +12723,19 @@ def _matched_ebay_tags(tags):
 
 
 def _normalize_trustpilot_tag(tag):
+    return normalize_tag(tag)
+
+
+def normalize_tag(tag):
     return re.sub(r"\s+", "", str(tag or "").strip().lower())
+
+
+def is_review_request_tag_alias(tag):
+    return normalize_tag(tag) in {normalize_tag(alias) for alias in REVIEW_REQUEST_TAG_ALIASES}
+
+
+def is_trustpilot_tag_alias(tag):
+    return normalize_tag(tag) in {normalize_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}
 
 
 def _normalize_ebay_tag(tag):

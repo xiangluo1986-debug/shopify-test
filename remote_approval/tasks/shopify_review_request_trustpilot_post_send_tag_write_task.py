@@ -36,6 +36,7 @@ REVIEW_REQUEST_REMOVE_ALIASES = [
     "1 : reveiw request",
 ]
 SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
+REVIEW_REQUEST_ALIAS_STILL_PRESENT_STATUS = "blocked_review_request_tag_still_present"
 MISSING_APPROVAL_STATUS = "blocked_missing_tag_write_approval"
 INVALID_APPROVAL_STATUS = "blocked_invalid_tag_write_approval"
 EBAY_BLOCK_REASON = "eBay order 鈥?Trustpilot email not allowed."
@@ -487,12 +488,19 @@ def _write_result(source_report: dict, source_blockers: list[dict], approval: di
         "removed_tag_count": 0,
         "tag_count_before": 0,
         "tag_count_after": 0,
+        "tags_before": [],
+        "tags_to_write": [],
+        "tags_after_readback": [],
         "matched_review_request_tags_to_remove": [],
         "removed_tag_values": [],
         "trustpilot_tag_present_before": False,
         "trustpilot_tag_present_after": False,
         "review_request_tag_present_after": False,
         "typo_review_request_tag_present_after": False,
+        "all_review_request_aliases_removed": False,
+        "local_shopify_tags_updated": False,
+        "local_tags_after_update": [],
+        "local_shopify_tags_update_error_sanitized": "",
         "ebay_tag_detected_from_shopify": False,
         "matched_ebay_tag_value": "",
         "shopify_order_name_confirmed": "",
@@ -637,7 +645,7 @@ def _build_payload(
         "report_generated_at": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.29B",
+        "phase": "5.29C",
         "mode": write_result.get("mode", "dry-run-approval-missing"),
         "command_label": COMMAND_LABEL,
         "tag_write_status": status,
@@ -685,20 +693,36 @@ def _build_payload(
         "removed_tag_count": _safe_int(write_result.get("removed_tag_count")),
         "tag_count_before": _safe_int(write_result.get("tag_count_before")),
         "tag_count_after": _safe_int(write_result.get("tag_count_after")),
-        "matched_review_request_tags_to_remove": [
-            _safe_text(tag, max_length=120) for tag in write_result.get("matched_review_request_tags_to_remove", [])
+        "tags_before": [_safe_text(tag, max_length=120) for tag in (write_result.get("tags_before") or [])],
+        "tags_to_write": [_safe_text(tag, max_length=120) for tag in (write_result.get("tags_to_write") or [])],
+        "tags_after_readback": [
+            _safe_text(tag, max_length=120) for tag in (write_result.get("tags_after_readback") or [])
         ],
-        "removed_tag_values": [_safe_text(tag, max_length=120) for tag in write_result.get("removed_tag_values", [])],
+        "matched_review_request_tags_to_remove": [
+            _safe_text(tag, max_length=120)
+            for tag in (write_result.get("matched_review_request_tags_to_remove") or [])
+        ],
+        "removed_tag_values": [
+            _safe_text(tag, max_length=120) for tag in (write_result.get("removed_tag_values") or [])
+        ],
         "trustpilot_tag_present_before": write_result.get("trustpilot_tag_present_before") is True,
         "trustpilot_tag_present_after": write_result.get("trustpilot_tag_present_after") is True,
         "trustpilot_tag_added": write_result.get("trustpilot_tag_added") is True,
         "review_request_tag_removed": write_result.get("review_request_tag_removed") is True,
         "typo_review_request_tag_removed": write_result.get("typo_review_request_tag_removed") is True,
+        "all_review_request_aliases_removed": write_result.get("all_review_request_aliases_removed") is True,
         "readback_verified": write_result.get("readback_verified") is True,
         "tag_write_readback_verified": write_result.get("readback_verified") is True
         or write_result.get("tag_write_readback_verified") is True,
         "review_request_tag_present_after": write_result.get("review_request_tag_present_after") is True,
         "typo_review_request_tag_present_after": write_result.get("typo_review_request_tag_present_after") is True,
+        "local_shopify_tags_updated": write_result.get("local_shopify_tags_updated") is True,
+        "local_tags_after_update": [
+            _safe_text(tag, max_length=120) for tag in (write_result.get("local_tags_after_update") or [])
+        ],
+        "local_shopify_tags_update_error_sanitized": _sanitize_text(
+            write_result.get("local_shopify_tags_update_error_sanitized", "")
+        ),
         "ebay_tag_detected_from_shopify": write_result.get("ebay_tag_detected_from_shopify") is True,
         "matched_ebay_tag_value": _safe_text(write_result.get("matched_ebay_tag_value"), max_length=120),
         "shopify_order_name_confirmed": _safe_text(write_result.get("shopify_order_name_confirmed"), max_length=80),
@@ -800,6 +824,13 @@ def _render_html_report(payload: dict) -> str:
             ("Trustpilot tag present after", payload.get("trustpilot_tag_present_after")),
             ("Review request tag present after", payload.get("review_request_tag_present_after")),
             ("Typo review request tag present after", payload.get("typo_review_request_tag_present_after")),
+            ("All review request aliases removed", payload.get("all_review_request_aliases_removed")),
+            ("Readback verified", payload.get("readback_verified")),
+            ("Local ShopifyOrder tags updated", payload.get("local_shopify_tags_updated")),
+            ("Tags before", ", ".join(payload.get("tags_before") or [])),
+            ("Tags to write", ", ".join(payload.get("tags_to_write") or [])),
+            ("Tags after readback", ", ".join(payload.get("tags_after_readback") or [])),
+            ("Local tags after update", ", ".join(payload.get("local_tags_after_update") or [])),
         )
     )
     blocker_rows = "\n".join(
@@ -863,7 +894,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "trustpilot_tag_added": payload.get("trustpilot_tag_added"),
         "review_request_tag_removed": payload.get("review_request_tag_removed"),
         "typo_review_request_tag_removed": payload.get("typo_review_request_tag_removed"),
+        "all_review_request_aliases_removed": payload.get("all_review_request_aliases_removed"),
+        "readback_verified": payload.get("readback_verified"),
         "tag_write_readback_verified": payload.get("tag_write_readback_verified"),
+        "local_shopify_tags_updated": payload.get("local_shopify_tags_updated"),
+        "local_tags_after_update": payload.get("local_tags_after_update"),
         "tag_write_attempted": payload.get("tag_write_attempted"),
         "tag_write_performed": payload.get("tag_write_performed"),
         "shopify_tag_write_performed": payload.get("shopify_tag_write_performed"),
@@ -900,6 +935,9 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Shopify API call performed: {payload.get('shopify_api_call_performed')}\n"
         f"Shopify write performed: {payload.get('shopify_write_performed')}\n"
         f"Gmail API call performed: {payload.get('gmail_api_call_performed')}\n"
+        f"All review request aliases removed: {payload.get('all_review_request_aliases_removed')}\n"
+        f"Readback verified: {payload.get('readback_verified')}\n"
+        f"Local ShopifyOrder tags updated: {payload.get('local_shopify_tags_updated')}\n"
         f"JSON: {json_path}\n"
         f"HTML: {html_path}\n"
     )
@@ -920,6 +958,11 @@ def _issue_summary(status: str, selected_order: str, blockers: list[dict], write
         return (
             f"{selected_order} is gated for Shopify tag write. Missing exact approval env; "
             "no Shopify API call or write was performed."
+        )
+    if status == REVIEW_REQUEST_ALIAS_STILL_PRESENT_STATUS:
+        return (
+            f"{selected_order} still has a review-request trigger alias after Shopify readback. "
+            "Local tags were not marked written; no Gmail or external review API call was performed."
         )
     first = blockers[0]["status"] if blockers else status
     return f"Trustpilot post-send tag write blocked: {first}. No Gmail or external review API call was performed."
