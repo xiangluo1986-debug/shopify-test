@@ -12,6 +12,7 @@ Related non-active drafts:
 - [BLUE_GREEN_DEPLOY_DECISIONS.md](BLUE_GREEN_DEPLOY_DECISIONS.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
+- [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 
 ## Current Status
 
@@ -23,9 +24,12 @@ Related non-active drafts:
 - Local apply simulation approval package: READY after
   [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
   is reviewed.
-- Local simulation: NO-GO until a separate task provides
+- Gated local simulation runner: READY for dry-run / no-action status checks
+  only at `scripts/blue_green_local_apply_simulation.ps1`.
+- Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
-  approves exact commands.
+  approval of exact commands. Real local simulation execution is not
+  implemented in the current runner phase.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Production apply: NO-GO.
 - Runtime behavior changed by this checklist: no.
@@ -142,6 +146,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_deploy_
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation_preview.ps1
+```
+
+- Run the gated local simulation runner in default dry-run / no-action mode:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1
+```
+
+- Confirm execution requests are still blocked unless the exact approval gate
+  is supplied, and that even correct approval remains a future placeholder in
+  this phase:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1 -ExecuteLocalSimulation
 ```
 
 - Validate draft Compose syntax without starting containers:

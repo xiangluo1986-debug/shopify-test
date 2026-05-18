@@ -41,6 +41,42 @@ It does not approve production, traffic switching, port `8000` takeover,
 Cloudflare/domain routing changes, migrations, external API writes, email
 sends, or Shopify writes.
 
+## Current Gated Runner
+
+The gated local-only simulation runner is:
+
+```powershell
+.\scripts\blue_green_local_apply_simulation.ps1
+```
+
+Default behavior is dry-run / no-action only:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1
+```
+
+The default run prints local readiness, current `/healthz/` status if
+reachable, and the future simulation plan. It does not start, stop, restart, or
+build containers. It does not run migrations, run collectstatic, switch traffic,
+modify files, change Cloudflare/domain routing, call Shopify/Gmail APIs, or
+send email.
+
+If execution is requested without the exact approval phrase, the runner blocks
+and exits non-zero:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1 -ExecuteLocalSimulation
+```
+
+Even when the exact `-Ack` phrase is supplied, real local simulation execution
+is still blocked in this phase. The runner reports:
+
+```text
+Real local simulation execution is not implemented in this phase.
+```
+
+Production remains NO-GO.
+
 ## Future Local Simulation Scope
 
 A future simulation may only:
@@ -51,6 +87,10 @@ A future simulation may only:
 - Test `/healthz/` on the inactive test color.
 - Stop only the inactive test color after validation.
 - Leave the current `web` service untouched.
+
+The next phase may implement actual inactive-color startup on a local-only test
+port, but only after separate approval of the exact commands, target color,
+environment handling, cleanup path, and no-production-traffic constraints.
 
 The current active `docker-compose.yml` must remain unchanged. The current web
 service must keep serving the existing local runtime path while the simulation
@@ -194,6 +234,8 @@ or production routing changes as part of failure handling.
 ## Go / No-Go
 
 - Approval package: READY.
-- Local simulation: NO-GO until the separate approval phrase is provided.
+- Gated simulation runner: dry-run / no-action only.
+- Local simulation execution: NO-GO. The approval phrase is required for a
+  future phase, but real execution is not implemented in this phase.
 - Production: NO-GO.
 - Runtime behavior changed by this package: no.

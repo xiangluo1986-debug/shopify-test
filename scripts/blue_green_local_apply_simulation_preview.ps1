@@ -85,6 +85,10 @@ function Show-FileStatus {
         [pscustomobject]@{
             Label = "Read-only dry-run planner"
             Path = ".\scripts\blue_green_deploy_dry_run.ps1"
+        },
+        [pscustomobject]@{
+            Label = "Gated local simulation runner"
+            Path = ".\scripts\blue_green_local_apply_simulation.ps1"
         }
     )
 
@@ -95,6 +99,21 @@ function Show-FileStatus {
             Write-Warn "$($item.Label) is missing: $($item.Path)"
         }
     }
+}
+
+function Show-RunnerStatus {
+    Write-Step "Local simulation runner status"
+
+    $runnerPath = ".\scripts\blue_green_local_apply_simulation.ps1"
+    if (Test-Path -LiteralPath $runnerPath) {
+        Write-Ok "Simulation runner exists: $runnerPath"
+    } else {
+        Write-Warn "Simulation runner is missing: $runnerPath"
+    }
+
+    Write-Warn "Current status is dry-run / no-action only."
+    Write-Warn "Real local simulation execution is not implemented in this phase."
+    Write-Warn "Production remains NO-GO."
 }
 
 function Show-ApprovalStatus {
@@ -207,6 +226,7 @@ function Show-FutureCommandPlan {
 
 Show-GitStatus
 Show-FileStatus
+Show-RunnerStatus
 Show-ApprovalStatus
 Test-HealthUrl -Url $HealthUrl
 Show-FutureCommandPlan
@@ -214,4 +234,5 @@ Show-FutureCommandPlan
 Write-Step "Result"
 Write-Ok "Local blue-green apply simulation preview completed."
 Write-Ok "No runtime behavior was changed."
+Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."
 Write-Ok "No docker compose up/down/restart/build, migrate, collectstatic, traffic switch, file modification, Shopify call, Gmail call, or email send was performed."

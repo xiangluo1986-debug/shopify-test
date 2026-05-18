@@ -168,6 +168,10 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Local apply simulation read-only preview"
             Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
+        },
+        [pscustomobject]@{
+            Label = "Gated local apply simulation runner"
+            Path = ".\scripts\blue_green_local_apply_simulation.ps1"
         }
     )
 
@@ -289,6 +293,10 @@ function Show-FuturePlan {
     Write-Host "NOT RUN IN THIS TASK: switch proxy traffic."
     Write-Host "NOT RUN IN THIS TASK: stop the previous color."
     Write-Host ""
+    Write-Host "Local simulation runner status: dry-run / no-action only."
+    Write-Host "Real local simulation execution is not implemented in this phase."
+    Write-Host "Production remains NO-GO."
+    Write-Host ""
     Write-Host "This script does not call docker compose up, down, restart, build, run, exec, or migrate."
     Write-Host "This script does not modify files, switch traffic, call Shopify APIs, call Gmail APIs, or send email."
 }
@@ -304,3 +312,4 @@ Show-FuturePlan
 Write-Step "Result"
 Write-Ok "Blue-green dry-run planner completed. No deploy action was performed."
 Write-Ok "No runtime behavior was changed by this read-only planner."
+Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."

@@ -24,12 +24,19 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md](BLUE_GREEN_DEPLOY_LOCAL_DRY_RUN_REVIEW.md)
 - [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
 - [scripts/blue_green_local_apply_simulation_preview.ps1](../scripts/blue_green_local_apply_simulation_preview.ps1)
+- [scripts/blue_green_local_apply_simulation.ps1](../scripts/blue_green_local_apply_simulation.ps1)
 
 The read-only planner at `scripts/blue_green_deploy_dry_run.ps1` reports
 whether these draft files and review packages exist and whether the active
 Compose file still appears to use the current single-web workflow. The local
 apply simulation preview script is also read-only and only prints status,
 approval-marker state, current `/healthz/` status, and future command examples.
+The gated local simulation runner at
+`scripts/blue_green_local_apply_simulation.ps1` is dry-run / no-action only in
+this phase. It prints readiness and the future local simulation plan, blocks
+execution requests without the exact approval phrase, and still does not
+implement real local simulation execution even when the phrase is supplied.
+Production remains NO-GO.
 
 ## Current Architecture
 
@@ -200,10 +207,19 @@ requires a separate approved task.
 
 Future task after Phase 1 review.
 
-Local validation remains NO-GO until
+Local validation remains NO-GO. The current gated runner is available only for
+dry-run / no-action status checks:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_apply_simulation.ps1
+```
+
+A future phase may implement actual inactive-color startup on a local-only test
+port only after
 [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
-is reviewed and the exact local-only approval phrase is provided in a separate
-task.
+is reviewed, the exact local-only approval phrase is provided in a separate
+task, and the exact commands, target color, cleanup path, and no-production
+traffic constraints are approved.
 
 Validate the proxy and color services locally or in staging:
 
@@ -328,9 +344,11 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Review [BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md](BLUE_GREEN_DEPLOY_LOCAL_APPLY_SIMULATION_APPROVAL.md)
-and provide the exact local-only approval phrase only if the next separate
-task should run a local simulation. Production should remain NO-GO until local
-or staging results are reviewed and a separate production task approves route,
-port ownership, proxy, scheduler, migration, static/media, rollback, and
-observation details.
+Review the dry-run output from
+`scripts/blue_green_local_apply_simulation.ps1`. The recommended next separate
+task is to design the actual local inactive-color startup step on a non-8000
+test port, still without production traffic, and only after explicit approval
+of the exact commands and cleanup path. Production should remain NO-GO until
+local or staging results are reviewed and a separate production task approves
+route, port ownership, proxy, scheduler, migration, static/media, rollback,
+and observation details.
