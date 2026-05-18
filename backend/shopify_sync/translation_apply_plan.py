@@ -3038,6 +3038,16 @@ def _all_languages_blocking_reason_label_for_entry(reason: str, entry: dict | No
         field_key == "body_html"
         and reason not in {"existing_translation_current_same_value"}
     ):
+        if reason == "blocked_html_media_or_link_tag_broken":
+            return (
+                "Product description video, link, or image structure did not match "
+                "the original. Review before update."
+            )
+        if reason == "blocked_body_html_structure_broken":
+            return (
+                "Product description HTML structure did not match the original. "
+                "Review before update."
+            )
         return "Product description needs review before automatic Shopify update."
     if reason in {
         "blocked_future_write_needs_resource_mapping",
@@ -3077,12 +3087,12 @@ def _all_languages_blocking_reason_label(reason: str):
     labels = {
         "blocked_background_draft_report_not_completed_or_partial": "Needs review before update.",
         "blocked_body_html_auto_update_disabled": "Product description needs review before automatic Shopify update.",
-        "blocked_body_html_structure_broken": "Product description needs review before automatic Shopify update.",
+        "blocked_body_html_structure_broken": "Product description HTML structure did not match the original. Review before update.",
         "blocked_digest_missing": "Missing Shopify mapping.",
         "blocked_existing_current_translation": "Already up to date.",
         "blocked_field_not_allowed_for_all_languages_update": "Missing Shopify mapping.",
         "blocked_forbidden_phrase_detected": "Contains blocked wording.",
-        "blocked_html_media_or_link_tag_broken": "Product description needs review before automatic Shopify update.",
+        "blocked_html_media_or_link_tag_broken": "Product description video, link, or image structure did not match the original. Review before update.",
         "blocked_identity_review_required": "Product/model check failed.",
         "blocked_key_missing": "Missing Shopify mapping.",
         "blocked_media_alt_not_customer_facing": "Needs review before update.",

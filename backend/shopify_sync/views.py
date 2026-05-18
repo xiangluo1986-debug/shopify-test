@@ -317,6 +317,7 @@ TRANSLATION_WORKSPACE_RESULT_FIELD_ORDER = {
 TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "existing_translation_outdated": "Existing translation is outdated",
     "existing_translation_outdated_manual_review_required": "Existing translation is outdated",
+    "source_changed_from_previous_report": "Original product content changed. Translation will be refreshed.",
     "seo_needs_manual_review": "SEO text needs review",
     "seo_not_ready": "SEO text needs review",
     "missing_part_type": "SEO may be missing the part type",
@@ -331,7 +332,7 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "manual_review_required": "Needs review before update",
     "no_generated_draft": "No automatic translation was generated",
     "openai_invalid_translation_response": "OpenAI returned an invalid response format",
-    "body_html_structure_broken": "Product description needs review before automatic update",
+    "body_html_structure_broken": "Product description HTML structure did not match the original. Review before update.",
     "draft_equals_source": "Translation is unchanged from the source",
     "missing_translation_not_requested": "Not translated automatically in this run",
     "child_resource_query_failed": "Some Shopify content could not be read",
@@ -343,7 +344,7 @@ TRANSLATION_WORKSPACE_RESULT_REASON_LABELS = {
     "draft_over_max_chars": "Translation is too long",
     "forbidden_marketing_or_origin_phrase": "Contains blocked wording",
     "forbidden_marketing_or_shipping_phrase": "Contains blocked wording",
-    "html_media_or_link_tag_broken": "Product description needs review before automatic update",
+    "html_media_or_link_tag_broken": "Product description video, link, or image structure did not match the original. Review before update.",
     "keyword_stuffing_or_duplicate": "SEO text needs review",
     "product_title_over_80_chars": "Product title is over 80 characters",
     "seo_title_over_60_chars": "SEO title is over 60 characters",
@@ -390,6 +391,7 @@ TRANSLATION_WORKSPACE_REVIEW_REASON_CODES = {
     "forbidden_marketing_or_origin_phrase",
     "forbidden_marketing_or_shipping_phrase",
     "html_media_or_link_tag_broken",
+    "source_changed_from_previous_report",
     "keyword_stuffing_or_duplicate",
     "manual_review_required",
     "missing_core_keyword",
@@ -6049,6 +6051,8 @@ def _translation_workspace_result_raw_reason_codes(row: dict):
         raw_reasons.append("future_write_needs_resource_mapping")
     if row.get("existing_translation_outdated"):
         raw_reasons.append("existing_translation_outdated")
+    if row.get("source_changed_from_previous_report"):
+        raw_reasons.append("source_changed_from_previous_report")
     if row.get("draft_blocked"):
         raw_reasons.append("draft_blocked")
     if row.get("product_identity_mismatch"):
@@ -6224,7 +6228,7 @@ def _attach_translation_workspace_row_update_status(row: dict, update_entry: dic
         if update_entry.get("field_group") == "options":
             label = "Product option updated"
         elif update_entry.get("key") == "body_html":
-            label = "Product description updated"
+            label = "Product description updated and confirmed."
         else:
             label = "Updated and confirmed"
         status_key = "ready"
@@ -6527,6 +6531,14 @@ def _translation_workspace_job_review_row(row: dict):
             "existing_translation_outdated",
             row.get("outdated"),
         ),
+        "source_changed_from_previous_report": bool(
+            row.get("source_changed_from_previous_report")
+        ),
+        "source_change_message": row.get("source_change_message", ""),
+        "previous_source_digest": row.get("previous_source_digest", ""),
+        "current_source_digest": row.get("current_source_digest", ""),
+        "previous_source_text_hash": row.get("previous_source_text_hash", ""),
+        "current_source_text_hash": row.get("current_source_text_hash", ""),
         "existing_translation_summary": existing_fields["summary"],
         "existing_translation_display": existing_fields["display"],
         "existing_translation_is_long": existing_fields["is_long"],
@@ -8755,6 +8767,19 @@ def _build_translation_editor_row(
         source_row.get("translation_outdated") is True
         or draft_entry.get("existing_translation_outdated") is True
     )
+    source_changed_from_previous_report = bool(
+        source_row.get("source_changed_from_previous_report")
+        or draft_entry.get("source_changed_from_previous_report")
+    )
+    source_change_message = str(
+        source_row.get("source_change_message")
+        or draft_entry.get("source_change_message")
+        or (
+            "Original product content changed. Translation will be refreshed."
+            if source_changed_from_previous_report
+            else ""
+        )
+    ).strip()
     target_value = existing_value or draft_value
     seo_notes = _list_from_value(draft_entry.get("seo_notes"))
     seo_review_notes = _list_from_value(draft_entry.get("seo_review_notes")) or [
@@ -8982,6 +9007,16 @@ def _build_translation_editor_row(
         "seo_status": seo_status,
         "existing_translation_present": existing_translation_present,
         "outdated": outdated,
+        "source_changed_from_previous_report": source_changed_from_previous_report,
+        "source_change_message": source_change_message,
+        "previous_source_digest": source_row.get("previous_source_digest")
+        or draft_entry.get("previous_source_digest", ""),
+        "current_source_digest": source_row.get("current_source_digest")
+        or draft_entry.get("current_source_digest", ""),
+        "previous_source_text_hash": source_row.get("previous_source_text_hash")
+        or draft_entry.get("previous_source_text_hash", ""),
+        "current_source_text_hash": source_row.get("current_source_text_hash")
+        or draft_entry.get("current_source_text_hash", ""),
         "digest": source_row.get("digest") or draft_entry.get("source_digest") or "",
         "draft_eligible": (
             source_row.get("draft_eligible")
@@ -9845,6 +9880,14 @@ def _normalize_translation_console_draft_entry(entry: dict):
         "current_translation_present": bool(entry.get("existing_translation_present")),
         "outdated": entry.get("existing_translation_outdated"),
         "existing_translation_outdated": entry.get("existing_translation_outdated"),
+        "source_changed_from_previous_report": bool(
+            entry.get("source_changed_from_previous_report")
+        ),
+        "source_change_message": entry.get("source_change_message", ""),
+        "previous_source_digest": entry.get("previous_source_digest", ""),
+        "current_source_digest": entry.get("current_source_digest", ""),
+        "previous_source_text_hash": entry.get("previous_source_text_hash", ""),
+        "current_source_text_hash": entry.get("current_source_text_hash", ""),
         "existing_translation_value": entry.get("existing_translation_value")
         or entry.get("translation_value")
         or "",

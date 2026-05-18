@@ -4005,6 +4005,7 @@
                         <div>
                           <div class="tw-result-eyebrow">{{ row.language_label }} ({{ row.language }})</div>
                           <h4 class="tw-result-title">{{ row.field_label }}</h4>
+                          {% if row.source_change_message %}<div class="tw-warning">{{ row.source_change_message }}</div>{% endif %}
                           {% if row.context_label %}<div class="tw-muted">{{ row.context_label }}</div>{% endif %}
                           {% if row.option_context_line %}<div class="tw-muted">{{ row.option_context_line }}</div>{% endif %}
                           {% if row.related_variants_label %}<div class="tw-muted">Related variants: {{ row.related_variants_label }}</div>{% endif %}
@@ -5372,6 +5373,7 @@
                     </div>
                   {% endif %}
                   {% if row.seo_warning %}<div class="tw-warning">{{ row.seo_warning }}</div>{% endif %}
+                  {% if row.source_change_message %}<div class="tw-warning">{{ row.source_change_message }}</div>{% endif %}
                   {% if row.product_identity_mismatch %}
                     <div class="tw-warning tw-identity-warning">
                       <strong>Possible wrong product name detected</strong><br>

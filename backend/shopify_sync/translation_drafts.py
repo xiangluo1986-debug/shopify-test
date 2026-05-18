@@ -220,6 +220,12 @@ OPENAI_MODEL = "gpt-4.1-mini"
 TRANSLATION_CACHE_PATH = Path("logs/shopify_translation_cache/translation_memory.json")
 TRANSLATION_CACHE_MAX_BYTES = 2_000_000
 TRANSLATION_CACHE_MAX_ENTRIES = 2000
+TRANSLATION_WORKSPACE_JOB_DIR = Path("logs/shopify_translation_workspace_jobs")
+TRANSLATION_WORKSPACE_PREVIOUS_REPORT_MAX_BYTES = 4_000_000
+TRANSLATION_WORKSPACE_IN_PROGRESS_REPORT_STATUSES = {"pending", "running", "partial"}
+SOURCE_CHANGED_REFRESH_MESSAGE = (
+    "Original product content changed. Translation will be refreshed."
+)
 OPENAI_PROMPT_COMPACT = "compact"
 OPENAI_PROMPT_RICH = "rich"
 OPENAI_PROMPT_HTML_TEXT_NODES = "html_text_nodes"
@@ -390,6 +396,8 @@ def generate_selected_product_missing_translation_draft_package(
         result["draft_status"] = validation_errors[0]
         return result
 
+    previous_source_index = _previous_translation_source_index(product_id)
+
     if installation is None:
         installation = ShopifyInstallation.objects.first()
     if installation is None:
@@ -454,10 +462,21 @@ def generate_selected_product_missing_translation_draft_package(
             else _requested_draft_rows(translatable_rows, fields)
         )
         for row in rows_to_check:
+            row = dict(row)
             field = _entry_field_from_row(row)
             source_value = str(row.get("source_value") or "")
             existing_present = bool(row.get("has_translation"))
+            source_change = _detect_previous_source_change(
+                row,
+                locale,
+                previous_source_index,
+            )
+            if source_change:
+                row.update(source_change)
             existing_outdated = row.get("translation_outdated") is True
+            if existing_present and row.get("source_changed_from_previous_report"):
+                existing_outdated = True
+                row["translation_outdated"] = True
             if not source_value.strip():
                 entry = _entry_template(locale, field, row, "source_empty")
             elif not row.get("draft_eligible"):
@@ -1201,6 +1220,14 @@ def _entry_template(locale, field, row, reason):
         "media_url": row.get("media_url", ""),
         "source_value": str(row.get("source_value") or ""),
         "source_digest": str(row.get("digest") or ""),
+        "source_changed_from_previous_report": bool(
+            row.get("source_changed_from_previous_report")
+        ),
+        "source_change_message": row.get("source_change_message", ""),
+        "previous_source_digest": row.get("previous_source_digest", ""),
+        "current_source_digest": row.get("current_source_digest", ""),
+        "previous_source_text_hash": row.get("previous_source_text_hash", ""),
+        "current_source_text_hash": row.get("current_source_text_hash", ""),
         "existing_translation_present": bool(row.get("has_translation")),
         "existing_translation_value": str(
             row.get("translation_value")
@@ -2415,11 +2442,17 @@ def _translation_cache_value(cache, cache_key):
 def _translation_cache_record(locale, entry, value):
     field = str((entry or {}).get("field") or "")
     resource_group = str((entry or {}).get("resource_group") or "")
+    source_digest = str(
+        (entry or {}).get("source_digest") or (entry or {}).get("digest") or ""
+    ).strip()
     return {
         "value": str(value or "").strip(),
         "locale": locale,
         "field": field,
         "resource_group": resource_group,
+        "resource_id": str((entry or {}).get("resource_id") or ""),
+        "source_key": str((entry or {}).get("source_key") or field),
+        "source_digest": source_digest,
         "source_text_hash": _source_text_hash(entry.get("source_value") or ""),
         "product_identity_context_hash": _product_identity_context_hash_for_cache(
             entry
@@ -2431,11 +2464,15 @@ def _translation_cache_record(locale, entry, value):
 def _translation_cache_key(locale, entry):
     field = str((entry or {}).get("field") or "")
     resource_group = str((entry or {}).get("resource_group") or "")
+    source_digest = str(
+        (entry or {}).get("source_digest") or (entry or {}).get("digest") or ""
+    ).strip()
     parts = [
-        "v1",
+        "v2",
         str(locale or ""),
         field,
         resource_group,
+        source_digest,
         _source_text_hash((entry or {}).get("source_value") or ""),
     ]
     identity_hash = _product_identity_context_hash_for_cache(entry)
@@ -2465,6 +2502,165 @@ def _product_identity_context_hash_for_cache(entry):
 
 def _source_text_hash(value):
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()[:24]
+
+
+def _previous_translation_source_index(product_id: str):
+    product_gid = str(product_id or "").strip()
+    if not product_gid:
+        return {}
+    index = {}
+    for path in _previous_translation_workspace_report_paths(product_gid):
+        report = _load_previous_translation_workspace_report(path)
+        if report.get("product_gid") and report.get("product_gid") != product_gid:
+            continue
+        report_status = str(report.get("status") or "").strip()
+        for row in _previous_translation_workspace_rows(report):
+            snapshot = _source_snapshot_from_report_row(row, report_status=report_status)
+            if not snapshot:
+                continue
+            key = (
+                snapshot["resource_id"],
+                snapshot["field"],
+                snapshot["locale"],
+            )
+            fallback_key = (snapshot["resource_id"], snapshot["field"], "")
+            index.setdefault(key, snapshot)
+            index.setdefault(fallback_key, snapshot)
+        if index:
+            break
+    return index
+
+
+def _previous_translation_workspace_report_paths(product_id: str):
+    product_hash = hashlib.sha256(str(product_id or "").encode("utf-8")).hexdigest()[:16]
+    try:
+        paths = list(
+            TRANSLATION_WORKSPACE_JOB_DIR.glob(
+                f"translation_workspace_job_{product_hash}_*.json"
+            )
+        )
+    except OSError:
+        return []
+    return sorted(paths, key=_safe_path_mtime, reverse=True)
+
+
+def _safe_path_mtime(path: Path):
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0
+
+
+def _load_previous_translation_workspace_report(path: Path):
+    try:
+        if (
+            not path.exists()
+            or path.stat().st_size > TRANSLATION_WORKSPACE_PREVIOUS_REPORT_MAX_BYTES
+        ):
+            return {}
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _previous_translation_workspace_rows(report: dict):
+    for key in ("review_rows", "detail_preview_rows"):
+        for row in (report or {}).get(key) or []:
+            if isinstance(row, dict):
+                yield row
+
+
+def _source_snapshot_from_report_row(row: dict, *, report_status: str = ""):
+    field = _normalize_draft_field_key(
+        row.get("field")
+        or row.get("field_key")
+        or row.get("key")
+        or row.get("resource_key")
+    )
+    if field != "body_html":
+        return {}
+    source_value = _first_text(
+        row,
+        "source_value",
+        "source_value_display",
+        "source_value_preview",
+        "source_preview",
+    )
+    use_previous_changed_source = (
+        report_status in TRANSLATION_WORKSPACE_IN_PROGRESS_REPORT_STATUSES
+        and row.get("source_changed_from_previous_report")
+    )
+    digest = str(
+        (
+            row.get("previous_source_digest")
+            if use_previous_changed_source
+            else None
+        )
+        or row.get("source_digest")
+        or row.get("digest")
+        or ""
+    ).strip()
+    source_hash = str(row.get("source_text_hash") or "").strip()
+    if use_previous_changed_source and row.get("previous_source_text_hash"):
+        source_hash = str(row.get("previous_source_text_hash") or "").strip()
+    if not source_hash and source_value.strip() and not use_previous_changed_source:
+        source_hash = _source_text_hash(source_value)
+    if not digest and not source_hash:
+        return {}
+    return {
+        "resource_id": str(row.get("resource_id") or "").strip(),
+        "field": field,
+        "locale": str(row.get("locale") or row.get("language") or "").strip(),
+        "source_digest": digest,
+        "source_text_hash": source_hash,
+    }
+
+
+def _detect_previous_source_change(row: dict, locale: str, previous_source_index: dict):
+    field = _normalize_draft_field_key(row.get("field_key") or row.get("key"))
+    if field != "body_html" or not previous_source_index:
+        return {}
+    resource_id = str(row.get("resource_id") or "").strip()
+    previous = previous_source_index.get(
+        (resource_id, field, str(locale or "").strip())
+    ) or previous_source_index.get((resource_id, field, ""))
+    if not previous:
+        return {}
+
+    current_digest = str(row.get("digest") or row.get("source_digest") or "").strip()
+    current_hash = _source_text_hash(row.get("source_value") or "")
+    previous_digest = str(previous.get("source_digest") or "").strip()
+    previous_hash = str(previous.get("source_text_hash") or "").strip()
+
+    changed = False
+    if previous_hash and current_hash:
+        changed = previous_hash != current_hash
+    elif previous_digest and current_digest:
+        changed = previous_digest != current_digest
+    if not changed:
+        return {}
+
+    return {
+        "source_changed_from_previous_report": True,
+        "source_change_message": SOURCE_CHANGED_REFRESH_MESSAGE,
+        "previous_source_digest": previous_digest,
+        "current_source_digest": current_digest,
+        "previous_source_text_hash": previous_hash,
+        "current_source_text_hash": current_hash,
+    }
+
+
+def _first_text(row: dict, *keys):
+    for key in keys:
+        value = (row or {}).get(key)
+        if value is None:
+            continue
+        text = str(value)
+        if text.strip():
+            return text
+    return ""
 
 
 class _VisibleHtmlTextExtractor(HTMLParser):
@@ -2818,29 +3014,36 @@ def _html_structure_notes_for_draft(entry, draft):
     if str((entry or {}).get("field") or "") != "body_html":
         return []
     source = str((entry or {}).get("source_value") or "")
-    source_tags = _html_tag_counts(source)
-    if not source_tags:
+    source_snapshot = _HtmlStructureSnapshot.from_html(source)
+    if not source_snapshot.tag_counts:
         return []
-    draft_tags = _html_tag_counts(draft)
+    draft_snapshot = _HtmlStructureSnapshot.from_html(draft)
     notes = []
-    if not draft_tags:
+    if not draft_snapshot.tag_counts:
         notes.append("body_html_structure_broken")
         return notes
-    missing_structural_tags = [
-        tag
-        for tag, source_count in source_tags.items()
-        if tag not in HTML_REVIEW_TAGS and draft_tags.get(tag, 0) < source_count
-    ]
-    if missing_structural_tags:
+    if any(
+        draft_snapshot.tag_counts.get(tag, 0) < source_count
+        for tag, source_count in source_snapshot.tag_counts.items()
+    ):
         notes.append("body_html_structure_broken")
-    missing_media_or_link_tags = [
-        tag
+    if any(
+        draft_snapshot.end_tag_counts.get(tag, 0) < source_count
+        for tag, source_count in source_snapshot.end_tag_counts.items()
+    ):
+        notes.append("body_html_structure_broken")
+    if any(
+        draft_snapshot.tag_counts.get(tag, 0)
+        < source_snapshot.tag_counts.get(tag, 0)
         for tag in HTML_REVIEW_TAGS
-        if draft_tags.get(tag, 0) < source_tags.get(tag, 0)
-    ]
-    if missing_media_or_link_tags:
+    ):
         notes.append("html_media_or_link_tag_broken")
-    return notes
+    if any(
+        attr_value and (tag, attr_name, attr_value) not in draft_snapshot.review_attrs
+        for tag, attr_name, attr_value in source_snapshot.review_attrs
+    ):
+        notes.append("html_media_or_link_tag_broken")
+    return _unique(notes)
 
 
 def _html_tag_counts(value):
@@ -2849,6 +3052,49 @@ def _html_tag_counts(value):
         tag = match.group(1).lower()
         counts[tag] = counts.get(tag, 0) + 1
     return counts
+
+
+class _HtmlStructureSnapshot(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tag_counts = {}
+        self.end_tag_counts = {}
+        self.review_attrs = []
+
+    @classmethod
+    def from_html(cls, value: str):
+        parser = cls()
+        try:
+            parser.feed(str(value or ""))
+            parser.close()
+        except Exception:
+            parser.tag_counts = {}
+            parser.end_tag_counts = {}
+            parser.review_attrs = []
+        return parser
+
+    def handle_starttag(self, tag, attrs):
+        self._record_tag(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        self._record_tag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        tag = str(tag or "").lower()
+        if tag:
+            self.end_tag_counts[tag] = self.end_tag_counts.get(tag, 0) + 1
+
+    def _record_tag(self, tag, attrs):
+        tag = str(tag or "").lower()
+        if not tag:
+            return
+        self.tag_counts[tag] = self.tag_counts.get(tag, 0) + 1
+        if tag not in HTML_REVIEW_TAGS:
+            return
+        attrs_dict = {str(key).lower(): str(value or "") for key, value in attrs or []}
+        for attr_name in ("href", "src"):
+            if attrs_dict.get(attr_name):
+                self.review_attrs.append((tag, attr_name, attrs_dict[attr_name]))
 
 
 def _attach_seo_quality(entry):

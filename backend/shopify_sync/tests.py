@@ -13,6 +13,13 @@ from .translation_apply_plan import (
     build_translation_workspace_all_languages_update_state,
     validate_and_update_all_languages_to_shopify,
 )
+from .translation_drafts import (
+    SOURCE_CHANGED_REFRESH_MESSAGE,
+    _html_structure_notes_for_draft,
+    _html_text_nodes_for_entry,
+    _translation_cache_key,
+    generate_selected_product_missing_translation_draft_package,
+)
 from .views import SHOPIFY_OAUTH_STATE_SESSION_KEY
 
 
@@ -175,6 +182,159 @@ class ShopifyOAuthTests(TestCase):
             installation.scope,
             "read_orders,read_translations,write_translations,read_locales",
         )
+
+
+class TranslationWorkspaceBodyHtmlSourceChangeTests(SimpleTestCase):
+    product_gid = "gid://shopify/Product/222"
+
+    old_body_html = "<p>Intro text</p><p>Text after video</p>"
+    new_body_html = (
+        "<p>Intro text</p>"
+        '<div class="video-section">'
+        '<iframe src="https://www.youtube.com/embed/demo123" title="Demo video"></iframe>'
+        "</div>"
+        "<p>Text after video</p>"
+    )
+
+    def _console_result(self):
+        return {
+            "product": {"id": self.product_gid, "title": "Demo RC Part"},
+            "translatable_resource": {
+                "translatable_content_count": 1,
+                "translation_count": 1,
+            },
+            "translatable_rows": [
+                {
+                    "entry_key": "body_html",
+                    "draft_key": "body_html",
+                    "key": "body_html",
+                    "source_key": "body_html",
+                    "field_key": "body_html",
+                    "resource_id": self.product_gid,
+                    "resource_type": "Product",
+                    "resource_group": "product_basics",
+                    "section_key": "basic",
+                    "source_value": self.new_body_html,
+                    "digest": "digest-new-body",
+                    "source_locale": "en",
+                    "target_locale": "ja",
+                    "has_translation": True,
+                    "translation_value": "<p>OLD FULL BODY CACHE</p>",
+                    "translation_locale": "ja",
+                    "translation_outdated": False,
+                    "draft_eligible": True,
+                    "draft_ineligible_reason": "",
+                }
+            ],
+            "child_resource_discovery_errors": [],
+            "per_group_discovery_status": {},
+            "per_group_discovery_reasons": {},
+        }
+
+    def test_body_html_source_change_refreshes_translation_and_preserves_youtube_iframe(self):
+        old_cache_key = _translation_cache_key(
+            "ja",
+            {
+                "field": "body_html",
+                "resource_group": "product_basics",
+                "source_value": self.old_body_html,
+                "source_digest": "digest-old-body",
+            },
+        )
+        new_cache_key = _translation_cache_key(
+            "ja",
+            {
+                "field": "body_html",
+                "resource_group": "product_basics",
+                "source_value": self.new_body_html,
+                "source_digest": "digest-new-body",
+            },
+        )
+        self.assertNotEqual(old_cache_key, new_cache_key)
+
+        nodes = _html_text_nodes_for_entry({"source_value": self.new_body_html})
+        node_text = [node["text"] for node in nodes]
+        self.assertEqual(node_text, ["Intro text", "Text after video"])
+        self.assertFalse(any("youtube" in value.lower() for value in node_text))
+
+        previous_source_index = {
+            (self.product_gid, "body_html", "ja"): {
+                "source_digest": "digest-old-body",
+                "source_text_hash": "",
+            }
+        }
+        old_cache = {
+            old_cache_key: {
+                "value": "<p>OLD FULL BODY CACHE</p>",
+                "locale": "ja",
+                "field": "body_html",
+                "source_digest": "digest-old-body",
+            }
+        }
+        openai_body_response = {
+            "translations": {
+                "body_html": {
+                    "html_text_nodes": {
+                        "n1": "JP Intro text",
+                        "n2": "JP Text after video",
+                    }
+                }
+            }
+        }
+
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}), patch(
+            "shopify_sync.translation_drafts.fetch_translation_console_data",
+            return_value=self._console_result(),
+        ), patch(
+            "shopify_sync.translation_drafts._previous_translation_source_index",
+            return_value=previous_source_index,
+        ), patch(
+            "shopify_sync.translation_drafts._load_translation_cache",
+            return_value=old_cache,
+        ), patch(
+            "shopify_sync.translation_drafts._save_translation_cache"
+        ) as mock_save_cache, patch(
+            "shopify_sync.translation_drafts._request_openai_profile",
+            return_value=openai_body_response,
+        ) as mock_openai_profile:
+            result = generate_selected_product_missing_translation_draft_package(
+                product_id=self.product_gid,
+                target_locales=["ja"],
+                fields=["product_basics"],
+                installation=SimpleNamespace(shop="example.myshopify.com"),
+                include_missing=True,
+                include_outdated=True,
+            )
+
+        self.assertTrue(result["success"])
+        mock_openai_profile.assert_called_once()
+        mock_save_cache.assert_called_once()
+        body_entry = result["draft_entries"][0]
+        self.assertEqual(
+            body_entry["row_status"],
+            "outdated_translation_update_draft_ready",
+        )
+        self.assertTrue(body_entry["existing_translation_outdated"])
+        self.assertTrue(body_entry["source_changed_from_previous_report"])
+        self.assertEqual(
+            body_entry["source_change_message"],
+            SOURCE_CHANGED_REFRESH_MESSAGE,
+        )
+        self.assertIn(
+            '<iframe src="https://www.youtube.com/embed/demo123" title="Demo video"></iframe>',
+            body_entry["draft_value"],
+        )
+        self.assertIn("JP Intro text", body_entry["draft_value"])
+        self.assertIn("JP Text after video", body_entry["draft_value"])
+        self.assertNotIn("OLD FULL BODY CACHE", body_entry["draft_value"])
+        self.assertNotIn("html_media_or_link_tag_broken", body_entry["quality_notes"])
+        self.assertNotIn("body_html_structure_broken", body_entry["quality_notes"])
+
+        broken_notes = _html_structure_notes_for_draft(
+            {"field": "body_html", "source_value": self.new_body_html},
+            "<p>JP Intro text</p><p>JP Text after video</p>",
+        )
+        self.assertIn("html_media_or_link_tag_broken", broken_notes)
 
 
 class TranslationAllLanguagesShopifyUpdateTests(SimpleTestCase):
