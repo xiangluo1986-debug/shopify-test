@@ -169,19 +169,38 @@ def _build_approval_message(task: str, mode: str, result: dict, approval_id: str
             f"{result['approval_message']}"
         )
 
+    result_lines = []
+    for key in (
+        "success",
+        "detected_issue_summary",
+        "checked_items",
+        "warnings",
+        "review_path",
+        "json_review_path",
+        "html_review_path",
+    ):
+        if key in result:
+            result_lines.append(f"- {key}: {_format_approval_value(result.get(key))}")
+    if not result_lines:
+        result_lines.append("- summary: no structured result summary fields were provided.")
+
+    action_lines = [f"- {action}" for action in _next_allowed_actions(task)]
+
     return (
         f"Task: {task}\n"
         f"Approval ID: {approval_id}\n"
         f"Status: {mode} completed\n"
         "Result:\n"
-        f"- checked_items: {result['checked_items']}\n"
-        f"- warnings: {result['warnings']}\n\n"
+        f"{chr(10).join(result_lines)}\n\n"
         "Choose next step:\n"
-        "1 = generate review file\n"
-        "2 = run simulated test write only\n"
-        "0 = stop task\n"
-        "SHOW_LOG = show recent log summary"
+        f"{chr(10).join(action_lines)}"
     )
+
+
+def _format_approval_value(value) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 def _request_reply(message: str, logger, approval_mode: str, summary: str) -> ApprovalReply:
@@ -348,6 +367,7 @@ def _execute_selected_action(
         "shopify_review_request_gmail_oauth_setup_helper",
         "shopify_review_request_gmail_readiness_package",
         "shopify_review_request_history_ledger_audit",
+        "shopify_review_request_dashboard_counts_audit",
         "shopify_review_request_kudosi_api_403_diagnostics",
         "shopify_review_request_kudosi_api_capability_probe",
         "shopify_review_request_manual_action_csv_export",
@@ -511,6 +531,16 @@ def _summarize_task_result(result: dict) -> str:
         "executor_status",
         "gate_status",
         "eligible_candidate_count",
+        "eligible_total",
+        "needs_review_visible_count",
+        "already_sent_total",
+        "blocked_total",
+        "older_eligible_hidden",
+        "latest_sent_order",
+        "latest_sent_time",
+        "already_sent_page_size",
+        "already_sent_visible_count",
+        "stale_counter_warning",
         "selected_candidate_order_name",
         "ack_present",
         "future_real_send_allowed_if_implemented",
@@ -1394,6 +1424,7 @@ def _next_allowed_actions(task: str) -> list[str]:
         "shopify_review_request_gmail_oauth_setup_helper",
         "shopify_review_request_gmail_readiness_package",
         "shopify_review_request_history_ledger_audit",
+        "shopify_review_request_dashboard_counts_audit",
         "shopify_review_request_kudosi_api_403_diagnostics",
         "shopify_review_request_kudosi_api_capability_probe",
         "shopify_review_request_manual_action_csv_export",
