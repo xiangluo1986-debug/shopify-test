@@ -586,6 +586,10 @@
     color: #111827;
     padding: 8px;
   }
+  .tw-result-card.is-edited-target {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
   .tw-update-entry input {
     margin-top: 3px;
   }
@@ -1985,9 +1989,14 @@
     color: #185c25;
   }
   .tw-status-badge.is-ready,
+  .tw-status-badge.is-saved_locally,
   .tw-status-badge.is-already_up_to_date {
     background: #e8f5e9;
     color: #185c25;
+  }
+  .tw-status-badge.is-review_note {
+    background: #eaf2ff;
+    color: #123f7a;
   }
   .tw-status-badge.is-needs_review {
     background: #fff4e5;
@@ -2395,6 +2404,7 @@
   .translation-workspace .tw-status-badge.is-translated,
   .translation-workspace .tw-status-badge.is-completed,
   .translation-workspace .tw-status-badge.is-ready,
+  .translation-workspace .tw-status-badge.is-saved_locally,
   .translation-workspace .tw-status-badge.is-already_up_to_date,
   .translation-workspace .tw-coverage-status.is-visible,
   .translation-workspace .tw-coverage-status.is-included {
@@ -2428,6 +2438,7 @@
     color: #7f1d1d;
   }
   .translation-workspace .tw-status-badge.is-draft_only,
+  .translation-workspace .tw-status-badge.is-review_note,
   .translation-workspace .tw-coverage-status.is-available_hidden_by_filter,
   .translation-workspace .tw-coverage-status.is-nested_only {
     border-color: #93c5fd;
@@ -3097,7 +3108,7 @@
   {% endif %}
 
   {% if translation_background_job.show_translation_results %}
-    <div id="translation-results" class="module tw-translation-results tw-translation-comparison" data-workspace-section="results" data-translation-results-section data-result-count="{{ translation_background_job.translation_result_count|default:0 }}" data-locale-terminal-count="{{ translation_background_job.counts.processed_locales|default:0 }}" data-language-switcher>
+    <div id="translation-results" class="module tw-translation-results tw-translation-comparison" data-workspace-section="results" data-translation-results-section data-result-count="{{ translation_background_job.translation_result_count|default:0 }}" data-locale-terminal-count="{{ translation_background_job.counts.processed_locales|default:0 }}" data-language-switcher data-active-locale="{{ active_locale|default:selected_locale }}" data-active-group="{{ active_group }}" data-edited-entry-id="{{ edited_entry_id }}">
       <div class="tw-results-heading">
         <h2>Result summary</h2>
         <div class="tw-results-meta-row">
@@ -4038,7 +4049,7 @@
                 </div>
                 <div class="tw-result-list">
                   {% for row in content_group.rows %}
-                    <article class="tw-result-card{% if row.is_html_field %} is-description{% endif %}" data-result-card data-locale="{{ language_group.language }}" data-group="{{ content_group.group_key }}" data-shopify-apply-supported="{% if row.shopify_apply_supported_field %}true{% else %}false{% endif %}">
+                    <article id="translation-entry-{{ row.safe_write_entry_id|default:row.entry_id }}" class="tw-result-card{% if row.is_html_field %} is-description{% endif %}" data-result-card data-locale="{{ language_group.language }}" data-group="{{ content_group.group_key }}" data-shopify-apply-supported="{% if row.shopify_apply_supported_field %}true{% else %}false{% endif %}">
                       <div class="tw-result-card-header">
                         <div>
                           <div class="tw-result-eyebrow">{{ row.language_label }} ({{ row.language }})</div>
@@ -4141,6 +4152,9 @@
                           <input type="hidden" name="target_locale" value="{{ row.language }}">
                           <input type="hidden" name="editor_filter" value="{{ editor_filter }}">
                           <input type="hidden" name="editor_search" value="{{ editor_search_query }}">
+                          <input type="hidden" name="active_locale" value="{{ row.language }}">
+                          <input type="hidden" name="active_group" value="{{ content_group.group_key }}">
+                          <input type="hidden" name="edited_entry_id" value="{{ row.safe_write_entry_id|default:row.entry_id }}">
                           <input type="hidden" name="translation_job_id" value="{{ translation_background_job.job_id }}">
                           <input type="hidden" name="manual_edit_entry_id" value="{{ row.safe_write_entry_id|default:row.entry_id }}">
                           {% if row.is_html_field %}
@@ -7350,6 +7364,16 @@
           if (!buttons.length || !panels.length) {
             return;
           }
+          var requestedLocale = container.getAttribute("data-active-locale") || "";
+          var editedEntryId = container.getAttribute("data-edited-entry-id") || "";
+          try {
+            var params = new URLSearchParams(window.location.search || "");
+            requestedLocale = requestedLocale || params.get("active_locale") || params.get("target_locale") || "";
+            editedEntryId = editedEntryId || params.get("edited_entry_id") || "";
+          } catch (error) {
+            requestedLocale = requestedLocale || "";
+            editedEntryId = editedEntryId || "";
+          }
 
           function canonicalLocale(value) {
             var text = String(value || "").trim();
@@ -7417,10 +7441,22 @@
             });
           });
           var defaultButton = buttons.filter(function (button) {
+            return requestedLocale &&
+              canonicalLocale(button.getAttribute("data-language-tab")) === canonicalLocale(requestedLocale);
+          })[0] || buttons.filter(function (button) {
             return button.getAttribute("data-language-default") === "true" ||
               button.classList.contains("is-active");
           })[0] || buttons[0];
           selectLanguage(defaultButton.getAttribute("data-language-tab"));
+          if (editedEntryId) {
+            window.setTimeout(function () {
+              var target = document.getElementById("translation-entry-" + editedEntryId);
+              if (target && target.scrollIntoView) {
+                target.scrollIntoView({ block: "center" });
+                target.classList.add("is-edited-target");
+              }
+            }, 80);
+          }
         });
     }());
 
@@ -7435,6 +7471,16 @@
           var panels = Array.prototype.slice.call(languagePanel.querySelectorAll("[data-group-panel]"));
           if (!buttons.length || !panels.length) {
             return;
+          }
+          var requestedGroup = "";
+          var root = document.querySelector("[data-language-switcher]");
+          if (root) {
+            requestedGroup = root.getAttribute("data-active-group") || "";
+          }
+          try {
+            requestedGroup = requestedGroup || (new URLSearchParams(window.location.search || "")).get("active_group") || "";
+          } catch (error) {
+            requestedGroup = requestedGroup || "";
           }
 
           function activeKeys() {
@@ -7465,6 +7511,13 @@
               applyGroupFilter();
             });
           });
+          if (requestedGroup) {
+            buttons.forEach(function (item) {
+              var active = item.getAttribute("data-group-tab") === requestedGroup;
+              item.classList.toggle("is-active", active);
+              item.setAttribute("aria-selected", active ? "true" : "false");
+            });
+          }
           applyGroupFilter();
         });
     }());

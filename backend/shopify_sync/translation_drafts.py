@@ -207,8 +207,15 @@ SEO_REVIEW_NOTE_CODES = {
     "missing_part_type",
     "missing_replacement_part_meaning",
     "missing_use_case",
+    "product_type_mismatch",
 }
 NON_BLOCKING_SEO_NOTE_CODES = {
+    "keyword_stuffing_or_duplicate",
+    "missing_core_keyword",
+    "missing_model",
+    "missing_part_type",
+    "missing_replacement_part_meaning",
+    "missing_use_case",
     "missing_value_point",
     "too_short_for_seo",
 }
@@ -273,7 +280,9 @@ PRODUCT_IDENTITY_BLOCKLIST_TERMS = (
     "F-16",
     "SR22",
     "Trainstar",
+    "RC ERA",
     "Volantex",
+    "VolantexRC",
     "WLtoys",
     "XK",
     "Goosky",
@@ -291,6 +300,63 @@ PRODUCT_IDENTITY_CATEGORY_TERMS = (
     "Battery",
     "Motor",
     "Connector",
+)
+PRODUCT_TYPE_MISMATCH_REVIEW_REASON = "product_type_mismatch"
+PRODUCT_TYPE_MISMATCH_WARNING_TEXT = "Product type may be wrong."
+PRODUCT_TYPE_GUARD_FIELDS = {"title", "body_html", "meta_title", "meta_description"}
+PRODUCT_TYPE_MAIN_SOURCE_TERMS = (
+    "RC helicopter",
+    "RC airplane",
+    "helicopter",
+    "aircraft",
+    "airplane",
+    "plane",
+    "warbird",
+    "boat",
+    "car",
+)
+PRODUCT_TYPE_ACCESSORY_SOURCE_TERMS = (
+    "replacement part",
+    "spare part",
+    "accessory",
+    "battery",
+    "propeller",
+    "charger",
+    "replacement",
+    "spare",
+)
+PRODUCT_TYPE_ACCESSORY_DRAFT_TERMS = (
+    "accessory",
+    "accessories",
+    "spare part",
+    "spare parts",
+    "replacement part",
+    "replacement parts",
+    "part for",
+    "parts for",
+    "zubehor",
+    "zubeh\u00f6r",
+    "ersatzteil",
+    "ersatzteile",
+    "ersatzteil fur",
+    "ersatzteil f\u00fcr",
+    "piece de rechange",
+    "pi\u00e8ce de rechange",
+    "accessoire",
+    "accesorio",
+    "accesorios",
+    "pieza de repuesto",
+    "repuesto",
+    "recambio",
+    "accessorio",
+    "accessori",
+    "pezzo di ricambio",
+    "ricambio",
+    "\u30a2\u30af\u30bb\u30b5\u30ea\u30fc",
+    "\u30d1\u30fc\u30c4",
+    "\u90e8\u54c1",
+    "\u4ea4\u63db\u90e8\u54c1",
+    "\u4e88\u5099\u90e8\u54c1",
 )
 PRODUCT_MODEL_TOKEN_RE = re.compile(
     r"(?<![A-Za-z0-9])(?:[A-Z]{1,5}-?\d+[A-Z0-9-]*|\d+[A-Z]{1,4}[A-Z0-9-]*)(?![A-Za-z0-9])"
@@ -1328,6 +1394,7 @@ def build_product_identity_context(product=None, translatable_rows=None, source_
     source_text = "\n".join(text_parts)
     source_model_terms = _extract_model_tokens(source_text)
     expected_terms = _extract_product_identity_terms(source_text, source_model_terms)
+    source_product_type = _source_product_type_profile(source_text)
     allowed_product_terms = [
         term
         for term in PRODUCT_IDENTITY_BLOCKLIST_TERMS
@@ -1337,6 +1404,7 @@ def build_product_identity_context(product=None, translatable_rows=None, source_
         "expected_terms": expected_terms,
         "source_model_terms": source_model_terms,
         "allowed_product_terms": allowed_product_terms,
+        "source_product_type": source_product_type,
     }
 
 
@@ -1377,14 +1445,38 @@ def validate_product_identity_draft(source_identity_context, draft, field=""):
         validation_reasons.append("unexpected_product_term")
     if unexpected_model_tokens:
         validation_reasons.append("unexpected_model_token")
+    product_type_validation = validate_product_type_draft(context, draft, field)
+    if product_type_validation["product_type_mismatch"]:
+        validation_reasons.append(PRODUCT_TYPE_MISMATCH_REVIEW_REASON)
     validation_reasons = _unique(validation_reasons)
     status = "blocked" if validation_reasons else "ok"
+    product_identity_mismatch = any(
+        reason != PRODUCT_TYPE_MISMATCH_REVIEW_REASON
+        for reason in validation_reasons
+    )
     return {
         "validation_status": status,
         "validation_reasons": validation_reasons,
-        "suspicious_terms": suspicious_terms,
-        "warning_text": PRODUCT_IDENTITY_WARNING_TEXT if validation_reasons else "",
-        "product_identity_mismatch": bool(validation_reasons),
+        "suspicious_terms": _unique(
+            suspicious_terms + product_type_validation["suspicious_terms"]
+        ),
+        "warning_text": (
+            PRODUCT_IDENTITY_WARNING_TEXT
+            if product_identity_mismatch
+            else (
+                PRODUCT_TYPE_MISMATCH_WARNING_TEXT
+                if product_type_validation["product_type_mismatch"]
+                else ""
+            )
+        ),
+        "product_identity_mismatch": product_identity_mismatch,
+        "product_type_mismatch": product_type_validation["product_type_mismatch"],
+        "product_type_warning_text": (
+            PRODUCT_TYPE_MISMATCH_WARNING_TEXT
+            if product_type_validation["product_type_mismatch"]
+            else ""
+        ),
+        "product_type_validation": product_type_validation,
         "needs_review": bool(validation_reasons),
         "draft_blocked": status == "blocked",
         "source_identity_terms": context.get("expected_terms") or [],
@@ -1392,6 +1484,159 @@ def validate_product_identity_draft(source_identity_context, draft, field=""):
         "draft_model_terms": draft_model_tokens,
         "field": field,
     }
+
+
+def validate_product_type_draft(source_identity_context, draft, field=""):
+    context = _normalize_product_identity_context(source_identity_context)
+    field = str(field or "").strip()
+    if field not in PRODUCT_TYPE_GUARD_FIELDS:
+        return _empty_product_type_validation(context, field)
+
+    source_profile = _normalize_source_product_type_profile(
+        context.get("source_product_type") or {}
+    )
+    guard_text = _product_type_guard_text(draft, field)
+    accessory_terms = _product_type_terms_in_text(
+        PRODUCT_TYPE_ACCESSORY_DRAFT_TERMS,
+        guard_text,
+    )
+    product_type_mismatch = bool(
+        source_profile.get("role") == "main_product" and accessory_terms
+    )
+    return {
+        "validation_status": "blocked" if product_type_mismatch else "ok",
+        "validation_reasons": (
+            [PRODUCT_TYPE_MISMATCH_REVIEW_REASON] if product_type_mismatch else []
+        ),
+        "product_type_mismatch": product_type_mismatch,
+        "warning_text": (
+            PRODUCT_TYPE_MISMATCH_WARNING_TEXT if product_type_mismatch else ""
+        ),
+        "suspicious_terms": accessory_terms,
+        "source_role": source_profile.get("role", ""),
+        "source_main_terms": source_profile.get("main_terms") or [],
+        "source_accessory_terms": source_profile.get("accessory_terms") or [],
+        "field": field,
+    }
+
+
+def _empty_product_type_validation(context, field):
+    source_profile = _normalize_source_product_type_profile(
+        (context or {}).get("source_product_type") or {}
+    )
+    return {
+        "validation_status": "skipped",
+        "validation_reasons": [],
+        "product_type_mismatch": False,
+        "warning_text": "",
+        "suspicious_terms": [],
+        "source_role": source_profile.get("role", ""),
+        "source_main_terms": source_profile.get("main_terms") or [],
+        "source_accessory_terms": source_profile.get("accessory_terms") or [],
+        "field": field,
+    }
+
+
+def _source_product_type_profile(source_text):
+    source_text = str(source_text or "")
+    main_terms = _product_type_terms_in_text(PRODUCT_TYPE_MAIN_SOURCE_TERMS, source_text)
+    accessory_terms = _product_type_terms_in_text(
+        PRODUCT_TYPE_ACCESSORY_SOURCE_TERMS,
+        source_text,
+    )
+    if accessory_terms:
+        role = "accessory_or_part"
+    elif main_terms:
+        role = "main_product"
+    else:
+        role = "unknown"
+    return {
+        "role": role,
+        "main_terms": main_terms,
+        "accessory_terms": accessory_terms,
+    }
+
+
+def _normalize_source_product_type_profile(profile):
+    if not isinstance(profile, dict):
+        return _source_product_type_profile("")
+    role = str(profile.get("role") or "").strip()
+    if role not in {"main_product", "accessory_or_part", "unknown"}:
+        role = "unknown"
+    return {
+        "role": role,
+        "main_terms": _unique(profile.get("main_terms") or []),
+        "accessory_terms": _unique(profile.get("accessory_terms") or []),
+    }
+
+
+def _product_type_guard_text(draft, field):
+    draft = str(draft or "")
+    if str(field or "") == "body_html":
+        headings = _body_html_heading_texts(draft)
+        return "\n".join(headings)
+    return draft
+
+
+def _product_type_terms_in_text(terms, text):
+    matches = []
+    for term in terms or []:
+        if _product_type_term_in_text(term, text):
+            matches.append(str(term))
+    return _unique(matches)
+
+
+def _product_type_term_in_text(term, text):
+    term = str(term or "").strip()
+    text = str(text or "")
+    if not term or not text:
+        return False
+    if all(ord(char) < 128 for char in term):
+        escaped = re.escape(term.lower()).replace(r"\ ", r"[\s_-]+")
+        return bool(
+            re.search(
+                rf"(?<![a-z0-9]){escaped}(?![a-z0-9])",
+                text.lower(),
+            )
+        )
+    return term in text
+
+
+def _body_html_heading_texts(value):
+    parser = _HeadingTextExtractor()
+    try:
+        parser.feed(str(value or ""))
+        parser.close()
+    except Exception:
+        return []
+    return parser.headings
+
+
+class _HeadingTextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.headings = []
+        self._heading_tag = ""
+        self._heading_parts = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = str(tag or "").lower()
+        if tag in {"h1", "h2", "h3", "h4"} and not self._heading_tag:
+            self._heading_tag = tag
+            self._heading_parts = []
+
+    def handle_endtag(self, tag):
+        tag = str(tag or "").lower()
+        if self._heading_tag and tag == self._heading_tag:
+            text = re.sub(r"\s+", " ", " ".join(self._heading_parts)).strip()
+            if text:
+                self.headings.append(text)
+            self._heading_tag = ""
+            self._heading_parts = []
+
+    def handle_data(self, data):
+        if self._heading_tag and str(data or "").strip():
+            self._heading_parts.append(str(data))
 
 
 def _attach_source_identity_context(entry, source_identity_context):
@@ -1415,6 +1660,8 @@ def _attach_product_identity_validation(entry, draft):
     entry["identity_warning_text"] = identity["warning_text"]
     entry["warning_text"] = identity["warning_text"]
     entry["product_identity_mismatch"] = identity["product_identity_mismatch"]
+    entry["product_type_mismatch"] = identity["product_type_mismatch"]
+    entry["product_type_warning_text"] = identity["product_type_warning_text"]
     entry["needs_review"] = bool(entry.get("needs_review") or identity["needs_review"])
     entry["draft_blocked"] = identity["draft_blocked"]
     entry["source_identity_terms"] = identity["source_identity_terms"]
@@ -1439,16 +1686,20 @@ def _attach_existing_translation_identity_validation(entry):
         existing_value,
         field=entry.get("field", ""),
     )
-    if not identity["product_identity_mismatch"]:
+    if not (identity["product_identity_mismatch"] or identity["product_type_mismatch"]):
         return
     entry["product_identity_validation_status"] = identity["validation_status"]
     entry["validation_reasons"] = identity["validation_reasons"]
     entry["suspicious_terms"] = identity["suspicious_terms"]
     entry["identity_warning_text"] = (
         "This existing translation may mention a different product. Please review before using."
+        if identity["product_identity_mismatch"]
+        else PRODUCT_TYPE_MISMATCH_WARNING_TEXT
     )
     entry["warning_text"] = entry["identity_warning_text"]
-    entry["product_identity_mismatch"] = True
+    entry["product_identity_mismatch"] = identity["product_identity_mismatch"]
+    entry["product_type_mismatch"] = identity["product_type_mismatch"]
+    entry["product_type_warning_text"] = identity.get("product_type_warning_text", "")
     entry["needs_review"] = True
     entry["source_identity_terms"] = identity["source_identity_terms"]
     entry["source_model_terms"] = identity["source_model_terms"]
@@ -1475,6 +1726,9 @@ def _normalize_product_identity_context(context):
         "expected_terms": _unique(context.get("expected_terms") or []),
         "source_model_terms": _unique(context.get("source_model_terms") or []),
         "allowed_product_terms": _unique(context.get("allowed_product_terms") or []),
+        "source_product_type": _normalize_source_product_type_profile(
+            context.get("source_product_type") or {}
+        ),
     }
 
 
@@ -2142,6 +2396,7 @@ def _openai_prompt_rules(prompt_profile, identity_term_text):
             "Return JSON only with a translations object keyed by draft_key exactly.",
             f"Preserve these source product identity terms when they appear in the source: {identity_term_text}.",
             "Do not introduce a different product brand, product line, aircraft name, vehicle name, or model number.",
+            "Do not change the product type. A helicopter must remain a helicopter, not an accessory, unless the source clearly says accessory/part.",
             "Preserve brand names, model names, SKU-like codes, dimensions, battery specs, and option structure.",
             "Preserve RC terminology and product facts. Do not invent specifications.",
             "Do not add CTA, shipping-origin, Made in China, Best, Cheap, guaranteed, official, or original OEM claims.",
@@ -2854,6 +3109,7 @@ def _request_openai_rewrite(locale, entry, current_value, attempt, result):
                             f"Preserve these source product identity terms when they appear in the source: {identity_term_text}.",
                             "Preserve brand names, model names, SKU-like codes, dimensions, battery specs, and option structure.",
                             "Do not introduce a different product brand, product line, aircraft name, vehicle name, or model number.",
+                            "Do not change the product type. A helicopter must remain a helicopter, not an accessory, unless the source clearly says accessory/part.",
                             "Do not add CTA, shipping, origin, Made in China, Best, Cheap, guaranteed, official, or original OEM claims.",
                         ],
                         "output_contract": {"type": "JSON object", "shape": {"value": "rewritten draft"}},

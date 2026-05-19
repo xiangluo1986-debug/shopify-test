@@ -252,6 +252,7 @@ ALL_LANGUAGES_HARD_REVIEW_REASON_MAP = {
     "manual_review_required": "blocked_needs_review_status",
     "openai_invalid_translation_response": "blocked_needs_review_status",
     "product_identity_mismatch": "blocked_identity_review_required",
+    "product_type_mismatch": "blocked_product_type_review_required",
     "product_title_over_80_chars": "blocked_product_title_over_80_chars",
     "seo_description_over_160_chars": "blocked_seo_description_over_160_chars",
     "seo_title_over_60_chars": "blocked_seo_title_over_60_chars",
@@ -2483,6 +2484,7 @@ def _safe_write_entry_from_row(row: dict, *, product_gid: str):
         "product_identity_mismatch": _safe_write_bool(
             row.get("product_identity_mismatch")
         ),
+        "product_type_mismatch": _safe_write_bool(row.get("product_type_mismatch")),
         "has_generated_draft": _safe_write_bool(row.get("has_generated_draft"))
         or bool(proposed_value.strip()),
     }
@@ -2569,6 +2571,8 @@ def _safe_write_block_reason(entry: dict, *, product_gid: str):
         return "blocked_existing_current_translation"
     if entry.get("product_identity_mismatch"):
         return "blocked_identity_review_required"
+    if entry.get("product_type_mismatch"):
+        return "blocked_product_type_review_required"
     if entry.get("source_changed_since_report"):
         return STALE_SOURCE_BLOCKED_REASON
     if entry.get("draft_blocked"):
@@ -2642,6 +2646,8 @@ def _selected_apply_block_reason(entry: dict, *, product_gid: str):
         return "blocked_forbidden_phrase_detected"
     if entry.get("product_identity_mismatch"):
         return "blocked_identity_review_required"
+    if entry.get("product_type_mismatch"):
+        return "blocked_product_type_review_required"
     if entry.get("source_changed_since_report"):
         return STALE_SOURCE_BLOCKED_REASON
     if entry.get("draft_blocked"):
@@ -2974,6 +2980,8 @@ def _all_languages_update_blocking_reasons(entry: dict, *, product_gid: str):
         reasons.append("blocked_forbidden_phrase_detected")
     if entry.get("product_identity_mismatch"):
         reasons.append("blocked_identity_review_required")
+    if entry.get("product_type_mismatch"):
+        reasons.append("blocked_product_type_review_required")
     if entry.get("source_changed_since_report"):
         reasons.append(STALE_SOURCE_BLOCKED_REASON)
     reasons.extend(_all_languages_hard_review_blocking_reasons(entry))
@@ -3609,6 +3617,7 @@ def _all_languages_blocking_reason_label(reason: str):
         "blocked_forbidden_phrase_detected": "Contains blocked wording.",
         "blocked_html_media_or_link_tag_broken": "Product description video, link, or image structure did not match the original. Review before update.",
         "blocked_identity_review_required": "Product/model check failed.",
+        "blocked_product_type_review_required": "Product type may be wrong.",
         "blocked_key_missing": "Missing Shopify mapping.",
         "blocked_media_alt_not_customer_facing": "Needs review before update.",
         "blocked_media_alt_over_125_chars": "Translation is too long.",
@@ -4239,6 +4248,12 @@ def _all_languages_body_html_blocker_categories(entry: dict):
         or entry.get("product_identity_mismatch")
     ):
         categories.append("identity_mismatch")
+    if (
+        "blocked_product_type_review_required" in reasons
+        or "product_type_mismatch" in codes
+        or entry.get("product_type_mismatch")
+    ):
+        categories.append("product_type_mismatch")
     if (
         "blocked_proposed_translation_empty" in reasons
         or "blocked_digest_missing" in reasons

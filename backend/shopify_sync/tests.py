@@ -9,18 +9,23 @@ from django.test import SimpleTestCase, TestCase, override_settings
 
 from .models import ShopifyInstallation
 from .translation_apply_plan import (
-    ALL_LANGUAGES_MAPPING_BLOCKED_REASON,
     build_translation_workspace_all_languages_update_state,
     validate_and_update_all_languages_to_shopify,
 )
 from .translation_drafts import (
     SOURCE_CHANGED_REFRESH_MESSAGE,
+    build_product_identity_context,
     _html_structure_notes_for_draft,
     _html_text_nodes_for_entry,
     _translation_cache_key,
     generate_selected_product_missing_translation_draft_package,
+    validate_product_identity_draft,
 )
-from .views import SHOPIFY_OAUTH_STATE_SESSION_KEY
+from .views import (
+    SHOPIFY_OAUTH_STATE_SESSION_KEY,
+    _translation_console_editor_redirect_url,
+    _translation_workspace_result_card_row,
+)
 
 
 def shopify_hmac(params, secret="test-secret"):
@@ -337,6 +342,108 @@ class TranslationWorkspaceBodyHtmlSourceChangeTests(SimpleTestCase):
         self.assertIn("html_media_or_link_tag_broken", broken_notes)
 
 
+class TranslationWorkspaceProductTypeGuardTests(SimpleTestCase):
+    def test_helicopter_translated_as_accessory_triggers_product_type_mismatch(self):
+        context = build_product_identity_context(
+            source_values=["RC ERA C184 helicopter"]
+        )
+
+        validation = validate_product_identity_draft(
+            context,
+            "RC ERA C184 accessory part",
+            field="meta_title",
+        )
+
+        self.assertTrue(validation["product_type_mismatch"])
+        self.assertTrue(validation["draft_blocked"])
+        self.assertIn("product_type_mismatch", validation["validation_reasons"])
+
+    def test_accessory_source_does_not_false_fail_product_type_guard(self):
+        context = build_product_identity_context(
+            source_values=["replacement battery for F-16"]
+        )
+
+        validation = validate_product_identity_draft(
+            context,
+            "F-16 replacement battery accessory",
+            field="meta_title",
+        )
+
+        self.assertFalse(validation["product_type_mismatch"])
+        self.assertNotIn("product_type_mismatch", validation["validation_reasons"])
+
+
+class TranslationWorkspaceManualEditUxTests(SimpleTestCase):
+    def test_manual_edit_redirect_preserves_german_locale_and_anchor(self):
+        request = SimpleNamespace(path="/admin/shopify_sync/translation-console/")
+
+        url = _translation_console_editor_redirect_url(
+            request,
+            selected_product_gid="gid://shopify/Product/111",
+            product_search_text="C184",
+            locale="de",
+            editor_filter="needs_review",
+            editor_search_query="title",
+            active_locale="de",
+            active_group="seo",
+            edited_entry_id="swr_abc123",
+        )
+
+        self.assertIn("target_locale=de", url)
+        self.assertIn("active_locale=de", url)
+        self.assertIn("active_group=seo", url)
+        self.assertTrue(url.endswith("#translation-entry-swr_abc123"))
+
+    def _manual_row(self, **overrides):
+        row = {
+            "locale": "de",
+            "resource_group": "seo",
+            "field": "meta_title",
+            "key": "meta_title",
+            "resource_id": "gid://shopify/Product/111",
+            "source_digest": "digest-meta-title-de",
+            "source_value": "RC ERA C184 helicopter",
+            "proposed_translation": "RC ERA C184 Hubschrauber",
+            "manual_edit_value": "RC ERA C184 Hubschrauber",
+            "using_manual_edit": True,
+            "has_generated_draft": True,
+            "validation_status": "draft_ready_for_manual_review",
+            "seo_validation_status": "seo_ready",
+        }
+        row.update(overrides)
+        return row
+
+    def test_manual_edit_without_existing_translation_is_saved_locally(self):
+        display = _translation_workspace_result_card_row(self._manual_row())
+
+        self.assertEqual(display["result_status_key"], "saved_locally")
+        self.assertEqual(display["result_status_label"], "Saved locally")
+
+    def test_manual_edit_matching_existing_translation_is_already_up_to_date(self):
+        display = _translation_workspace_result_card_row(
+            self._manual_row(
+                existing_translation_present=True,
+                existing_translation_value="RC ERA C184 Hubschrauber",
+                existing_translation_outdated=False,
+            )
+        )
+
+        self.assertEqual(display["result_status_key"], "already_up_to_date")
+        self.assertEqual(display["result_status_label"], "Already up to date")
+
+    def test_manual_edit_different_existing_translation_is_ready_not_needs_review(self):
+        display = _translation_workspace_result_card_row(
+            self._manual_row(
+                existing_translation_present=True,
+                existing_translation_value="Alter Titel",
+                existing_translation_outdated=True,
+            )
+        )
+
+        self.assertEqual(display["result_status_key"], "saved_locally")
+        self.assertNotEqual(display["result_status_key"], "needs_review")
+
+
 class TranslationAllLanguagesShopifyUpdateTests(SimpleTestCase):
     product_gid = "gid://shopify/Product/111"
 
@@ -413,7 +520,52 @@ class TranslationAllLanguagesShopifyUpdateTests(SimpleTestCase):
         self.assertIn("blocked_html_media_or_link_tag_broken", blocked["body_html"]["blocking_reasons"])
         self.assertEqual(
             blocked["option.name"]["blocking_reason"],
-            ALL_LANGUAGES_MAPPING_BLOCKED_REASON,
+            "Missing Shopify mapping.",
+        )
+
+    def test_all_languages_state_uses_consistent_manual_edit_status(self):
+        rows = [
+            self._title_row(
+                "de",
+                "RC ERA C184 Hubschrauber",
+                manual_edit_value="RC ERA C184 Hubschrauber",
+                using_manual_edit=True,
+                existing_translation_present=False,
+                existing_translation_value="",
+                existing_translation_outdated=False,
+            ),
+            self._title_row(
+                "fr",
+                "RC ERA C184 Helicoptere",
+                manual_edit_value="RC ERA C184 Helicoptere",
+                using_manual_edit=True,
+                existing_translation_present=True,
+                existing_translation_value="RC ERA C184 Helicoptere",
+                existing_translation_outdated=False,
+            ),
+            self._title_row(
+                "es",
+                "RC ERA C184 Helicoptero",
+                manual_edit_value="RC ERA C184 Helicoptero",
+                using_manual_edit=True,
+                existing_translation_present=True,
+                existing_translation_value="Titulo anterior",
+                existing_translation_outdated=True,
+            ),
+        ]
+
+        state = build_translation_workspace_all_languages_update_state(
+            self._report(rows),
+            selected_product_gid=self.product_gid,
+        )
+        entries = {(entry["locale"], entry["key"]): entry for entry in state["entries"]}
+
+        self.assertEqual(entries[("de", "title")]["status"], "write_ready")
+        self.assertEqual(entries[("fr", "title")]["status"], "skipped")
+        self.assertEqual(entries[("es", "title")]["status"], "write_ready")
+        self.assertIn(
+            "existing_translation_outdated",
+            entries[("es", "title")]["soft_warning_reasons"],
         )
 
     @patch("shopify_sync.translation_apply_plan.requests.post")
@@ -480,6 +632,14 @@ class TranslationAllLanguagesShopifyUpdateTests(SimpleTestCase):
                     "data": {
                         "translatableResource": {
                             "resourceId": resource_id,
+                            "translatableContent": [
+                                {
+                                    "key": "title",
+                                    "value": "RC plane spare part",
+                                    "digest": f"digest-title-{locale}",
+                                    "locale": "en",
+                                }
+                            ],
                             "translations": [
                                 {
                                     "key": key,
