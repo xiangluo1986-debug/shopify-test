@@ -23,7 +23,7 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO for scripted apply; external route active through 18000 candidate"
-$NextBlueGreenStep = "ChatGPT review of post-cutover observation and hardening docs"
+$NextBlueGreenStep = "ChatGPT review of the formalization plan, post-cutover observation, and hardening docs"
 $CloudflareTunnelName = "aftersales-ticket"
 $CloudflarePublishedRouteTarget = "http://127.0.0.1:18000"
 $CloudflareTicketsHostname = "tickets.kidstoyloverapps.com"
@@ -93,6 +93,8 @@ $RollbackRunbookPath = ".\docs\BLUE_GREEN_ROLLBACK_RUNBOOK.md"
 $RollbackRunbookStatus = "READY for ChatGPT review"
 $LongTermOperationsPath = ".\docs\BLUE_GREEN_LONG_TERM_OPERATIONS.md"
 $LongTermOperationsStatus = "READY for ChatGPT review"
+$FormalizationPlanPath = ".\docs\BLUE_GREEN_FORMALIZATION_PLAN.md"
+$FormalizationPlanStatus = "READY for ChatGPT review"
 $RuntimeCommandHelperPath = ".\scripts\blue_green_runtime_commands.ps1"
 $RuntimeCommandHelperStatus = "plan-only / no-action"
 $RuntimeCommandExecutionStatus = "NOT ENABLED"
@@ -384,6 +386,10 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Long-term blue-green operations"
             Path = $LongTermOperationsPath
+        },
+        [pscustomobject]@{
+            Label = "Blue-green formalization plan"
+            Path = $FormalizationPlanPath
         },
         [pscustomobject]@{
             Label = "Local apply simulation read-only preview"
@@ -732,6 +738,8 @@ function Show-DeploymentLockStatus {
     Write-Host "Rollback runbook exists: $(Test-Path -LiteralPath $RollbackRunbookPath)."
     Write-Host "Long-term operations doc: $LongTermOperationsStatus."
     Write-Host "Long-term operations doc exists: $(Test-Path -LiteralPath $LongTermOperationsPath)."
+    Write-Host "Formalization plan: $FormalizationPlanStatus."
+    Write-Host "Formalization plan exists: $(Test-Path -LiteralPath $FormalizationPlanPath)."
     Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
     Write-Host "Conservative defaults: nginx proxy candidate; current web owns port 8000 until final approval; web_blue/web_green/bluegreen_proxy service names; .deploy/active-color.json state; rollback to previous_color; at least 10 minutes of observation."
     Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
@@ -959,6 +967,8 @@ function Show-FuturePlan {
     Write-Host "Rollback runbook exists: $(Test-Path -LiteralPath $RollbackRunbookPath)."
     Write-Host "Long-term operations doc: $LongTermOperationsStatus."
     Write-Host "Long-term operations doc exists: $(Test-Path -LiteralPath $LongTermOperationsPath)."
+    Write-Host "Formalization plan: $FormalizationPlanStatus."
+    Write-Host "Formalization plan exists: $(Test-Path -LiteralPath $FormalizationPlanPath)."
     Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
     Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
     Write-Host "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
@@ -1097,6 +1107,8 @@ Write-Ok "Rollback runbook: $RollbackRunbookStatus."
 Write-Ok "Rollback runbook exists: $(Test-Path -LiteralPath $RollbackRunbookPath)."
 Write-Ok "Long-term operations doc: $LongTermOperationsStatus."
 Write-Ok "Long-term operations doc exists: $(Test-Path -LiteralPath $LongTermOperationsPath)."
+Write-Ok "Formalization plan: $FormalizationPlanStatus."
+Write-Ok "Formalization plan exists: $(Test-Path -LiteralPath $FormalizationPlanPath)."
 Write-Ok "Production proxy/active-color/rollback details have conservative defaults and reviewed switch/rollback design."
 Write-Ok "Active-color state design reviewed."
 Write-Ok "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."

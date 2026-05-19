@@ -37,6 +37,11 @@ or send email.
 Convert `bluegreen_proxy_candidate` into a reviewed long-term production proxy
 service in a later approved implementation task.
 
+Use [BLUE_GREEN_FORMALIZATION_PLAN.md](BLUE_GREEN_FORMALIZATION_PLAN.md) as the
+dry-run plan for staging that conversion. The formalization plan keeps the
+current `18000` path alive, keeps `8000` as rollback, and blocks live service
+renames or real apply work until a later approved task.
+
 Required decisions before implementation:
 
 - Final service name: keep `bluegreen_proxy_candidate` temporarily or rename to
@@ -179,6 +184,7 @@ Cleanup must not:
 - Hardening plan: ready for review after creation.
 - Rollback runbook: ready for review after creation.
 - Long-term operations doc: ready for review after creation.
+- Formalization plan: ready for review after creation.
 - Production runtime implementation: not enabled by this plan.
 - Production apply scripts: still no-action / blocked unless separately
   approved.

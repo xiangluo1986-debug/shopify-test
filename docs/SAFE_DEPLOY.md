@@ -59,6 +59,8 @@ The manual rollback runbook is documented at
 [BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md).
 The long-term operations document is documented at
 [BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md).
+The blue-green formalization plan is documented at
+[BLUE_GREEN_FORMALIZATION_PLAN.md](BLUE_GREEN_FORMALIZATION_PLAN.md).
 The final runtime approval design is documented at
 [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
 These documents are READY after review; production implementation is NOT
@@ -330,8 +332,8 @@ running. The final runtime rehearsal has PASSED, and the `18000` candidate
 route has PASSED. The Cloudflare cutover result is documented at
 [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 The post-cutover observation and hardening docs are ready for ChatGPT review;
-the next step is review and separately approved monitoring/proxy hardening,
-not a deploy.
+the formalization plan is ready for ChatGPT review; the next step is review
+and separately approved monitoring/proxy hardening, not a deploy.
 
 Optional flags:
 

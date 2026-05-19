@@ -52,6 +52,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_HARDENING_PLAN.md](BLUE_GREEN_HARDENING_PLAN.md)
 - [BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md)
 - [BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md)
+- [BLUE_GREEN_FORMALIZATION_PLAN.md](BLUE_GREEN_FORMALIZATION_PLAN.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
@@ -289,8 +290,11 @@ configuration untouched.
   [BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md).
 - Long-term operations:
   [BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md).
-- Next future step: review the post-cutover hardening package and implement
-  approved monitoring/proxy hardening in a separate task.
+- Formalization plan:
+  [BLUE_GREEN_FORMALIZATION_PLAN.md](BLUE_GREEN_FORMALIZATION_PLAN.md).
+- Next future step: review the formalization and post-cutover hardening
+  package, then implement approved monitoring/proxy hardening in a separate
+  task.
 
 ## Deployment Lock Gate
 
