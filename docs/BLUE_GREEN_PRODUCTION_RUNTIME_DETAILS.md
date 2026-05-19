@@ -43,6 +43,13 @@ in
 It proposes `18000` as a placeholder new proxy port. The port is not final,
 Cloudflare change is not approved, and production apply remains NO-GO.
 
+The Cloudflare route change readiness and manual cutover approval package is
+documented in
+[BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+It records the proposed future target `http://127.0.0.1:18000`, rollback
+target `http://127.0.0.1:8000`, required pre-cutover checks, and manual
+rollback plan. It does not approve Cloudflare cutover or production apply.
+
 This document does not approve production apply. It does not deploy, start or
 stop containers, run migrations, run collectstatic, switch traffic, change
 Cloudflare or domain routing, modify active Compose files, modify production
@@ -162,9 +169,13 @@ scheduler.
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
 - Option B route plan: READY after review at
   [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Cloudflare cutover approval package: READY after review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Proposed Option B proxy port: `18000`, NOT FINAL.
+- `18000` candidate validation: PASSED.
 - Conservative recommendation: Option B, not approved.
 - Chosen option: NOT YET.
+- Cloudflare cutover: NOT APPROVED.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
 - Cloudflare Published application route origin confirmed: YES.
@@ -173,10 +184,9 @@ scheduler.
 - Production apply implementation: still NOT READY.
 - Production apply: NO-GO.
 
-Next required step: prepare the Cloudflare route change readiness / manual
-cutover approval package, fill the option comparison manual decision fields,
-and request separate final production approval before any runtime-changing
-action.
+Next required step: review the Cloudflare cutover approval package, fill the
+option comparison manual decision fields, and request separate final production
+approval before any runtime-changing action.
 
 ## Runtime Command Helper Status
 
@@ -231,5 +241,5 @@ action.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: Cloudflare route change readiness / manual cutover
-  approval package.
+- Future cutover requires manual Cloudflare edit and rollback plan review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).

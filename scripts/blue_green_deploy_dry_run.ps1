@@ -33,6 +33,12 @@ $OptionBCloudflareRoutePlanPath = ".\docs\BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_P
 $OptionBCloudflareRoutePlanStatus = "READY after review"
 $OptionBProposedProxyPort = "18000"
 $OptionBProposedProxyPortStatus = "NOT FINAL"
+$CloudflareCutoverApprovalPath = ".\docs\BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md"
+$CloudflareCutoverApprovalStatus = "READY after review"
+$CloudflareCutoverStatus = "NOT APPROVED"
+$CloudflareProposedCutoverTarget = "http://127.0.0.1:18000"
+$CloudflareRollbackTarget = "http://127.0.0.1:8000"
+$CloudflareManualCutoverApprovalPhrase = "I_APPROVE_MANUAL_CLOUDFLARE_ROUTE_CUTOVER_TO_18000"
 $ProductionCandidateProxyComposePath = ".\docker-compose.bluegreen.proxy-candidate.example.yml"
 $ProductionCandidateProxyConfigPath = ".\nginx\bluegreen.proxy-candidate.example.conf"
 $ProductionCandidateProxyService = "bluegreen_proxy_candidate"
@@ -333,6 +339,10 @@ function Show-DraftArtifactSummary {
             Path = $OptionBCloudflareRoutePlanPath
         },
         [pscustomobject]@{
+            Label = "Cloudflare cutover approval package"
+            Path = $CloudflareCutoverApprovalPath
+        },
+        [pscustomobject]@{
             Label = "Production switch/rollback review"
             Path = $ProductionSwitchRollbackReviewPath
         },
@@ -433,6 +443,7 @@ function Show-DeploymentLockStatus {
     $externalRoutingDecisionPath = $ExternalRoutingDecisionPath
     $trafficPathOptionComparisonPath = $TrafficPathOptionComparisonPath
     $optionBCloudflareRoutePlanPath = $OptionBCloudflareRoutePlanPath
+    $cloudflareCutoverApprovalPath = $CloudflareCutoverApprovalPath
     $productionSwitchRollbackReviewPath = $ProductionSwitchRollbackReviewPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
@@ -566,6 +577,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Option B Cloudflare route plan is missing: $optionBCloudflareRoutePlanPath"
     }
 
+    if (Test-Path -LiteralPath $cloudflareCutoverApprovalPath) {
+        Write-Ok "Cloudflare cutover approval package exists: $cloudflareCutoverApprovalPath"
+    } else {
+        Write-Warn "Cloudflare cutover approval package is missing: $cloudflareCutoverApprovalPath"
+    }
+
     if (Test-Path -LiteralPath $productionSwitchRollbackReviewPath) {
         Write-Ok "Production switch/rollback review document exists: $productionSwitchRollbackReviewPath"
     } else {
@@ -616,6 +633,11 @@ function Show-DeploymentLockStatus {
     Write-Host "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
     Write-Host "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
     Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
+    Write-Host "Cloudflare cutover approval package: $CloudflareCutoverApprovalStatus."
+    Write-Host "Cloudflare cutover approval package exists: $(Test-Path -LiteralPath $CloudflareCutoverApprovalPath)."
+    Write-Host "Cloudflare cutover: $CloudflareCutoverStatus."
+    Write-Host "Proposed cutover target: $CloudflareProposedCutoverTarget."
+    Write-Host "Rollback target: $CloudflareRollbackTarget."
     Write-Host "Production-candidate proxy status: $ProductionCandidateProxyStatus."
     Write-Host "Production-candidate healthz alignment: $ProductionCandidateHealthzAlignmentStatus."
     Write-Host "Production-candidate validation: $ProductionCandidateValidationStatus."
@@ -823,6 +845,12 @@ function Show-FuturePlan {
     Write-Host "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
     Write-Host "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
     Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
+    Write-Host "Cloudflare cutover approval package: $CloudflareCutoverApprovalStatus."
+    Write-Host "Cloudflare cutover approval package exists: $(Test-Path -LiteralPath $CloudflareCutoverApprovalPath)."
+    Write-Host "Cloudflare cutover: $CloudflareCutoverStatus."
+    Write-Host "Proposed cutover target: $CloudflareProposedCutoverTarget."
+    Write-Host "Rollback target: $CloudflareRollbackTarget."
+    Write-Host "Manual cutover approval phrase documented but inactive: $CloudflareManualCutoverApprovalPhrase"
     Write-Host "Production-candidate proxy status: $ProductionCandidateProxyStatus."
     Write-Host "18000 production-candidate proxy validation: $ProductionCandidateValidationStatus."
     Write-Host "Option B proxy candidate local path: $ProductionCandidateValidationStatus."
@@ -881,6 +909,7 @@ function Show-FuturePlan {
     Write-Host "External routing decision package path: $ExternalRoutingDecisionPath."
     Write-Host "Traffic path option comparison path: $TrafficPathOptionComparisonPath."
     Write-Host "Option B Cloudflare route plan path: $OptionBCloudflareRoutePlanPath."
+    Write-Host "Cloudflare cutover approval package path: $CloudflareCutoverApprovalPath."
     Write-Host "Non-production validation plan path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
     Write-Host "Production preflight document path: $ProductionPreflightPath."
     Write-Host "Production apply readiness package path: $ProductionReadinessPath."
@@ -929,6 +958,11 @@ Write-Ok "Traffic path option comparison exists: $(Test-Path -LiteralPath $Traff
 Write-Ok "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
 Write-Ok "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
 Write-Ok "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
+Write-Ok "Cloudflare cutover approval package: $CloudflareCutoverApprovalStatus."
+Write-Ok "Cloudflare cutover approval package exists: $(Test-Path -LiteralPath $CloudflareCutoverApprovalPath)."
+Write-Ok "Cloudflare cutover: $CloudflareCutoverStatus."
+Write-Ok "Proposed cutover target: $CloudflareProposedCutoverTarget."
+Write-Ok "Rollback target: $CloudflareRollbackTarget."
 Write-Ok "Production-candidate proxy status: $ProductionCandidateProxyStatus."
 Write-Ok "Production-candidate healthz alignment: $ProductionCandidateHealthzAlignmentStatus."
 Write-Ok "Production-candidate validation: $ProductionCandidateValidationStatus."

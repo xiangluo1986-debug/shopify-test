@@ -23,6 +23,8 @@ reviews the production runtime details document at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
 reviews the production switch/rollback review document at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md),
+reviews the Cloudflare cutover approval package at
+[BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md),
 reviews the final runtime approval design at
 [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md),
 and uses the same lock before any runtime-changing action.
@@ -436,6 +438,12 @@ runtime-changing actions should use the shared deployment lock.
   `docs/BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md`; READY after review
   for design only, with proxy switch command NOT IMPLEMENTED, rollback command
   NOT IMPLEMENTED, and production apply still NO-GO.
+- Cloudflare cutover approval package:
+  `docs/BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md`; READY after review for
+  manual cutover planning only. `18000` candidate validation has PASSED,
+  proposed cutover target is `http://127.0.0.1:18000`, rollback target is
+  `http://127.0.0.1:8000`, Cloudflare cutover is NOT APPROVED, and production
+  apply remains NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, the production preflight document is reviewed, migration
@@ -469,7 +477,9 @@ runtime-changing actions should use the shared deployment lock.
   plus
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
   plus
-  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+  plus
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
 ## Runtime Command Helper Coverage Status
 
@@ -529,5 +539,5 @@ runtime-changing actions should use the shared deployment lock.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: Cloudflare route change readiness / manual cutover
-  approval package.
+- Future cutover requires manual Cloudflare edit and rollback plan review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).

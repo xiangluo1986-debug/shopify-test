@@ -11,6 +11,12 @@ switch traffic, write active-color state, or change runtime configuration.
 
 Production remains NO-GO.
 
+The Cloudflare route change readiness and manual cutover approval package now
+exists at
+[BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+It is documentation-only, does not approve Cloudflare changes, and does not
+approve production apply.
+
 ## Current Confirmed Cloudflare Route Targets
 
 - Tunnel: `aftersales-ticket`.
@@ -21,14 +27,15 @@ Production remains NO-GO.
 
 ## Proposed Future Option B Target
 
-Conservative placeholder:
+Documented proposed target:
 
 - Proposed `bluegreen_proxy` local port: `18000`.
 - Future target:
   - `tickets.kidstoyloverapps.com` -> `http://127.0.0.1:18000`.
   - `shopify.kidstoyloverapps.com` -> `http://127.0.0.1:18000`.
 
-`18000` is proposed, not active. The final port must be approved later. No
+`18000` is proposed, not active. The local `18000` proxy candidate validation
+has PASSED, but final manual Cloudflare cutover approval is still required. No
 Cloudflare edit is approved or performed by this task.
 
 ## Preconditions Before Future Cloudflare Route Change
@@ -36,12 +43,17 @@ Cloudflare edit is approved or performed by this task.
 - `bluegreen_proxy` is running and healthy on the chosen new local port.
 - `/healthz/` through `bluegreen_proxy` returns HTTP 200.
 - Current `8000` remains healthy.
+- `git status` has been reviewed.
+- Deployment lock is available.
+- No existing deployment lock is present.
 - Deployment lock is acquired for the runtime-changing task.
+- `web_blue` and `web_green` are healthy.
 - Rollback target is confirmed as `http://127.0.0.1:8000`.
 - Both tickets and shopify routes are changed consistently.
 - Cloudflare Access policies remain unchanged.
 - Approval owner is confirmed.
 - Observation window is confirmed.
+- Rollback owner is confirmed.
 - Old web path remains available during observation if possible.
 
 ## Future Manual Cloudflare Change Steps
@@ -94,10 +106,15 @@ NOT RUN IN THIS TASK.
 ## Go / No-Go
 
 - Option B plan: READY after review.
+- Cloudflare cutover approval package: READY after review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Chosen port: NOT FINAL.
 - Proposed placeholder port: `18000`.
+- `18000` candidate validation: PASSED.
+- Cloudflare cutover: NOT APPROVED.
 - Cloudflare change: NOT APPROVED.
 - Production apply: NO-GO.
+- Runtime execution: NOT ENABLED.
 
 ## Production-Candidate Proxy Design Update (2026-05-19)
 
@@ -137,8 +154,8 @@ NOT RUN IN THIS TASK.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: Cloudflare route change readiness / manual cutover
-  approval package.
+- Future cutover requires manual Cloudflare edit and rollback plan review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
 ## Bluegreen Proxy Candidate 18000 Validation Result (2026-05-19)
 
@@ -160,8 +177,9 @@ NOT RUN IN THIS TASK.
 - Cloudflare route change: NOT APPROVED.
 - Production traffic switch: no.
 - Production apply: still NO-GO.
-- Next required step: Cloudflare route change readiness / manual cutover
-  approval package.
+- Cloudflare cutover approval package exists at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+- Cloudflare cutover: NOT APPROVED.
 - Production script requirement: wait for `web_blue` and `web_green` health
   before proxy validation or cutover because the first request may return HTTP
   502 while backends start.

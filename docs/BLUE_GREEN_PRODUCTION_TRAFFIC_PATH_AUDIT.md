@@ -25,6 +25,14 @@ in
 It proposes `18000` as a placeholder proxy port only; the port is not final,
 Cloudflare change is not approved, and production apply remains NO-GO.
 
+The Cloudflare route change readiness and manual cutover approval package is
+documented in
+[BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+It records the proposed future cutover target `http://127.0.0.1:18000`, the
+rollback target `http://127.0.0.1:8000`, required pre-cutover checks, and
+manual rollback plan. It does not approve Cloudflare cutover or production
+apply.
+
 This audit did not deploy, build images, start containers, stop containers,
 restart containers, run migrations, run collectstatic, reload proxy, switch
 traffic, write active-color state, change Cloudflare/domain routing, modify
@@ -196,8 +204,9 @@ port ownership to `bluegreen_proxy`, or keep current local ownership and change
 the Cloudflare service targets. The conservative recommendation is Option B for
 the first production transition, but it is not approved yet.
 
-Do not change Cloudflare yet. Do not take over `8000` yet. Production apply
-remains NO-GO.
+Do not change Cloudflare yet. Do not take over `8000` yet. Review the
+Cloudflare cutover approval package before any future manual route edit.
+Production apply remains NO-GO.
 
 ## Go / No-Go
 
@@ -208,9 +217,13 @@ remains NO-GO.
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
 - Option B route plan: READY after review at
   [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Cloudflare cutover approval package: READY after review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Proposed Option B proxy port: `18000`, NOT FINAL.
+- `18000` candidate validation: PASSED.
 - Conservative recommendation: Option B, not approved.
 - Chosen option: NOT YET.
+- Cloudflare cutover: NOT APPROVED.
 - Cloudflare Published application route origin confirmed: YES.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
@@ -218,7 +231,6 @@ remains NO-GO.
 - Production runtime execution: NOT ENABLED.
 - Production apply: NO-GO.
 
-Next required step: review the Option B route plan, approve or change the
-final proxy port, fill the option comparison manual decision fields, and
-separately approve any future Cloudflare route edit before implementing any
-real blue-green runtime command.
+Next required step: review the Cloudflare cutover approval package, fill the
+option comparison manual decision fields, and separately approve any future
+Cloudflare route edit before implementing any real blue-green runtime command.

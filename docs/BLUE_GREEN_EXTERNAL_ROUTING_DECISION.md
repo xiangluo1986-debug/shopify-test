@@ -69,6 +69,13 @@ It proposes `18000` as a conservative placeholder for a future
 `bluegreen_proxy` local port. The port is not final, the Cloudflare change is
 not approved, and production apply remains NO-GO.
 
+Cloudflare route change readiness and manual cutover approval package:
+[BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+It records the proposed future target `http://127.0.0.1:18000`, rollback
+target `http://127.0.0.1:8000`, required pre-cutover checks, and manual
+rollback plan. The package is documentation-only; Cloudflare cutover remains
+NOT APPROVED and production apply remains NO-GO.
+
 ## Updated Routing Interpretation
 
 - External app traffic reaches local `8000` through Cloudflare Tunnel
@@ -152,15 +159,19 @@ Risk: Cloudflare Published application route service target changes.
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
 - Option B route plan: READY after review at
   [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Cloudflare cutover approval package: READY after review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Proposed Option B proxy port: `18000`, NOT FINAL.
+- `18000` candidate validation: PASSED.
 - Chosen option: NOT YET.
 - Conservative recommendation: Option B, not approved.
+- Cloudflare cutover: NOT APPROVED.
 - Cloudflare Published application route origin confirmed: YES.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
 - Production proxy switch implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: review the Option B route plan, approve or change the
-final proxy port, fill the manual decision fields, and separately approve any
-future Cloudflare routing change before it is made.
+Next required step: review the Cloudflare cutover approval package, fill the
+manual decision fields, and separately approve any future Cloudflare routing
+change before it is made.

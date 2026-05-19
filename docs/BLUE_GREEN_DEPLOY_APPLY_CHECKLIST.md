@@ -30,6 +30,7 @@ Related non-active drafts:
 - [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
 - [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
 - [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md)
+- [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -106,6 +107,12 @@ Related non-active drafts:
   [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
   Proposed proxy port `18000` is NOT FINAL. Cloudflare change is NOT APPROVED
   and production apply remains NO-GO.
+- Cloudflare route change readiness and manual cutover approval package:
+  READY after review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+  The proposed cutover target is `http://127.0.0.1:18000`, rollback target is
+  `http://127.0.0.1:8000`, `18000` candidate validation has PASSED,
+  Cloudflare cutover is NOT APPROVED, and production apply remains NO-GO.
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
   It documents the exact future proxy switch flow, active-color state design,
@@ -298,6 +305,10 @@ review. Normal non-deploy tasks are not blocked.
   local `8000` takeover, or production proxy switch implementation.
 - Option B is only the conservative recommendation; it is not approval to edit
   Cloudflare.
+- The Cloudflare cutover approval package in
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md)
+  has been reviewed before any manual Cloudflare route edit. This package is
+  documentation-only and is not approval to cut over.
 - Final project deployment command policy is documented in
   [AGENTS.md](../AGENTS.md), [SAFE_DEPLOY.md](SAFE_DEPLOY.md),
   [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md), and
@@ -387,6 +398,11 @@ and rollback steps.
   [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md);
   proposed port `18000` is a non-final placeholder, rollback returns both
   routes to `http://127.0.0.1:8000`, and production apply remains NO-GO.
+- Cloudflare cutover approval package: review
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md);
+  proposed target is `http://127.0.0.1:18000`, rollback target is
+  `http://127.0.0.1:8000`, future cutover requires manual Cloudflare edit,
+  Cloudflare cutover is NOT APPROVED, and production apply remains NO-GO.
 - Migration compatibility rules: backward-compatible only during blue-green
   switch; risky schema changes require separate migration planning.
 - Static/media handling: shared media remains unchanged; `collectstatic`
@@ -428,6 +444,8 @@ These actions are not approved by this checklist alone:
 - Proceeding before the external routing decision package is reviewed and the
   Option A versus Option B routing choice is approved.
 - Treating the Option B recommendation as approval to edit Cloudflare.
+- Treating the Cloudflare cutover approval package as approval to edit
+  Cloudflare.
 - Taking over host port `8000` before a separate approval.
 - Running migrations.
 - Reloading or replacing production proxy configuration.
@@ -716,5 +734,5 @@ they are separate examples and are not referenced by `docker-compose.yml`.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: Cloudflare route change readiness / manual cutover
-  approval package.
+- Future cutover requires manual Cloudflare edit and rollback plan review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).

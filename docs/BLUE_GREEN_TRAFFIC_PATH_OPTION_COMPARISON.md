@@ -112,6 +112,13 @@ The no-action Option B route change and rollback plan now exists at
 It proposes `18000` as a conservative placeholder proxy port, but that port is
 not final. The plan does not approve any Cloudflare change or production apply.
 
+The Cloudflare route change readiness and manual cutover approval package now
+exists at
+[BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+It documents the proposed future target `http://127.0.0.1:18000`, rollback
+target `http://127.0.0.1:8000`, required pre-cutover checks, and manual
+rollback plan. It does not approve Cloudflare cutover or production apply.
+
 ## Decision Matrix
 
 | Question | Option A - Proxy Takes 8000 | Option B - Cloudflare Targets New Proxy Port |
@@ -141,8 +148,12 @@ not final. The plan does not approve any Cloudflare change or production apply.
 - Option comparison: READY after review.
 - Option B route plan: READY after review at
   [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Cloudflare cutover approval package: READY after review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Proposed Option B proxy port: `18000`, NOT FINAL.
+- `18000` candidate validation: PASSED.
 - Chosen option: NOT YET.
+- Cloudflare cutover: NOT APPROVED.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
 - Production apply: NO-GO.
@@ -185,5 +196,5 @@ not final. The plan does not approve any Cloudflare change or production apply.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: Cloudflare route change readiness / manual cutover
-  approval package.
+- Future cutover requires manual Cloudflare edit and rollback plan review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
