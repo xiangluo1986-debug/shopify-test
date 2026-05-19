@@ -247,12 +247,15 @@ configuration untouched.
 - Option B route plan: READY after review; proposed proxy port `18000` is NOT
   FINAL, Cloudflare change is NOT APPROVED, and production apply remains
   NO-GO.
+- Bluegreen proxy candidate `18000` validation: PASSED.
+- Option B proxy candidate local path: PASSED.
 - Chosen option: NOT YET.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
 - Production apply: NO-GO.
-- Next future step: review the Option B route plan, approve or change the
-  final proxy port, and fill the option comparison manual decision fields.
+- Next future step: prepare the Cloudflare route change readiness / manual
+  cutover approval package and fill the option comparison manual decision
+  fields.
 
 ## Deployment Lock Gate
 
@@ -722,15 +725,17 @@ to design the future implementation without touching production traffic after
 the routing option is selected. The comparison is documented at
 [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md);
 Option B is the conservative recommendation, but not approved. The next
-route planning reference is
+readiness reference is
 [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md),
-where `18000` is proposed only as a non-final placeholder. The next
-implementation task should review the exact proxy config path, active-color
-state update behavior, proxy switch/reload command, rollback command,
-observation checks, migration gate, scheduler singleton confirmation, and
-media/static confirmation. Production remains NO-GO until implementation is
-added in a later task and a separate production task approves the exact runtime
-path being used.
+where `18000` has passed local production-candidate proxy validation but
+Cloudflare route change remains NOT APPROVED. The next implementation task
+should prepare the Cloudflare route change readiness / manual cutover approval
+package and review the exact proxy config path, active-color state update
+behavior, proxy switch/reload command, rollback command, observation checks,
+migration gate, scheduler singleton confirmation, and media/static
+confirmation. Production remains NO-GO until implementation is added in a
+later task and a separate production task approves the exact runtime path being
+used.
 
 ## Runtime Command Helper Status
 
@@ -771,9 +776,11 @@ path being used.
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
 - Candidate validation remains local port `18000` only. Host port `8000`
   remains the current web path and is not published by the candidate example.
-- Next manual rerun must verify `http://127.0.0.1:18000/healthz/` returns
-  HTTP 200 while `http://127.0.0.1:8000/healthz/` remains the current active
-  web path.
+- Bluegreen proxy candidate `18000` validation: PASSED on 2026-05-19.
+- Option B proxy candidate local path: PASSED.
+- Production script requirement: wait for `web_blue` and `web_green` health
+  before proxy validation or cutover because the first proxy request can return
+  HTTP 502 while backends start.
 - Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
   `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
 - Cloudflare route change: NOT APPROVED.
@@ -782,5 +789,5 @@ path being used.
 - The candidate files do not start/stop/restart/build containers, run
   migrations, run collectstatic, reload proxy, switch traffic, write
   active-color state, or change production nginx/proxy config.
-- Next required step: local `18000` candidate validation, still without any
-  Cloudflare/domain routing change.
+- Next required step: Cloudflare route change readiness / manual cutover
+  approval package.

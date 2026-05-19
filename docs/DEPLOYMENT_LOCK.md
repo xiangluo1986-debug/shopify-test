@@ -460,6 +460,7 @@ runtime-changing actions should use the shared deployment lock.
 - Production blue-green apply remains NO-GO until a separate future apply task
   approves exact runtime commands, confirms every runtime-changing path uses
   the deployment lock, reviews successful local/test proxy validation, reviews
+  the passed local production-candidate proxy validation, reviews
   [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md), and
   reviews
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
@@ -512,9 +513,11 @@ runtime-changing actions should use the shared deployment lock.
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
 - Candidate validation remains local port `18000` only. Host port `8000`
   remains the current web path and is not published by the candidate example.
-- Next manual rerun must verify `http://127.0.0.1:18000/healthz/` returns
-  HTTP 200 while `http://127.0.0.1:8000/healthz/` remains the current active
-  web path.
+- Bluegreen proxy candidate `18000` validation: PASSED on 2026-05-19.
+- Option B proxy candidate local path: PASSED.
+- Production script requirement: wait for `web_blue` and `web_green` health
+  before proxy validation or cutover because the first proxy request can return
+  HTTP 502 while backends start.
 - The candidate files are design-only and do not acquire the deployment lock
   because they do not start/stop/restart/build containers, run migrations, run
   collectstatic, reload proxy, switch traffic, write active-color state, or
@@ -526,5 +529,5 @@ runtime-changing actions should use the shared deployment lock.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: local `18000` candidate validation, still without any
-  Cloudflare/domain routing change.
+- Next required step: Cloudflare route change readiness / manual cutover
+  approval package.

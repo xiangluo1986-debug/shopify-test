@@ -271,9 +271,9 @@ required gates for every production apply.
 - Production implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: review the Option B route plan, approve or change the
-final proxy port, fill the option comparison manual decision fields, then
-separately review and approve the exact runtime command path before any
+Next required step: prepare the Cloudflare route change readiness / manual
+cutover approval package, fill the option comparison manual decision fields,
+and separately review and approve the exact runtime command path before any
 production apply.
 
 ## Runtime Command Helper Status
@@ -316,9 +316,11 @@ production apply.
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
 - Candidate validation remains local port `18000` only. Host port `8000`
   remains the current web path and is not published by the candidate example.
-- Next manual rerun must verify `http://127.0.0.1:18000/healthz/` returns
-  HTTP 200 while `http://127.0.0.1:8000/healthz/` remains the current active
-  web path.
+- Bluegreen proxy candidate `18000` validation: PASSED on 2026-05-19.
+- Option B proxy candidate local path: PASSED.
+- Production script requirement: wait for `web_blue` and `web_green` health
+  before proxy validation or cutover because the first proxy request can return
+  HTTP 502 while backends start.
 - The candidate files are not active, not used by normal `docker compose`
   commands, must not bind `8000`, and must not be used by production nginx
   until a separate approval task.
@@ -327,5 +329,5 @@ production apply.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: local `18000` candidate validation, still without any
-  Cloudflare/domain routing change.
+- Next required step: Cloudflare route change readiness / manual cutover
+  approval package.

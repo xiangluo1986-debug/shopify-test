@@ -298,9 +298,10 @@ and shopify is `http://127.0.0.1:8000`; Option A and Option B are documented at
 [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
 The no-action Option B route plan is documented at
 [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
-The conservative recommendation is Option B, but it is not approved. Proposed
-port `18000` is not final. The next step is manual review and final port /
-routing approval, not a deploy.
+The conservative recommendation is Option B, but it is not approved. The local
+production-candidate proxy path on `18000` has PASSED validation, but
+Cloudflare route change remains NOT APPROVED. The next step is the Cloudflare
+route change readiness / manual cutover approval package, not a deploy.
 
 Optional flags:
 
@@ -560,9 +561,11 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
 - Candidate validation remains local port `18000` only. Host port `8000`
   remains the current web path and is not published by the candidate example.
-- Next manual rerun must verify `http://127.0.0.1:18000/healthz/` returns
-  HTTP 200 while `http://127.0.0.1:8000/healthz/` remains the current active
-  web path.
+- Bluegreen proxy candidate `18000` validation: PASSED on 2026-05-19.
+- Option B proxy candidate local path: PASSED.
+- Production script requirement: wait for `web_blue` and `web_green` health
+  before proxy validation or cutover because the first proxy request can return
+  HTTP 502 while backends start.
 - The candidate files are example-only, not active, not used by normal
   `docker compose` commands, and must not bind host port `8000`.
 - Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
@@ -570,5 +573,5 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: local `18000` candidate validation, still without any
-  Cloudflare/domain routing change.
+- Next required step: Cloudflare route change readiness / manual cutover
+  approval package.

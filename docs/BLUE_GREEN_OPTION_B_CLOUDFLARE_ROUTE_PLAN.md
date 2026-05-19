@@ -124,9 +124,11 @@ NOT RUN IN THIS TASK.
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
 - Candidate validation remains local port `18000` only. Host port `8000`
   remains the current web path and is not published by the candidate example.
-- Next manual rerun must verify `http://127.0.0.1:18000/healthz/` returns
-  HTTP 200 while `http://127.0.0.1:8000/healthz/` remains the current active
-  web path.
+- Bluegreen proxy candidate `18000` validation: PASSED on 2026-05-19.
+- Option B proxy candidate local path: PASSED.
+- Production script requirement: wait for `web_blue` and `web_green` health
+  before proxy validation or cutover because the first proxy request can return
+  HTTP 502 while backends start.
 - The candidate files are example-only, production-candidate design-only, not
   active, not used by normal `docker compose` commands, and must not bind
   host port `8000`.
@@ -135,5 +137,31 @@ NOT RUN IN THIS TASK.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
-- Next required step: local `18000` candidate validation, still without any
-  Cloudflare/domain routing change.
+- Next required step: Cloudflare route change readiness / manual cutover
+  approval package.
+
+## Bluegreen Proxy Candidate 18000 Validation Result (2026-05-19)
+
+- Validation status: PASSED.
+- Scope: local production-candidate proxy only.
+- Candidate compose: `docker-compose.bluegreen.proxy-candidate.example.yml`.
+- Candidate proxy: `bluegreen_proxy_candidate`.
+- Candidate port: `18000`.
+- Candidate web services: `web_blue` and `web_green`.
+- Initial `18000 /healthz/` returned HTTP 502 while `web_blue` and
+  `web_green` were still health: starting.
+- After waiting for backend health, `18000 /healthz/` returned HTTP 200.
+- `8000 /healthz/` stayed HTTP 200 before and after validation.
+- Cleanup stopped only `bluegreen_proxy_candidate`, `web_green`, and
+  `web_blue`.
+- After cleanup, `18000` was not serving and the candidate compose showed no
+  running services.
+- Cloudflare change: no.
+- Cloudflare route change: NOT APPROVED.
+- Production traffic switch: no.
+- Production apply: still NO-GO.
+- Next required step: Cloudflare route change readiness / manual cutover
+  approval package.
+- Production script requirement: wait for `web_blue` and `web_green` health
+  before proxy validation or cutover because the first request may return HTTP
+  502 while backends start.
