@@ -37,9 +37,15 @@ The production runtime details document is documented at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
 The production switch/rollback review document is documented at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+The final runtime approval design is documented at
+[BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
 These documents are READY after review; production implementation is NOT
 READY, exact production runtime command implementation is still not enabled,
 and production apply remains NO-GO.
+
+The final runtime approval design is READY after review, but runtime command
+execution remains NOT ENABLED and the documented future approval phrase is
+inactive.
 
 The current safe deploy flow now enforces a deployment single-flight lock in
 real non-dry-run mode. The standalone helper exists at

@@ -26,12 +26,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$RuntimeApprovalPhrase = "I_APPROVE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW"
+$RuntimeApprovalPhrase = "I_APPROVE_ENABLE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW"
 $ProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $DeployDirectory = [System.IO.Path]::GetFullPath((Join-Path -Path $ProjectRoot -ChildPath ".deploy"))
 $RuntimeHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "blue_green_runtime_commands.ps1"
 $ProductionApplyPath = Join-Path -Path $PSScriptRoot -ChildPath "blue_green_production_apply.ps1"
 $DeployLockHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "deploy_lock.ps1"
+$FinalRuntimeApprovalPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md"
 $Script:InitialBoundParameters = @{}
 foreach ($key in $PSBoundParameters.Keys) {
     $Script:InitialBoundParameters[$key] = $PSBoundParameters[$key]
@@ -277,10 +278,21 @@ function Show-AvailableActions {
     Write-Host "  -Action plan-switch"
     Write-Host "  -Action plan-rollback"
     Write-Host "  -Action plan-cleanup"
-    Write-Host "Future approval phrase documented but not active for execution: $RuntimeApprovalPhrase"
+    Write-Host "Final runtime approval doc exists: $(Test-Path -LiteralPath $FinalRuntimeApprovalPath -PathType Leaf)"
+    Write-Host "Future approval phrase documented but inactive: $RuntimeApprovalPhrase"
     Write-Host "Ack supplied: $(-not [string]::IsNullOrWhiteSpace($Ack))"
-    Write-Host "Ack matches future phrase: $($Ack -eq $RuntimeApprovalPhrase)"
+    Write-Host "Ack matches inactive future phrase: $($Ack -eq $RuntimeApprovalPhrase)"
+    Write-Host "Runtime execution remains disabled."
     Write-Host "Even a matching Ack does not enable proxy reload, traffic switch, rollback execution, or active-color state writes in this phase."
+}
+
+function Show-FinalRuntimeApprovalStatus {
+    Write-Step "Final runtime approval status"
+    Write-Host "Final runtime approval doc exists: $(Test-Path -LiteralPath $FinalRuntimeApprovalPath -PathType Leaf)"
+    Write-Host "Final runtime approval doc path: docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md"
+    Write-Host "Runtime command execution: NOT ENABLED"
+    Write-Host "Future approval phrase documented but inactive: $RuntimeApprovalPhrase"
+    Write-Host "Production apply remains: NO-GO"
 }
 
 function Show-Status {
@@ -306,9 +318,12 @@ function Show-Status {
     Write-Host "Rollback execution: NOT ENABLED"
     Write-Host "Container start/stop/restart/build: NOT ENABLED"
     Write-Host "Migration/collectstatic: NOT ENABLED"
+    Write-Host "Final runtime approval doc exists: $(Test-Path -LiteralPath $FinalRuntimeApprovalPath -PathType Leaf)"
+    Write-Host "Future approval phrase documented but inactive: $RuntimeApprovalPhrase"
 
     Write-Step "Document status"
     $docs = @(
+        "docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md",
         "docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md",
         "docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md",
         "docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md",
@@ -355,6 +370,7 @@ function Show-StateValidation {
     Write-Host "ProxyConfigPath: $(Format-OptionalValue -Value $ProxyConfigPath)"
     Write-Host "No files were modified."
     Write-Host "No proxy reload, traffic switch, rollback, container action, migration, collectstatic, or active-color state write was performed."
+    Show-FinalRuntimeApprovalStatus
     Write-Host "Production apply remains NO-GO."
 }
 
@@ -376,6 +392,8 @@ function Show-PlanSwitch {
     Write-Host "Proxy switch execution: NOT ENABLED."
     Write-Host "Proxy reload execution: NOT ENABLED."
     Write-Host "Active-color state write: NOT ENABLED."
+    Write-Host "Runtime execution remains disabled."
+    Write-Host "Final approval phrase documented but inactive: $RuntimeApprovalPhrase"
     Write-Host "Production apply remains NO-GO."
 }
 
@@ -396,6 +414,8 @@ function Show-PlanRollback {
     Write-Host "Proxy reload execution: NOT ENABLED."
     Write-Host "Active-color state write: NOT ENABLED."
     Write-Host "No database rollback is enabled by this helper."
+    Write-Host "Runtime execution remains disabled."
+    Write-Host "Final approval phrase documented but inactive: $RuntimeApprovalPhrase"
     Write-Host "Production apply remains NO-GO."
 }
 
@@ -411,6 +431,7 @@ function Show-PlanCleanup {
     Write-Host "NOT RUN: do not remove rollback-required runtime state."
     Write-Host "Cleanup execution: NOT ENABLED."
     Write-Host "Container stop/removal execution: NOT ENABLED."
+    Show-FinalRuntimeApprovalStatus
     Write-Host "Production apply remains NO-GO."
 }
 

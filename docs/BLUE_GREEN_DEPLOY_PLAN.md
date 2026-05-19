@@ -42,6 +42,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+- [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -107,6 +108,12 @@ Real production blue-green apply command path is implemented as a skeleton only 
 ```
 
 Production remains NO-GO.
+
+The final runtime approval design exists at
+[BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
+It is READY after review, but runtime command execution remains NOT ENABLED,
+the documented future approval phrase is inactive, and production apply remains
+NO-GO.
 
 The non-production validation plan exists at
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).

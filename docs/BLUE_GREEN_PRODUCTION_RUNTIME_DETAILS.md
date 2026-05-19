@@ -10,6 +10,11 @@ reviewed separately in
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 That review is READY after review, but it does not approve production apply.
 
+Final runtime approval design is documented in
+[BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
+It is READY after review, but runtime command execution remains NOT ENABLED
+and production apply remains NO-GO.
+
 This document does not approve production apply. It does not deploy, start or
 stop containers, run migrations, run collectstatic, switch traffic, change
 Cloudflare or domain routing, modify active Compose files, modify production

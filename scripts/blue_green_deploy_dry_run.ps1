@@ -23,7 +23,10 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
-$NextBlueGreenStep = "review plan-only runtime helper output and request separate approval before any runtime implementation"
+$NextBlueGreenStep = "decide whether to implement runtime command execution in a separate task"
+$FinalRuntimeApprovalPath = ".\docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md"
+$FinalRuntimeApprovalStatus = "READY after review"
+$FinalRuntimeApprovalPhrase = "I_APPROVE_ENABLE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW"
 $ProductionPreflightPath = ".\docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md"
 $ProductionPreflightStatus = "READY after review"
 $ProductionReadinessPath = ".\docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md"
@@ -36,6 +39,7 @@ $ProductionSwitchRollbackReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLB
 $ProductionSwitchRollbackReviewStatus = "READY after review"
 $RuntimeCommandHelperPath = ".\scripts\blue_green_runtime_commands.ps1"
 $RuntimeCommandHelperStatus = "plan-only / no-action"
+$RuntimeCommandExecutionStatus = "NOT ENABLED"
 $ProxySwitchExecutionStatus = "NOT ENABLED"
 $ActiveColorStateWriteStatus = "NOT ENABLED"
 $RollbackExecutionStatus = "NOT ENABLED"
@@ -246,6 +250,10 @@ function Show-DraftArtifactSummary {
             Path = ".\docs\BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md"
         },
         [pscustomobject]@{
+            Label = "Final runtime approval design"
+            Path = $FinalRuntimeApprovalPath
+        },
+        [pscustomobject]@{
             Label = "Production preflight readiness review"
             Path = $ProductionPreflightPath
         },
@@ -309,6 +317,7 @@ function Show-DeploymentLockStatus {
     $nonProductionValidationPath = ".\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md"
     $nonProductionApprovalPath = ".\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md"
     $proxyValidationApprovalPath = ".\docs\BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md"
+    $finalRuntimeApprovalPath = $FinalRuntimeApprovalPath
     $productionPreflightPath = $ProductionPreflightPath
     $productionReadinessPath = $ProductionReadinessPath
     $productionCommandReviewPath = $ProductionCommandReviewPath
@@ -355,9 +364,10 @@ function Show-DeploymentLockStatus {
 
     if (Test-Path -LiteralPath $RuntimeCommandHelperPath) {
         $runtimeHelperText = Get-Content -LiteralPath $RuntimeCommandHelperPath -Raw
-        $runtimeHelperNoActionGatePresent = ($runtimeHelperText -match "I_APPROVE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW") -and ($runtimeHelperText -match "plan-only")
+        $runtimeHelperNoActionGatePresent = ($runtimeHelperText -match "I_APPROVE_ENABLE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW") -and ($runtimeHelperText -match "plan-only")
         Write-Ok "Blue-green runtime command helper exists: $RuntimeCommandHelperPath"
         Write-Host "Runtime command helper status: $RuntimeCommandHelperStatus"
+        Write-Host "Runtime command execution: $RuntimeCommandExecutionStatus"
         Write-Host "Runtime command helper no-action gate present: $runtimeHelperNoActionGatePresent"
     } else {
         Write-Warn "Blue-green runtime command helper is missing: $RuntimeCommandHelperPath"
@@ -379,6 +389,12 @@ function Show-DeploymentLockStatus {
         Write-Ok "Local proxy routing validation approval package exists: $proxyValidationApprovalPath"
     } else {
         Write-Warn "Local proxy routing validation approval package is missing: $proxyValidationApprovalPath"
+    }
+
+    if (Test-Path -LiteralPath $finalRuntimeApprovalPath) {
+        Write-Ok "Final runtime approval document exists: $finalRuntimeApprovalPath"
+    } else {
+        Write-Warn "Final runtime approval document is missing: $finalRuntimeApprovalPath"
     }
 
     if (Test-Path -LiteralPath $productionPreflightPath) {
@@ -454,6 +470,10 @@ function Show-DeploymentLockStatus {
     Write-Host "Active-color state under .deploy must not be committed and must not contain secrets."
     Write-Host "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
     Write-Host "Runtime command helper status: $RuntimeCommandHelperStatus."
+    Write-Host "Runtime command execution: $RuntimeCommandExecutionStatus."
+    Write-Host "Final runtime approval: $FinalRuntimeApprovalStatus."
+    Write-Host "Final runtime approval doc exists: $(Test-Path -LiteralPath $FinalRuntimeApprovalPath)."
+    Write-Host "Final runtime approval phrase documented but inactive: $FinalRuntimeApprovalPhrase"
     Write-Host "Proxy switch execution: $ProxySwitchExecutionStatus."
     Write-Host "Active-color state write: $ActiveColorStateWriteStatus."
     Write-Host "Rollback execution: $RollbackExecutionStatus."
@@ -618,6 +638,10 @@ function Show-FuturePlan {
     Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
     Write-Host "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
     Write-Host "Runtime command helper status: $RuntimeCommandHelperStatus."
+    Write-Host "Runtime command execution: $RuntimeCommandExecutionStatus."
+    Write-Host "Final runtime approval: $FinalRuntimeApprovalStatus."
+    Write-Host "Final runtime approval doc exists: $(Test-Path -LiteralPath $FinalRuntimeApprovalPath)."
+    Write-Host "Final runtime approval phrase documented but inactive: $FinalRuntimeApprovalPhrase"
     Write-Host "Proxy switch execution: $ProxySwitchExecutionStatus."
     Write-Host "Active-color state write: $ActiveColorStateWriteStatus."
     Write-Host "Rollback execution: $RollbackExecutionStatus."
@@ -682,6 +706,10 @@ Write-Ok "Production proxy/active-color/rollback details have conservative defau
 Write-Ok "Active-color state design reviewed."
 Write-Ok "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
 Write-Ok "Runtime command helper status: $RuntimeCommandHelperStatus."
+Write-Ok "Runtime command execution: $RuntimeCommandExecutionStatus."
+Write-Ok "Final runtime approval: $FinalRuntimeApprovalStatus."
+Write-Ok "Final runtime approval doc exists: $(Test-Path -LiteralPath $FinalRuntimeApprovalPath)."
+Write-Ok "Final runtime approval phrase documented but inactive."
 Write-Ok "Proxy switch execution: $ProxySwitchExecutionStatus."
 Write-Ok "Active-color state write: $ActiveColorStateWriteStatus."
 Write-Ok "Rollback execution: $RollbackExecutionStatus."

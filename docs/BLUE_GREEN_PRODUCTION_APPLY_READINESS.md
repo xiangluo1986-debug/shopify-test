@@ -21,6 +21,11 @@ documented in
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 It is READY after review, but it does not approve production apply.
 
+Final runtime approval design is documented in
+[BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
+It is READY after review, but runtime command execution remains NOT ENABLED
+and production apply remains NO-GO.
+
 ## Current Passed Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -37,6 +42,9 @@ It is READY after review, but it does not approve production apply.
 - Production switch/rollback review document:
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
   exists and is READY after review.
+- Final runtime approval design:
+  [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
+  exists and is READY after review; execution remains NOT ENABLED.
 - Production command path skeleton: implemented but blocked.
 - Production implementation: NOT READY.
 - Exact production runtime command implementation: still not enabled.

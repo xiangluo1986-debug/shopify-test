@@ -14,6 +14,11 @@ request, translation, settlement, Trustpilot, Kudosi, or Ali Reviews workflows.
 
 Production remains NO-GO.
 
+Final runtime approval design is documented in
+[BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
+It is READY after review, but runtime command execution remains NOT ENABLED
+and production apply remains NO-GO.
+
 ## Current Conservative Defaults
 
 - Proxy candidate: nginx.

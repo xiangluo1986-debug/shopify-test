@@ -23,7 +23,13 @@ reviews the production runtime details document at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
 reviews the production switch/rollback review document at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md),
+reviews the final runtime approval design at
+[BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md),
 and uses the same lock before any runtime-changing action.
+
+The final runtime approval design is READY after review, but runtime command
+execution remains NOT ENABLED, the future approval phrase is inactive, and
+production apply remains NO-GO.
 
 ## What The Lock Protects
 

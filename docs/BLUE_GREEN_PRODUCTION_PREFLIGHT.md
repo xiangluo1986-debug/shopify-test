@@ -17,6 +17,8 @@ The production runtime details document is documented at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
 The production switch/rollback review is documented at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+The final runtime approval design is documented at
+[BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
 These documents are READY after review, but production implementation is NOT
 READY, exact production runtime command implementation is still not enabled,
 and production apply remains NO-GO.
@@ -42,6 +44,10 @@ and production apply remains NO-GO.
 - Production switch/rollback review document:
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
   exists and is READY after review.
+- Final runtime approval design:
+  [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
+  exists and is READY after review; runtime command execution remains NOT
+  ENABLED.
 
 ## Required Production Decisions / Checks
 
