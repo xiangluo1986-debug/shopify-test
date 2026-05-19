@@ -27,6 +27,7 @@ Related non-active drafts:
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
 - [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
+- [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -87,6 +88,11 @@ Related non-active drafts:
   networking owning port `8000` during the audit, no active Compose proxy
   service, Cloudflare DNS in front of the domain, and unresolved exact
   proxy/origin ownership. Production apply remains NO-GO.
+- External routing decision package: READY after review at
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+  External routing is NOT YET confirmed. No Cloudflare/domain routing change
+  and no host port `8000` ownership change are approved without separate
+  future approval.
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
   It documents the exact future proxy switch flow, active-color state design,
@@ -309,6 +315,11 @@ review. Normal non-deploy tasks are not blocked.
 - Static and media file handling is confirmed for two web containers.
 - Scheduler behavior is reviewed so only one scheduler instance runs.
 - Cloudflare or external routing changes are reviewed without exposing tokens.
+- The external routing decision package in
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+  has been reviewed and manually filled before any production proxy switch
+  implementation, Cloudflare/domain routing change, or host port `8000`
+  ownership change.
 - Rollback authority and communication path are assigned before the switch.
 
 ## Required Manual Decisions
@@ -337,6 +348,10 @@ and rollback steps.
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
   and manually decide whether future `bluegreen_proxy` owns `8000` or an
   external proxy/tunnel owns the upstream switch.
+- External routing decision package: review
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md);
+  external routing is NOT YET confirmed and production apply remains blocked
+  until the Cloudflare/origin/tunnel path is manually confirmed.
 - Migration compatibility rules: backward-compatible only during blue-green
   switch; risky schema changes require separate migration planning.
 - Static/media handling: shared media remains unchanged; `collectstatic`
@@ -374,6 +389,8 @@ These actions are not approved by this checklist alone:
   approved apply task.
 - Moving host port `8000` from `web` to a proxy.
 - Changing Cloudflare tunnel targets or public routing.
+- Proceeding before the external routing decision package is reviewed and the
+  external origin path is manually confirmed.
 - Running migrations.
 - Reloading or replacing production proxy configuration.
 - Reloading or replacing any active local proxy configuration without a

@@ -42,6 +42,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
 - [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
+- [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -172,6 +173,13 @@ The production traffic path audit exists at
 It is READY after review, but exact proxy ownership, Cloudflare/origin routing,
 and the future switch/reload plus rollback commands remain manual decisions.
 
+The external routing decision package exists at
+[BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+It is READY after review, but external routing is NOT YET confirmed. Production
+apply remains blocked until the Cloudflare/origin/tunnel path is manually
+confirmed. No Cloudflare/domain routing change and no host port `8000`
+ownership change are approved without separate future approval.
+
 The production switch/rollback review document exists at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 It records the future proxy switch flow, active-color state shape including
@@ -205,11 +213,13 @@ configuration untouched.
 - Local inactive runtime validation: PASSED.
 - Local/test proxy routing validation: PASSED.
 - Production preflight, readiness, command review, runtime details,
-  traffic path audit,
-  switch/rollback review, and final runtime approval docs exist.
+  traffic path audit, external routing decision package, switch/rollback
+  review, and final runtime approval docs exist.
 - Production runtime execution: NOT ENABLED.
 - Production traffic path audit: READY after review; proxy ownership still
   requires manual decision.
+- External routing decision package: READY after review; external routing
+  confirmed: NOT YET.
 - Production apply: NO-GO.
 - Next future step, only if explicitly approved: implement runtime execution
   under the final approval gates, deployment lock enforcement, and exact
@@ -629,6 +639,10 @@ and remains no-action.
   a separate approval changes it.
 - Cloudflare/external routing default: no local-only routing change; production
   routing requires separate approval.
+- External routing decision package:
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+  must be reviewed and filled before any Cloudflare/domain routing change,
+  host port `8000` ownership change, or production proxy switch implementation.
 - Active color tracking default: future file-based marker, documented as
   draft/example only until an apply task creates real runtime state.
 - Migration default: backward-compatible migrations only during blue-green

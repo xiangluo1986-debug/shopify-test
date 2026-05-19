@@ -36,6 +36,12 @@ The production traffic path audit is documented in
 It is READY after review, but it leaves proxy/origin ownership as a manual
 decision and does not approve production apply.
 
+The manual external routing decision package is documented in
+[BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+It records that external routing is NOT YET confirmed. No Cloudflare/domain
+routing change and no host port `8000` ownership change are approved without a
+separate future approval.
+
 ## Current Validated Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -56,6 +62,9 @@ decision and does not approve production apply.
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
   exists and is READY after review; exact proxy ownership still requires a
   manual decision.
+- External routing decision package:
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+  exists after this package is reviewed; external routing is NOT YET confirmed.
 
 ## Exact Future Production Command Groups
 
@@ -117,6 +126,7 @@ NOT RUN IN THIS TASK:
 - Switch only after target health passes.
 - Post-switch `8000 /healthz/`.
 - No Cloudflare/domain change unless separately approved.
+- No host port `8000` ownership change unless separately approved.
 
 The future proxy switch mechanism is not approved by this review document and
 must remain blocked until the exact proxy config path, switch/reload command,
@@ -128,6 +138,9 @@ The current traffic path audit is documented in
 [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
 and still requires a manual decision on whether `bluegreen_proxy` owns `8000`
 or an external proxy/tunnel performs the upstream switch.
+The external routing decision package is documented in
+[BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+and must be completed before any production proxy switch implementation.
 Conservative defaults are documented in
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md):
 nginx candidate, no port `8000` takeover before final approval, no first-apply
@@ -181,6 +194,8 @@ The following conservative defaults are now documented in
 - Proxy candidate: nginx.
 - Port ownership: current production `web` owns host port `8000`; a future
   proxy may own `8000` only after explicit final production apply approval.
+- External routing: NOT YET confirmed; production apply remains blocked until
+  the Cloudflare/origin/tunnel path is manually confirmed.
 - Production service names: `web_blue`, `web_green`, and `bluegreen_proxy`.
 - Active color storage: local `.deploy/active-color.json` containing
   `active_color`, `previous_color`, `updated_at`, `updated_by`, and
@@ -211,6 +226,9 @@ required gates for every production apply.
 - Command review doc: READY after review.
 - Traffic path audit: READY after review at
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
+- External routing decision package: READY after review at
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+- External routing confirmed: NOT YET.
 - Switch/rollback review doc: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production implementation: NOT READY.

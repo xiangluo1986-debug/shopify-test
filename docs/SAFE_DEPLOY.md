@@ -37,13 +37,17 @@ The production runtime details document is documented at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
 The production traffic path audit is documented at
 [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
+The external routing decision package is documented at
+[BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
 The production switch/rollback review document is documented at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 The final runtime approval design is documented at
 [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
 These documents are READY after review; production implementation is NOT
 READY, exact production runtime command implementation is still not enabled,
-and production apply remains NO-GO.
+external routing is NOT YET confirmed, and production apply remains NO-GO.
+No Cloudflare/domain routing change and no host port `8000` ownership change
+are approved without separate future approval.
 
 The final runtime approval design is READY after review, but runtime command
 execution remains NOT ENABLED and the documented future approval phrase is
@@ -122,6 +126,11 @@ service can become healthy.
   is READY after review. It confirms active Compose still declares `web` on
   `8000:8000` and no active Compose proxy service was found, but exact
   Cloudflare/origin/proxy ownership still requires manual decision.
+- External routing decision package:
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+  is READY after review. External routing is NOT YET confirmed, and production
+  apply remains blocked until the Cloudflare/origin/tunnel path is manually
+  confirmed.
 - Production switch/rollback review document:
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
   is READY after review for design only. It documents the future proxy switch
@@ -263,7 +272,8 @@ Normal dry-run, read-only, documentation, and non-deploy tasks are not blocked
 by the deployment lock.
 
 Current status: production blue-green runtime execution is NOT ENABLED and
-production apply remains NO-GO.
+production apply remains NO-GO. No Cloudflare/domain routing change and no host
+port `8000` ownership change are approved without separate future approval.
 
 Optional flags:
 

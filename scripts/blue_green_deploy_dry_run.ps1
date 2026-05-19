@@ -39,6 +39,9 @@ $ProductionRuntimeDetailsPath = ".\docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md
 $ProductionRuntimeDetailsStatus = "READY after review"
 $ProductionTrafficPathAuditPath = ".\docs\BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md"
 $ProductionTrafficPathAuditStatus = "READY after review"
+$ExternalRoutingDecisionPath = ".\docs\BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md"
+$ExternalRoutingDecisionPackageStatus = "READY after review"
+$ExternalRoutingConfirmedStatus = "NOT YET"
 $ProductionProxyOwnershipStatus = "manual decision required"
 $ProductionSwitchRollbackReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md"
 $ProductionSwitchRollbackReviewStatus = "READY after review"
@@ -283,6 +286,10 @@ function Show-DraftArtifactSummary {
             Path = $ProductionTrafficPathAuditPath
         },
         [pscustomobject]@{
+            Label = "External routing decision package"
+            Path = $ExternalRoutingDecisionPath
+        },
+        [pscustomobject]@{
             Label = "Production switch/rollback review"
             Path = $ProductionSwitchRollbackReviewPath
         },
@@ -336,6 +343,7 @@ function Show-DeploymentLockStatus {
     $productionCommandReviewPath = $ProductionCommandReviewPath
     $productionRuntimeDetailsPath = $ProductionRuntimeDetailsPath
     $productionTrafficPathAuditPath = $ProductionTrafficPathAuditPath
+    $externalRoutingDecisionPath = $ExternalRoutingDecisionPath
     $productionSwitchRollbackReviewPath = $ProductionSwitchRollbackReviewPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
@@ -451,6 +459,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Production traffic path audit document is missing: $productionTrafficPathAuditPath"
     }
 
+    if (Test-Path -LiteralPath $externalRoutingDecisionPath) {
+        Write-Ok "External routing decision package exists: $externalRoutingDecisionPath"
+    } else {
+        Write-Warn "External routing decision package is missing: $externalRoutingDecisionPath"
+    }
+
     if (Test-Path -LiteralPath $productionSwitchRollbackReviewPath) {
         Write-Ok "Production switch/rollback review document exists: $productionSwitchRollbackReviewPath"
     } else {
@@ -494,6 +508,9 @@ function Show-DeploymentLockStatus {
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
     Write-Host "Production traffic path audit: $ProductionTrafficPathAuditStatus."
     Write-Host "Production traffic path audit document exists: $(Test-Path -LiteralPath $ProductionTrafficPathAuditPath)."
+    Write-Host "External routing decision package: $ExternalRoutingDecisionPackageStatus."
+    Write-Host "External routing decision package exists: $(Test-Path -LiteralPath $ExternalRoutingDecisionPath)."
+    Write-Host "External routing confirmed: $ExternalRoutingConfirmedStatus."
     Write-Host "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
     Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
     Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
@@ -518,7 +535,9 @@ function Show-DeploymentLockStatus {
     Write-Host "Proxy validation hold-open mode: $ProxyValidationHoldOpenStatus in scripts/blue_green_local_inactive_startup.ps1."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Next step: $NextBlueGreenStep."
-    Write-Host "Production apply remains blocked until exact runtime commands based on the documented defaults are implemented, reviewed, approved, and covered by manual production approval."
+    Write-Host "Production apply remains blocked until external routing is manually confirmed and exact runtime commands based on the documented defaults are implemented, reviewed, approved, and covered by manual production approval."
+    Write-Host "No Cloudflare/domain routing change is approved without separate approval."
+    Write-Host "No host port 8000 ownership change is approved without separate approval."
     Write-Host "Local inactive startup has separate local-only gates; production switch still requires the deployment lock."
     Write-Host "Non-production validation approval phrase required for future runtime validation: $NonProductionValidationApprovalPhrase"
     Write-Host "Non-production validation lock path for the future run: $NonProductionValidationLockPath"
@@ -668,6 +687,9 @@ function Show-FuturePlan {
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
     Write-Host "Production traffic path audit: $ProductionTrafficPathAuditStatus."
     Write-Host "Production traffic path audit document exists: $(Test-Path -LiteralPath $ProductionTrafficPathAuditPath)."
+    Write-Host "External routing decision package: $ExternalRoutingDecisionPackageStatus."
+    Write-Host "External routing decision package exists: $(Test-Path -LiteralPath $ExternalRoutingDecisionPath)."
+    Write-Host "External routing confirmed: $ExternalRoutingConfirmedStatus."
     Write-Host "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
     Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
     Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
@@ -704,10 +726,13 @@ function Show-FuturePlan {
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
     Write-Host "Production command review document path: $ProductionCommandReviewPath."
     Write-Host "Production traffic path audit path: $ProductionTrafficPathAuditPath."
+    Write-Host "External routing decision package path: $ExternalRoutingDecisionPath."
     Write-Host "Non-production validation plan path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
     Write-Host "Production preflight document path: $ProductionPreflightPath."
     Write-Host "Production apply readiness package path: $ProductionReadinessPath."
-    Write-Host "Production apply remains blocked until exact runtime commands based on the documented defaults are implemented, reviewed, approved, and covered by manual approval."
+    Write-Host "Production apply remains blocked until external routing is manually confirmed and exact runtime commands based on the documented defaults are implemented, reviewed, approved, and covered by manual approval."
+    Write-Host "No Cloudflare/domain routing change is approved without separate approval."
+    Write-Host "No host port 8000 ownership change is approved without separate approval."
     Write-Host "Production remains NO-GO."
     Write-Host ""
     Write-Host "This script does not call docker compose up, down, restart, build, run, exec, or migrate."
@@ -741,6 +766,9 @@ Write-Ok "Production runtime details: $ProductionRuntimeDetailsStatus."
 Write-Ok "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
 Write-Ok "Production traffic path audit: $ProductionTrafficPathAuditStatus."
 Write-Ok "Production traffic path audit document exists: $(Test-Path -LiteralPath $ProductionTrafficPathAuditPath)."
+Write-Ok "External routing decision package: $ExternalRoutingDecisionPackageStatus."
+Write-Ok "External routing decision package exists: $(Test-Path -LiteralPath $ExternalRoutingDecisionPath)."
+Write-Ok "External routing confirmed: $ExternalRoutingConfirmedStatus."
 Write-Ok "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
 Write-Ok "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
 Write-Ok "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
@@ -766,6 +794,8 @@ Write-Ok "Local proxy routing validation approval package status: exists if repo
 Write-Ok "Production apply: NO-GO."
 Write-Ok "Next step: $NextBlueGreenStep."
 Write-Ok "Non-production validation approval package status: exists if reported above; future runtime validation requires explicit approval phrase and deployment lock."
-Write-Ok "Production blue-green real apply remains NO-GO until a separate future phase approves exact runtime commands behind deployment lock gates."
+Write-Ok "Production blue-green real apply remains NO-GO until external routing is manually confirmed and a separate future phase approves exact runtime commands behind deployment lock gates."
+Write-Ok "No Cloudflare/domain routing change is approved without separate approval."
+Write-Ok "No host port 8000 ownership change is approved without separate approval."
 Write-Ok "Inactive startup runner status: dry-run / no-action by default; future execution requires Ack plus -AllowContainerAction; test port 8000 and service web are blocked; production remains NO-GO."
 Write-Ok "Simulation runner status: dry-run / no-action only; production remains NO-GO."

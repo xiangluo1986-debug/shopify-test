@@ -7,6 +7,12 @@ ownership questions for future blue-green apply planning.
 
 Audit date: 2026-05-19.
 
+The manual external routing decision package is documented in
+[BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+It records the routing options and checklist required before any production
+blue-green proxy apply. External routing is NOT YET confirmed, and production
+apply remains NO-GO.
+
 This audit did not deploy, build images, start containers, stop containers,
 restart containers, run migrations, run collectstatic, reload proxy, switch
 traffic, write active-color state, change Cloudflare/domain routing, modify
@@ -61,6 +67,10 @@ settlement, Trustpilot, Kudosi, or Ali Reviews workflows.
   Cloudflare to the app was not proven. The domain may reach the app through a
   tunnel, direct host routing, or another external proxy outside this
   repository. Manual confirmation is required.
+- No Cloudflare/domain routing change is approved by this audit or by the
+  external routing decision package.
+- No host port `8000` ownership change is approved by this audit or by the
+  external routing decision package.
 
 ## Current Production Risk
 
@@ -116,10 +126,16 @@ proxy ownership and an approved no-secret operational procedure.
 - What exact rollback command should be used?
 - What planned maintenance window, if any, is required for the first proxy
   ownership change?
+- Complete the manual checklist in
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+  before any production proxy switch implementation.
 
 ## Go / No-Go
 
 - Traffic path audit: READY after review.
+- External routing decision package: READY after review at
+  [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+- External routing confirmed: NOT YET.
 - Production proxy switch implementation: NOT READY.
 - Production runtime execution: NOT ENABLED.
 - Production apply: NO-GO.
