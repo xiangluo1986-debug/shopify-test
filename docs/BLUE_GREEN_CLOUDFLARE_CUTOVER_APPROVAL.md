@@ -45,7 +45,7 @@ Before any future Cloudflare edit:
 ## Manual Cutover Approval Phrase
 
 ```text
-I_APPROVE_MANUAL_CLOUDFLARE_ROUTE_CUTOVER_TO_18000
+I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL
 ```
 
 This phrase is documentation-only for now. No script should accept this phrase
@@ -135,3 +135,16 @@ Rollback:
 - Runtime execution: NOT ENABLED.
 - Next required step: final manual Cloudflare cutover checklist / operator
   approval.
+
+## Final Manual Checklist Link
+
+- Final manual Cloudflare cutover checklist exists at
+  [BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md](BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md).
+- Manual cutover checklist: READY after review.
+- Approval phrase is documentation-only:
+  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL`.
+- No script should accept the phrase yet.
+- Cloudflare cutover remains NOT APPROVED.
+- Production apply remains NO-GO.
+- Final manual cutover requires operator approval before any Cloudflare route
+  edit.

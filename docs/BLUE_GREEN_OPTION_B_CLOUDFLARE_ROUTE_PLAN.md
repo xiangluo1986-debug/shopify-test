@@ -190,3 +190,16 @@ NOT RUN IN THIS TASK.
 - Production script requirement: wait for `web_blue` and `web_green` health
   before proxy validation or cutover because the first request may return HTTP
   502 while backends start.
+
+## Final Manual Checklist Link
+
+- Final manual Cloudflare cutover checklist exists at
+  [BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md](BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md).
+- Manual cutover checklist: READY after review.
+- Approval phrase is documentation-only:
+  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL`.
+- No script should accept the phrase yet.
+- Cloudflare cutover remains NOT APPROVED.
+- Production apply remains NO-GO.
+- Final manual cutover requires operator approval before any Cloudflare route
+  edit.

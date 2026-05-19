@@ -23,7 +23,7 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
-$NextBlueGreenStep = "final manual Cloudflare cutover checklist / operator approval"
+$NextBlueGreenStep = "operator decision whether to perform manual cutover"
 $CloudflareTunnelName = "aftersales-ticket"
 $CloudflarePublishedRouteTarget = "http://127.0.0.1:8000"
 $CloudflareTicketsHostname = "tickets.kidstoyloverapps.com"
@@ -35,10 +35,12 @@ $OptionBProposedProxyPort = "18000"
 $OptionBProposedProxyPortStatus = "NOT FINAL"
 $CloudflareCutoverApprovalPath = ".\docs\BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md"
 $CloudflareCutoverApprovalStatus = "READY after review"
+$ManualCloudflareCutoverChecklistPath = ".\docs\BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md"
+$ManualCloudflareCutoverChecklistStatus = "READY after review"
 $CloudflareCutoverStatus = "NOT APPROVED"
 $CloudflareProposedCutoverTarget = "http://127.0.0.1:18000"
 $CloudflareRollbackTarget = "http://127.0.0.1:8000"
-$CloudflareManualCutoverApprovalPhrase = "I_APPROVE_MANUAL_CLOUDFLARE_ROUTE_CUTOVER_TO_18000"
+$CloudflareManualCutoverApprovalPhrase = "I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL"
 $ProductionCandidateProxyComposePath = ".\docker-compose.bluegreen.proxy-candidate.example.yml"
 $ProductionCandidateProxyConfigPath = ".\nginx\bluegreen.proxy-candidate.example.conf"
 $ProductionCandidateProxyService = "bluegreen_proxy_candidate"
@@ -345,6 +347,10 @@ function Show-DraftArtifactSummary {
             Path = $CloudflareCutoverApprovalPath
         },
         [pscustomobject]@{
+            Label = "Manual Cloudflare cutover checklist"
+            Path = $ManualCloudflareCutoverChecklistPath
+        },
+        [pscustomobject]@{
             Label = "Production switch/rollback review"
             Path = $ProductionSwitchRollbackReviewPath
         },
@@ -446,6 +452,7 @@ function Show-DeploymentLockStatus {
     $trafficPathOptionComparisonPath = $TrafficPathOptionComparisonPath
     $optionBCloudflareRoutePlanPath = $OptionBCloudflareRoutePlanPath
     $cloudflareCutoverApprovalPath = $CloudflareCutoverApprovalPath
+    $manualCloudflareCutoverChecklistPath = $ManualCloudflareCutoverChecklistPath
     $productionSwitchRollbackReviewPath = $ProductionSwitchRollbackReviewPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
@@ -585,6 +592,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Cloudflare cutover approval package is missing: $cloudflareCutoverApprovalPath"
     }
 
+    if (Test-Path -LiteralPath $manualCloudflareCutoverChecklistPath) {
+        Write-Ok "Manual Cloudflare cutover checklist exists: $manualCloudflareCutoverChecklistPath"
+    } else {
+        Write-Warn "Manual Cloudflare cutover checklist is missing: $manualCloudflareCutoverChecklistPath"
+    }
+
     if (Test-Path -LiteralPath $productionSwitchRollbackReviewPath) {
         Write-Ok "Production switch/rollback review document exists: $productionSwitchRollbackReviewPath"
     } else {
@@ -637,6 +650,9 @@ function Show-DeploymentLockStatus {
     Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
     Write-Host "Cloudflare cutover approval package: $CloudflareCutoverApprovalStatus."
     Write-Host "Cloudflare cutover approval package exists: $(Test-Path -LiteralPath $CloudflareCutoverApprovalPath)."
+    Write-Host "Manual Cloudflare cutover checklist: $ManualCloudflareCutoverChecklistStatus."
+    Write-Host "Manual Cloudflare cutover checklist exists: $(Test-Path -LiteralPath $ManualCloudflareCutoverChecklistPath)."
+    Write-Host "Cutover approval phrase is documentation-only: $CloudflareManualCutoverApprovalPhrase"
     Write-Host "Cloudflare cutover: $CloudflareCutoverStatus."
     Write-Host "Proposed cutover target: $CloudflareProposedCutoverTarget."
     Write-Host "Rollback target: $CloudflareRollbackTarget."
@@ -851,10 +867,12 @@ function Show-FuturePlan {
     Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
     Write-Host "Cloudflare cutover approval package: $CloudflareCutoverApprovalStatus."
     Write-Host "Cloudflare cutover approval package exists: $(Test-Path -LiteralPath $CloudflareCutoverApprovalPath)."
+    Write-Host "Manual Cloudflare cutover checklist: $ManualCloudflareCutoverChecklistStatus."
+    Write-Host "Manual Cloudflare cutover checklist exists: $(Test-Path -LiteralPath $ManualCloudflareCutoverChecklistPath)."
     Write-Host "Cloudflare cutover: $CloudflareCutoverStatus."
     Write-Host "Proposed cutover target: $CloudflareProposedCutoverTarget."
     Write-Host "Rollback target: $CloudflareRollbackTarget."
-    Write-Host "Manual cutover approval phrase documented but inactive: $CloudflareManualCutoverApprovalPhrase"
+    Write-Host "Cutover approval phrase is documentation-only: $CloudflareManualCutoverApprovalPhrase"
     Write-Host "Production-candidate proxy status: $ProductionCandidateProxyStatus."
     Write-Host "18000 production-candidate proxy validation: $ProductionCandidateValidationStatus."
     Write-Host "18000 candidate route: $ProductionCandidateRouteStatus."
@@ -916,6 +934,7 @@ function Show-FuturePlan {
     Write-Host "Traffic path option comparison path: $TrafficPathOptionComparisonPath."
     Write-Host "Option B Cloudflare route plan path: $OptionBCloudflareRoutePlanPath."
     Write-Host "Cloudflare cutover approval package path: $CloudflareCutoverApprovalPath."
+    Write-Host "Manual Cloudflare cutover checklist path: $ManualCloudflareCutoverChecklistPath."
     Write-Host "Non-production validation plan path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
     Write-Host "Production preflight document path: $ProductionPreflightPath."
     Write-Host "Production apply readiness package path: $ProductionReadinessPath."
@@ -966,6 +985,9 @@ Write-Ok "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $Optio
 Write-Ok "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
 Write-Ok "Cloudflare cutover approval package: $CloudflareCutoverApprovalStatus."
 Write-Ok "Cloudflare cutover approval package exists: $(Test-Path -LiteralPath $CloudflareCutoverApprovalPath)."
+Write-Ok "Manual Cloudflare cutover checklist: $ManualCloudflareCutoverChecklistStatus."
+Write-Ok "Manual Cloudflare cutover checklist exists: $(Test-Path -LiteralPath $ManualCloudflareCutoverChecklistPath)."
+Write-Ok "Cutover approval phrase is documentation-only: $CloudflareManualCutoverApprovalPhrase"
 Write-Ok "Cloudflare cutover: $CloudflareCutoverStatus."
 Write-Ok "Proposed cutover target: $CloudflareProposedCutoverTarget."
 Write-Ok "Rollback target: $CloudflareRollbackTarget."

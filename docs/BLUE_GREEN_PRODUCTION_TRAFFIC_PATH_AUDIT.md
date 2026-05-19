@@ -234,3 +234,16 @@ Production apply remains NO-GO.
 Next required step: review the Cloudflare cutover approval package, fill the
 option comparison manual decision fields, and separately approve any future
 Cloudflare route edit before implementing any real blue-green runtime command.
+
+## Final Manual Checklist Link
+
+- Final manual Cloudflare cutover checklist exists at
+  [BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md](BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md).
+- Manual cutover checklist: READY after review.
+- Approval phrase is documentation-only:
+  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL`.
+- No script should accept the phrase yet.
+- Cloudflare cutover remains NOT APPROVED.
+- Production apply remains NO-GO.
+- Final manual cutover requires operator approval before any Cloudflare route
+  edit.
