@@ -191,3 +191,22 @@ request separate final production approval before any runtime-changing action.
 - Final runtime implementation still needs a separate approval after exact
   proxy, state write, rollback, observation, cleanup, migration, scheduler, and
   media/static behavior is reviewed.
+
+## Production-Candidate Proxy Design Update (2026-05-19)
+
+- Candidate compose example exists at
+  [../docker-compose.bluegreen.proxy-candidate.example.yml](../docker-compose.bluegreen.proxy-candidate.example.yml).
+- Candidate nginx config example exists at
+  [../nginx/bluegreen.proxy-candidate.example.conf](../nginx/bluegreen.proxy-candidate.example.conf).
+- Proposed production-candidate local proxy port: `18000`
+  (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
+- The candidate files are example-only and do not implement proxy reload,
+  active-color state write, traffic switch, rollback, scheduler, migration,
+  collectstatic, or database destructive behavior.
+- Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
+  `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
+- Cloudflare route change: NOT APPROVED.
+- Host port `8000` takeover: NOT APPROVED.
+- Production apply remains NO-GO.
+- Next required step: local `18000` candidate validation, still without any
+  Cloudflare/domain routing change.

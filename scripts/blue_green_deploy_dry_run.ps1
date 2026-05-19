@@ -23,7 +23,7 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
-$NextBlueGreenStep = "review Option B route plan, approve or change the final proxy port, and fill option comparison manual decision fields"
+$NextBlueGreenStep = "local 18000 candidate validation without Cloudflare change"
 $CloudflareTunnelName = "aftersales-ticket"
 $CloudflarePublishedRouteTarget = "http://127.0.0.1:8000"
 $CloudflareTicketsHostname = "tickets.kidstoyloverapps.com"
@@ -33,6 +33,11 @@ $OptionBCloudflareRoutePlanPath = ".\docs\BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_P
 $OptionBCloudflareRoutePlanStatus = "READY after review"
 $OptionBProposedProxyPort = "18000"
 $OptionBProposedProxyPortStatus = "NOT FINAL"
+$ProductionCandidateProxyComposePath = ".\docker-compose.bluegreen.proxy-candidate.example.yml"
+$ProductionCandidateProxyConfigPath = ".\nginx\bluegreen.proxy-candidate.example.conf"
+$ProductionCandidateProxyService = "bluegreen_proxy_candidate"
+$ProductionCandidateProxyPort = "18000"
+$ProductionCandidateProxyStatus = "PRODUCTION-CANDIDATE DESIGN ONLY / NOT ACTIVE"
 $ProjectDeploymentPolicyPath = ".\AGENTS.md"
 $ProjectDeploymentPolicyStatus = "documented"
 $FinalRuntimeApprovalPath = ".\docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md"
@@ -230,6 +235,14 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Local-test proxy example config"
             Path = ".\nginx\bluegreen.local-test.example.conf"
+        },
+        [pscustomobject]@{
+            Label = "Production-candidate proxy Compose example"
+            Path = $ProductionCandidateProxyComposePath
+        },
+        [pscustomobject]@{
+            Label = "Production-candidate proxy nginx config example"
+            Path = $ProductionCandidateProxyConfigPath
         },
         [pscustomobject]@{
             Label = "Project deployment command policy"
@@ -555,6 +568,11 @@ function Show-DeploymentLockStatus {
     Write-Host "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
     Write-Host "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
     Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
+    Write-Host "Production-candidate proxy status: $ProductionCandidateProxyStatus."
+    Write-Host "Production-candidate proxy compose exists: $(Test-Path -LiteralPath $ProductionCandidateProxyComposePath)."
+    Write-Host "Production-candidate proxy config exists: $(Test-Path -LiteralPath $ProductionCandidateProxyConfigPath)."
+    Write-Host "Production-candidate proxy service: $ProductionCandidateProxyService."
+    Write-Host "Proposed candidate port: $ProductionCandidateProxyPort."
     Write-Host "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
     Write-Host "Chosen option: $TrafficPathOptionChosenStatus."
     Write-Host "Cloudflare change: $CloudflareChangeApprovalStatus."
@@ -750,6 +768,11 @@ function Show-FuturePlan {
     Write-Host "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
     Write-Host "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
     Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
+    Write-Host "Production-candidate proxy status: $ProductionCandidateProxyStatus."
+    Write-Host "Production-candidate proxy compose exists: $(Test-Path -LiteralPath $ProductionCandidateProxyComposePath)."
+    Write-Host "Production-candidate proxy config exists: $(Test-Path -LiteralPath $ProductionCandidateProxyConfigPath)."
+    Write-Host "Production-candidate proxy service: $ProductionCandidateProxyService."
+    Write-Host "Proposed candidate port: $ProductionCandidateProxyPort."
     Write-Host "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
     Write-Host "Chosen option: $TrafficPathOptionChosenStatus."
     Write-Host "Cloudflare change: $CloudflareChangeApprovalStatus."
@@ -847,6 +870,11 @@ Write-Ok "Traffic path option comparison exists: $(Test-Path -LiteralPath $Traff
 Write-Ok "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
 Write-Ok "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
 Write-Ok "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
+Write-Ok "Production-candidate proxy status: $ProductionCandidateProxyStatus."
+Write-Ok "Production-candidate proxy compose exists: $(Test-Path -LiteralPath $ProductionCandidateProxyComposePath)."
+Write-Ok "Production-candidate proxy config exists: $(Test-Path -LiteralPath $ProductionCandidateProxyConfigPath)."
+Write-Ok "Production-candidate proxy service: $ProductionCandidateProxyService."
+Write-Ok "Proposed candidate port: $ProductionCandidateProxyPort."
 Write-Ok "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
 Write-Ok "Chosen option: $TrafficPathOptionChosenStatus."
 Write-Ok "Cloudflare change: $CloudflareChangeApprovalStatus."

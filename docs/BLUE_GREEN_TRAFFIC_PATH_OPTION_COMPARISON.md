@@ -146,3 +146,22 @@ not final. The plan does not approve any Cloudflare change or production apply.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
 - Production apply: NO-GO.
+
+## Production-Candidate Proxy Design Update (2026-05-19)
+
+- Candidate compose example exists at
+  [../docker-compose.bluegreen.proxy-candidate.example.yml](../docker-compose.bluegreen.proxy-candidate.example.yml).
+- Candidate nginx config example exists at
+  [../nginx/bluegreen.proxy-candidate.example.conf](../nginx/bluegreen.proxy-candidate.example.conf).
+- Proposed production-candidate local proxy port: `18000`
+  (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
+- The candidate files keep Option B in design-only status. They do not change
+  Cloudflare, do not take over host port `8000`, and do not enable production
+  apply.
+- Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
+  `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
+- Cloudflare route change: NOT APPROVED.
+- Host port `8000` takeover: NOT APPROVED.
+- Production apply remains NO-GO.
+- Next required step: local `18000` candidate validation, still without any
+  Cloudflare/domain routing change.

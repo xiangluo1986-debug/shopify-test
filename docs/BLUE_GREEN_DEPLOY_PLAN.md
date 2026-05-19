@@ -745,3 +745,22 @@ path being used.
 - Production apply remains NO-GO.
 - Final runtime implementation still needs a separate approval task before the
   future helper behavior can become executable.
+
+## Production-Candidate Proxy Design Update (2026-05-19)
+
+- Candidate compose example exists at
+  [../docker-compose.bluegreen.proxy-candidate.example.yml](../docker-compose.bluegreen.proxy-candidate.example.yml).
+- Candidate nginx config example exists at
+  [../nginx/bluegreen.proxy-candidate.example.conf](../nginx/bluegreen.proxy-candidate.example.conf).
+- Proposed production-candidate local proxy port: `18000`
+  (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
+- Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
+  `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
+- Cloudflare route change: NOT APPROVED.
+- Host port `8000` takeover: NOT APPROVED.
+- Production apply remains NO-GO.
+- The candidate files do not start/stop/restart/build containers, run
+  migrations, run collectstatic, reload proxy, switch traffic, write
+  active-color state, or change production nginx/proxy config.
+- Next required step: local `18000` candidate validation, still without any
+  Cloudflare/domain routing change.

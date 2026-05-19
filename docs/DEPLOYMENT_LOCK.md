@@ -486,3 +486,25 @@ runtime-changing actions should use the shared deployment lock.
 - Production apply remains NO-GO.
 - Final runtime implementation still needs a separate approval before any lock
   protected runtime command is allowed to execute.
+
+## Production-Candidate Proxy Design Update (2026-05-19)
+
+- Candidate compose example exists at
+  [../docker-compose.bluegreen.proxy-candidate.example.yml](../docker-compose.bluegreen.proxy-candidate.example.yml).
+- Candidate nginx config example exists at
+  [../nginx/bluegreen.proxy-candidate.example.conf](../nginx/bluegreen.proxy-candidate.example.conf).
+- Proposed production-candidate local proxy port: `18000`
+  (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
+- The candidate files are design-only and do not acquire the deployment lock
+  because they do not start/stop/restart/build containers, run migrations, run
+  collectstatic, reload proxy, switch traffic, write active-color state, or
+  change Cloudflare/domain routing.
+- Any later local `18000` validation that starts runtime components must use
+  the deployment lock if it changes runtime state.
+- Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
+  `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
+- Cloudflare route change: NOT APPROVED.
+- Host port `8000` takeover: NOT APPROVED.
+- Production apply remains NO-GO.
+- Next required step: local `18000` candidate validation, still without any
+  Cloudflare/domain routing change.

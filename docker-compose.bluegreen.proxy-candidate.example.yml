@@ -1,0 +1,55 @@
+# EXAMPLE ONLY.
+# PRODUCTION-CANDIDATE DESIGN ONLY.
+# NOT ACTIVE.
+# NOT USED BY NORMAL docker compose COMMANDS.
+# MUST NOT BIND 8000.
+# MUST NOT CHANGE CLOUDFLARE.
+# PRODUCTION APPLY NO-GO.
+#
+# This file is separate from the active docker-compose.yml and is not loaded
+# unless an operator explicitly passes it with `docker compose -f`.
+# It is documentation/example configuration for a future production-candidate
+# blue-green proxy on local host port 18000 only.
+#
+# Do not use this file to deploy, start containers, reload a proxy, switch
+# traffic, write active-color state, run migrations, run collectstatic, change
+# Cloudflare routing, call Shopify APIs, call Gmail APIs, or send email.
+#
+# Proposed future shape, after separate approval:
+# - bluegreen_proxy_candidate publishes host 18000 -> container 80.
+# - Future web_blue and web_green services would be on this same Docker network
+#   and would expose their Django app on container port 8000.
+# - The active upstream must be selected by a separately reviewed future
+#   active-color switch mechanism. This example does not implement that switch.
+# - Host port 8000 remains untouched and must not be published here.
+name: aftersales-bluegreen-proxy-candidate
+
+services:
+  bluegreen_proxy_candidate:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/bluegreen.proxy-candidate.example.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "18000:80"
+    expose:
+      - "80"
+    networks:
+      - bluegreen_candidate_net
+    labels:
+      com.kidstoylover.deploy.role: production-candidate-proxy
+      com.kidstoylover.deploy.scope: design-only
+      com.kidstoylover.deploy.production_traffic: "false"
+      com.kidstoylover.deploy.cloudflare_change: "false"
+      com.kidstoylover.deploy.production_apply: "no-go"
+    # No scheduler, migration, collectstatic, database destructive behavior,
+    # Shopify/Gmail workflow, Cloudflare routing change, active-color state
+    # write, production nginx config write, proxy reload, or traffic switch is
+    # declared in this example.
+    #
+    # Future approved examples only, not declared here:
+    # - web_blue: expose 8000 on bluegreen_candidate_net, no host 8000 publish.
+    # - web_green: expose 8000 on bluegreen_candidate_net, no host 8000 publish.
+
+networks:
+  bluegreen_candidate_net:
+    name: aftersales-bluegreen-proxy-candidate_net
