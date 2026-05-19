@@ -25,6 +25,7 @@ Related non-active drafts:
 - [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+- [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -63,8 +64,20 @@ Related non-active drafts:
   approve production apply, and requires separate approval for additional
   validation.
 - Next required blue-green step: review
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  and
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
-  and resolve production proxy, active-color, and rollback details.
+  for future exact implementation design.
+- Production runtime details document: READY after review at
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+  It documents conservative defaults for nginx as proxy candidate, current
+  `web` ownership of host port `8000` until final approval, service names
+  `web_blue`, `web_green`, and `bluegreen_proxy`, active-color state under
+  `.deploy/active-color.json`, controlled proxy switch shape, rollback to
+  `previous_color`, at least 10 minutes of observation, backward-compatible
+  migration policy, singleton scheduler, and shared media/uploads.
+  Production implementation is still NOT READY and production apply remains
+  NO-GO.
 - Local/test proxy routing validation result: PASSED on 2026-05-19 and
   recorded at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -136,6 +149,8 @@ Related non-active drafts:
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
+- Active color state under `.deploy/` must not be committed and must not
+  contain secrets.
 
 ## Deployment Lock Coverage Status
 
@@ -214,6 +229,10 @@ review. Normal non-deploy tasks are not blocked.
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
   has been reviewed. It does not implement or approve production runtime
   commands.
+- The production runtime details document in
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  has been reviewed. It documents conservative defaults only and does not
+  implement or approve production runtime commands.
 - Successful non-production inactive runtime validation has been reviewed, and
   local/test proxy routing validation has passed, before any future production
   apply request.
@@ -255,6 +274,8 @@ review. Normal non-deploy tasks are not blocked.
   normal non-deploy tasks remain unblocked.
 - A reviewed proxy design is selected and tested away from production traffic.
 - The active color source of truth is documented and recoverable.
+- The active color state path stays under `.deploy/`, is not committed, and
+  contains no secrets.
 - Database backup and restore process is confirmed for the production database.
 - Any migrations are reviewed for backward compatibility before they run.
 - Static and media file handling is confirmed for two web containers.
@@ -272,6 +293,9 @@ and rollback steps.
 
 - Proxy technology: nginx is the local-only planning default, example-only
   until apply phase.
+- Production proxy / active-color / rollback defaults are documented in
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md);
+  exact implementation and final production approval are still required.
 - Active color tracking: future file-based marker, documented as draft/example
   only until an apply task creates real runtime state.
 - Port ownership: current `web` service keeps host port `8000`; changing this

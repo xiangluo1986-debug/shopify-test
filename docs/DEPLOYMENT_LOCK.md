@@ -19,6 +19,8 @@ reviews the production apply readiness package at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md),
 reviews the production command review document at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md),
+reviews the production runtime details document at
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
 and uses the same lock before any runtime-changing action.
 
 ## What The Lock Protects
@@ -271,8 +273,20 @@ skeleton is implemented but blocked, and production apply remains NO-GO.
 The dedicated production runtime command review is documented at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 It is READY after review, but production implementation is NOT READY, exact
-runtime command implementation is still not enabled, unresolved blockers
-remain, and production apply remains NO-GO.
+runtime command implementation is still not enabled, and production apply
+remains NO-GO.
+
+The production runtime details document is documented at
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+It is READY after review for conservative design direction only. It records
+nginx as the proxy candidate, current `web` ownership of host port `8000`
+until final approval, future service names `web_blue`, `web_green`, and
+`bluegreen_proxy`, active-color state under `.deploy/active-color.json`,
+rollback to `previous_color`, at least 10 minutes of first-apply observation,
+backward-compatible migration policy, singleton scheduler policy, and shared
+media/uploads requirements. The active-color state file under `.deploy/` must
+not be committed and must not contain secrets. Exact proxy switch/reload and
+rollback commands still require later implementation and final approval.
 
 Production apply now has successful local inactive runtime validation and
 local/test proxy routing validation documented in
@@ -384,6 +398,10 @@ runtime-changing actions should use the shared deployment lock.
   `docs/BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md`; READY after review,
   production implementation is NOT READY, exact runtime command implementation
   is still not enabled, and production apply remains NO-GO.
+- Production runtime details document:
+  `docs/BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md`; READY after review for
+  conservative defaults only, with active-color state under `.deploy/` not
+  committed and no secrets in runtime state.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, the production preflight document is reviewed, migration
@@ -412,4 +430,6 @@ runtime-changing actions should use the shared deployment lock.
   reviews
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
   plus
-  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+  plus
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).

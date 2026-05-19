@@ -23,13 +23,15 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
-$NextBlueGreenStep = "resolve production proxy/active-color/rollback details"
+$NextBlueGreenStep = "use production runtime defaults for future exact implementation review"
 $ProductionPreflightPath = ".\docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md"
 $ProductionPreflightStatus = "READY after review"
 $ProductionReadinessPath = ".\docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md"
 $ProductionApplyReadinessStatus = "READY after review"
 $ProductionCommandReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md"
 $ProductionCommandReviewStatus = "READY after review"
+$ProductionRuntimeDetailsPath = ".\docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md"
+$ProductionRuntimeDetailsStatus = "READY after review"
 $ProductionCommandPathSkeletonStatus = "implemented but blocked"
 $ProductionCommandImplementationStatus = "NOT READY"
 
@@ -247,6 +249,10 @@ function Show-DraftArtifactSummary {
             Path = $ProductionCommandReviewPath
         },
         [pscustomobject]@{
+            Label = "Production runtime details"
+            Path = $ProductionRuntimeDetailsPath
+        },
+        [pscustomobject]@{
             Label = "Local apply simulation read-only preview"
             Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
         },
@@ -289,6 +295,7 @@ function Show-DeploymentLockStatus {
     $productionPreflightPath = $ProductionPreflightPath
     $productionReadinessPath = $ProductionReadinessPath
     $productionCommandReviewPath = $ProductionCommandReviewPath
+    $productionRuntimeDetailsPath = $ProductionRuntimeDetailsPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
     $proxyConfigPath = ".\nginx\bluegreen.local-test.example.conf"
@@ -364,6 +371,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Production command review document is missing: $productionCommandReviewPath"
     }
 
+    if (Test-Path -LiteralPath $productionRuntimeDetailsPath) {
+        Write-Ok "Production runtime details document exists: $productionRuntimeDetailsPath"
+    } else {
+        Write-Warn "Production runtime details document is missing: $productionRuntimeDetailsPath"
+    }
+
     if (Test-Path -LiteralPath $proxyUnifiedComposePath) {
         Write-Ok "Unified local proxy routing compose example exists: $proxyUnifiedComposePath"
         $proxyUnifiedText = Get-Content -LiteralPath $proxyUnifiedComposePath -Raw
@@ -397,12 +410,17 @@ function Show-DeploymentLockStatus {
     Write-Host "Production apply readiness package exists: $(Test-Path -LiteralPath $ProductionReadinessPath)."
     Write-Host "Production command review: $ProductionCommandReviewStatus."
     Write-Host "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
+    Write-Host "Production runtime details: $ProductionRuntimeDetailsStatus."
+    Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
+    Write-Host "Production proxy/active-color/rollback details: conservative defaults documented."
+    Write-Host "Conservative defaults: nginx proxy candidate; current web owns port 8000 until final approval; web_blue/web_green/bluegreen_proxy service names; .deploy/active-color.json state; rollback to previous_color; at least 10 minutes of observation."
+    Write-Host "Active-color state under .deploy must not be committed and must not contain secrets."
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
     Write-Host "Production implementation: $ProductionCommandImplementationStatus."
     Write-Host "Proxy validation hold-open mode: $ProxyValidationHoldOpenStatus in scripts/blue_green_local_inactive_startup.ps1."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Next step: $NextBlueGreenStep."
-    Write-Host "Production apply remains blocked until production proxy/active-color/rollback details are resolved, exact runtime commands are approved, and manual production approval is given."
+    Write-Host "Production apply remains blocked until exact runtime commands based on the documented defaults are implemented, reviewed, approved, and covered by manual production approval."
     Write-Host "Local inactive startup has separate local-only gates; production switch still requires the deployment lock."
     Write-Host "Non-production validation approval phrase required for future runtime validation: $NonProductionValidationApprovalPhrase"
     Write-Host "Non-production validation lock path for the future run: $NonProductionValidationLockPath"
@@ -548,8 +566,11 @@ function Show-FuturePlan {
     Write-Host "Production apply readiness package exists: $(Test-Path -LiteralPath $ProductionReadinessPath)."
     Write-Host "Production command review: $ProductionCommandReviewStatus."
     Write-Host "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
-    Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
+    Write-Host "Production runtime details: $ProductionRuntimeDetailsStatus."
+    Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
+    Write-Host "Production proxy/active-color/rollback details: conservative defaults documented."
     Write-Host "Production implementation: $ProductionCommandImplementationStatus."
+    Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Next step: $NextBlueGreenStep."
     Write-Host "Future non-production validation requires explicit approval phrase: $NonProductionValidationApprovalPhrase"
@@ -569,7 +590,7 @@ function Show-FuturePlan {
     Write-Host "Non-production validation plan path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
     Write-Host "Production preflight document path: $ProductionPreflightPath."
     Write-Host "Production apply readiness package path: $ProductionReadinessPath."
-    Write-Host "Production apply remains blocked until production proxy/active-color/rollback details are resolved, exact runtime commands are approved, and manual approval is given."
+    Write-Host "Production apply remains blocked until exact runtime commands based on the documented defaults are implemented, reviewed, approved, and covered by manual approval."
     Write-Host "Production remains NO-GO."
     Write-Host ""
     Write-Host "This script does not call docker compose up, down, restart, build, run, exec, or migrate."
@@ -599,6 +620,9 @@ Write-Ok "Production apply readiness: $ProductionApplyReadinessStatus."
 Write-Ok "Production apply readiness package exists: $(Test-Path -LiteralPath $ProductionReadinessPath)."
 Write-Ok "Production command review: $ProductionCommandReviewStatus."
 Write-Ok "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
+Write-Ok "Production runtime details: $ProductionRuntimeDetailsStatus."
+Write-Ok "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
+Write-Ok "Production proxy/active-color/rollback details have conservative defaults."
 Write-Ok "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
 Write-Ok "Production implementation: $ProductionCommandImplementationStatus."
 Write-Ok "Proxy validation network fix: unified compose example was used for the passed local/test validation."

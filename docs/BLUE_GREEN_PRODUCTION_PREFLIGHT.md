@@ -13,7 +13,9 @@ documented separately at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
 The dedicated production runtime command review is documented at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
-Both documents are READY after review, but production implementation is NOT
+The production runtime details document is documented at
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+These documents are READY after review, but production implementation is NOT
 READY, exact production runtime command implementation is still not enabled,
 and production apply remains NO-GO.
 
@@ -32,6 +34,9 @@ and production apply remains NO-GO.
 - Production apply readiness package:
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
   exists for exact command review.
+- Production runtime details document:
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  exists and records conservative defaults.
 
 ## Required Production Decisions / Checks
 
@@ -83,19 +88,29 @@ and production apply remains NO-GO.
 ### E. Proxy And Port Ownership
 
 - The current `web` service owns host port `8000` today.
+- Conservative proxy candidate: nginx.
 - The production proxy takeover strategy must be explicitly approved before
   any runtime change.
+- Future production service names should be `web_blue`, `web_green`, and
+  `bluegreen_proxy`.
 - Cloudflare, domain, tunnel, or external routing impact must be known before
   any production apply.
 - No port `8000` takeover is approved without a separate production apply
   approval.
 - Active production nginx/proxy configuration must not be changed by this
   preflight review.
+- Production proxy config path must be created and reviewed in a later task.
 
 ### F. Active / Target Color Tracking
 
 - Production apply must define how the active color is tracked before any
   switch.
+- Conservative default active color state path:
+  `.deploy/active-color.json`.
+- The active color state file should contain `active_color`, `previous_color`,
+  `updated_at`, `updated_by`, and `deploy_id`.
+- The active color state file must not be committed and must not contain
+  secrets.
 - Target color must be validated and must not equal the active color.
 - The previous active color must be known before switch.
 - Rollback target must be known and recorded before switch.
@@ -113,6 +128,7 @@ and production apply remains NO-GO.
 ### H. Rollback
 
 - Rollback means switching the proxy back to the previous color.
+- Conservative rollback default: switch proxy back to `previous_color`.
 - The old color must not be stopped immediately after the initial switch.
 - Rollback authority and the exact rollback command must be known before
   production apply.
@@ -122,9 +138,12 @@ and production apply remains NO-GO.
 
 ### I. Observation Window
 
-- A minimum observation period must be defined before cleanup.
+- Conservative default observation period for the first production apply:
+  at least 10 minutes before cleanup.
 - During observation, inspect web logs, proxy logs, health checks, and any
   agreed operator smoke checks.
+- Required first-apply checks include `/healthz/`, the admin login path, key
+  internal pages, and web logs.
 - The observation window should start after the post-switch health check
   passes.
 - Cleanup must wait until the observation window has completed and rollback is
@@ -154,6 +173,8 @@ and production apply remains NO-GO.
 ## Go / No-Go
 
 - Production preflight document: READY after review.
+- Production runtime details document: READY after review at
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
 - Production apply readiness package: READY after review at
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
 - Production command review document: READY after review at
@@ -162,10 +183,10 @@ and production apply remains NO-GO.
 - Production implementation: NOT READY.
 - Exact production runtime command implementation: still not enabled.
 - Production apply: NO-GO.
-- Next step: review
-  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
-  and resolve production proxy, active-color, and rollback details before any
-  future runtime implementation task.
+- Next step: use the conservative defaults in
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  for a future implementation design, then separately review and approve exact
+  runtime commands before any production apply.
 
 This preflight document is a readiness review only. It does not deploy, start
 or stop containers, build images, run migrations, run collectstatic, switch

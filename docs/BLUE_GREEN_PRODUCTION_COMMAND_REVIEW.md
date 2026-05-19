@@ -12,6 +12,14 @@ Gmail, Trustpilot, Kudosi, or Ali Reviews workflows.
 
 Production remains NO-GO.
 
+Production runtime defaults for proxy technology, port ownership, service
+names, active-color storage, proxy switch shape, rollback, observation,
+migration policy, scheduler singleton behavior, and media/static handling are
+documented in
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+Those defaults resolve the design direction only. They do not approve
+production command implementation or production apply.
+
 ## Current Validated Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -19,6 +27,9 @@ Production remains NO-GO.
 - Deployment lock: implemented.
 - `safe_deploy` lock enforcement: active.
 - Production command skeleton: implemented but blocked.
+- Production runtime details document:
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  exists and records conservative defaults.
 
 ## Exact Future Production Command Groups
 
@@ -82,8 +93,14 @@ NOT RUN IN THIS TASK:
 - No Cloudflare/domain change unless separately approved.
 
 The future proxy switch mechanism is not approved by this review document and
-must remain blocked until proxy technology, config path, active color storage,
-rollback, and production routing impact are known.
+must remain blocked until the exact proxy config path, switch/reload command,
+active-color state update, rollback command, and production routing impact are
+reviewed for the specific apply. Conservative defaults are documented in
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md):
+nginx candidate, no port `8000` takeover before final approval, no first-apply
+Cloudflare/domain routing change unless separately approved, and switch only
+through a controlled local proxy include/symlink/state file after target health
+passes.
 
 ### E. Observation
 
@@ -95,7 +112,9 @@ NOT RUN IN THIS TASK:
 - Current/old color retained.
 
 Observation must keep the old color available until rollback is no longer
-immediately required.
+immediately required. Conservative default observation for the first
+production apply is at least 10 minutes, with `/healthz/`, admin login path,
+key internal pages, and web logs checked before cleanup.
 
 ### F. Rollback
 
@@ -106,7 +125,9 @@ NOT RUN IN THIS TASK:
 - Do not rollback database unless separately approved.
 
 Rollback is a runtime-changing path and must follow the same deployment lock
-rules as the forward switch.
+rules as the forward switch. The conservative default is to switch the proxy
+back to `previous_color`, keep the old color running during observation, and
+avoid database rollback unless a separate database rollback task is approved.
 
 ### G. Cleanup
 
@@ -119,21 +140,36 @@ NOT RUN IN THIS TASK:
 Cleanup must not remove database state, media/uploads, static state, secrets,
 or rollback-required runtime state.
 
-## Production Command Unknowns / Blockers
+## Production Runtime Defaults And Remaining Blockers
 
-The following items are still unknown or must be decided before production
-runtime command implementation can be enabled:
+The following conservative defaults are now documented in
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md):
 
-- Actual production proxy technology/path.
-- Whether proxy owns port `8000`.
-- Blue/green service names in production.
-- Active color storage.
-- Exact proxy reload/switch mechanism.
-- Rollback exact command.
-- Observation time.
-- Migration policy for this deploy.
-- Scheduler singleton confirmation.
-- Media/static confirmation.
+- Proxy candidate: nginx.
+- Port ownership: current production `web` owns host port `8000`; a future
+  proxy may own `8000` only after explicit final production apply approval.
+- Production service names: `web_blue`, `web_green`, and `bluegreen_proxy`.
+- Active color storage: local `.deploy/active-color.json` containing
+  `active_color`, `previous_color`, `updated_at`, `updated_by`, and
+  `deploy_id`.
+- Active color state under `.deploy/` must not be committed and must not
+  contain secrets.
+- Proxy switch shape: controlled local proxy include/symlink/state update only
+  after target health passes.
+- Rollback shape: switch proxy back to `previous_color`, with deployment lock
+  protection and no automatic database rollback.
+- Observation default: at least 10 minutes for the first production apply.
+- Migration policy: backward-compatible migrations only; destructive changes
+  need a separate deploy plan.
+- Scheduler policy: singleton scheduler only; no blue/green scheduler.
+- Media/static policy: shared media/uploads required; static handling reviewed
+  before proxy switch.
+
+Production runtime command implementation is still blocked until a later task
+reviews and implements the exact production proxy config path, switch/reload
+command, rollback command, state-file write behavior, validation commands, and
+cleanup commands. Scheduler singleton and migration compatibility remain
+required gates for every production apply.
 
 ## Go / No-Go
 
@@ -141,5 +177,6 @@ runtime command implementation can be enabled:
 - Production implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: resolve production proxy, active-color, and rollback details
-before any future runtime command implementation task.
+Next required step: use the conservative runtime details as the input to a
+future implementation task, then separately review and approve the exact
+runtime command path before any production apply.

@@ -40,6 +40,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+- [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -141,8 +142,21 @@ The dedicated production runtime command review exists at
 It records the exact future command groups for preflight, deployment lock,
 target color preparation, proxy switch, observation, rollback, and cleanup.
 It is READY after review, but production implementation is NOT READY, exact
-runtime command implementation is still not enabled, unresolved blockers
-remain, and production apply remains NO-GO.
+runtime command implementation is still not enabled, and production apply
+remains NO-GO.
+
+The production runtime details document exists at
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+It records conservative defaults for nginx as the proxy candidate, current
+`web` ownership of host port `8000` until final approval, production service
+names `web_blue`, `web_green`, and `bluegreen_proxy`, active-color state under
+`.deploy/active-color.json`, controlled proxy switch shape, rollback to
+`previous_color`, at least 10 minutes of first-apply observation,
+backward-compatible migration policy, singleton scheduler policy, and shared
+media/uploads requirements. Runtime details are READY after review, but active
+color state under `.deploy/` must not be committed or contain secrets, exact
+runtime commands are still not implemented, and production apply remains
+NO-GO.
 
 The local/test proxy routing validation approval package exists at
 [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -462,13 +476,15 @@ and `docker-compose.bluegreen.proxy-validation.example.yml`. Cleanup stopped
 only `bluegreen_proxy_test` and `web_green_test`; production port `8000` and
 current `web` remained untouched.
 
-Next phase: resolve the production proxy, active-color, and rollback details
-listed in
-[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
-Production remains NO-GO. Migration compatibility, scheduler
-singleton behavior, media/static/uploads, proxy ownership, active/target color
-tracking, rollback, observation, cleanup, and data safety still must be
-checked before any production apply.
+Next phase: use the conservative production proxy, active-color, and rollback
+details listed in
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+and
+[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+for a future exact implementation review. Production remains NO-GO. Migration
+compatibility, scheduler singleton behavior, media/static/uploads, proxy
+ownership, active/target color tracking, rollback, observation, cleanup, and
+data safety still must be checked before any production apply.
 
 ### Phase 3: One-Time Traffic Path Introduction
 
@@ -554,6 +570,12 @@ conservative defaults approved for local-only planning, while local runtime
 changes and production apply both remain blocked until separate apply tasks
 approve exact commands.
 
+Production-specific conservative defaults are documented in
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+They resolve design direction only. Production implementation remains NOT
+READY, production apply remains NO-GO, and exact proxy switch/reload plus
+rollback commands still require a later implementation and final approval.
+
 - Proxy technology default: nginx, example-only until apply phase.
 - Port ownership default: current `web` service keeps host port `8000` until
   a separate approval changes it.
@@ -584,11 +606,14 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Review the production command review document at
+Use the production runtime details document at
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+and the command review document at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
-without touching production traffic. The next separate task should resolve the
-production proxy technology/path, active color storage, exact proxy switch and
-rollback commands, observation time, migration policy, scheduler singleton
-confirmation, and media/static confirmation. Production remains NO-GO until
-those blockers are resolved, command implementation is added in a later task,
-and a separate production task approves the exact runtime path being used.
+to design the future implementation without touching production traffic. The
+next separate task should implement and review the exact proxy config path,
+active-color state update behavior, proxy switch/reload command, rollback
+command, observation checks, migration gate, scheduler singleton confirmation,
+and media/static confirmation. Production remains NO-GO until implementation
+is added in a later task and a separate production task approves the exact
+runtime path being used.

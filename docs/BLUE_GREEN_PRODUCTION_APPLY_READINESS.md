@@ -9,6 +9,13 @@ This document does not approve production apply. Production apply remains
 NO-GO until a later explicit approval task reviews the exact runtime path and
 approves the final command set.
 
+Production runtime defaults are documented in
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+Those defaults cover proxy candidate, port ownership, service names,
+active-color state, proxy switch shape, rollback, observation, migration
+policy, scheduler singleton behavior, and media/static expectations. They do
+not approve production command implementation or production apply.
+
 ## Current Passed Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -19,23 +26,51 @@ approves the final command set.
 - Production command review document:
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
   exists and is READY after review.
+- Production runtime details document:
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  exists and records conservative defaults.
 - Production command path skeleton: implemented but blocked.
 - Production implementation: NOT READY.
 - Exact production runtime command implementation: still not enabled.
 
-## Required Manual Production Decisions Still Needed
+## Conservative Defaults And Required Final Reviews
 
-- Production proxy technology and config path.
-- Whether production proxy takes over port `8000`.
-- Cloudflare/domain routing impact.
-- Active color tracking method.
-- Target color selection.
-- Rollback command.
-- Observation window.
-- Who has rollback authority.
-- Migration compatibility approval.
-- Scheduler singleton confirmation.
-- Media/static/uploads confirmation.
+Conservative defaults now documented:
+
+- Proxy candidate: nginx.
+- Current production `web` owns host port `8000`; a future proxy may take over
+  `8000` only after explicit final production apply approval.
+- Future production service names: `web_blue`, `web_green`, and
+  `bluegreen_proxy`.
+- Active color state: `.deploy/active-color.json` with `active_color`,
+  `previous_color`, `updated_at`, `updated_by`, and `deploy_id`.
+- Active color state under `.deploy/` must not be committed and must not
+  contain secrets.
+- Future proxy switch updates only a controlled local proxy
+  include/symlink/state file after target health passes.
+- Rollback switches the proxy back to `previous_color`, uses the deployment
+  lock, and does not rollback the database unless separately approved.
+- First production apply observation window: at least 10 minutes.
+- Migration policy: backward-compatible migrations only; destructive
+  migrations need a separate deploy plan.
+- Scheduler policy: singleton scheduler only; Shopify sync, Review Request,
+  settlement, Gmail/Trustpilot jobs, and other scheduled jobs must not run
+  twice.
+- Media/uploads must be shared; static handling must be reviewed before
+  production proxy switch.
+
+Final reviews still needed before production implementation or apply:
+
+- Exact production proxy config path.
+- Exact proxy switch/reload command.
+- Exact active-color state update behavior.
+- Exact rollback command and rollback authority.
+- Target color selection for the specific deploy.
+- Cloudflare/domain routing impact, with no first-apply routing change unless
+  separately approved.
+- Migration compatibility approval for the specific deploy.
+- Scheduler singleton confirmation for the specific deploy.
+- Media/static/uploads confirmation for the specific deploy.
 
 ## Exact Command Review
 
@@ -43,6 +78,10 @@ The dedicated production runtime command review is documented at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 It is READY after review, but production implementation is NOT READY and
 production apply remains NO-GO.
+
+The production runtime details document is
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+It is READY after review for conservative design direction only.
 
 All commands in this section are for future review context only.
 
@@ -217,6 +256,8 @@ Production apply cannot proceed unless all gates below pass:
 - No existing deployment lock.
 - Current `8000` healthy.
 - Target color not equal active color.
+- Active-color state path remains under `.deploy/`, is not committed, and
+  contains no secrets.
 - Migration compatibility approved.
 - Scheduler singleton confirmed.
 - Media/static shared storage confirmed.
@@ -246,6 +287,8 @@ confirmation, and a separate explicit production approval.
 ## Go / No-Go
 
 - Readiness package: READY after review.
+- Production runtime details document: READY after review at
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
 - Production command review document: READY after review at
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 - Production command path skeleton: implemented but blocked.

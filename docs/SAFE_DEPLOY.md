@@ -33,9 +33,11 @@ documented at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
 The dedicated production runtime command review is documented at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
-Both documents are READY after review; production implementation is NOT READY,
-exact production runtime command implementation is still not enabled,
-unresolved blockers remain, and production apply remains NO-GO.
+The production runtime details document is documented at
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+These documents are READY after review; production implementation is NOT
+READY, exact production runtime command implementation is still not enabled,
+and production apply remains NO-GO.
 
 The current safe deploy flow now enforces a deployment single-flight lock in
 real non-dry-run mode. The standalone helper exists at
@@ -95,8 +97,16 @@ service can become healthy.
 - Production command review document:
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
   is READY after review; production implementation is NOT READY, exact runtime
-  command implementation is still not enabled, and proxy/active-color/rollback
-  blockers remain before any later implementation task.
+  command implementation is still not enabled.
+- Production runtime details document:
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  is READY after review for conservative defaults only. It documents nginx as
+  proxy candidate, current `web` ownership of host port `8000` until final
+  approval, active-color state under `.deploy/active-color.json`, rollback to
+  `previous_color`, at least 10 minutes of first-apply observation,
+  backward-compatible migration policy, singleton scheduler policy, and shared
+  media/uploads requirements. Active-color state under `.deploy/` must not be
+  committed and must not contain secrets.
 
 Runtime-changing deploy paths include container start, container stop,
 container restart, image build, migration, collectstatic, proxy switch, traffic
@@ -180,9 +190,10 @@ present; even then real production apply remains blocked because runtime
 execution is not approved in this phase. It also reports that local/test proxy
 validation is passed, the production preflight document exists, the production
 apply readiness package exists, the production command review document exists,
-exact runtime command implementation is still not enabled, unresolved blockers
-remain, the draft approval phrase is not active for real apply, and production
-apply remains NO-GO.
+the production runtime details document exists, conservative defaults are
+documented, exact runtime command implementation is still not enabled, the
+draft approval phrase is not active for real apply, and production apply
+remains NO-GO.
 
 Deployment lock helper status:
 
