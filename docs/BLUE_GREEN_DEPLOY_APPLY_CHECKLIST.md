@@ -684,8 +684,17 @@ they are separate examples and are not referenced by `docker-compose.yml`.
   [../docker-compose.bluegreen.proxy-candidate.example.yml](../docker-compose.bluegreen.proxy-candidate.example.yml).
 - Candidate nginx config example exists at
   [../nginx/bluegreen.proxy-candidate.example.conf](../nginx/bluegreen.proxy-candidate.example.conf).
+- The previous local `18000` candidate test failed because nginx referenced
+  `web_green:8000` while the candidate Compose file did not define a
+  `web_green` service on the same Docker network.
+- The fixed candidate Compose example now defines `web_blue`, `web_green`, and
+  `bluegreen_proxy_candidate` on one candidate network. The blue/green
+  services reuse the existing `aftersales-web` image and expose only container
+  port `8000`.
 - Proposed production-candidate local proxy port: `18000`
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
+- Candidate validation remains local port `18000` only. Host port `8000`
+  remains the current web path and is not published by the candidate example.
 - The candidate examples must not bind host port `8000`, must not change
   Cloudflare, and must not be used by production nginx until separately
   approved.

@@ -36,6 +36,8 @@ $OptionBProposedProxyPortStatus = "NOT FINAL"
 $ProductionCandidateProxyComposePath = ".\docker-compose.bluegreen.proxy-candidate.example.yml"
 $ProductionCandidateProxyConfigPath = ".\nginx\bluegreen.proxy-candidate.example.conf"
 $ProductionCandidateProxyService = "bluegreen_proxy_candidate"
+$ProductionCandidateBlueService = "web_blue"
+$ProductionCandidateGreenService = "web_green"
 $ProductionCandidateProxyPort = "18000"
 $ProductionCandidateProxyStatus = "PRODUCTION-CANDIDATE DESIGN ONLY / NOT ACTIVE"
 $ProjectDeploymentPolicyPath = ".\AGENTS.md"
@@ -363,6 +365,35 @@ function Show-DraftArtifactSummary {
     }
 
     Write-Host "These files are examples/checklists only. They are not loaded by the current docker compose command unless explicitly passed with -f."
+}
+
+function Show-ProductionCandidateProxyShape {
+    Write-Step "Production-candidate proxy compose shape"
+
+    if (-not (Test-Path -LiteralPath $ProductionCandidateProxyComposePath)) {
+        Write-Warn "Production-candidate proxy compose is missing: $ProductionCandidateProxyComposePath"
+        Write-Host "Proxy candidate compose includes web_blue/web_green/proxy: False"
+        Write-Host "Proxy candidate host 18000 binding present: False"
+        Write-Host "Proxy candidate no host 8000 binding: False"
+        Write-Host "Production apply: $ProductionApplyStatus."
+        return
+    }
+
+    $services = @(Get-ComposeServiceNames -Path $ProductionCandidateProxyComposePath)
+    $candidateText = Get-Content -LiteralPath $ProductionCandidateProxyComposePath -Raw
+    $hasBlue = $services -contains $ProductionCandidateBlueService
+    $hasGreen = $services -contains $ProductionCandidateGreenService
+    $hasProxy = $services -contains $ProductionCandidateProxyService
+    $hasCandidatePort = $candidateText -match '["'']?18000:80["'']?'
+    $hasHost8000Binding = $candidateText -match '(?m)^\s*-\s*["'']?(?:127\.0\.0\.1:)?8000:8000(?:/tcp)?["'']?\s*$'
+    $hasRequiredServices = $hasBlue -and $hasGreen -and $hasProxy
+
+    Write-Host ("Production-candidate services detected: " + ($services -join ", "))
+    Write-Host "Proxy candidate compose includes web_blue/web_green/proxy: $hasRequiredServices"
+    Write-Host "Proxy candidate port: $ProductionCandidateProxyPort (expected host 18000 -> container 80)."
+    Write-Host "Proxy candidate host 18000 binding present: $hasCandidatePort"
+    Write-Host "Proxy candidate no host 8000 binding: $(-not $hasHost8000Binding)"
+    Write-Host "Production apply: $ProductionApplyStatus."
 }
 
 function Show-DeploymentLockStatus {
@@ -840,6 +871,7 @@ Show-GitStatus
 Show-ComposeSummary -Path $ComposeFile
 Show-ActiveComposeShape -Path $ComposeFile
 Show-DraftArtifactSummary
+Show-ProductionCandidateProxyShape
 Show-DeploymentLockStatus
 Show-DecisionStatus
 Test-HealthUrl -Url $HealthUrl
@@ -874,7 +906,9 @@ Write-Ok "Production-candidate proxy status: $ProductionCandidateProxyStatus."
 Write-Ok "Production-candidate proxy compose exists: $(Test-Path -LiteralPath $ProductionCandidateProxyComposePath)."
 Write-Ok "Production-candidate proxy config exists: $(Test-Path -LiteralPath $ProductionCandidateProxyConfigPath)."
 Write-Ok "Production-candidate proxy service: $ProductionCandidateProxyService."
+Write-Ok "Production-candidate compose services: $ProductionCandidateBlueService, $ProductionCandidateGreenService, $ProductionCandidateProxyService."
 Write-Ok "Proposed candidate port: $ProductionCandidateProxyPort."
+Write-Ok "Proxy candidate port binding: host 18000 -> container 80 only; host 8000 remains current web."
 Write-Ok "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
 Write-Ok "Chosen option: $TrafficPathOptionChosenStatus."
 Write-Ok "Cloudflare change: $CloudflareChangeApprovalStatus."

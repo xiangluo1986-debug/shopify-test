@@ -16,17 +16,56 @@
 # Cloudflare routing, call Shopify APIs, call Gmail APIs, or send email.
 #
 # Proposed future shape, after separate approval:
+# - web_blue and web_green reuse the existing aftersales-web image.
+# - web_blue and web_green expose only container port 8000 on the candidate
+#   network and do not publish host port 8000.
 # - bluegreen_proxy_candidate publishes host 18000 -> container 80.
-# - Future web_blue and web_green services would be on this same Docker network
-#   and would expose their Django app on container port 8000.
 # - The active upstream must be selected by a separately reviewed future
 #   active-color switch mechanism. This example does not implement that switch.
 # - Host port 8000 remains untouched and must not be published here.
 name: aftersales-bluegreen-proxy-candidate
 
+x-candidate-django-web: &candidate-django-web
+  image: aftersales-web
+  environment:
+    TZ: Asia/Shanghai
+    DJANGO_DEBUG: "0"
+    DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+    DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:18000,http://127.0.0.1:18000
+    SHOPIFY_TRANSLATION_WORKFLOW_LOG_DIR: /app/workflow_logs
+  expose:
+    - "8000"
+  networks:
+    - bluegreen_candidate_net
+  # This example command does not run migrations or collectstatic.
+  command: bash -lc "python manage.py runserver 0.0.0.0:8000"
+
 services:
+  web_blue:
+    <<: *candidate-django-web
+    labels:
+      com.kidstoylover.deploy.role: django-web
+      com.kidstoylover.deploy.color: blue
+      com.kidstoylover.deploy.scope: production-candidate-example
+      com.kidstoylover.deploy.production_traffic: "false"
+      com.kidstoylover.deploy.cloudflare_change: "false"
+      com.kidstoylover.deploy.production_apply: "no-go"
+
+  web_green:
+    <<: *candidate-django-web
+    labels:
+      com.kidstoylover.deploy.role: django-web
+      com.kidstoylover.deploy.color: green
+      com.kidstoylover.deploy.scope: production-candidate-example
+      com.kidstoylover.deploy.production_traffic: "false"
+      com.kidstoylover.deploy.cloudflare_change: "false"
+      com.kidstoylover.deploy.production_apply: "no-go"
+
   bluegreen_proxy_candidate:
     image: nginx:1.27-alpine
+    depends_on:
+      - web_blue
+      - web_green
     volumes:
       - ./nginx/bluegreen.proxy-candidate.example.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
@@ -45,10 +84,6 @@ services:
     # Shopify/Gmail workflow, Cloudflare routing change, active-color state
     # write, production nginx config write, proxy reload, or traffic switch is
     # declared in this example.
-    #
-    # Future approved examples only, not declared here:
-    # - web_blue: expose 8000 on bluegreen_candidate_net, no host 8000 publish.
-    # - web_green: expose 8000 on bluegreen_candidate_net, no host 8000 publish.
 
 networks:
   bluegreen_candidate_net:

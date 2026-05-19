@@ -153,8 +153,17 @@ not final. The plan does not approve any Cloudflare change or production apply.
   [../docker-compose.bluegreen.proxy-candidate.example.yml](../docker-compose.bluegreen.proxy-candidate.example.yml).
 - Candidate nginx config example exists at
   [../nginx/bluegreen.proxy-candidate.example.conf](../nginx/bluegreen.proxy-candidate.example.conf).
+- The previous local `18000` candidate test failed because nginx referenced
+  `web_green:8000` while the candidate Compose file did not define a
+  `web_green` service on the same Docker network.
+- The fixed candidate Compose example now defines `web_blue`, `web_green`, and
+  `bluegreen_proxy_candidate` on one candidate network. The blue/green
+  services reuse the existing `aftersales-web` image and expose only container
+  port `8000`.
 - Proposed production-candidate local proxy port: `18000`
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
+- Candidate validation remains local port `18000` only. Host port `8000`
+  remains the current web path and is not published by the candidate example.
 - The candidate files keep Option B in design-only status. They do not change
   Cloudflare, do not take over host port `8000`, and do not enable production
   apply.
