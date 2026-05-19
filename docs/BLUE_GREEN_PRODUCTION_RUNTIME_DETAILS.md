@@ -31,6 +31,12 @@ blue-green proxy apply. No Cloudflare/domain routing change is approved, no
 host port `8000` ownership change is approved, and production apply remains
 NO-GO.
 
+The dedicated traffic path option comparison is documented in
+[BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+It documents Option A, where `bluegreen_proxy` takes local `8000`, and Option
+B, where Cloudflare Published application routes point to a new proxy port. The
+conservative recommendation is Option B, but it is not approved yet.
+
 This document does not approve production apply. It does not deploy, start or
 stop containers, run migrations, run collectstatic, switch traffic, change
 Cloudflare or domain routing, modify active Compose files, modify production
@@ -63,6 +69,9 @@ Production remains NO-GO.
 - The next routing decision must compare local proxy takeover of `8000` with a
   Cloudflare Published application route service target change to a new proxy
   port.
+- The documented conservative direction is Option B for the first production
+  transition, but chosen option, Cloudflare change, and `8000` takeover are all
+  still unapproved.
 
 ### C. Blue / Green Service Names
 
@@ -143,16 +152,21 @@ scheduler.
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 - External routing decision package: READY after review at
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+- Traffic path option comparison: READY after review at
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Conservative recommendation: Option B, not approved.
+- Chosen option: NOT YET.
+- Cloudflare change: NOT APPROVED.
+- `8000` takeover: NOT APPROVED.
 - Cloudflare Published application route origin confirmed: YES.
 - Switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production apply implementation: still NOT READY.
 - Production apply: NO-GO.
 
-Next required step: create a no-action comparison of local `8000` proxy
-takeover versus Cloudflare Published application route service target changes,
-then request separate final production approval before any runtime-changing
-action.
+Next required step: fill the option comparison manual decision fields and
+create a no-action Cloudflare route change / rollback plan, then request
+separate final production approval before any runtime-changing action.
 
 ## Runtime Command Helper Status
 

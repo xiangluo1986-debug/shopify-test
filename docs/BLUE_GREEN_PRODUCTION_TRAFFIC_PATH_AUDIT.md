@@ -13,6 +13,12 @@ It records the confirmed Cloudflare Tunnel Published application route targets
 and the routing options required before any production blue-green proxy apply.
 Production apply remains NO-GO.
 
+The dedicated Option A versus Option B comparison is documented in
+[BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+It recommends Option B as the conservative direction for the first production
+transition, but the chosen option is still NOT YET and Cloudflare changes
+require separate approval.
+
 This audit did not deploy, build images, start containers, stop containers,
 restart containers, run migrations, run collectstatic, reload proxy, switch
 traffic, write active-color state, change Cloudflare/domain routing, modify
@@ -167,17 +173,22 @@ proxy ownership and an approved no-secret operational procedure.
 - Complete the manual checklist in
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
   before any production proxy switch implementation.
+- Review the Option A versus Option B comparison in
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
+  and fill the manual decision fields before any Cloudflare route edit or
+  local `8000` takeover.
 
 ## Recommended Next Path
 
-Recommended next path: create a no-action comparison / decision package for
+Recommended next path: review the no-action comparison / decision package for
 Option A versus Option B.
 
 The manual Cloudflare check confirmed both Published application routes target
 local `127.0.0.1:8000`, while current Docker `web` owns local `8000`. The next
-decision is whether to keep the Cloudflare target stable and move local port
-ownership to `bluegreen_proxy`, or keep current local ownership and change the
-Cloudflare service targets.
+decision remains whether to keep the Cloudflare target stable and move local
+port ownership to `bluegreen_proxy`, or keep current local ownership and change
+the Cloudflare service targets. The conservative recommendation is Option B for
+the first production transition, but it is not approved yet.
 
 Do not change Cloudflare yet. Do not take over `8000` yet. Production apply
 remains NO-GO.
@@ -187,11 +198,17 @@ remains NO-GO.
 - Traffic path audit: READY after review.
 - External routing decision package: READY after review at
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+- Option comparison package: READY after review at
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Conservative recommendation: Option B, not approved.
+- Chosen option: NOT YET.
 - Cloudflare Published application route origin confirmed: YES.
+- Cloudflare change: NOT APPROVED.
+- `8000` takeover: NOT APPROVED.
 - Production proxy switch implementation: NOT READY.
 - Production runtime execution: NOT ENABLED.
 - Production apply: NO-GO.
 
-Next required step: compare local `8000` proxy takeover versus Cloudflare
-Published application route service target changes before implementing any real
-blue-green runtime command.
+Next required step: fill the option comparison manual decision fields and
+create a no-action Cloudflare route change / rollback plan before implementing
+any real blue-green runtime command.

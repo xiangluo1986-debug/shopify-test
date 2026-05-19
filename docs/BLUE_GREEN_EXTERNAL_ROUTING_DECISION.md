@@ -57,6 +57,12 @@ Production remains NO-GO.
 Source audit:
 [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 
+Dedicated Option A versus Option B comparison:
+[BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+It documents the local `8000` proxy takeover path and the Cloudflare route
+target change path. The conservative recommendation is Option B, but it is not
+approved yet.
+
 ## Updated Routing Interpretation
 
 - External app traffic reaches local `8000` through Cloudflare Tunnel
@@ -106,7 +112,11 @@ Risk: Cloudflare Published application route service target changes.
 
 - Do not change Cloudflare or domain routing yet.
 - Do not let `bluegreen_proxy` take host port `8000` yet.
-- Create a no-action comparison / decision package for Option A vs Option B.
+- Review the no-action Option A vs Option B comparison package.
+- Prefer Option B as the conservative first production transition direction,
+  but do not approve it yet.
+- Create a no-action Cloudflare route change plan and rollback plan before
+  any future route edit.
 - Require separate approval before any Cloudflare/domain routing change.
 - Require separate approval before any host port `8000` ownership change.
 - Production apply remains NO-GO.
@@ -132,10 +142,16 @@ Risk: Cloudflare Published application route service target changes.
 ## Go / No-Go
 
 - External routing decision package: READY after review.
+- Option comparison package: READY after review at
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Chosen option: NOT YET.
+- Conservative recommendation: Option B, not approved.
 - Cloudflare Published application route origin confirmed: YES.
+- Cloudflare change: NOT APPROVED.
+- `8000` takeover: NOT APPROVED.
 - Production proxy switch implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: create a no-action Option A vs Option B comparison package
-covering local `8000` proxy takeover versus Cloudflare Published application
-route service target changes for both hostnames.
+Next required step: fill the manual decision fields in the option comparison
+package and review a no-action Cloudflare route change and rollback plan before
+any future routing change.

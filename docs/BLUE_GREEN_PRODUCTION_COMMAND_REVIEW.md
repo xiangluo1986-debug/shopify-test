@@ -44,6 +44,12 @@ Option A versus Option B routing decision. No Cloudflare/domain routing change
 and no host port `8000` ownership change are approved without a separate future
 approval.
 
+The dedicated traffic path option comparison is documented in
+[BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+It documents both Option A and Option B. The conservative recommendation is
+Option B, but the chosen option is still NOT YET and Cloudflare changes require
+separate approval.
+
 ## Current Validated Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -66,8 +72,11 @@ approval.
   Published application routes target `http://127.0.0.1:8000`.
 - External routing decision package:
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
-  exists after this package is reviewed; routing options still require a
-  no-action comparison before implementation.
+  exists after this package is reviewed.
+- Traffic path option comparison:
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
+  exists after review; Option B is the conservative recommendation, but it is
+  not approved yet.
 
 ## Exact Future Production Command Groups
 
@@ -145,8 +154,10 @@ and confirms both Cloudflare Published application routes target
 port.
 The external routing decision package is documented in
 [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
-and must be used for the Option A versus Option B comparison before any
-production proxy switch implementation.
+and the dedicated comparison is documented in
+[BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+Both must be reviewed before any production proxy switch implementation.
+Option B is the conservative recommendation, but not approved yet.
 Conservative defaults are documented in
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md):
 nginx candidate, no port `8000` takeover before final approval, no first-apply
@@ -235,15 +246,21 @@ required gates for every production apply.
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 - External routing decision package: READY after review at
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
+- Traffic path option comparison: READY after review at
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Conservative recommendation: Option B, not approved.
+- Chosen option: NOT YET.
+- Cloudflare change: NOT APPROVED.
+- `8000` takeover: NOT APPROVED.
 - Cloudflare Published application route origin confirmed: YES.
 - Switch/rollback review doc: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: compare proxy takeover of local `8000` with Cloudflare
-Published application route service target changes, then separately review and
-approve the exact runtime command path before any production apply.
+Next required step: fill the option comparison manual decision fields and
+prepare a no-action Cloudflare route change / rollback plan, then separately
+review and approve the exact runtime command path before any production apply.
 
 ## Runtime Command Helper Status
 

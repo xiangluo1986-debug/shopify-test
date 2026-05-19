@@ -28,6 +28,7 @@ Related non-active drafts:
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
 - [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
 - [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+- [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -94,6 +95,12 @@ Related non-active drafts:
   Cloudflare Published application route origin is confirmed. No
   Cloudflare/domain routing change and no host port `8000` ownership change are
   approved without separate future approval.
+- Traffic path option comparison: READY after review at
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+  Option A and Option B are documented. Option B is the conservative
+  recommendation for the first production transition, but the chosen option is
+  NOT YET, Cloudflare change is NOT APPROVED, `8000` takeover is NOT APPROVED,
+  and production apply remains NO-GO.
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
   It documents the exact future proxy switch flow, active-color state design,
@@ -277,9 +284,15 @@ review. Normal non-deploy tasks are not blocked.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase.`
 - Cloudflare Published application routes are confirmed for both tickets and
-  shopify to `http://127.0.0.1:8000`; the next no-action decision must compare
-  local proxy takeover of `8000` with changing both Cloudflare service targets
-  to a new proxy port.
+  shopify to `http://127.0.0.1:8000`; the manual option decision must choose
+  between local proxy takeover of `8000` and changing both Cloudflare service
+  targets to a new proxy port.
+- The traffic path option comparison in
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
+  has been reviewed and manually filled before any Cloudflare route edit,
+  local `8000` takeover, or production proxy switch implementation.
+- Option B is only the conservative recommendation; it is not approval to edit
+  Cloudflare.
 - Final project deployment command policy is documented in
   [AGENTS.md](../AGENTS.md), [SAFE_DEPLOY.md](SAFE_DEPLOY.md),
   [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md), and
@@ -360,6 +373,11 @@ and rollback steps.
   the Cloudflare Published application route origin is confirmed, but
   production apply remains blocked until the Option A versus Option B routing
   decision is approved.
+- Traffic path option comparison: review
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md);
+  Option A and Option B are documented, Option B is the conservative
+  recommendation, chosen option is NOT YET, Cloudflare change is NOT APPROVED,
+  and `8000` takeover is NOT APPROVED.
 - Migration compatibility rules: backward-compatible only during blue-green
   switch; risky schema changes require separate migration planning.
 - Static/media handling: shared media remains unchanged; `collectstatic`
@@ -399,6 +417,8 @@ These actions are not approved by this checklist alone:
 - Changing Cloudflare tunnel targets or public routing.
 - Proceeding before the external routing decision package is reviewed and the
   Option A versus Option B routing choice is approved.
+- Treating the Option B recommendation as approval to edit Cloudflare.
+- Taking over host port `8000` before a separate approval.
 - Running migrations.
 - Reloading or replacing production proxy configuration.
 - Reloading or replacing any active local proxy configuration without a

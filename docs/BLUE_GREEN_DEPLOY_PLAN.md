@@ -43,6 +43,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
 - [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
 - [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
+- [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -179,10 +180,18 @@ decisions.
 The external routing decision package exists at
 [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
 It is READY after review and records the confirmed Cloudflare Published
-application route targets. Production apply remains blocked until a no-action
-comparison chooses between proxy takeover of local `8000` and Cloudflare
+application route targets. Production apply remains blocked until the manual
+option decision chooses between proxy takeover of local `8000` and Cloudflare
 service target changes. No Cloudflare/domain routing change and no host port
 `8000` ownership change are approved without separate future approval.
+
+The traffic path option comparison exists at
+[BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+It documents Option A, where `bluegreen_proxy` takes local `8000`, and Option
+B, where Cloudflare Published application routes point to a new proxy port. The
+conservative recommendation is Option B for the first production transition,
+but the chosen option is NOT YET, Cloudflare change is NOT APPROVED, `8000`
+takeover is NOT APPROVED, and production apply remains NO-GO.
 
 The production switch/rollback review document exists at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
@@ -224,9 +233,14 @@ configuration untouched.
   requires manual decision.
 - External routing decision package: READY after review; Cloudflare Published
   application route origin confirmed: YES.
+- Traffic path option comparison: READY after review; Option B is the
+  conservative recommendation but not approved.
+- Chosen option: NOT YET.
+- Cloudflare change: NOT APPROVED.
+- `8000` takeover: NOT APPROVED.
 - Production apply: NO-GO.
-- Next future step: create a no-action comparison of proxy takeover of local
-  `8000` versus Cloudflare Published application route service target changes.
+- Next future step: fill the option comparison manual decision fields and
+  create a no-action Cloudflare route change / rollback plan.
 
 ## Deployment Lock Gate
 
@@ -555,6 +569,9 @@ Manual decision needed: either keep the Cloudflare Published application route
 targets stable at `http://127.0.0.1:8000` by moving local port `8000` to the
 proxy, or keep current local `8000` ownership and change both Cloudflare
 Published application route service targets to a new proxy port.
+The conservative documented recommendation is the second path, Option B, but
+it is not approved and no Cloudflare route edit may happen without separate
+approval.
 
 ### Phase 4: Blue-Green Deploy Operation
 
@@ -649,9 +666,12 @@ and remains no-action.
   routing change or Cloudflare service target change is approved.
 - External routing decision package:
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
-  must be used for an Option A versus Option B comparison before any
-  Cloudflare/domain routing change, host port `8000` ownership change, or
-  production proxy switch implementation.
+  and traffic path option comparison
+  [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
+  must be reviewed before any Cloudflare/domain routing change, host port
+  `8000` ownership change, or production proxy switch implementation.
+- Option A and Option B are documented; Option B is the conservative
+  recommendation but is not approved yet.
 - Active color tracking default: future file-based marker, documented as
   draft/example only until an apply task creates real runtime state.
 - Migration default: backward-compatible migrations only during blue-green
@@ -678,7 +698,7 @@ and remains no-action.
 
 ## Immediate Next Task Recommendation
 
-Create a no-action routing comparison package for proxy takeover of local
+Review the no-action routing comparison package for proxy takeover of local
 `8000` versus Cloudflare Published application route service target changes.
 Use the production runtime details document at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
@@ -687,12 +707,15 @@ the switch/rollback review document at
 and the command review document at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 to design the future implementation without touching production traffic after
-the routing option is selected. The next implementation task should review the
-exact proxy config path, active-color state update behavior, proxy
-switch/reload command, rollback command, observation checks, migration gate,
-scheduler singleton confirmation, and media/static confirmation. Production
-remains NO-GO until implementation is added in a later task and a separate
-production task approves the exact runtime path being used.
+the routing option is selected. The comparison is documented at
+[BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md);
+Option B is the conservative recommendation, but not approved. The next
+implementation task should review the exact proxy config path, active-color
+state update behavior, proxy switch/reload command, rollback command,
+observation checks, migration gate, scheduler singleton confirmation, and
+media/static confirmation. Production remains NO-GO until implementation is
+added in a later task and a separate production task approves the exact runtime
+path being used.
 
 ## Runtime Command Helper Status
 
