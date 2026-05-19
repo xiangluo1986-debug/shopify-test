@@ -32,15 +32,34 @@ settlement, Trustpilot, Kudosi, or Ali Reviews workflows.
   `8000` to container port `8000`.
 - No active Compose service named nginx, proxy, caddy, traefik, haproxy, or
   `bluegreen_proxy` was found in the active Compose service list.
-- Host listener checks showed port `8000` was owned by Docker Desktop plumbing:
-  `com.docker.backend.exe` on wildcard addresses, with `wslrelay.exe` also
-  listening on loopback IPv6 at the time of the audit.
+- Current host listener checks showed `0.0.0.0:8000` listening and owned by
+  Docker Desktop plumbing: `com.docker.backend.exe`
+  (`C:\Program Files\Docker\Docker\resources\com.docker.backend.exe`) at audit
+  time.
+- `Get-NetTCPConnection` returned no rows for `80`, `443`, or `8000`, but
+  `netstat` confirmed the `8000` listener. The discrepancy is recorded as a
+  tooling observation, not as proof that `8000` is absent.
+- No local `80` or `443` listener was found in the narrowed listening-port
+  check.
 - `http://127.0.0.1:8000/healthz/` returned HTTP 200 with body `OK`.
+- `http://127.0.0.1:18080/healthz/` and
+  `http://127.0.0.1:19080/healthz/` were not serving.
+- Windows service/process discovery found a running `Cloudflared` service with
+  automatic start and a running `cloudflared` process.
+- No nginx, Caddy, Traefik, HAProxy, or app-specific reverse proxy service or
+  process was found by name. `SstpSvc` and `WinHttpAutoProxySvc` appeared only
+  because the search included generic tunnel/proxy terms; they are Windows
+  built-in services and do not prove app routing.
 - DNS for `tickets.kidstoyloverapps.com` resolved to Cloudflare A and AAAA
+  addresses: A `172.67.132.69`, A `104.21.4.166`, and Cloudflare IPv6
   addresses.
-- `https://tickets.kidstoyloverapps.com/healthz/` could not be verified from
-  this environment. PowerShell reported the connection closed unexpectedly,
-  and `curl.exe` returned HTTP status `000`.
+- PowerShell and `curl.exe` had local TLS/client failures for
+  `https://tickets.kidstoyloverapps.com/healthz/`, so a Python HTTPS read was
+  used as a sanitized cross-check.
+- The Python HTTPS read returned HTTP 200 from `server=cloudflare` with a
+  `cf-ray` header and a Cloudflare Access sign-in HTML page. It did not return
+  the app `OK` health response, so unauthenticated external `/healthz/` does
+  not prove the Cloudflare-to-origin path.
 - Repository proxy/tunnel indicators found only non-active blue-green examples
   and documentation, including:
   `docker-compose.bluegreen.proxy-validation.example.yml`,
@@ -55,7 +74,8 @@ settlement, Trustpilot, Kudosi, or Ali Reviews workflows.
 ## Current Traffic Path Summary
 
 - Current host port `8000` owner: Docker Desktop host networking processes were
-  listening on port `8000` during the audit.
+  listening on port `8000` during the audit; the current observed owner was
+  `com.docker.backend.exe`.
 - Docker service mapping `8000`: active Compose declares `web` with
   `8000:8000`.
 - Live container ownership: not proven from Docker runtime commands because
@@ -63,10 +83,14 @@ settlement, Trustpilot, Kudosi, or Ali Reviews workflows.
 - Active Compose proxy service: none found.
 - Repository proxy artifacts: example-only nginx and proxy validation files
   exist, but they are not active production runtime configuration.
-- External domain routing: DNS is Cloudflare-fronted, but the origin path from
-  Cloudflare to the app was not proven. The domain may reach the app through a
-  tunnel, direct host routing, or another external proxy outside this
-  repository. Manual confirmation is required.
+- Local `80`/`443`: no listening local server was confirmed on either port.
+- External domain routing: DNS is Cloudflare-fronted and Cloudflare Access is
+  in front of unauthenticated `/healthz/`, but the origin path from Cloudflare
+  to the app was not proven. A running local `cloudflared` service exists, but
+  its service target was not inspected because command lines and tunnel config
+  can contain secret tokens. The domain may reach the app through a tunnel,
+  direct host routing, or another external proxy outside this repository.
+  Manual confirmation is required.
 - No Cloudflare/domain routing change is approved by this audit or by the
   external routing decision package.
 - No host port `8000` ownership change is approved by this audit or by the
@@ -79,10 +103,10 @@ settlement, Trustpilot, Kudosi, or Ali Reviews workflows.
 - If an external reverse proxy or Cloudflare tunnel is already involved, its
   ownership, config path, reload command, and rollback command are unknown from
   repository evidence and must be confirmed manually.
-- The audit supports the current design assumption that active Compose is
-  still single-web on `8000`, but it does not prove the full public traffic
-  path because Docker runtime listing and external HTTPS health verification
-  were blocked.
+- The audit supports the current design assumption that local app traffic is
+  available on `8000`, but it does not prove the full public traffic path
+  because Docker runtime listing was blocked and external HTTPS reaches
+  Cloudflare Access rather than the app health body.
 
 ## Blue-Green Insertion Options
 
@@ -117,18 +141,41 @@ proxy ownership and an approved no-secret operational procedure.
 
 ## Required Manual Decisions
 
-- Should `bluegreen_proxy` own host port `8000` in the future production path?
-- Is Cloudflare/domain routing currently pointing to this host on port `8000`,
-  a Cloudflare tunnel, or another external proxy?
+- In Cloudflare DNS, is `tickets.kidstoyloverapps.com` a proxied DNS record,
+  a CNAME/public hostname backed by Cloudflare Tunnel, or another route type?
+- In Cloudflare Zero Trust / Tunnels, what tunnel name and public hostname
+  entry serve `tickets.kidstoyloverapps.com`, if any?
+- What exact service target is configured for that public hostname:
+  `http://127.0.0.1:8000`, `http://localhost:8000`, another local port, or an
+  external proxy?
+- Does Cloudflare Access intentionally protect `/healthz/`, or should that
+  endpoint have a health-check bypass rule?
 - Is there an external reverse proxy outside `docker-compose.yml`?
-- What is the exact production proxy or tunnel config path?
+- What is the exact production proxy or tunnel config path, if safe to
+  identify without exposing tokens?
 - What exact reload/switch command should be used?
 - What exact rollback command should be used?
+- Should `bluegreen_proxy` own host port `8000` in the future production path,
+  or should an existing tunnel/proxy switch upstream instead?
 - What planned maintenance window, if any, is required for the first proxy
   ownership change?
 - Complete the manual checklist in
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
   before any production proxy switch implementation.
+
+## Recommended Next Path
+
+Recommended next path: manual Cloudflare dashboard check fields to fill.
+
+The audit found a running local `cloudflared` service, but did not prove that
+Cloudflare Tunnel targets local `8000`. It also found Cloudflare Access in
+front of unauthenticated `/healthz/`. Because the origin path is still
+insufficiently evidenced, do not choose tunnel-origin blue-green, external
+proxy upstream switching, or one-time local proxy takeover yet.
+
+After the manual fields identify the exact origin target, choose the matching
+implementation path in a separate reviewed task. Production apply remains
+NO-GO.
 
 ## Go / No-Go
 
