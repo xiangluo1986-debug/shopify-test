@@ -17,6 +17,8 @@
 #
 # Proposed future shape, after separate approval:
 # - web_blue and web_green reuse the existing aftersales-web image.
+# - web_blue and web_green align with active web source/env wiring closely
+#   enough for candidate /healthz/ validation while still avoiding migrations.
 # - web_blue and web_green expose only container port 8000 on the candidate
 #   network and do not publish host port 8000.
 # - bluegreen_proxy_candidate publishes host 18000 -> container 80.
@@ -27,18 +29,31 @@ name: aftersales-bluegreen-proxy-candidate
 
 x-candidate-django-web: &candidate-django-web
   image: aftersales-web
+  env_file:
+    - ./.env
   environment:
     TZ: Asia/Shanghai
-    DJANGO_DEBUG: "0"
-    DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
-    DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:18000,http://127.0.0.1:18000
     SHOPIFY_TRANSLATION_WORKFLOW_LOG_DIR: /app/workflow_logs
+  volumes:
+    - ./backend:/app
+    - ./logs:/app/workflow_logs:ro
+    - media:/app/media
+  working_dir: /app
   expose:
     - "8000"
   networks:
     - bluegreen_candidate_net
-  # This example command does not run migrations or collectstatic.
+  # Active web's image default also runs migrations. This candidate command is
+  # intentionally limited to runserver for /healthz/ validation only.
   command: bash -lc "python manage.py runserver 0.0.0.0:8000"
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - 'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/healthz/\", timeout=5).read()"'
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 20s
 
 services:
   web_blue:
@@ -84,6 +99,9 @@ services:
     # Shopify/Gmail workflow, Cloudflare routing change, active-color state
     # write, production nginx config write, proxy reload, or traffic switch is
     # declared in this example.
+
+volumes:
+  media:
 
 networks:
   bluegreen_candidate_net:

@@ -40,6 +40,8 @@ $ProductionCandidateBlueService = "web_blue"
 $ProductionCandidateGreenService = "web_green"
 $ProductionCandidateProxyPort = "18000"
 $ProductionCandidateProxyStatus = "PRODUCTION-CANDIDATE DESIGN ONLY / NOT ACTIVE"
+$ProductionCandidateHealthzAlignmentStatus = "READY in example; manual 18000 /healthz rerun pending"
+$ProductionCandidateValidationStatus = "PENDING after candidate web returned /healthz/ 404"
 $ProjectDeploymentPolicyPath = ".\AGENTS.md"
 $ProjectDeploymentPolicyStatus = "documented"
 $FinalRuntimeApprovalPath = ".\docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md"
@@ -386,13 +388,28 @@ function Show-ProductionCandidateProxyShape {
     $hasProxy = $services -contains $ProductionCandidateProxyService
     $hasCandidatePort = $candidateText -match '["'']?18000:80["'']?'
     $hasHost8000Binding = $candidateText -match '(?m)^\s*-\s*["'']?(?:127\.0\.0\.1:)?8000:8000(?:/tcp)?["'']?\s*$'
+    $hasEnvFile = ($candidateText -match '(?m)^\s*env_file:\s*$') -and ($candidateText -match '(?m)^\s*-\s*\./\.env\s*$')
+    $hasBackendMount = $candidateText -match '(?m)^\s*-\s*\./backend:/app\s*$'
+    $hasWorkflowLogMount = $candidateText -match '(?m)^\s*-\s*\./logs:/app/workflow_logs:ro\s*$'
+    $hasMediaMount = $candidateText -match '(?m)^\s*-\s*media:/app/media\s*$'
+    $hasWorkingDir = $candidateText -match '(?m)^\s*working_dir:\s*/app\s*$'
+    $hasNoMigrationRunserverCommand = $candidateText -match '(?m)^\s*command:\s*bash -lc "python manage\.py runserver 0\.0\.0\.0:8000"\s*$'
     $hasRequiredServices = $hasBlue -and $hasGreen -and $hasProxy
+    $healthzAlignmentReady = $hasRequiredServices -and $hasCandidatePort -and (-not $hasHost8000Binding) -and $hasEnvFile -and $hasBackendMount -and $hasWorkflowLogMount -and $hasMediaMount -and $hasWorkingDir -and $hasNoMigrationRunserverCommand
 
     Write-Host ("Production-candidate services detected: " + ($services -join ", "))
     Write-Host "Proxy candidate compose includes web_blue/web_green/proxy: $hasRequiredServices"
     Write-Host "Proxy candidate port: $ProductionCandidateProxyPort (expected host 18000 -> container 80)."
     Write-Host "Proxy candidate host 18000 binding present: $hasCandidatePort"
     Write-Host "Proxy candidate no host 8000 binding: $(-not $hasHost8000Binding)"
+    Write-Host "Proxy candidate env_file reference present without printing values: $hasEnvFile"
+    Write-Host "Proxy candidate backend source mount present: $hasBackendMount"
+    Write-Host "Proxy candidate workflow log mount matches active web mode: $hasWorkflowLogMount"
+    Write-Host "Proxy candidate media mount present: $hasMediaMount"
+    Write-Host "Proxy candidate working_dir /app present: $hasWorkingDir"
+    Write-Host "Proxy candidate command avoids migrations and runs runserver: $hasNoMigrationRunserverCommand"
+    Write-Host "Proxy candidate healthz alignment ready: $healthzAlignmentReady"
+    Write-Host "Proxy candidate validation status: $ProductionCandidateValidationStatus."
     Write-Host "Production apply: $ProductionApplyStatus."
 }
 
@@ -600,10 +617,14 @@ function Show-DeploymentLockStatus {
     Write-Host "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
     Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
     Write-Host "Production-candidate proxy status: $ProductionCandidateProxyStatus."
+    Write-Host "Production-candidate healthz alignment: $ProductionCandidateHealthzAlignmentStatus."
+    Write-Host "Production-candidate validation: $ProductionCandidateValidationStatus."
+    Write-Host "Previous local 18000 candidate test reached web_green but Django returned /healthz/ 404."
     Write-Host "Production-candidate proxy compose exists: $(Test-Path -LiteralPath $ProductionCandidateProxyComposePath)."
     Write-Host "Production-candidate proxy config exists: $(Test-Path -LiteralPath $ProductionCandidateProxyConfigPath)."
     Write-Host "Production-candidate proxy service: $ProductionCandidateProxyService."
     Write-Host "Proposed candidate port: $ProductionCandidateProxyPort."
+    Write-Host "Next manual candidate test should verify http://127.0.0.1:18000/healthz/ returns HTTP 200 while 8000 remains current web."
     Write-Host "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
     Write-Host "Chosen option: $TrafficPathOptionChosenStatus."
     Write-Host "Cloudflare change: $CloudflareChangeApprovalStatus."
@@ -903,12 +924,16 @@ Write-Ok "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
 Write-Ok "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
 Write-Ok "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
 Write-Ok "Production-candidate proxy status: $ProductionCandidateProxyStatus."
+Write-Ok "Production-candidate healthz alignment: $ProductionCandidateHealthzAlignmentStatus."
+Write-Ok "Production-candidate validation: $ProductionCandidateValidationStatus."
+Write-Ok "Previous local 18000 candidate test reached web_green but Django returned /healthz/ 404; manual rerun is still required."
 Write-Ok "Production-candidate proxy compose exists: $(Test-Path -LiteralPath $ProductionCandidateProxyComposePath)."
 Write-Ok "Production-candidate proxy config exists: $(Test-Path -LiteralPath $ProductionCandidateProxyConfigPath)."
 Write-Ok "Production-candidate proxy service: $ProductionCandidateProxyService."
 Write-Ok "Production-candidate compose services: $ProductionCandidateBlueService, $ProductionCandidateGreenService, $ProductionCandidateProxyService."
 Write-Ok "Proposed candidate port: $ProductionCandidateProxyPort."
 Write-Ok "Proxy candidate port binding: host 18000 -> container 80 only; host 8000 remains current web."
+Write-Ok "Next manual candidate test: 18000 /healthz/ must return HTTP 200 before any production consideration."
 Write-Ok "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
 Write-Ok "Chosen option: $TrafficPathOptionChosenStatus."
 Write-Ok "Cloudflare change: $CloudflareChangeApprovalStatus."

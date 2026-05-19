@@ -160,10 +160,21 @@ not final. The plan does not approve any Cloudflare change or production apply.
   `bluegreen_proxy_candidate` on one candidate network. The blue/green
   services reuse the existing `aftersales-web` image and expose only container
   port `8000`.
+- A later local `18000` candidate test confirmed nginx could reach
+  `web_green`, but `web_green` returned `GET /healthz/` as HTTP 404. That
+  narrowed the remaining issue to candidate web source/env alignment, not
+  Docker networking.
+- The candidate web services now reference the active `.env` path without
+  documenting values, mount `./backend:/app`, set `working_dir: /app`, mount
+  workflow logs/media like active web, and keep an explicit no-migration
+  `runserver` command for local candidate validation.
 - Proposed production-candidate local proxy port: `18000`
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
 - Candidate validation remains local port `18000` only. Host port `8000`
   remains the current web path and is not published by the candidate example.
+- Next manual rerun must verify `http://127.0.0.1:18000/healthz/` returns
+  HTTP 200 while `http://127.0.0.1:8000/healthz/` remains the current active
+  web path.
 - The candidate files keep Option B in design-only status. They do not change
   Cloudflare, do not take over host port `8000`, and do not enable production
   apply.
