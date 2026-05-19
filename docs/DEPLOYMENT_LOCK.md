@@ -13,7 +13,9 @@ without deployment. `scripts/blue_green_production_apply.ps1` now exists as a
 no-action production apply skeleton that documents the future lock gates, but
 real production blue-green apply remains NO-GO until a future apply task
 implements exact runtime commands, reviews the successful local/test proxy
-validation, and uses the same lock before any runtime-changing action.
+validation, reviews
+[BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md), and
+uses the same lock before any runtime-changing action.
 
 ## What The Lock Protects
 
@@ -243,6 +245,14 @@ containers, run migrations, run collectstatic, switch proxy traffic, modify
 active `docker-compose.yml`, modify production nginx/proxy configuration, or
 call Shopify/Gmail/review/translation workflows.
 
+The production preflight readiness review is documented at
+[BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
+It is READY after review, but it does not approve production apply. The future
+production apply path must still pass deployment lock, migration compatibility,
+scheduler singleton, media/static/uploads, proxy/port ownership,
+active/target color tracking, health check, rollback, observation, cleanup,
+and data safety checks.
+
 Production apply now has successful local inactive runtime validation and
 local/test proxy routing validation documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
@@ -347,9 +357,10 @@ runtime-changing actions should use the shared deployment lock.
   `bluegreen_proxy_test` and `web_green_test` on the same local Docker network.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
-  switch/cleanup, production preflight design / readiness review is complete,
-  migration compatibility and scheduler singleton behavior are checked, and
-  only the matching `lock_id` is released.
+  switch/cleanup, the production preflight document is reviewed, migration
+  compatibility and scheduler singleton behavior are checked, media/static and
+  proxy/rollback/cleanup/data safety checks pass, and only the matching
+  `lock_id` is released.
 
 ## Current Status
 
@@ -367,5 +378,7 @@ runtime-changing actions should use the shared deployment lock.
   blocked execution modes.
 - Production blue-green apply remains NO-GO until a separate future apply task
   approves exact runtime commands, confirms every runtime-changing path uses
-  the deployment lock, reviews successful local/test proxy validation, and
-  completes production preflight design / production apply readiness review.
+  the deployment lock, reviews successful local/test proxy validation, reviews
+  [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md), and
+  completes a production apply readiness checklist package / exact command
+  review.

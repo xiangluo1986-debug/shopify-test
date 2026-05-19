@@ -22,6 +22,7 @@ Related non-active drafts:
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
+- [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -59,8 +60,8 @@ Related non-active drafts:
   It records the completed/passed manual inactive runtime validation, does not
   approve production apply, and requires separate approval for additional
   validation.
-- Next required blue-green step: production preflight design / production
-  apply readiness review.
+- Next required blue-green step: production apply readiness checklist package /
+  exact command review.
 - Local/test proxy routing validation result: PASSED on 2026-05-19 and
   recorded at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -103,10 +104,17 @@ Related non-active drafts:
   production lock, run Docker commands, run migrations, run collectstatic,
   switch traffic, or modify files. Required future approval phrase:
   `I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK`.
-- Production apply: NO-GO until production preflight design / production apply
-  readiness review is complete and a separate production task approves exact
-  runtime commands, route, port ownership, proxy, scheduler, migration,
-  static/media, rollback, observation, and lock handling.
+- Production preflight document: READY after review at
+  [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
+  It does not approve production apply. It records required checks for
+  deployment lock behavior, migration compatibility, scheduler singleton
+  behavior, media/static/uploads, proxy and port ownership, active/target color
+  tracking, health checks, rollback, observation, cleanup, and data loss
+  prevention.
+- Production apply: NO-GO until the production preflight document is reviewed
+  and a separate production task approves exact runtime commands, route, port
+  ownership, proxy, scheduler, migration, static/media, rollback, observation,
+  cleanup, data safety, and lock handling.
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
@@ -176,6 +184,9 @@ review. Normal non-deploy tasks are not blocked.
 - Any future production switch acquires the deployment lock first and releases
   it only after switch validation and cleanup/finally handling.
 - The production apply skeleton has been reviewed in default no-action mode.
+- The production preflight document in
+  [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md) has
+  been reviewed.
 - Successful non-production inactive runtime validation has been reviewed, and
   local/test proxy routing validation has passed, before any future production
   apply request.
@@ -286,6 +297,8 @@ These actions are not approved by this checklist alone:
   for the exact runtime path being used.
 - Proceeding with production apply before successful local/test proxy routing
   validation and separate manual production approval.
+- Proceeding with production apply before the production preflight document is
+  reviewed and a separate exact command review is approved.
 
 ## Rollback Steps
 
@@ -311,6 +324,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_deploy_
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_production_apply.ps1
 ```
+
+- Review the production preflight document:
+  [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
 
 - Confirm execution requests without the exact approval phrase remain blocked:
 

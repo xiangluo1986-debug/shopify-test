@@ -17,6 +17,7 @@ $RequiredApprovalPhrase = "I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT
 $ProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $DeployDirectory = [System.IO.Path]::GetFullPath((Join-Path -Path $ProjectRoot -ChildPath ".deploy"))
 $DeployLockHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "deploy_lock.ps1"
+$ProductionPreflightPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md"
 
 function Write-Step {
     param([string]$Message)
@@ -149,6 +150,16 @@ function Show-NonProductionGate {
     Write-Host "This skeleton still performs no runtime action."
 }
 
+function Show-ProductionPreflightGate {
+    Write-Step "Required production preflight gate"
+    Write-Host "Production preflight document exists: $(Test-Path -LiteralPath $ProductionPreflightPath -PathType Leaf)"
+    Write-Host "Required preflight document: docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md."
+    Write-Host "Production preflight document status: READY after review."
+    Write-Host "Production apply still remains NO-GO."
+    Write-Host "Exact production apply command is not implemented in this skeleton."
+    Write-Host "Migration, scheduler singleton, media/static/uploads, proxy/port ownership, active/target color, health check, rollback, observation, cleanup, and data safety checks must pass first."
+}
+
 function Show-LockFlow {
     Write-Step "Future required deployment lock flow"
     Write-Host "NOT RUN: acquire deployment lock before any build/start/migrate/collectstatic/proxy switch/cleanup."
@@ -164,6 +175,7 @@ function Show-LockFlow {
 
 function Show-FutureSteps {
     Write-Step "Future production apply phases"
+    Write-Host "NOT RUN: exact production apply command review."
     Write-Host "NOT RUN: preflight git status."
     Write-Host "NOT RUN: current active health check."
     Write-Host "NOT RUN: validate target inactive color."
@@ -206,12 +218,14 @@ try {
     Show-PlanHeader -ResolvedLockPath $resolvedLockPath
     Show-NoActionBoundary
     Show-NonProductionGate
+    Show-ProductionPreflightGate
     Show-BlockingResult -Message $_.Exception.Message -Code 5
 }
 
 Show-PlanHeader -ResolvedLockPath $resolvedLockPath
 Show-NoActionBoundary
 Show-NonProductionGate
+Show-ProductionPreflightGate
 Show-LockFlow
 Show-FutureSteps
 
@@ -225,6 +239,7 @@ if (-not $ExecuteProductionApply) {
     Write-Step "Result"
     Write-Ok "Plan-only production apply skeleton completed. No runtime action was performed."
     Write-Ok "Successful non-production validation and manual approval are required before production apply."
+    Write-Ok "Production preflight document exists if reported above; production apply readiness checklist / exact command review is still required."
     Write-Ok "Production real apply remains NO-GO."
     exit 0
 }
@@ -254,6 +269,7 @@ Write-Fail "Real production blue-green apply is not implemented in this phase."
 Write-Fail "No docker compose up/down/restart/build was run."
 Write-Fail "No proxy switch, migration, collectstatic, traffic switch, or cleanup was run."
 Write-Fail "No deployment lock was acquired because this skeleton has no real production apply implementation."
+Write-Fail "Exact production apply command is not implemented; migration, scheduler, media/static, proxy, rollback, observation, cleanup, and data safety checks must pass first."
 
 Write-Step "Result"
 Write-Fail "Production blue-green apply remains blocked by the skeleton."

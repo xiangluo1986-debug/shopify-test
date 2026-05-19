@@ -37,6 +37,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
+- [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -110,9 +111,17 @@ The separate non-production runtime validation approval package exists at
 It records that local inactive runtime validation PASSED on 2026-05-18 for
 `web_green_test` on test port `18080` using image `aftersales-web:latest`.
 It does not approve production. Local/test proxy routing validation also PASSED
-on 2026-05-19. Production apply remains blocked until production preflight
-design / production apply readiness review is complete and manual production
-approval is given.
+on 2026-05-19. Production apply remains blocked until the production preflight
+document is reviewed, a production apply readiness checklist package / exact
+command review is complete, and manual production approval is given.
+
+The production preflight readiness review exists at
+[BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
+It records the required production checks for deployment lock behavior,
+migration compatibility, scheduler singleton behavior, media/static/uploads,
+proxy and port ownership, active/target color tracking, health checks,
+rollback, observation, cleanup, and data loss prevention. The preflight
+document is READY after review, but production apply remains NO-GO.
 
 The local/test proxy routing validation approval package exists at
 [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -432,9 +441,11 @@ and `docker-compose.bluegreen.proxy-validation.example.yml`. Cleanup stopped
 only `bluegreen_proxy_test` and `web_green_test`; production port `8000` and
 current `web` remained untouched.
 
-Next phase: production preflight design / production apply readiness review.
-Production remains NO-GO. Migration compatibility and scheduler singleton
-behavior still must be checked before any production apply.
+Next phase: production apply readiness checklist package / exact command
+review. Production remains NO-GO. Migration compatibility, scheduler
+singleton behavior, media/static/uploads, proxy ownership, active/target color
+tracking, rollback, observation, cleanup, and data safety still must be
+checked before any production apply.
 
 ### Phase 3: One-Time Traffic Path Introduction
 
@@ -550,10 +561,11 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Run a production preflight design / production apply readiness review without
-touching production traffic. The recommended next separate task should review
-the exact production runtime path, deployment lock handling, port ownership,
-proxy switch design, migration compatibility, scheduler singleton behavior,
-static/media behavior, rollback, and observation requirements. Production
-remains NO-GO until that review is complete and a separate production task
-approves the exact runtime path being used.
+Review the production preflight readiness document, then create a separate
+production apply readiness checklist package / exact command review without
+touching production traffic. The next separate task should review the exact
+production runtime path, deployment lock handling, port ownership, proxy switch
+design, migration compatibility, scheduler singleton behavior, static/media
+behavior, rollback, observation, cleanup, and data safety requirements.
+Production remains NO-GO until that review is complete and a separate
+production task approves the exact runtime path being used.
