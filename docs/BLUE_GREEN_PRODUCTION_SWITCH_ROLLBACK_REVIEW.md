@@ -153,3 +153,21 @@ Use this review with the production runtime details and command review docs as
 input to a later exact implementation task, then require separate final
 production approval before any proxy reload, traffic switch, active-color
 state write, cleanup, or rollback command is run.
+
+## Runtime Command Helper Status
+
+- `scripts/blue_green_runtime_commands.ps1` exists as a plan-only / no-action
+  helper.
+- The helper may print `status`, `validate-state`, `plan-switch`,
+  `plan-rollback`, and `plan-cleanup` output, but it does not execute those
+  runtime steps.
+- Proxy switch/reload execution is not enabled.
+- Active-color state write is not enabled.
+- Rollback execution is not enabled.
+- Production apply remains NO-GO.
+- The future approval phrase
+  `I_APPROVE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW` is documented
+  only and is not active for execution.
+- Final runtime implementation still needs a separate reviewed and approved
+  task before any proxy reload, traffic switch, state write, rollback, or
+  cleanup command can run.

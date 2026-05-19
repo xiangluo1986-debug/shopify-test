@@ -119,3 +119,18 @@ scheduler.
 Next required step: use these conservative defaults to design the future
 production apply implementation and exact command review, then request a
 separate final production approval before any runtime-changing action.
+
+## Runtime Command Helper Status
+
+- `scripts/blue_green_runtime_commands.ps1` exists as a plan-only / no-action
+  helper for status and future command planning.
+- The helper does not reload proxy, switch traffic, write
+  `.deploy/active-color.json`, start/stop/restart containers, run migrations,
+  run collectstatic, or execute rollback.
+- Active-color state write is not enabled yet.
+- Proxy reload/switch is not enabled yet.
+- Rollback execution is not enabled yet.
+- Production apply remains NO-GO.
+- Final runtime implementation still needs a separate approval after exact
+  proxy, state write, rollback, observation, cleanup, migration, scheduler, and
+  media/static behavior is reviewed.

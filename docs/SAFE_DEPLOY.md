@@ -439,3 +439,18 @@ When Codex creates or reorganizes a new deployable project, it should proactivel
 - Health check validation after restart.
 
 This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose apps, and future internal tools.
+
+## Blue-Green Runtime Helper Status
+
+- `scripts/blue_green_runtime_commands.ps1` exists as a plan-only / no-action
+  blue-green helper.
+- It does not change `safe_deploy.ps1` behavior.
+- It does not reload proxy, switch traffic, write active-color state, execute
+  rollback, start/stop/restart/build containers, run migrations, or run
+  collectstatic.
+- Proxy switch execution is NOT ENABLED.
+- Active-color state write is NOT ENABLED.
+- Rollback execution is NOT ENABLED.
+- Production apply remains NO-GO.
+- Final runtime implementation requires a separate approval task before any
+  executable command is connected to the blue-green helper.

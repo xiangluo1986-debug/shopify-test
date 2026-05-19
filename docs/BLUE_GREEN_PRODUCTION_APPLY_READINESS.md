@@ -315,3 +315,17 @@ Cloudflare/domain routing; modify active Compose files; modify production
 proxy configuration; call Shopify APIs; call Gmail APIs; send email; or affect
 ticket, review request, translation, settlement, Trustpilot, Kudosi, or Ali
 Reviews workflows.
+
+## Runtime Command Helper Status
+
+- `scripts/blue_green_runtime_commands.ps1` exists.
+- Helper status: plan-only / no-action.
+- Proxy switch/reload command is not active.
+- Active-color state write is not active.
+- Rollback command is not active.
+- Production apply remains blocked and NO-GO.
+- The documented future approval phrase
+  `I_APPROVE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW` does not enable
+  execution in this phase.
+- A separate final runtime implementation approval is still required before any
+  production switch, state write, rollback, or cleanup action.

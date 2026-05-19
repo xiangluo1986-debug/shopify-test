@@ -196,3 +196,18 @@ required gates for every production apply.
 Next required step: use the conservative runtime details as the input to a
 future implementation task, then separately review and approve the exact
 runtime command path before any production apply.
+
+## Runtime Command Helper Status
+
+- `scripts/blue_green_runtime_commands.ps1` exists as a blocked runtime command
+  helper.
+- Current helper status: plan-only / no-action.
+- It prints future command plans only; it does not acquire the deployment lock,
+  reload proxy, switch traffic, write active-color state, run rollback, or run
+  cleanup.
+- Proxy switch execution: NOT ENABLED.
+- Active-color state write: NOT ENABLED.
+- Rollback execution: NOT ENABLED.
+- Production apply remains NO-GO.
+- The final runtime implementation and any executable production command path
+  require a separate approval task.

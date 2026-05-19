@@ -579,3 +579,22 @@ docker compose up -d web
 
 The draft files do not change runtime behavior by existing commands because
 they are separate examples and are not referenced by `docker-compose.yml`.
+
+## Runtime Command Helper Checklist
+
+- Confirm `scripts/blue_green_runtime_commands.ps1 -Action status` reports
+  plan-only / no-action behavior.
+- Confirm `scripts/blue_green_runtime_commands.ps1 -Action validate-state`
+  validates `blue` / `green` values and blocks matching active/target colors.
+- Confirm `scripts/blue_green_runtime_commands.ps1 -Action plan-switch`
+  prints future switch steps with every step marked NOT RUN.
+- Confirm `scripts/blue_green_runtime_commands.ps1 -Action plan-rollback`
+  prints future rollback steps with every step marked NOT RUN.
+- Confirm `scripts/blue_green_runtime_commands.ps1 -Action plan-cleanup`
+  prints cleanup rules and performs no cleanup.
+- Proxy switch/reload execution remains NOT ENABLED.
+- Active-color state write remains NOT ENABLED.
+- Rollback execution remains NOT ENABLED.
+- Production apply remains NO-GO.
+- Separate final runtime implementation approval is still required before any
+  executable proxy switch, state write, rollback, or cleanup command is added.

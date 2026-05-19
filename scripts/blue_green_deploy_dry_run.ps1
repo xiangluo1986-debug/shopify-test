@@ -23,7 +23,7 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
-$NextBlueGreenStep = "use production runtime defaults for future exact implementation review"
+$NextBlueGreenStep = "review plan-only runtime helper output and request separate approval before any runtime implementation"
 $ProductionPreflightPath = ".\docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md"
 $ProductionPreflightStatus = "READY after review"
 $ProductionReadinessPath = ".\docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md"
@@ -34,6 +34,11 @@ $ProductionRuntimeDetailsPath = ".\docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md
 $ProductionRuntimeDetailsStatus = "READY after review"
 $ProductionSwitchRollbackReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md"
 $ProductionSwitchRollbackReviewStatus = "READY after review"
+$RuntimeCommandHelperPath = ".\scripts\blue_green_runtime_commands.ps1"
+$RuntimeCommandHelperStatus = "plan-only / no-action"
+$ProxySwitchExecutionStatus = "NOT ENABLED"
+$ActiveColorStateWriteStatus = "NOT ENABLED"
+$RollbackExecutionStatus = "NOT ENABLED"
 $ProductionCommandPathSkeletonStatus = "implemented but blocked"
 $ProductionCommandImplementationStatus = "NOT READY"
 $ProxySwitchCommandStatus = "NOT IMPLEMENTED"
@@ -275,6 +280,10 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "No-action production apply skeleton"
             Path = ".\scripts\blue_green_production_apply.ps1"
+        },
+        [pscustomobject]@{
+            Label = "Plan-only runtime command helper"
+            Path = $RuntimeCommandHelperPath
         }
     )
 
@@ -342,6 +351,16 @@ function Show-DeploymentLockStatus {
         Write-Host "Blue-green production apply skeleton no-action gate present: $productionApplySkeletonExists"
     } else {
         Write-Warn "Blue-green production apply skeleton is missing: $productionApplyPath"
+    }
+
+    if (Test-Path -LiteralPath $RuntimeCommandHelperPath) {
+        $runtimeHelperText = Get-Content -LiteralPath $RuntimeCommandHelperPath -Raw
+        $runtimeHelperNoActionGatePresent = ($runtimeHelperText -match "I_APPROVE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW") -and ($runtimeHelperText -match "plan-only")
+        Write-Ok "Blue-green runtime command helper exists: $RuntimeCommandHelperPath"
+        Write-Host "Runtime command helper status: $RuntimeCommandHelperStatus"
+        Write-Host "Runtime command helper no-action gate present: $runtimeHelperNoActionGatePresent"
+    } else {
+        Write-Warn "Blue-green runtime command helper is missing: $RuntimeCommandHelperPath"
     }
 
     if (Test-Path -LiteralPath $nonProductionValidationPath) {
@@ -433,6 +452,11 @@ function Show-DeploymentLockStatus {
     Write-Host "Conservative defaults: nginx proxy candidate; current web owns port 8000 until final approval; web_blue/web_green/bluegreen_proxy service names; .deploy/active-color.json state; rollback to previous_color; at least 10 minutes of observation."
     Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
     Write-Host "Active-color state under .deploy must not be committed and must not contain secrets."
+    Write-Host "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
+    Write-Host "Runtime command helper status: $RuntimeCommandHelperStatus."
+    Write-Host "Proxy switch execution: $ProxySwitchExecutionStatus."
+    Write-Host "Active-color state write: $ActiveColorStateWriteStatus."
+    Write-Host "Rollback execution: $RollbackExecutionStatus."
     Write-Host "Proxy switch command: $ProxySwitchCommandStatus."
     Write-Host "Rollback command: $RollbackCommandStatus."
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
@@ -592,6 +616,11 @@ function Show-FuturePlan {
     Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
     Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
     Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
+    Write-Host "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
+    Write-Host "Runtime command helper status: $RuntimeCommandHelperStatus."
+    Write-Host "Proxy switch execution: $ProxySwitchExecutionStatus."
+    Write-Host "Active-color state write: $ActiveColorStateWriteStatus."
+    Write-Host "Rollback execution: $RollbackExecutionStatus."
     Write-Host "Proxy switch command: $ProxySwitchCommandStatus."
     Write-Host "Rollback command: $RollbackCommandStatus."
     Write-Host "Production implementation: $ProductionCommandImplementationStatus."
@@ -651,6 +680,11 @@ Write-Ok "Production switch/rollback review: $ProductionSwitchRollbackReviewStat
 Write-Ok "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
 Write-Ok "Production proxy/active-color/rollback details have conservative defaults and reviewed switch/rollback design."
 Write-Ok "Active-color state design reviewed."
+Write-Ok "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
+Write-Ok "Runtime command helper status: $RuntimeCommandHelperStatus."
+Write-Ok "Proxy switch execution: $ProxySwitchExecutionStatus."
+Write-Ok "Active-color state write: $ActiveColorStateWriteStatus."
+Write-Ok "Rollback execution: $RollbackExecutionStatus."
 Write-Ok "Proxy switch command: $ProxySwitchCommandStatus."
 Write-Ok "Rollback command: $RollbackCommandStatus."
 Write-Ok "Production command path skeleton: $ProductionCommandPathSkeletonStatus."

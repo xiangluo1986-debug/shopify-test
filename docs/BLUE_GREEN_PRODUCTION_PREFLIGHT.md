@@ -202,3 +202,16 @@ or stop containers, build images, run migrations, run collectstatic, switch
 traffic, change Cloudflare/domain routing, change active Compose files, change
 production proxy configuration, call Shopify APIs, call Gmail APIs, send email,
 or affect ticket, review request, translation, or settlement workflows.
+
+## Runtime Command Helper Status
+
+- `scripts/blue_green_runtime_commands.ps1` exists as a plan-only / no-action
+  helper.
+- The helper may validate supplied color values and print future switch,
+  rollback, and cleanup plans, but it does not perform runtime changes.
+- Active-color state write is not enabled.
+- Proxy reload/switch is not enabled.
+- Rollback execution is not enabled.
+- Production apply remains NO-GO.
+- Final runtime implementation still requires separate review and approval
+  before any proxy, state, rollback, cleanup, or production traffic action.

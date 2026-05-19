@@ -448,3 +448,20 @@ runtime-changing actions should use the shared deployment lock.
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
   plus
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+
+## Runtime Command Helper Coverage Status
+
+- `scripts/blue_green_runtime_commands.ps1` exists.
+- Helper status: plan-only / no-action.
+- It documents future proxy switch, active-color state update, rollback, and
+  cleanup steps, but it does not acquire the deployment lock or execute those
+  steps.
+- Future executable proxy switch, state write, rollback, cleanup, and
+  production apply paths must acquire the deployment lock before changing
+  runtime state.
+- Proxy switch execution is NOT ENABLED.
+- Active-color state write is NOT ENABLED.
+- Rollback execution is NOT ENABLED.
+- Production apply remains NO-GO.
+- Final runtime implementation still needs a separate approval before any lock
+  protected runtime command is allowed to execute.

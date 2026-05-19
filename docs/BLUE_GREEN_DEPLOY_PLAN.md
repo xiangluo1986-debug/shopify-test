@@ -632,3 +632,17 @@ command, observation checks, migration gate, scheduler singleton confirmation,
 and media/static confirmation. Production remains NO-GO until implementation
 is added in a later task and a separate production task approves the exact
 runtime path being used.
+
+## Runtime Command Helper Status
+
+- `scripts/blue_green_runtime_commands.ps1` now exists for plan-only runtime
+  command review.
+- It does not deploy, start/stop/restart/build containers, run migrations, run
+  collectstatic, reload proxy, switch traffic, write active-color state, or run
+  rollback.
+- Proxy switch execution: NOT ENABLED.
+- Active-color state write: NOT ENABLED.
+- Rollback execution: NOT ENABLED.
+- Production apply remains NO-GO.
+- Final runtime implementation still needs a separate approval task before the
+  future helper behavior can become executable.
