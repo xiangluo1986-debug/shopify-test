@@ -19,6 +19,7 @@ $ProxyValidationInactivePort = "18080"
 $ProxyValidationProxyPort = "19080"
 $ProxyValidationTargetService = "web_green_test"
 $ProxyValidationProxyService = "bluegreen_proxy_test"
+$ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validation.example.yml"
 $ProxyValidationStatus = "pending"
 $ProxyValidationHoldOpenStatus = "available"
 $ProductionApplyStatus = "NO-GO"
@@ -165,7 +166,11 @@ function Show-DraftArtifactSummary {
             Path = ".\docker-compose.bluegreen.local-test.example.yml"
         },
         [pscustomobject]@{
-            Label = "Local-test proxy Compose example"
+            Label = "Unified local-test proxy validation Compose example"
+            Path = ".\docker-compose.bluegreen.proxy-validation.example.yml"
+        },
+        [pscustomobject]@{
+            Label = "Local-test proxy-only Compose example"
             Path = ".\docker-compose.bluegreen.proxy-test.example.yml"
         },
         [pscustomobject]@{
@@ -260,6 +265,7 @@ function Show-DeploymentLockStatus {
     $nonProductionValidationPath = ".\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md"
     $nonProductionApprovalPath = ".\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md"
     $proxyValidationApprovalPath = ".\docs\BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md"
+    $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
     $proxyConfigPath = ".\nginx\bluegreen.local-test.example.conf"
 
@@ -316,10 +322,20 @@ function Show-DeploymentLockStatus {
         Write-Warn "Local proxy routing validation approval package is missing: $proxyValidationApprovalPath"
     }
 
-    if (Test-Path -LiteralPath $proxyComposePath) {
-        Write-Ok "Local proxy routing compose example exists: $proxyComposePath"
+    if (Test-Path -LiteralPath $proxyUnifiedComposePath) {
+        Write-Ok "Unified local proxy routing compose example exists: $proxyUnifiedComposePath"
+        $proxyUnifiedText = Get-Content -LiteralPath $proxyUnifiedComposePath -Raw
+        $proxyNetworkFixReady = ($proxyUnifiedText -match "web_green_test") -and ($proxyUnifiedText -match "bluegreen_proxy_test") -and ($proxyUnifiedText -match "local_validation_net") -and ($proxyUnifiedText -match "18080:8000") -and ($proxyUnifiedText -match "19080:80")
+        Write-Host "Proxy validation network fix ready: $proxyNetworkFixReady"
     } else {
-        Write-Warn "Local proxy routing compose example is missing: $proxyComposePath"
+        Write-Warn "Unified local proxy routing compose example is missing: $proxyUnifiedComposePath"
+        Write-Host "Proxy validation network fix ready: False"
+    }
+
+    if (Test-Path -LiteralPath $proxyComposePath) {
+        Write-Ok "Proxy-only local routing compose example exists: $proxyComposePath"
+    } else {
+        Write-Warn "Proxy-only local routing compose example is missing: $proxyComposePath"
     }
 
     if (Test-Path -LiteralPath $proxyConfigPath) {
@@ -331,7 +347,7 @@ function Show-DeploymentLockStatus {
     Write-Ok "safe_deploy lock enforcement is active in real non-dry-run mode."
     Write-Warn "Blue-green production real apply remains NO-GO. The skeleton is no-action by default and still blocks real execution."
     Write-Host "Non-production inactive runtime validation: $NonProductionInactiveRuntimeValidationStatus."
-    Write-Host "Proxy validation: $ProxyValidationStatus."
+    Write-Host "Proxy validation: $ProxyValidationStatus until manually rerun with the unified compose example."
     Write-Host "Proxy validation hold-open mode: $ProxyValidationHoldOpenStatus in scripts/blue_green_local_inactive_startup.ps1."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Production apply remains blocked until local/test proxy validation passes and manual production approval is given."
@@ -340,7 +356,7 @@ function Show-DeploymentLockStatus {
     Write-Host "Non-production validation lock path for the future run: $NonProductionValidationLockPath"
     Write-Host "Local proxy routing validation approval phrase required for future run: $ProxyValidationApprovalPhrase"
     Write-Host "Local proxy routing validation lock path for the future run: $ProxyValidationLockPath"
-    Write-Host "Local proxy routing validation fixed parameters: project=$ProxyValidationComposeProjectName inactive_port=$ProxyValidationInactivePort proxy_port=$ProxyValidationProxyPort target=$ProxyValidationTargetService proxy=$ProxyValidationProxyService production_port_8000=not-used."
+    Write-Host "Local proxy routing validation fixed parameters: project=$ProxyValidationComposeProjectName compose=$ProxyValidationUnifiedComposePath inactive_port=$ProxyValidationInactivePort proxy_port=$ProxyValidationProxyPort target=$ProxyValidationTargetService proxy=$ProxyValidationProxyService production_port_8000=not-used."
     Write-Host "Deployment lock is required for non-production runtime validation and any future runtime-changing production apply."
     Write-Host "Runtime-changing paths requiring the lock: container start, container stop, container restart, image build, migration, collectstatic, proxy switch, traffic switch, cleanup, production apply, and rollback."
     Write-Host "If a second deploy task sees an existing lock, it must block and exit non-zero. It must not auto-queue."
@@ -472,17 +488,18 @@ function Show-FuturePlan {
     Write-Host "Future non-production runtime validation must also acquire the deployment lock before test-only runtime actions."
     Write-Host "Future non-production validation approval package path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md."
     Write-Host "Non-production inactive runtime validation: $NonProductionInactiveRuntimeValidationStatus."
-    Write-Host "Proxy validation: $ProxyValidationStatus."
+    Write-Host "Proxy validation: $ProxyValidationStatus until manually rerun with $ProxyValidationUnifiedComposePath."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Future non-production validation requires explicit approval phrase: $NonProductionValidationApprovalPhrase"
     Write-Host "Future non-production validation lock path: $NonProductionValidationLockPath"
     Write-Host "Future local proxy routing validation approval package path: .\docs\BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md."
     Write-Host "Future local proxy routing validation requires explicit approval phrase: $ProxyValidationApprovalPhrase"
     Write-Host "Future local proxy routing validation lock path: $ProxyValidationLockPath"
-    Write-Host "Future local proxy routing validation uses project $ProxyValidationComposeProjectName, target $ProxyValidationTargetService on $ProxyValidationInactivePort, and proxy $ProxyValidationProxyService on $ProxyValidationProxyPort."
+    Write-Host "Future local proxy routing validation uses project $ProxyValidationComposeProjectName, compose $ProxyValidationUnifiedComposePath, target $ProxyValidationTargetService on $ProxyValidationInactivePort, and proxy $ProxyValidationProxyService on $ProxyValidationProxyPort."
     Write-Host "Future local proxy routing validation must first run inactive startup with -HoldOpenForProxyValidation so $ProxyValidationTargetService remains available on $ProxyValidationInactivePort."
-    Write-Host "After proxy validation, cleanup must stop only $ProxyValidationTargetService."
+    Write-Host "After proxy validation, cleanup must stop only $ProxyValidationProxyService and $ProxyValidationTargetService."
     Write-Host "Production port 8000 must not be used by the future proxy validation."
+    Write-Host "The unified proxy validation compose example keeps $ProxyValidationProxyService and $ProxyValidationTargetService on the same Docker network for service discovery."
     Write-Host "An existing deployment lock must block the second deploy task; no automatic queue is allowed."
     Write-Host "Production apply skeleton path: .\scripts\blue_green_production_apply.ps1."
     Write-Host "Production apply skeleton status: no-action by default; real apply remains NO-GO."
@@ -509,7 +526,8 @@ Write-Ok "No runtime behavior was changed by this read-only planner."
 Write-Ok "Deployment lock status: helper/doc/safe_deploy enforcement are checked above; dry-run still acquires no lock."
 Write-Ok "Production apply skeleton status: exists if reported above; no-action by default."
 Write-Ok "Non-production inactive runtime validation: PASSED."
-Write-Ok "Proxy validation: pending."
+Write-Ok "Proxy validation: pending until manually rerun with the unified compose example."
+Write-Ok "Proxy validation network fix: unified compose example is ready if reported above."
 Write-Ok "Proxy validation hold-open mode: available; proxy validation remains pending until hold-open startup and the local proxy test both pass."
 Write-Ok "Local proxy routing validation approval package status: exists if reported above; future run requires explicit approval phrase and deployment lock."
 Write-Ok "Production apply: NO-GO."

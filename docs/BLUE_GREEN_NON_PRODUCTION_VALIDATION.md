@@ -50,6 +50,13 @@ proxy service is started, `web_green_test` must be started with
 `-HoldOpenForProxyValidation`; otherwise the inactive startup runner cleans it
 up immediately after direct health validation.
 
+The latest manual proxy validation failed because `bluegreen_proxy_test` and
+`web_green_test` were launched from separate Compose projects/networks, so
+nginx could not resolve `web_green_test:8000`. Future local/test proxy
+validation must use the unified example
+`docker-compose.bluegreen.proxy-validation.example.yml`, which keeps both test
+services on the same Docker network while publishing only `18080` and `19080`.
+
 ## Validation Result - 2026-05-18
 
 - Validation status: PASSED.
@@ -83,9 +90,12 @@ path only. It does not approve production apply, production proxy changes,
 traffic switching, migrations, collectstatic, or external API workflows.
 Local/test proxy routing validation is still pending and required before
 production apply can be reconsidered. The next proxy validation must use
-hold-open mode so `web_green_test` remains running on `18080` long enough for
-`bluegreen_proxy_test` on `19080` to route to it. Cleanup after that proxy
-validation is mandatory and must stop only `web_green_test`.
+hold-open mode with
+`docker-compose.bluegreen.proxy-validation.example.yml` so `web_green_test`
+remains running on `18080` in the same Docker network as
+`bluegreen_proxy_test` on `19080`. Cleanup after that proxy validation is
+mandatory and must stop only the test services `bluegreen_proxy_test` and
+`web_green_test`.
 
 ## Validation Scope
 
@@ -101,7 +111,7 @@ The future validation should cover:
   `18080`, gated by
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
 - Hold-open inactive startup before proxy validation, with mandatory cleanup
-  of only `web_green_test` afterward.
+  of only `bluegreen_proxy_test` and `web_green_test` afterward.
 - Rollback/no-switch behavior when validation fails.
 - Cleanup of test-only services.
 - Confirmation that the current production web service remains untouched.
@@ -143,7 +153,9 @@ Before any non-production runtime validation, confirm:
 - For proxy validation, the proxy approval package has been reviewed, the
   local proxy approval phrase has been provided in a separate task, the proxy
   test port is `19080`, hold-open mode is used for `web_green_test` on
-  `18080`, cleanup stops only `web_green_test`, and production port `8000` is
+  `18080` through
+  `docker-compose.bluegreen.proxy-validation.example.yml`, cleanup stops only
+  `bluegreen_proxy_test` and `web_green_test`, and production port `8000` is
   not used.
 
 If any gate is uncertain, stop before starting test-only services.
@@ -168,6 +180,7 @@ NOT RUN IN THIS TASK:
 ```powershell
 docker compose -p aftersales-bluegreen-test -f .\docker-compose.bluegreen.local-test.example.yml config
 docker compose -p aftersales-bluegreen-test -f .\docker-compose.bluegreen.local-test.example.yml config --services
+docker compose -f .\docker-compose.bluegreen.proxy-validation.example.yml config
 ```
 
 NOT RUN IN THIS TASK:
@@ -180,7 +193,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_i
   -HoldOpenForProxyValidation `
   -Ack I_APPROVE_LOCAL_INACTIVE_COLOR_STARTUP_NO_8000_NO_PRODUCTION_TRAFFIC `
   -AllowContainerAction `
-  -ComposeFile .\docker-compose.bluegreen.local-test.example.yml `
+  -ComposeFile .\docker-compose.bluegreen.proxy-validation.example.yml `
   -InactiveService web_green_test `
   -TestPort 18080
 ```
@@ -206,14 +219,14 @@ NOT RUN IN THIS TASK:
 ### Cleanup Target
 
 ```powershell
-docker compose -p aftersales-bluegreen-test -f .\docker-compose.bluegreen.local-test.example.yml stop web_green_test
-docker compose -p aftersales-bluegreen-test -f .\docker-compose.bluegreen.local-test.example.yml rm -f web_green_test
+docker compose -f .\docker-compose.bluegreen.proxy-validation.example.yml stop bluegreen_proxy_test web_green_test
+docker compose -f .\docker-compose.bluegreen.proxy-validation.example.yml rm -f bluegreen_proxy_test web_green_test
 ```
 
 The minimum mandatory cleanup command after a hold-open proxy validation is:
 
 ```powershell
-docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test
+docker compose -f docker-compose.bluegreen.proxy-validation.example.yml stop bluegreen_proxy_test web_green_test
 ```
 
 Cleanup must not stop current `web`, must not use `docker compose down`, and
@@ -261,5 +274,8 @@ the test-only resources.
 - Local/test proxy routing validation: pending; approval package exists at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
   The pending proxy validation requires hold-open inactive startup first and
-  mandatory cleanup of only `web_green_test` afterward.
+  mandatory cleanup of only `bluegreen_proxy_test` and `web_green_test`
+  afterward. It must use
+  `docker-compose.bluegreen.proxy-validation.example.yml` so both test services
+  are on the same Docker network.
 - Production apply: NO-GO.

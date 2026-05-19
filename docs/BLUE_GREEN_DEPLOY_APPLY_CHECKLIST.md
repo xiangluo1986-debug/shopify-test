@@ -22,6 +22,7 @@ Related non-active drafts:
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
+- [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
 - [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
@@ -64,9 +65,13 @@ Related non-active drafts:
   `.deploy/bluegreen-proxy-validation.lock`, Compose project
   `aftersales-bluegreen-proxy-validation`, inactive service `web_green_test`
   on port `18080`, and test proxy service `bluegreen_proxy_test` on port
-  `19080`. Port `8000`, current `web`, production traffic, and production
-  proxy configuration must remain untouched. Normal non-deploy tasks are not
-  blocked by this deployment lock.
+  `19080`, through
+  `docker-compose.bluegreen.proxy-validation.example.yml`. Port `8000`,
+  current `web`, production traffic, and production proxy configuration must
+  remain untouched. Normal non-deploy tasks are not blocked by this deployment
+  lock. The previous proxy validation failed because the proxy and web test
+  services were launched in separate Docker networks; the unified compose
+  example fixes local/test service discovery.
 - Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
   approval of exact commands. Real local simulation execution is not
@@ -80,7 +85,8 @@ Related non-active drafts:
   The local inactive service reuses the existing `aftersales-web` image; the
   startup runner intentionally uses `--no-build`. Hold-open mode is available
   behind the same gates for local/test proxy validation only; after proxy
-  validation, cleanup is mandatory and must stop only `web_green_test`.
+  validation, cleanup is mandatory and must stop only `bluegreen_proxy_test`
+  and `web_green_test`.
 - Local runtime apply: NO-GO until a separate task approves exact commands.
 - Deployment lock helper: available at `scripts/deploy_lock.ps1`.
 - safe_deploy lock awareness: READY for dry-run/check-only status reporting at
@@ -122,8 +128,9 @@ Related non-active drafts:
   rollback/no-switch handling must still use the deployment lock.
 - Local/test proxy routing validation: pending; approval package exists and
   future validation requires hold-open inactive startup, the local proxy
-  approval phrase, mandatory cleanup of only `web_green_test`, and deployment
-  lock.
+  approval phrase, mandatory cleanup of only `bluegreen_proxy_test` and
+  `web_green_test`, the unified proxy validation Compose example, and
+  deployment lock.
 
 Runtime-changing actions that require the deployment lock before any future
 apply include container start, container stop, container restart, image build,
@@ -178,14 +185,16 @@ review. Normal non-deploy tasks are not blocked.
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
   has been reviewed, the exact local proxy approval phrase is supplied in a
   separate task, and the future run uses `19080` for the test proxy while
-  leaving `8000` untouched.
+  leaving `8000` untouched. The future run uses
+  `docker-compose.bluegreen.proxy-validation.example.yml` so
+  `bluegreen_proxy_test` and `web_green_test` share one Docker network.
 - The inactive startup runner is run with `-HoldOpenForProxyValidation` before
   the local/test proxy validation so `web_green_test` remains reachable on
   `18080`.
 - The cleanup command is ready before hold-open startup:
-  `docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test`.
-- Cleanup after proxy validation stops only `web_green_test`; the current
-  `web` service remains untouched.
+  `docker compose -f docker-compose.bluegreen.proxy-validation.example.yml stop bluegreen_proxy_test web_green_test`.
+- Cleanup after proxy validation stops only `bluegreen_proxy_test` and
+  `web_green_test`; the current `web` service remains untouched.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply is not implemented in this phase.`
 - Deployment tasks do not auto-queue behind an existing lock. A second deploy
@@ -278,7 +287,8 @@ These actions are not approved by this checklist alone:
 - Reloading or replacing any active local proxy configuration without a
   separate approved apply task.
 - Running local/test proxy validation unless hold-open inactive startup and
-  cleanup of only `web_green_test` are explicitly included.
+  cleanup of only `bluegreen_proxy_test` and `web_green_test` are explicitly
+  included.
 - Switching traffic between colors.
 - Stopping the previous active color.
 - Proceeding with production apply before deployment lock enforcement is active
@@ -403,8 +413,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_local_i
 docker compose -f docker-compose.bluegreen.local-test.example.yml config
 ```
 
-- Confirm the local-test proxy Compose example validates without starting
-  containers:
+- Confirm the unified local-test proxy validation Compose example validates
+  without starting containers:
+
+```powershell
+docker compose -f docker-compose.bluegreen.proxy-validation.example.yml config
+```
+
+- Confirm the proxy-only Compose example is treated as a low-level/deprecated
+  standalone example and is not used for full validation without the inactive
+  service on the same Docker network:
 
 ```powershell
 docker compose -f docker-compose.bluegreen.proxy-test.example.yml config
@@ -415,6 +433,9 @@ docker compose -f docker-compose.bluegreen.proxy-test.example.yml config
 ```powershell
 Test-Path .\nginx\bluegreen.local-test.example.conf
 ```
+
+- Confirm the unified proxy validation config publishes only `18080` and
+  `19080`, and never host port `8000`.
 
 - Confirm the local-test inactive Compose example uses the existing image
   `aftersales-web` and does not require a build. If the image is missing, run a

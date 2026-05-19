@@ -3,6 +3,7 @@
 # NOT ACTIVE.
 # NOT USED BY NORMAL docker compose COMMANDS.
 # MUST NOT BIND 8000.
+# DEPRECATED FOR STANDALONE FULL PROXY VALIDATION.
 #
 # This file is separate from the active docker-compose.yml and is not loaded
 # unless an operator explicitly passes it with `docker compose -f`.
@@ -10,9 +11,16 @@
 # used for production traffic, Cloudflare/domain routing, scheduler workflows,
 # migrations, collectstatic, Shopify writes, Gmail calls, or email sends.
 #
-# The future validation must publish only 19080:80. The inactive test service
-# should already be running as web_green_test on the same local_test_net network
-# under the aftersales-bluegreen-proxy-validation Compose project.
+# Full local/test proxy validation must use the unified example:
+# docker-compose.bluegreen.proxy-validation.example.yml
+#
+# This proxy-only file is kept as a low-level example. Do not run it standalone
+# for full validation: if web_green_test was started by another Compose project,
+# nginx will not resolve web_green_test:8000 across the separate Docker
+# networks. If this file is used at all, web_green_test must already be on the
+# exact same local_test_net network in the same Compose project.
+#
+# The validation must publish only 19080:80 from this proxy-only service.
 name: aftersales-bluegreen-proxy-validation
 
 services:

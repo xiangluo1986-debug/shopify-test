@@ -1,0 +1,89 @@
+# EXAMPLE ONLY.
+# LOCAL TEST ONLY.
+# NOT ACTIVE.
+# NOT USED BY NORMAL docker compose COMMANDS.
+# MUST NOT BIND 8000.
+# PRODUCTION NO-GO.
+#
+# This file is separate from the active docker-compose.yml and is not loaded
+# unless an operator explicitly passes it with `docker compose -f`.
+# It is for local/test proxy validation only. It must not be used for
+# production traffic, Cloudflare/domain routing, scheduler workflows,
+# migrations, collectstatic, Shopify writes, Gmail calls, or email sends.
+#
+# The previous proxy-only validation design could put bluegreen_proxy_test and
+# web_green_test in separate Compose projects/networks. In that shape, nginx
+# cannot resolve web_green_test:8000. This unified example keeps both services
+# in one Compose project and on one local validation network.
+#
+# Host publishing is intentionally limited to:
+# - web_green_test: 18080 -> 8000
+# - bluegreen_proxy_test: 19080 -> 80
+#
+# Host port 8000 must remain owned by the current active web path.
+name: aftersales-bluegreen-proxy-validation
+
+x-local-django-web: &local-django-web
+  image: aftersales-web
+  environment:
+    TZ: Asia/Shanghai
+    DJANGO_DEBUG: "0"
+    DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+    DJANGO_CSRF_TRUSTED_ORIGINS: http://localhost:18080,http://127.0.0.1:18080,http://localhost:19080,http://127.0.0.1:19080
+    SHOPIFY_TRANSLATION_WORKFLOW_LOG_DIR: /app/workflow_logs
+  volumes:
+    - ./backend:/app
+    - proxy_validation_media:/app/media
+    - proxy_validation_workflow_logs:/app/workflow_logs
+  expose:
+    - "8000"
+  networks:
+    - local_validation_net
+  # This local test command does not run migrations or collectstatic.
+  command: bash -lc "python manage.py runserver 0.0.0.0:8000"
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - 'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8000/healthz/\", timeout=5).read()"'
+    interval: 10s
+    timeout: 5s
+    retries: 6
+    start_period: 20s
+
+services:
+  web_green_test:
+    <<: *local-django-web
+    ports:
+      - "18080:8000"
+    labels:
+      com.kidstoylover.deploy.role: django-web
+      com.kidstoylover.deploy.color: green-test
+      com.kidstoylover.deploy.scope: local-test-only
+      com.kidstoylover.deploy.production_traffic: "false"
+
+  bluegreen_proxy_test:
+    image: nginx:1.27-alpine
+    depends_on:
+      - web_green_test
+    volumes:
+      - ./nginx/bluegreen.local-test.example.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "19080:80"
+    expose:
+      - "80"
+    networks:
+      - local_validation_net
+    labels:
+      com.kidstoylover.deploy.role: local-test-proxy
+      com.kidstoylover.deploy.scope: local-test-only
+      com.kidstoylover.deploy.production_traffic: "false"
+    # No scheduler, production proxy, migration, collectstatic, traffic switch,
+    # database destructive behavior, or production service is declared here.
+
+volumes:
+  proxy_validation_media:
+  proxy_validation_workflow_logs:
+
+networks:
+  local_validation_net:
+    name: aftersales-bluegreen-proxy-validation_local_validation_net

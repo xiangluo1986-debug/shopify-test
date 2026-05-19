@@ -37,6 +37,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md)
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
+- [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
 - [scripts/blue_green_production_apply.ps1](../scripts/blue_green_production_apply.ps1)
@@ -70,10 +71,10 @@ build/preparation task before attempting local inactive startup. Hold-open mode
 is now available behind the same gates for local/test proxy validation only:
 after direct `18080 /healthz/` passes, `web_green_test` remains running so the
 test proxy on `19080` can route to it. Cleanup after proxy validation is
-mandatory and must stop only `web_green_test`:
+mandatory and must stop only test services:
 
 ```powershell
-docker compose -f docker-compose.bluegreen.local-test.example.yml stop web_green_test
+docker compose -f docker-compose.bluegreen.proxy-validation.example.yml stop bluegreen_proxy_test web_green_test
 ```
 
 The current `web`, port `8000`, production traffic, active Compose file,
@@ -122,8 +123,17 @@ the exact approval phrase
 `I_APPROVE_LOCAL_PROXY_ROUTING_VALIDATION_NO_PRODUCTION_TRAFFIC`. This does not
 approve production, does not transfer port `8000`, and does not block normal
 non-deploy tasks. The inactive service must be started with
-`-HoldOpenForProxyValidation` before the proxy test and cleaned up afterward by
-stopping only `web_green_test`.
+`-HoldOpenForProxyValidation` against
+`docker-compose.bluegreen.proxy-validation.example.yml` before the proxy test
+and cleaned up afterward by stopping only `bluegreen_proxy_test` and
+`web_green_test`.
+
+The latest manual proxy validation failed because `bluegreen_proxy_test` and
+`web_green_test` were launched from separate Compose projects/networks, leaving
+nginx unable to resolve `web_green_test:8000`. The unified proxy validation
+Compose example fixes that local/test service-discovery problem by keeping both
+services in one Compose project/network while leaving port `8000`, production
+traffic, and active proxy configuration untouched.
 
 ## Deployment Lock Gate
 
@@ -418,8 +428,9 @@ Next phase: local/test proxy routing validation through `19080` to
 `web_green_test` on `18080`, using
 [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
 That validation requires the gated inactive startup runner's hold-open mode
-first, then mandatory cleanup of only `web_green_test`. Production port `8000`
-and current `web` must remain untouched.
+with `docker-compose.bluegreen.proxy-validation.example.yml` first, then
+mandatory cleanup of only `bluegreen_proxy_test` and `web_green_test`.
+Production port `8000` and current `web` must remain untouched.
 Production remains NO-GO.
 
 ### Phase 3: One-Time Traffic Path Introduction
@@ -538,9 +549,11 @@ approve exact commands.
 
 Run local/test proxy routing simulation and validation without touching
 production traffic. The recommended next separate task is to start
-`web_green_test` with hold-open mode on `18080`, validate the proxy route
-through `19080`, then stop only `web_green_test` during cleanup. It should also
-validate port ownership, scheduler, migration, static/media, rollback,
-observation, and deployment lock handling in a local/test scope. Production
-remains NO-GO until proxy validation is reviewed and a separate production task
-approves the exact runtime path being used.
+`web_green_test` with hold-open mode on `18080` from
+`docker-compose.bluegreen.proxy-validation.example.yml`, validate the proxy
+route through `19080`, then stop only `bluegreen_proxy_test` and
+`web_green_test` during cleanup. It should also validate port ownership,
+scheduler, migration, static/media, rollback, observation, and deployment lock
+handling in a local/test scope. Production remains NO-GO until proxy validation
+is reviewed and a separate production task approves the exact runtime path
+being used.

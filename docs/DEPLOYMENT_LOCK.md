@@ -258,10 +258,13 @@ The local/test proxy routing validation approval package is
 That future validation remains pending and must use lock path
 `.deploy/bluegreen-proxy-validation.lock`, Compose project
 `aftersales-bluegreen-proxy-validation`, inactive service `web_green_test` on
-`18080`, and test proxy service `bluegreen_proxy_test` on `19080`. It must not
-use production port `8000`, touch the current `web` service, or switch
-production traffic. Normal non-deploy tasks are not blocked by this validation
-lock.
+`18080`, test proxy service `bluegreen_proxy_test` on `19080`, and
+`docker-compose.bluegreen.proxy-validation.example.yml` so both test services
+share one Docker network. The prior proxy validation failed when the services
+were launched from separate Compose projects/networks and nginx could not
+resolve `web_green_test:8000`. The future validation must not use production
+port `8000`, touch the current `web` service, or switch production traffic.
+Normal non-deploy tasks are not blocked by this validation lock.
 
 ## Lock Behavior
 
@@ -337,8 +340,10 @@ runtime-changing actions should use the shared deployment lock.
   validation lock path is `.deploy/bluegreen-nonprod-validation.lock`.
 - Local/test proxy routing validation approval package:
   `docs/BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md`; production approval
-  remains not granted, proxy validation is pending, and the validation lock path
-  is `.deploy/bluegreen-proxy-validation.lock`.
+  remains not granted, proxy validation is pending, the validation lock path is
+  `.deploy/bluegreen-proxy-validation.lock`, and future validation uses
+  `docker-compose.bluegreen.proxy-validation.example.yml` to keep
+  `bluegreen_proxy_test` and `web_green_test` on the same local Docker network.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, local/test proxy validation has passed, and only the matching
