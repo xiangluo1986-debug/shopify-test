@@ -14,8 +14,10 @@ no-action production apply skeleton that documents the future lock gates, but
 real production blue-green apply remains NO-GO until a future apply task
 implements exact runtime commands, reviews the successful local/test proxy
 validation, reviews
-[BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md), and
-uses the same lock before any runtime-changing action.
+[BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md),
+reviews the production apply readiness package at
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md),
+and uses the same lock before any runtime-changing action.
 
 ## What The Lock Protects
 
@@ -253,6 +255,12 @@ scheduler singleton, media/static/uploads, proxy/port ownership,
 active/target color tracking, health check, rollback, observation, cleanup,
 and data safety checks.
 
+The production apply readiness checklist and exact command review package is
+documented at
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+It is READY after review, but production command implementation remains NOT
+READY and production apply remains NO-GO.
+
 Production apply now has successful local inactive runtime validation and
 local/test proxy routing validation documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
@@ -355,6 +363,10 @@ runtime-changing actions should use the shared deployment lock.
   completed validation used
   `docker-compose.bluegreen.proxy-validation.example.yml` to keep
   `bluegreen_proxy_test` and `web_green_test` on the same local Docker network.
+- Production apply readiness package:
+  `docs/BLUE_GREEN_PRODUCTION_APPLY_READINESS.md`; READY after review for exact
+  command review, production command implementation remains NOT READY, and
+  production apply remains NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, the production preflight document is reviewed, migration
@@ -380,5 +392,5 @@ runtime-changing actions should use the shared deployment lock.
   approves exact runtime commands, confirms every runtime-changing path uses
   the deployment lock, reviews successful local/test proxy validation, reviews
   [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md), and
-  completes a production apply readiness checklist package / exact command
-  review.
+  reviews
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).

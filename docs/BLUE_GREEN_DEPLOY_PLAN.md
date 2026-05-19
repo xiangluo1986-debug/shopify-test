@@ -38,6 +38,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
+- [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -112,8 +113,10 @@ It records that local inactive runtime validation PASSED on 2026-05-18 for
 `web_green_test` on test port `18080` using image `aftersales-web:latest`.
 It does not approve production. Local/test proxy routing validation also PASSED
 on 2026-05-19. Production apply remains blocked until the production preflight
-document is reviewed, a production apply readiness checklist package / exact
-command review is complete, and manual production approval is given.
+document is reviewed,
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+is reviewed for exact command readiness, and manual production approval is
+given.
 
 The production preflight readiness review exists at
 [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
@@ -122,6 +125,13 @@ migration compatibility, scheduler singleton behavior, media/static/uploads,
 proxy and port ownership, active/target color tracking, health checks,
 rollback, observation, cleanup, and data loss prevention. The preflight
 document is READY after review, but production apply remains NO-GO.
+
+The production apply readiness checklist and exact command review package
+exists at
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+It records the future command groups, safety gates, draft approval phrase, and
+remaining production decisions. It is READY after review; production command
+implementation is NOT READY and production apply remains NO-GO.
 
 The local/test proxy routing validation approval package exists at
 [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -441,8 +451,10 @@ and `docker-compose.bluegreen.proxy-validation.example.yml`. Cleanup stopped
 only `bluegreen_proxy_test` and `web_green_test`; production port `8000` and
 current `web` remained untouched.
 
-Next phase: production apply readiness checklist package / exact command
-review. Production remains NO-GO. Migration compatibility, scheduler
+Next phase: review the production apply readiness checklist package / exact
+command review in
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+Production remains NO-GO. Migration compatibility, scheduler
 singleton behavior, media/static/uploads, proxy ownership, active/target color
 tracking, rollback, observation, cleanup, and data safety still must be
 checked before any production apply.
@@ -561,11 +573,13 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Review the production preflight readiness document, then create a separate
-production apply readiness checklist package / exact command review without
-touching production traffic. The next separate task should review the exact
-production runtime path, deployment lock handling, port ownership, proxy switch
-design, migration compatibility, scheduler singleton behavior, static/media
-behavior, rollback, observation, cleanup, and data safety requirements.
-Production remains NO-GO until that review is complete and a separate
-production task approves the exact runtime path being used.
+Review the production preflight readiness document and the production apply
+readiness checklist package at
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+without touching production traffic. The next separate task should review the
+exact production runtime path, deployment lock handling, port ownership, proxy
+switch design, migration compatibility, scheduler singleton behavior,
+static/media behavior, rollback, observation, cleanup, and data safety
+requirements. Production remains NO-GO until that review is complete, command
+implementation is added in a later task, and a separate production task
+approves the exact runtime path being used.

@@ -23,8 +23,11 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
-$NextBlueGreenStep = "production apply readiness checklist / exact command review"
+$NextBlueGreenStep = "review production apply readiness package / exact command review"
 $ProductionPreflightPath = ".\docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md"
+$ProductionPreflightStatus = "READY after review"
+$ProductionReadinessPath = ".\docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md"
+$ProductionCommandImplementationStatus = "NOT READY"
 
 function Write-Step {
     param([string]$Message)
@@ -232,6 +235,10 @@ function Show-DraftArtifactSummary {
             Path = $ProductionPreflightPath
         },
         [pscustomobject]@{
+            Label = "Production apply readiness checklist / exact command review"
+            Path = $ProductionReadinessPath
+        },
+        [pscustomobject]@{
             Label = "Local apply simulation read-only preview"
             Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
         },
@@ -272,6 +279,7 @@ function Show-DeploymentLockStatus {
     $nonProductionApprovalPath = ".\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md"
     $proxyValidationApprovalPath = ".\docs\BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md"
     $productionPreflightPath = $ProductionPreflightPath
+    $productionReadinessPath = $ProductionReadinessPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
     $proxyConfigPath = ".\nginx\bluegreen.local-test.example.conf"
@@ -335,6 +343,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Production preflight document is missing: $productionPreflightPath"
     }
 
+    if (Test-Path -LiteralPath $productionReadinessPath) {
+        Write-Ok "Production apply readiness package exists: $productionReadinessPath"
+    } else {
+        Write-Warn "Production apply readiness package is missing: $productionReadinessPath"
+    }
+
     if (Test-Path -LiteralPath $proxyUnifiedComposePath) {
         Write-Ok "Unified local proxy routing compose example exists: $proxyUnifiedComposePath"
         $proxyUnifiedText = Get-Content -LiteralPath $proxyUnifiedComposePath -Raw
@@ -362,7 +376,10 @@ function Show-DeploymentLockStatus {
     Write-Host "Non-production inactive runtime validation: $NonProductionInactiveRuntimeValidationStatus."
     Write-Host "Local/test proxy routing validation: $ProxyValidationStatus."
     Write-Host "Non-production validation chain: PASSED for inactive runtime plus local/test proxy routing."
+    Write-Host "Production preflight: $ProductionPreflightStatus."
     Write-Host "Production preflight document exists: $(Test-Path -LiteralPath $ProductionPreflightPath)."
+    Write-Host "Production apply readiness package exists: $(Test-Path -LiteralPath $ProductionReadinessPath)."
+    Write-Host "Production command implementation: $ProductionCommandImplementationStatus."
     Write-Host "Proxy validation hold-open mode: $ProxyValidationHoldOpenStatus in scripts/blue_green_local_inactive_startup.ps1."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Next step: $NextBlueGreenStep."
@@ -506,7 +523,10 @@ function Show-FuturePlan {
     Write-Host "Non-production inactive runtime validation: $NonProductionInactiveRuntimeValidationStatus."
     Write-Host "Local/test proxy routing validation: $ProxyValidationStatus."
     Write-Host "Non-production validation chain: PASSED for inactive runtime plus local/test proxy routing."
+    Write-Host "Production preflight: $ProductionPreflightStatus."
     Write-Host "Production preflight document exists: $(Test-Path -LiteralPath $ProductionPreflightPath)."
+    Write-Host "Production apply readiness package exists: $(Test-Path -LiteralPath $ProductionReadinessPath)."
+    Write-Host "Production command implementation: $ProductionCommandImplementationStatus."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Next step: $NextBlueGreenStep."
     Write-Host "Future non-production validation requires explicit approval phrase: $NonProductionValidationApprovalPhrase"
@@ -524,6 +544,7 @@ function Show-FuturePlan {
     Write-Host "Production apply skeleton status: no-action by default; real apply remains NO-GO."
     Write-Host "Non-production validation plan path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
     Write-Host "Production preflight document path: $ProductionPreflightPath."
+    Write-Host "Production apply readiness package path: $ProductionReadinessPath."
     Write-Host "Production apply remains blocked until production preflight review is complete, exact command review is approved, and manual approval is given."
     Write-Host "Production remains NO-GO."
     Write-Host ""
@@ -548,12 +569,15 @@ Write-Ok "Production apply skeleton status: exists if reported above; no-action 
 Write-Ok "Non-production inactive runtime validation: PASSED."
 Write-Ok "Local/test proxy routing validation: PASSED."
 Write-Ok "Non-production validation chain: PASSED for inactive runtime plus local/test proxy routing."
+Write-Ok "Production preflight: $ProductionPreflightStatus."
 Write-Ok "Production preflight document exists: $(Test-Path -LiteralPath $ProductionPreflightPath)."
+Write-Ok "Production apply readiness package exists: $(Test-Path -LiteralPath $ProductionReadinessPath)."
+Write-Ok "Production command implementation: $ProductionCommandImplementationStatus."
 Write-Ok "Proxy validation network fix: unified compose example was used for the passed local/test validation."
 Write-Ok "Proxy validation hold-open mode: completed for the passed local/test validation."
 Write-Ok "Local proxy routing validation approval package status: exists if reported above; passed result recorded and future reruns require explicit approval phrase and deployment lock."
 Write-Ok "Production apply: NO-GO."
-Write-Ok "Next step: production apply readiness checklist / exact command review."
+Write-Ok "Next step: $NextBlueGreenStep."
 Write-Ok "Non-production validation approval package status: exists if reported above; future runtime validation requires explicit approval phrase and deployment lock."
 Write-Ok "Production blue-green real apply remains NO-GO until a separate future phase implements exact runtime commands behind deployment lock gates."
 Write-Ok "Inactive startup runner status: dry-run / no-action by default; future execution requires Ack plus -AllowContainerAction; test port 8000 and service web are blocked; production remains NO-GO."

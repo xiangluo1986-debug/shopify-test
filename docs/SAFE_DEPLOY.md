@@ -23,10 +23,16 @@ in
 The local inactive runtime validation passed on 2026-05-18, and local/test
 proxy routing validation passed on 2026-05-19. Production apply remains
 blocked until the production preflight document is reviewed, a production
-apply readiness checklist package / exact command review is complete, and a
-separate manual production approval is given. The production preflight
+apply readiness checklist package / exact command review is reviewed, command
+implementation is added in a later task, and a separate manual production
+approval is given. The production preflight
 readiness review is documented at
 [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
+The production apply readiness checklist and exact command review package is
+documented at
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+It is READY after review; production command implementation remains NOT READY
+and production apply remains NO-GO.
 
 The current safe deploy flow now enforces a deployment single-flight lock in
 real non-dry-run mode. The standalone helper exists at
@@ -77,6 +83,10 @@ service can become healthy.
   preflight document is reviewed, and migration compatibility, scheduler
   singleton behavior, media/static/uploads, proxy ownership, rollback,
   observation, cleanup, and data safety are checked.
+- Production apply readiness package:
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+  is READY after review; exact command review is still required before any
+  later implementation task.
 
 Runtime-changing deploy paths include container start, container stop,
 container restart, image build, migration, collectstatic, proxy switch, traffic
@@ -156,9 +166,9 @@ traffic, or modify files. Execution requests remain blocked unless the exact
 approval phrase, valid target/active colors, and `.deploy/` lock path gate are
 present; even then real production apply remains blocked because it is not
 implemented in this phase. It also reports that local/test proxy validation is
-passed, the production preflight document exists, and production apply
-readiness checklist / exact command review is still required before any future
-production apply.
+passed, the production preflight document exists, the production apply
+readiness package exists, exact command review is required, the draft approval
+phrase is not active yet, and production apply remains NO-GO.
 
 Deployment lock helper status:
 

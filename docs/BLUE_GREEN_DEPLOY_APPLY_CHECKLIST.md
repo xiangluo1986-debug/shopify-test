@@ -23,6 +23,7 @@ Related non-active drafts:
 - [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
+- [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -60,8 +61,9 @@ Related non-active drafts:
   It records the completed/passed manual inactive runtime validation, does not
   approve production apply, and requires separate approval for additional
   validation.
-- Next required blue-green step: production apply readiness checklist package /
-  exact command review.
+- Next required blue-green step: review
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+  for exact command readiness.
 - Local/test proxy routing validation result: PASSED on 2026-05-19 and
   recorded at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -111,6 +113,11 @@ Related non-active drafts:
   behavior, media/static/uploads, proxy and port ownership, active/target color
   tracking, health checks, rollback, observation, cleanup, and data loss
   prevention.
+- Production apply readiness package: READY after review at
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+  It records future command groups, production safety gates, required manual
+  decisions, and the draft approval phrase. Production command implementation
+  remains NOT READY.
 - Production apply: NO-GO until the production preflight document is reviewed
   and a separate production task approves exact runtime commands, route, port
   ownership, proxy, scheduler, migration, static/media, rollback, observation,
@@ -187,6 +194,10 @@ review. Normal non-deploy tasks are not blocked.
 - The production preflight document in
   [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md) has
   been reviewed.
+- The production apply readiness package in
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+  has been reviewed. It does not implement a production command and does not
+  approve production apply.
 - Successful non-production inactive runtime validation has been reviewed, and
   local/test proxy routing validation has passed, before any future production
   apply request.

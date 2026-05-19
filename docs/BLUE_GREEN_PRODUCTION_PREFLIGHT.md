@@ -8,6 +8,12 @@ This document does not approve production apply. Production remains NO-GO until
 all preflight items are reviewed and a separate production approval task is
 created for the exact runtime path and command set.
 
+The production apply readiness checklist and exact command review package is
+documented separately at
+[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+It is READY after review, but production command implementation remains NOT
+READY and production apply remains NO-GO.
+
 ## Current Passed Validations
 
 - Local inactive runtime validation: PASSED.
@@ -15,6 +21,9 @@ created for the exact runtime path and command set.
 - Deployment lock helper: available.
 - safe_deploy real mode: lock enforced.
 - Production apply skeleton: no-action only.
+- Production apply readiness package:
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+  exists for exact command review.
 
 ## Required Production Decisions / Checks
 
@@ -137,9 +146,13 @@ created for the exact runtime path and command set.
 ## Go / No-Go
 
 - Production preflight document: READY after review.
+- Production apply readiness package: READY after review at
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+- Production command implementation: NOT READY.
 - Production apply: NO-GO.
-- Next step: production apply readiness checklist package / exact command
-  review.
+- Next step: review
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+  for exact command readiness.
 
 This preflight document is a readiness review only. It does not deploy, start
 or stop containers, build images, run migrations, run collectstatic, switch

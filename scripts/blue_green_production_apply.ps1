@@ -18,6 +18,8 @@ $ProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $DeployDirectory = [System.IO.Path]::GetFullPath((Join-Path -Path $ProjectRoot -ChildPath ".deploy"))
 $DeployLockHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "deploy_lock.ps1"
 $ProductionPreflightPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md"
+$ProductionReadinessPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md"
+$DraftReadinessApprovalPhrase = "I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW"
 
 function Write-Step {
     param([string]$Message)
@@ -122,6 +124,7 @@ function Show-PlanHeader {
     Write-Host "ExecuteProductionApply requested: $([bool]$ExecuteProductionApply)"
     Write-Host "RequireLockValidation: $([bool]$RequireLockValidation)"
     Write-Host "Required approval phrase: $RequiredApprovalPhrase"
+    Write-Host "Draft readiness approval phrase: $DraftReadinessApprovalPhrase (not active; not accepted by current scripts)"
     Write-Host "TargetColor: $(if ([string]::IsNullOrWhiteSpace($TargetColor)) { '<not provided>' } else { $TargetColor })"
     Write-Host "ActiveColor: $(if ([string]::IsNullOrWhiteSpace($ActiveColor)) { '<not provided>' } else { $ActiveColor })"
     Write-Host "Deployment lock path: $(Get-RelativeProjectPath -Path $ResolvedLockPath)"
@@ -154,7 +157,13 @@ function Show-ProductionPreflightGate {
     Write-Step "Required production preflight gate"
     Write-Host "Production preflight document exists: $(Test-Path -LiteralPath $ProductionPreflightPath -PathType Leaf)"
     Write-Host "Required preflight document: docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md."
+    Write-Host "Production apply readiness document exists: $(Test-Path -LiteralPath $ProductionReadinessPath -PathType Leaf)"
+    Write-Host "Required readiness document: docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md."
     Write-Host "Production preflight document status: READY after review."
+    Write-Host "Production apply readiness package status: READY after review."
+    Write-Host "Exact production command review is required."
+    Write-Host "Production apply command implementation: NOT READY / not yet implemented."
+    Write-Host "Draft readiness approval phrase is not active yet: $DraftReadinessApprovalPhrase."
     Write-Host "Production apply still remains NO-GO."
     Write-Host "Exact production apply command is not implemented in this skeleton."
     Write-Host "Migration, scheduler singleton, media/static/uploads, proxy/port ownership, active/target color, health check, rollback, observation, cleanup, and data safety checks must pass first."
@@ -239,7 +248,9 @@ if (-not $ExecuteProductionApply) {
     Write-Step "Result"
     Write-Ok "Plan-only production apply skeleton completed. No runtime action was performed."
     Write-Ok "Successful non-production validation and manual approval are required before production apply."
-    Write-Ok "Production preflight document exists if reported above; production apply readiness checklist / exact command review is still required."
+    Write-Ok "Production readiness document exists if reported above; exact command review is required."
+    Write-Ok "Production apply command is still not implemented."
+    Write-Ok "Draft readiness approval phrase is not active yet and is not accepted by current scripts."
     Write-Ok "Production real apply remains NO-GO."
     exit 0
 }
@@ -270,6 +281,7 @@ Write-Fail "No docker compose up/down/restart/build was run."
 Write-Fail "No proxy switch, migration, collectstatic, traffic switch, or cleanup was run."
 Write-Fail "No deployment lock was acquired because this skeleton has no real production apply implementation."
 Write-Fail "Exact production apply command is not implemented; migration, scheduler, media/static, proxy, rollback, observation, cleanup, and data safety checks must pass first."
+Write-Fail "Draft readiness approval phrase is not active yet; production apply remains NO-GO."
 
 Write-Step "Result"
 Write-Fail "Production blue-green apply remains blocked by the skeleton."
