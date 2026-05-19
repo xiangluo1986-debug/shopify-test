@@ -19,6 +19,8 @@ Production remains NO-GO.
 
 - Local inactive runtime validation: PASSED.
 - Local/test proxy routing validation: PASSED.
+- `18000` production-candidate proxy validation: PASSED.
+- Final runtime rehearsal: PASSED.
 - Deployment lock: implemented.
 - safe_deploy lock enforcement: active.
 - Runtime helper: plan-only.
@@ -94,5 +96,11 @@ runtime command enablement.
 ## Go / No-Go
 
 - Final approval design: READY after review.
+- Cloudflare cutover approval package: READY after review.
+- Final runtime rehearsal: PASSED.
+- `18000` candidate route: PASSED.
+- Cloudflare cutover: NOT APPROVED.
 - Runtime command execution: NOT ENABLED.
 - Production apply: NO-GO.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.

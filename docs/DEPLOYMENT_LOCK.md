@@ -442,8 +442,9 @@ runtime-changing actions should use the shared deployment lock.
   `docs/BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md`; READY after review for
   manual cutover planning only. `18000` candidate validation has PASSED,
   proposed cutover target is `http://127.0.0.1:18000`, rollback target is
-  `http://127.0.0.1:8000`, Cloudflare cutover is NOT APPROVED, and production
-  apply remains NO-GO.
+  `http://127.0.0.1:8000`, the `18000` candidate route has PASSED, final
+  runtime rehearsal has PASSED, Cloudflare cutover is NOT APPROVED, and
+  production apply remains NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, the production preflight document is reviewed, migration
@@ -468,7 +469,8 @@ runtime-changing actions should use the shared deployment lock.
 - Production blue-green apply remains NO-GO until a separate future apply task
   approves exact runtime commands, confirms every runtime-changing path uses
   the deployment lock, reviews successful local/test proxy validation, reviews
-  the passed local production-candidate proxy validation, reviews
+  the passed local production-candidate proxy validation, reviews the passed
+  final runtime rehearsal, reviews
   [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md), and
   reviews
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
@@ -539,5 +541,8 @@ runtime-changing actions should use the shared deployment lock.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
+- Final runtime rehearsal: PASSED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).

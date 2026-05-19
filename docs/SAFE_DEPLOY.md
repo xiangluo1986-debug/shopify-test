@@ -161,8 +161,9 @@ service can become healthy.
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md)
   is READY after review. `18000` candidate validation has PASSED, proposed
   cutover target is `http://127.0.0.1:18000`, rollback target is
-  `http://127.0.0.1:8000`, Cloudflare cutover is NOT APPROVED, and production
-  apply remains NO-GO.
+  `http://127.0.0.1:8000`, the `18000` candidate route has PASSED, final
+  runtime rehearsal has PASSED, Cloudflare cutover is NOT APPROVED, and
+  production apply remains NO-GO.
 - Production switch/rollback review document:
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
   is READY after review for design only. It documents the future proxy switch
@@ -313,10 +314,12 @@ The no-action Option B route plan is documented at
 [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
 The conservative recommendation is Option B, but it is not approved. The local
 production-candidate proxy path on `18000` has PASSED validation, but
-Cloudflare route change remains NOT APPROVED. The Cloudflare cutover approval
-package is documented at
+Cloudflare route change remains NOT APPROVED. The final runtime rehearsal has
+PASSED, and the `18000` candidate route has PASSED. The Cloudflare cutover
+approval package is documented at
 [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
-The next step is manual review and separate approval, not a deploy.
+The next step is final manual Cloudflare cutover checklist / operator
+approval, not a deploy.
 
 Optional flags:
 
@@ -588,5 +591,8 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
+- Final runtime rehearsal: PASSED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).

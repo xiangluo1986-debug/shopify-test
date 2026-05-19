@@ -259,14 +259,16 @@ configuration untouched.
 - Cloudflare cutover approval package: READY after review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Bluegreen proxy candidate `18000` validation: PASSED.
+- `18000` candidate route: PASSED.
 - Option B proxy candidate local path: PASSED.
+- Final runtime rehearsal: PASSED.
 - Chosen option: NOT YET.
 - Cloudflare cutover: NOT APPROVED.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
 - Production apply: NO-GO.
-- Next future step: review the Cloudflare cutover approval package and fill
-  the option comparison manual decision fields.
+- Next future step: final manual Cloudflare cutover checklist / operator
+  approval.
 
 ## Deployment Lock Gate
 
@@ -799,6 +801,9 @@ approves the exact runtime path being used.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
+- Final runtime rehearsal: PASSED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - The candidate files do not start/stop/restart/build containers, run
   migrations, run collectstatic, reload proxy, switch traffic, write
   active-color state, or change production nginx/proxy config.

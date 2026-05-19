@@ -111,10 +111,14 @@ NOT RUN IN THIS TASK.
 - Chosen port: NOT FINAL.
 - Proposed placeholder port: `18000`.
 - `18000` candidate validation: PASSED.
+- `18000` candidate route: PASSED.
+- Final runtime rehearsal: PASSED.
 - Cloudflare cutover: NOT APPROVED.
 - Cloudflare change: NOT APPROVED.
 - Production apply: NO-GO.
 - Runtime execution: NOT ENABLED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 
 ## Production-Candidate Proxy Design Update (2026-05-19)
 
@@ -180,6 +184,9 @@ NOT RUN IN THIS TASK.
 - Cloudflare cutover approval package exists at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Cloudflare cutover: NOT APPROVED.
+- Final runtime rehearsal: PASSED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - Production script requirement: wait for `web_blue` and `web_green` health
   before proxy validation or cutover because the first request may return HTTP
   502 while backends start.

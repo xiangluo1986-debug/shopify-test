@@ -173,6 +173,8 @@ scheduler.
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 - Proposed Option B proxy port: `18000`, NOT FINAL.
 - `18000` candidate validation: PASSED.
+- `18000` candidate route: PASSED.
+- Final runtime rehearsal: PASSED.
 - Conservative recommendation: Option B, not approved.
 - Chosen option: NOT YET.
 - Cloudflare cutover: NOT APPROVED.
@@ -184,9 +186,8 @@ scheduler.
 - Production apply implementation: still NOT READY.
 - Production apply: NO-GO.
 
-Next required step: review the Cloudflare cutover approval package, fill the
-option comparison manual decision fields, and request separate final production
-approval before any runtime-changing action.
+Next required step: final manual Cloudflare cutover checklist / operator
+approval.
 
 ## Runtime Command Helper Status
 
@@ -241,5 +242,8 @@ approval before any runtime-changing action.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
+- Final runtime rehearsal: PASSED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).

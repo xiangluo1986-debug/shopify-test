@@ -111,8 +111,11 @@ Related non-active drafts:
   READY after review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
   The proposed cutover target is `http://127.0.0.1:18000`, rollback target is
-  `http://127.0.0.1:8000`, `18000` candidate validation has PASSED,
+  `http://127.0.0.1:8000`, `18000` candidate validation has PASSED, the
+  `18000` candidate route has PASSED, final runtime rehearsal has PASSED,
   Cloudflare cutover is NOT APPROVED, and production apply remains NO-GO.
+  Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
   It documents the exact future proxy switch flow, active-color state design,
@@ -734,5 +737,8 @@ they are separate examples and are not referenced by `docker-compose.yml`.
 - Cloudflare route change: NOT APPROVED.
 - Host port `8000` takeover: NOT APPROVED.
 - Production apply remains NO-GO.
+- Final runtime rehearsal: PASSED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).

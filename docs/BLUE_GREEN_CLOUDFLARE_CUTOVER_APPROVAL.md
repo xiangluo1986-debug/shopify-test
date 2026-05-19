@@ -103,9 +103,35 @@ Rollback:
   designed and approved.
 - Do not cut over unless the `18000` candidate is already healthy.
 
+## Final Runtime Rehearsal Result (2026-05-19)
+
+- Final runtime rehearsal status: PASSED.
+- Candidate compose: `docker-compose.bluegreen.proxy-candidate.example.yml`.
+- Candidate proxy: `bluegreen_proxy_candidate`.
+- Candidate port: `18000`.
+- Candidate web services: `web_blue` and `web_green`.
+- Deployment lock before rehearsal: `.deploy/deploy.lock` did not exist.
+- `8000 /healthz/`: HTTP 200 OK before, during, and after the rehearsal.
+- `18000` before rehearsal: not serving.
+- `18000 /healthz/`: HTTP 200 OK after backend startup.
+- Candidate status showed `bluegreen_proxy_candidate` running on `18000`,
+  with `web_blue` healthy and `web_green` healthy.
+- Cleanup stopped only `bluegreen_proxy_candidate`, `web_blue`, and
+  `web_green`.
+- `18000` after cleanup: not serving.
+- Candidate compose after cleanup showed no running services.
+- Cloudflare route change: no.
+- Production traffic switch: no.
+- Migration, collectstatic, proxy reload, and active-color write: no.
+- Production apply: still NO-GO.
+
 ## Go / No-Go
 
 - Cutover approval package: READY after review.
+- Final runtime rehearsal: PASSED.
+- `18000` candidate route: PASSED.
 - Cloudflare cutover: NOT APPROVED.
 - Production apply: NO-GO.
 - Runtime execution: NOT ENABLED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.

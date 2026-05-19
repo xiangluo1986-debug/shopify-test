@@ -196,14 +196,17 @@ and production apply remains NO-GO.
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+- Cloudflare cutover approval package: READY after review at
+  [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
+- Final runtime rehearsal: PASSED.
+- `18000` candidate route: PASSED.
 - Production command path skeleton: implemented but blocked.
 - Production implementation: NOT READY.
 - Exact production runtime command implementation: still not enabled.
+- Cloudflare cutover: NOT APPROVED.
 - Cloudflare route change: NOT APPROVED.
 - Production apply: NO-GO.
-- Next step: prepare the Cloudflare route change readiness / manual cutover
-  approval package, then separately review and approve exact runtime commands
-  before any production apply.
+- Next step: final manual Cloudflare cutover checklist / operator approval.
 
 This preflight document is a readiness review only. It does not deploy, start
 or stop containers, build images, run migrations, run collectstatic, switch
@@ -239,8 +242,9 @@ or affect ticket, review request, translation, or settlement workflows.
   cleanup.
 - Cloudflare route change: NOT APPROVED.
 - Production apply: NO-GO.
-- Next required step: Cloudflare route change readiness / manual cutover
-  approval package.
+- Final runtime rehearsal: PASSED.
+- Next required step: final manual Cloudflare cutover checklist / operator
+  approval.
 - Production script requirement: wait for `web_blue` and `web_green` health
   before proxy validation or cutover because the first request may return HTTP
   502 while backends start.
