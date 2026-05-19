@@ -1229,6 +1229,46 @@ Future tracking design note:
   email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
   `translationsRegister` calls.
 
+## Phase 5.31 Customer Lifetime Trustpilot Note Evidence Guard
+
+- [x] Customer lifetime order counts use all local ShopifyOrder history for
+  high/medium confidence identities: exact customer email when available,
+  Shopify customer ID if present in future local data, exact normalized name
+  plus shipping phone, or exact normalized name plus shipping address/postcode.
+- [x] Name-only matches remain low confidence and cannot approve sending.
+- [x] Historical local note fields are scanned for Trustpilot evidence
+  (`trustpilot`, `trustpoilt`, `truspilot`, `trustpoit`, `trust pilot`,
+  `trust poilt`, and `1:` variants) with spacing/punctuation variants matched.
+- [x] Matching historical note evidence blocks Needs review and shows only the
+  safe keyword and historical order number, with reason `Previous Trustpilot
+  note found on historical order #xxxxx.`
+- [x] Added `shopify_review_request_customer_lifetime_trustpilot_note_audit` to
+  report the `#21687` diagnosis, matched order names, match method/confidence,
+  historical evidence order, safe keyword, final blockers, note-blocked count,
+  and active Review & Send before/after counts.
+- [x] Phase 5.31 is scan/UI/report only. It performs no Shopify writes, tag
+  mutations, Gmail API calls, email sends, Trustpilot/Kudosi/Ali Reviews API
+  calls, or `translationsRegister` calls.
+
+## Phase 5.31B #21687 Identity Drilldown Audit
+
+- [x] Added `shopify_review_request_customer_identity_drilldown_audit` to
+  diagnose why local customer history for `#21687` can be smaller than the
+  Shopify UI order count.
+- [x] The audit reports local order field presence, exact identity strategy
+  counts, potential local matched order names, why the current logic counted
+  only confirmed local orders, and possible missed historical orders.
+- [x] The audit scans only safe local note fields for `trustpilot`,
+  `trustpoilt`, `truspilot`, `trustpoit`, `trust pilot`, and `trust poilt`
+  evidence and outputs only order name, field name, and matched keyword.
+- [x] Manual evidence mode reports `local_data_missing_customer_history=true`
+  when local confirmed history is below the user-reported Shopify UI count and
+  recommends wider customer/order sync or customer ID persistence.
+- [x] Phase 5.31B is local audit/report only. It outputs no raw email, phone,
+  address, or full note text and performs no Shopify writes, tag mutations,
+  Gmail API calls, email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
+  `translationsRegister` calls.
+
 ## Phase 5.28J Review Send Failure Audit And Queue Pagination
 
 - [x] Added `shopify_review_request_review_send_failure_audit` to diagnose the

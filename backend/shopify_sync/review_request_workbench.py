@@ -171,6 +171,7 @@ REVIEW_REQUEST_FOCUS_ORDER_NAMES = (
     "#21076",
     "#21102",
     "#21225",
+    "#21687",
     "#21778",
     "#22530",
     "#22562",
@@ -230,6 +231,34 @@ NOTE_RISK_KEYWORDS = (
     "问题单",
 )
 NOTE_RISK_REASON = "Aftersales/ticket note found"
+TRUSTPILOT_NOTE_FIELDS = (
+    "shopify_note",
+    "shopify_note_attributes",
+    "warehouse_note",
+    "transfer_note",
+    "exception_review_reason",
+    "exception_review_response",
+    "cost_calculation_note",
+)
+TRUSTPILOT_NOTE_KEYWORDS = (
+    "1: trustpilot",
+    "1: trustpoilt",
+    "trustpilot",
+    "trustpoilt",
+    "truspilot",
+    "trustpoit",
+    "trust pilot",
+    "trust poilt",
+)
+CUSTOMER_IDENTITY_DRILLDOWN_NOTE_FIELDS = (
+    "shopify_note",
+    "shopify_note_attributes",
+    "warehouse_note",
+    "transfer_note",
+    "exception_review_reason",
+)
+CUSTOMER_IDENTITY_DRILLDOWN_TARGET_ORDER_NAME = "#21687"
+CUSTOMER_IDENTITY_DRILLDOWN_USER_REPORTED_ORDER_COUNT = 7
 MERGED_ORDER_KEYWORDS = (
     "combined",
     "merged",
@@ -366,6 +395,18 @@ REPORT_DEFINITIONS = (
         "customer_history_precision_audit",
         "Customer history precision audit",
         "shopify_review_request_customer_history_precision_audit.json",
+        ("report_status", "status"),
+    ),
+    (
+        "customer_lifetime_trustpilot_note_audit",
+        "Customer lifetime Trustpilot note audit",
+        "shopify_review_request_customer_lifetime_trustpilot_note_audit.json",
+        ("report_status", "status"),
+    ),
+    (
+        "customer_identity_drilldown_audit",
+        "Customer identity drilldown audit",
+        "shopify_review_request_customer_identity_drilldown_audit.json",
         ("report_status", "status"),
     ),
     (
@@ -5317,6 +5358,11 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "order_21102_diagnosis": scan["order_21102_diagnosis"],
         "order_21225_diagnosis": scan["order_21225_diagnosis"],
         "order_21225_trustpilot_tag_detection": scan["order_21225_trustpilot_tag_detection"],
+        "order_21687_diagnosis": scan["order_21687_diagnosis"],
+        "#21687_customer_history_order_count": scan.get("#21687_customer_history_order_count", 0),
+        "#21687_customer_history_order_names": scan.get("#21687_customer_history_order_names", []),
+        "#21687_customer_history_match_method": scan.get("#21687_customer_history_match_method", ""),
+        "#21687_customer_history_confidence": scan.get("#21687_customer_history_confidence", ""),
         "order_21778_diagnosis": scan["order_21778_diagnosis"],
         "order_21778_trustpilot_tag_detection": scan["order_21778_trustpilot_tag_detection"],
         "order_22530_diagnosis": scan["order_22530_diagnosis"],
@@ -5353,6 +5399,15 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "overcounted_customer_history_count": scan["overcounted_customer_history_count"],
         "candidates_blocked_by_low_confidence_history": scan["candidates_blocked_by_low_confidence_history"],
         "candidates_blocked_by_note_risk": scan["candidates_blocked_by_note_risk"],
+        "candidates_blocked_by_historical_trustpilot_note_count": scan[
+            "candidates_blocked_by_historical_trustpilot_note_count"
+        ],
+        "active_review_send_count_before_historical_trustpilot_note_guard": scan[
+            "active_review_send_count_before_historical_trustpilot_note_guard"
+        ],
+        "active_review_send_count_after_historical_trustpilot_note_guard": scan[
+            "active_review_send_count_after_historical_trustpilot_note_guard"
+        ],
         "active_review_send_count_before_precision": scan["active_review_send_count_before_precision"],
         "blocked_missing_review_request_tag_count": scan["blocked_missing_review_request_tag_count"],
         "blocked_not_delivered_count": scan["blocked_not_delivered_count"],
@@ -5387,6 +5442,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "kudosi_api_call_performed": False,
         "ali_reviews_api_call_performed": False,
         "raw_customer_email_output": False,
+        "full_note_output": False,
         "secrets_output": False,
         "all_new_actions_no_write_confirmed": True,
         "detected_issue_summary": _last_60_days_issue_summary(scan),
@@ -5966,6 +6022,286 @@ def build_review_request_customer_history_precision_audit_report(params=None):
             f"note-risk blocked: {len(note_risk_rows)}; low-confidence history blocked: {len(low_confidence_rows)}; "
             f"active Review & Send before/after: {active_before}/{active_after}. "
             "No Gmail, Shopify, Trustpilot, Kudosi, Ali Reviews, or external API calls were performed."
+        ),
+    }
+
+
+def build_review_request_customer_lifetime_trustpilot_note_audit_report(params=None):
+    state = _build_review_send_state(params)
+    scan = state["last_60_days_scan"]
+    approval_queue = state["approval_queue"]
+    blocked_rows = list(scan.get("blocked_queue_rows") or [])
+    eligible_rows = list(scan.get("eligible_queue_rows") or [])
+    review_rows = list(scan.get("review_queue_rows") or [])
+    already_sent_rows = list(scan.get("already_sent_queue_rows") or [])
+    order_21687 = scan.get("order_21687_diagnosis") or {}
+    order_21687_row, order_21687_section = _find_scan_order_row(
+        {
+            "eligible_queue_rows": eligible_rows,
+            "review_queue_rows": review_rows,
+            "blocked_queue_rows": blocked_rows,
+            "already_sent_queue_rows": already_sent_rows,
+        },
+        "#21687",
+    )
+    note_blocked_rows = [
+        row
+        for row in blocked_rows
+        if row.get("customer_level_trustpilot_note_evidence_found") is True
+        or row.get("trustpilot_note_evidence_found") is True
+    ]
+    active_after = (
+        _int_or_zero(scan.get("active_review_send_count_after_historical_trustpilot_note_guard"))
+        or _int_or_zero(scan.get("eligible_candidate_count"))
+        or _int_or_zero(approval_queue.get("review_send_action_enabled_count"))
+        or _int_or_zero(scan.get("review_queue_visible_count"))
+    )
+    active_before = (
+        _int_or_zero(scan.get("active_review_send_count_before_historical_trustpilot_note_guard"))
+        or active_after + len(note_blocked_rows)
+    )
+    evidence_found = order_21687.get("customer_level_trustpilot_note_evidence_found") is True
+    evidence_order = _safe_text(
+        order_21687.get("customer_level_trustpilot_note_evidence_order_name"),
+        max_length=80,
+    )
+    safe_keyword = _safe_text(order_21687.get("customer_level_trustpilot_note_safe_keyword"), max_length=80)
+    final_blockers = _dedupe_text(order_21687.get("final_blockers") or [])
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_customer_lifetime_trustpilot_note_audit",
+        "task_name": "shopify_review_request_customer_lifetime_trustpilot_note_audit",
+        "phase": "5.31",
+        "mode": "dry-run-local-customer-lifetime-trustpilot-note-audit",
+        "report_status": "customer_lifetime_trustpilot_note_audit_ready",
+        "success": True,
+        "customer_history_matching_policy": {
+            "high_confidence": ["customer_email", "shopify_customer_id_if_available"],
+            "medium_confidence": ["normalized_full_name_shipping_phone", "normalized_full_name_shipping_address_postcode"],
+            "low_confidence": ["name_only_excluded_from_send_approval"],
+            "window": "lifetime_local_orders",
+        },
+        "trustpilot_note_keyword_policy": {
+            "keywords": list(TRUSTPILOT_NOTE_KEYWORDS),
+            "spacing_and_punctuation_variants_matched": True,
+            "full_note_text_output": False,
+        },
+        "order_21687_diagnosis": order_21687,
+        "order_21687_found": order_21687.get("found_in_local_shopify_order") is True,
+        "order_21687_candidate_scan_section": order_21687_section,
+        "order_21687_customer_lifetime_order_count": _int_or_zero(
+            order_21687.get("customer_history_order_count")
+        ),
+        "order_21687_matched_order_names": _dedupe_order_names(
+            order_21687.get("customer_history_matched_order_names")
+            or order_21687.get("customer_history_order_names")
+            or []
+        ),
+        "order_21687_match_method": _safe_text(
+            order_21687.get("customer_history_match_method"), max_length=80
+        ),
+        "order_21687_customer_history_confidence": _safe_text(
+            order_21687.get("customer_history_confidence"), max_length=80
+        ),
+        "order_21687_trustpilot_note_evidence_found": evidence_found,
+        "order_21687_evidence_order_name": evidence_order,
+        "order_21687_safe_detected_keyword": safe_keyword,
+        "order_21687_final_eligibility": _safe_text(
+            order_21687.get("final_eligibility_status"), max_length=80
+        ),
+        "order_21687_final_blockers": final_blockers,
+        "#21687_found": order_21687.get("found_in_local_shopify_order") is True,
+        "#21687_customer_history_order_count": _int_or_zero(
+            order_21687.get("customer_history_order_count")
+        ),
+        "#21687_matched_order_names": _dedupe_order_names(
+            order_21687.get("customer_history_matched_order_names")
+            or order_21687.get("customer_history_order_names")
+            or []
+        ),
+        "#21687_match_method": _safe_text(order_21687.get("customer_history_match_method"), max_length=80),
+        "#21687_customer_history_confidence": _safe_text(
+            order_21687.get("customer_history_confidence"), max_length=80
+        ),
+        "#21687_trustpilot_note_evidence_found": evidence_found,
+        "#21687_evidence_order_name": evidence_order,
+        "#21687_safe_detected_keyword": safe_keyword,
+        "#21687_final_eligibility": _safe_text(order_21687.get("final_eligibility_status"), max_length=80),
+        "#21687_final_blockers": final_blockers,
+        "candidates_blocked_by_historical_trustpilot_note_count": len(note_blocked_rows),
+        "candidates_blocked_by_historical_trustpilot_note": [
+            {
+                "order": _safe_text(row.get("order"), max_length=80),
+                "evidence_order_name": _safe_text(
+                    row.get("customer_level_trustpilot_note_evidence_order_name"), max_length=80
+                ),
+                "safe_keyword": _safe_text(row.get("customer_level_trustpilot_note_safe_keyword"), max_length=80),
+                "reason": _trustpilot_note_evidence_reason(
+                    {
+                        "order_name": row.get("customer_level_trustpilot_note_evidence_order_name"),
+                    }
+                ),
+            }
+            for row in note_blocked_rows[:50]
+        ],
+        "active_review_send_count_before_historical_trustpilot_note_guard": active_before,
+        "active_review_send_count_after_historical_trustpilot_note_guard": active_after,
+        "active_review_send_count_before_fix": active_before,
+        "active_review_send_count_after_fix": active_after,
+        "review_queue_visible_count_after_fix": _int_or_zero(scan.get("review_queue_visible_count")),
+        "eligible_candidate_count_after_fix": _int_or_zero(scan.get("eligible_candidate_count")),
+        "order_21687_row_present_in_needs_review": bool(
+            order_21687_row and order_21687_section in {"eligible", "review_queue"}
+        ),
+        "order_21687_row_present_in_blocked_or_already_sent": bool(
+            order_21687_row and order_21687_section in {"blocked", "already_sent"}
+        ),
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "full_note_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+        "detected_issue_summary": (
+            "Customer lifetime Trustpilot note audit ready. "
+            f"#21687 found={order_21687.get('found_in_local_shopify_order') is True}; "
+            f"lifetime order count={_int_or_zero(order_21687.get('customer_history_order_count'))}; "
+            f"historical Trustpilot note evidence found={evidence_found}; "
+            f"active Review & Send before/after={active_before}/{active_after}. "
+            "No Gmail, Shopify, Trustpilot, Kudosi, Ali Reviews, or external API calls were performed."
+        ),
+    }
+
+
+def build_review_request_customer_identity_drilldown_audit_report(params=None):
+    params = params or {}
+    target_order_name = _canonical_order_name(
+        params.get("order_name") or CUSTOMER_IDENTITY_DRILLDOWN_TARGET_ORDER_NAME
+    )
+    state = _build_review_send_state(params)
+    scan = state["last_60_days_scan"]
+    drilldown = _customer_identity_drilldown_audit(target_order_name)
+    order_diagnosis = scan.get("order_21687_diagnosis") if target_order_name == "#21687" else {}
+    order_diagnosis = order_diagnosis or {}
+    strategy_counts = drilldown.get("identity_strategy_counts") or {}
+    historical_evidence_found = drilldown.get("historical_trustpilot_note_evidence_found") is True
+    local_confirmed_count = _int_or_zero(drilldown.get("local_confirmed_order_count"))
+    user_reported_count = _int_or_zero(drilldown.get("user_reported_shopify_ui_order_count"))
+    local_data_missing = user_reported_count > 0 and local_confirmed_count < user_reported_count
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "shopify_review_request_customer_identity_drilldown_audit",
+        "task_name": "shopify_review_request_customer_identity_drilldown_audit",
+        "phase": "5.31B",
+        "mode": "dry-run-local-customer-identity-drilldown-audit",
+        "report_status": (
+            "customer_identity_drilldown_audit_ready"
+            if drilldown.get("target_order_found") is True
+            else "customer_identity_drilldown_target_order_not_found"
+        ),
+        "success": True,
+        "target_order_name": target_order_name,
+        "user_reported_shopify_ui_order_count": user_reported_count,
+        "local_order_fields": drilldown.get("local_order_fields") or {},
+        "target_order_found": drilldown.get("target_order_found") is True,
+        "local_confirmed_order_count": local_confirmed_count,
+        "local_confirmed_order_names": drilldown.get("local_confirmed_order_names") or [],
+        "local_confirmed_match_method": drilldown.get("local_confirmed_match_method", ""),
+        "local_confirmed_confidence": drilldown.get("local_confirmed_confidence", ""),
+        "identity_strategy_counts": strategy_counts,
+        "identity_strategy_order_names": drilldown.get("identity_strategy_order_names") or {},
+        "identity_strategy_details": drilldown.get("identity_strategy_details") or [],
+        "exact_email_match_order_count": strategy_counts.get("customer_email_exact", 0),
+        "exact_customer_name_match_order_count": strategy_counts.get("customer_name_exact", 0),
+        "shipping_phone_match_order_count": strategy_counts.get("shipping_phone_exact", 0),
+        "shipping_name_postcode_match_order_count": strategy_counts.get("shipping_name_postcode_exact", 0),
+        "broader_safe_candidate_matched_order_names": drilldown.get(
+            "broader_safe_candidate_matched_order_names"
+        )
+        or [],
+        "possible_missed_historical_orders": drilldown.get("possible_missed_historical_orders") or [],
+        "why_only_counted_orders": drilldown.get("why_only_counted_orders", ""),
+        "note_evidence_checks": drilldown.get("note_evidence_checks") or [],
+        "note_evidence_matches": drilldown.get("note_evidence_matches") or [],
+        "trustpilot_note_evidence_found": historical_evidence_found,
+        "trustpoilt_note_evidence_found": historical_evidence_found,
+        "evidence_order_name": drilldown.get("evidence_order_name", ""),
+        "evidence_field_name": drilldown.get("evidence_field_name", ""),
+        "evidence_safe_keyword": drilldown.get("evidence_safe_keyword", ""),
+        "order_21687_candidate_scan_final_eligibility": _safe_text(
+            order_diagnosis.get("final_eligibility_status"), max_length=80
+        ),
+        "order_21687_candidate_scan_final_blockers": _dedupe_text(
+            order_diagnosis.get("final_blockers") or []
+        ),
+        "order_21687_candidate_scan_customer_history_order_count": _int_or_zero(
+            order_diagnosis.get("customer_history_order_count")
+        ),
+        "order_21687_candidate_scan_trustpilot_note_evidence_found": (
+            order_diagnosis.get("customer_level_trustpilot_note_evidence_found") is True
+        ),
+        "should_block_order_21687": historical_evidence_found,
+        "candidate_scan_blocker_update_needed": bool(
+            historical_evidence_found
+            and _safe_text(order_diagnosis.get("final_eligibility_status"), max_length=80) != "blocked"
+        ),
+        "local_data_missing_customer_history": local_data_missing,
+        "manual_evidence_mode": {
+            "shopify_ui_order_count_reported_by_user": user_reported_count,
+            "local_data_missing_customer_history": local_data_missing,
+            "recommended_action": drilldown.get("recommended_action", ""),
+        },
+        "#21687_local_confirmed_order_count": local_confirmed_count,
+        "#21687_identity_strategy_counts": strategy_counts,
+        "#21687_potential_matched_order_names": drilldown.get(
+            "broader_safe_candidate_matched_order_names"
+        )
+        or [],
+        "#21687_trustpoilt_note_evidence_found": historical_evidence_found,
+        "#21687_evidence_order_name": drilldown.get("evidence_order_name", ""),
+        "#21687_should_now_be_blocked": historical_evidence_found,
+        "#21687_local_data_appears_incomplete": local_data_missing,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_draft_created": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "raw_phone_output": False,
+        "raw_address_output": False,
+        "full_note_output": False,
+        "secrets_output": False,
+        "all_new_actions_no_write_confirmed": True,
+        "detected_issue_summary": (
+            f"#21687 identity drilldown ready. Local confirmed orders={local_confirmed_count}; "
+            f"potential local candidate orders={len(drilldown.get('broader_safe_candidate_matched_order_names') or [])}; "
+            f"historical Trustpilot note evidence found={historical_evidence_found}; "
+            f"local data missing versus Shopify UI count={local_data_missing}. "
+            "No Gmail, Shopify, Trustpilot, Kudosi, Ali Reviews, external API, email, tag write, "
+            "mutation, or translationsRegister call was performed."
         ),
     }
 
@@ -7641,11 +7977,15 @@ def _last_60_days_candidate_scan(
     order_21076_diagnosis = _focus_order_diagnosis("#21076", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21102_diagnosis = _focus_order_diagnosis("#21102", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21225_diagnosis = _focus_order_diagnosis("#21225", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
+    order_21687_diagnosis = _focus_order_diagnosis("#21687", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_21778_diagnosis = _focus_order_diagnosis("#21778", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_22530_diagnosis = _focus_order_diagnosis("#22530", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_22562_diagnosis = _focus_order_diagnosis("#22562", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     eligible_candidate_count_total = len(eligible_rows)
     review_queue_visible_count = len(review_queue_rows)
+    historical_note_blocked_count = sum(
+        1 for row in blocked_rows if row.get("customer_level_trustpilot_note_evidence_found") is True
+    )
     latest_sent = _latest_already_sent_record(already_sent_rows)
     latest_tag_write_time = _latest_tag_write_time(already_sent_rows)
     stale_counter_warning = bool(
@@ -7667,6 +8007,19 @@ def _last_60_days_candidate_scan(
         "order_21102_diagnosis": order_21102_diagnosis,
         "order_21225_diagnosis": order_21225_diagnosis,
         "order_21225_trustpilot_tag_detection": _order_trustpilot_tag_detection(order_21225_diagnosis),
+        "order_21687_diagnosis": order_21687_diagnosis,
+        "#21687_customer_history_order_count": _int_or_zero(
+            order_21687_diagnosis.get("customer_history_order_count")
+        ),
+        "#21687_customer_history_order_names": _dedupe_order_names(
+            order_21687_diagnosis.get("customer_history_matched_order_names") or []
+        ),
+        "#21687_customer_history_match_method": _safe_text(
+            order_21687_diagnosis.get("customer_history_match_method"), max_length=80
+        ),
+        "#21687_customer_history_confidence": _safe_text(
+            order_21687_diagnosis.get("customer_history_confidence"), max_length=80
+        ),
         "order_21778_diagnosis": order_21778_diagnosis,
         "order_21778_trustpilot_tag_detection": _order_trustpilot_tag_detection(order_21778_diagnosis),
         "order_22530_diagnosis": order_22530_diagnosis,
@@ -7725,6 +8078,11 @@ def _last_60_days_candidate_scan(
             1 for row in blocked_rows if _row_blocked_by_customer_history_unknown(row)
         ),
         "candidates_blocked_by_note_risk": sum(1 for row in blocked_rows if _row_blocked_by_note_risk(row)),
+        "candidates_blocked_by_historical_trustpilot_note_count": historical_note_blocked_count,
+        "active_review_send_count_before_historical_trustpilot_note_guard": (
+            eligible_candidate_count_total + historical_note_blocked_count
+        ),
+        "active_review_send_count_after_historical_trustpilot_note_guard": eligible_candidate_count_total,
         "active_review_send_count_before_precision": eligible_candidate_count_total
         + sum(1 for row in blocked_rows if _row_blocked_only_by_precision_fix(row)),
         "blocked_missing_review_request_tag_count": sum(
@@ -7985,6 +8343,8 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         "customer_order_sequence_number": _int_or_zero((row or {}).get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text((row or {}).get("customer_order_sequence_label"), max_length=120),
         "historical_order_names": _dedupe_order_names((row or {}).get("historical_order_names") or []),
+        "customer_history_order_names": _dedupe_order_names((row or {}).get("customer_history_order_names") or []),
+        "customer_history_window": _safe_text((row or {}).get("customer_history_window"), max_length=80),
         "customer_history_matched_order_names": _dedupe_order_names(
             (row or {}).get("customer_history_matched_order_names")
             or (row or {}).get("historical_order_names")
@@ -8003,6 +8363,18 @@ def _focus_order_diagnosis(order_name, scan_contexts, eligible_rows, blocked_row
         "customer_history_source": _safe_text((row or {}).get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text((row or {}).get("customer_history_confidence"), max_length=80),
         "customer_level_trustpilot_already_sent": (row or {}).get("customer_level_trustpilot_already_sent") is True,
+        "customer_level_trustpilot_note_evidence_found": (
+            (row or {}).get("customer_level_trustpilot_note_evidence_found") is True
+        ),
+        "customer_level_trustpilot_note_evidence_order_name": _safe_text(
+            (row or {}).get("customer_level_trustpilot_note_evidence_order_name"), max_length=80
+        ),
+        "customer_level_trustpilot_note_safe_keyword": _safe_text(
+            (row or {}).get("customer_level_trustpilot_note_safe_keyword"), max_length=80
+        ),
+        "customer_level_trustpilot_note_field_name": _safe_text(
+            (row or {}).get("customer_level_trustpilot_note_field_name"), max_length=120
+        ),
         "note_risk_detected": (row or context).get("note_risk_detected") is True,
         "note_risk_field": _safe_text((row or context).get("note_risk_field"), max_length=120),
         "note_risk_fields": _dedupe_text((row or context).get("note_risk_fields") or []),
@@ -9143,7 +9515,10 @@ def _row_blocked_by_prior_trustpilot_history(row):
     text = _row_block_text(row)
     return (
         row.get("customer_level_trustpilot_already_sent") is True
+        or row.get("customer_level_trustpilot_note_evidence_found") is True
+        or row.get("trustpilot_note_evidence_found") is True
         or bool(row.get("previous_trustpilot_order_names"))
+        or "previous trustpilot note found" in text
         or "already sent trustpilot to this customer" in text
         or "already sent via" in text
     )
@@ -9173,6 +9548,7 @@ def _row_block_text(row):
             "evidence",
             "status",
             "trustpilot_history_label",
+            "customer_level_trustpilot_note_evidence_order_name",
             "note_risk_reason",
         )
     )
@@ -9198,6 +9574,8 @@ def _queue_candidate_summary(row):
             row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
         ),
         "customer_history_match_method": _safe_text(row.get("customer_history_match_method"), max_length=80),
+        "customer_history_order_names": _dedupe_order_names(row.get("customer_history_order_names") or []),
+        "customer_history_window": _safe_text(row.get("customer_history_window"), max_length=80),
         "customer_history_excluded_weak_matches": _dedupe_order_names(
             row.get("customer_history_excluded_weak_matches") or []
         ),
@@ -9208,6 +9586,18 @@ def _queue_candidate_summary(row):
         "customer_history_source": _safe_text(row.get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
+        "customer_level_trustpilot_note_evidence_found": (
+            row.get("customer_level_trustpilot_note_evidence_found") is True
+        ),
+        "customer_level_trustpilot_note_evidence_order_name": _safe_text(
+            row.get("customer_level_trustpilot_note_evidence_order_name"), max_length=80
+        ),
+        "customer_level_trustpilot_note_safe_keyword": _safe_text(
+            row.get("customer_level_trustpilot_note_safe_keyword"), max_length=80
+        ),
+        "customer_level_trustpilot_note_field_name": _safe_text(
+            row.get("customer_level_trustpilot_note_field_name"), max_length=120
+        ),
         "note_risk_detected": row.get("note_risk_detected") is True,
         "note_risk_field": _safe_text(row.get("note_risk_field"), max_length=120),
         "note_risk_fields": _dedupe_text(row.get("note_risk_fields") or []),
@@ -9262,6 +9652,8 @@ def _blocked_candidate_summary(row):
             row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
         ),
         "customer_history_match_method": _safe_text(row.get("customer_history_match_method"), max_length=80),
+        "customer_history_order_names": _dedupe_order_names(row.get("customer_history_order_names") or []),
+        "customer_history_window": _safe_text(row.get("customer_history_window"), max_length=80),
         "customer_history_excluded_weak_matches": _dedupe_order_names(
             row.get("customer_history_excluded_weak_matches") or []
         ),
@@ -9272,6 +9664,18 @@ def _blocked_candidate_summary(row):
         "customer_history_source": _safe_text(row.get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
+        "customer_level_trustpilot_note_evidence_found": (
+            row.get("customer_level_trustpilot_note_evidence_found") is True
+        ),
+        "customer_level_trustpilot_note_evidence_order_name": _safe_text(
+            row.get("customer_level_trustpilot_note_evidence_order_name"), max_length=80
+        ),
+        "customer_level_trustpilot_note_safe_keyword": _safe_text(
+            row.get("customer_level_trustpilot_note_safe_keyword"), max_length=80
+        ),
+        "customer_level_trustpilot_note_field_name": _safe_text(
+            row.get("customer_level_trustpilot_note_field_name"), max_length=120
+        ),
         "note_risk_detected": row.get("note_risk_detected") is True,
         "note_risk_field": _safe_text(row.get("note_risk_field"), max_length=120),
         "note_risk_fields": _dedupe_text(row.get("note_risk_fields") or []),
@@ -9770,6 +10174,113 @@ def _note_risk_from_sources(*sources):
     }
 
 
+def detect_trustpilot_note_evidence(order):
+    order = order or {}
+    order_name = _canonical_order_name(
+        order.get("order_name") or order.get("order") or order.get("order_number")
+    )
+    for field in TRUSTPILOT_NOTE_FIELDS:
+        if field not in order:
+            continue
+        for fragment in _note_text_fragments(order.get(field)):
+            keyword = _trustpilot_note_keyword_in_text(fragment)
+            if keyword:
+                return {
+                    "evidence_found": True,
+                    "safe_keyword": keyword,
+                    "field_name": field,
+                    "order_name": order_name,
+                }
+    return {
+        "evidence_found": False,
+        "safe_keyword": "",
+        "field_name": "",
+        "order_name": order_name,
+    }
+
+
+def _trustpilot_note_keyword_in_text(value):
+    compact_text = _compact_trustpilot_note_text(value)
+    if not compact_text:
+        return ""
+    for keyword in TRUSTPILOT_NOTE_KEYWORDS:
+        safe_keyword = _safe_text(keyword, max_length=80)
+        if safe_keyword and _compact_trustpilot_note_text(safe_keyword) in compact_text:
+            return safe_keyword
+    return ""
+
+
+def _compact_trustpilot_note_text(value):
+    return re.sub(r"[^a-z0-9]+", "", _safe_text(value, max_length=2000).lower())
+
+
+def _empty_trustpilot_note_evidence(order_name=""):
+    return {
+        "evidence_found": False,
+        "safe_keyword": "",
+        "field_name": "",
+        "order_name": _canonical_order_name(order_name),
+    }
+
+
+def _customer_trustpilot_note_evidence(order, customer_orders):
+    current_id = (order or {}).get("id")
+    current_name = _canonical_order_name((order or {}).get("order_name"))
+    for history_order in customer_orders or []:
+        history_name = _canonical_order_name(history_order.get("order_name"))
+        if current_id and history_order.get("id") == current_id:
+            continue
+        if current_name and history_name == current_name:
+            continue
+        evidence = detect_trustpilot_note_evidence(history_order)
+        if evidence.get("evidence_found") is True:
+            return evidence
+    return _empty_trustpilot_note_evidence()
+
+
+def _trustpilot_note_evidence_from_sources(*sources):
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        if (
+            source.get("customer_level_trustpilot_note_evidence_found") is True
+            or source.get("trustpilot_note_evidence_found") is True
+        ):
+            return {
+                "evidence_found": True,
+                "safe_keyword": _safe_text(
+                    source.get("customer_level_trustpilot_note_safe_keyword")
+                    or source.get("trustpilot_note_safe_keyword"),
+                    max_length=80,
+                ),
+                "field_name": _safe_text(
+                    source.get("customer_level_trustpilot_note_field_name")
+                    or source.get("trustpilot_note_field_name"),
+                    max_length=120,
+                ),
+                "order_name": _canonical_order_name(
+                    source.get("customer_level_trustpilot_note_evidence_order_name")
+                    or source.get("trustpilot_note_evidence_order_name")
+                    or source.get("order_name")
+                    or source.get("order")
+                ),
+            }
+        evidence = detect_trustpilot_note_evidence(source)
+        if evidence.get("evidence_found") is True:
+            return evidence
+    return _empty_trustpilot_note_evidence()
+
+
+def _trustpilot_note_evidence_reason(evidence):
+    order_name = _canonical_order_name((evidence or {}).get("order_name")) or "another order"
+    return f"Previous Trustpilot note found on historical order {order_name}."
+
+
+def _trustpilot_note_history_label(evidence):
+    order_name = _canonical_order_name((evidence or {}).get("order_name")) or "another order"
+    return f"Previous Trustpilot note found via {order_name}"
+
+
 def _source_rows_by_order(*row_groups):
     rows_by_order = {}
     for rows in row_groups:
@@ -10261,6 +10772,9 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
         or row.get("previous_trustpilot_order_names")
         or []
     ) if history_confirmed else []
+    trustpilot_note_evidence = (
+        _trustpilot_note_evidence_from_sources(local_context, row) if history_confirmed else _empty_trustpilot_note_evidence()
+    )
     note_risk = _note_risk_from_sources(local_context, row)
     if not history_confirmed:
         blockers.append("Customer history not confirmed.")
@@ -10268,6 +10782,8 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
         blockers.append("First-order customer; Trustpilot is for repeat customers.")
     if note_risk["note_risk_detected"]:
         blockers.append(NOTE_RISK_REASON)
+    if trustpilot_note_evidence.get("evidence_found") is True:
+        blockers.append(_trustpilot_note_evidence_reason(trustpilot_note_evidence))
     if previous_trustpilot_order_names:
         blockers.append(
             f"Already sent Trustpilot to this customer via {_join_order_names(previous_trustpilot_order_names)}."
@@ -10646,6 +11162,8 @@ def _local_order_contexts(order_names):
             "customer_order_sequence_label": history["customer_order_sequence_label"],
             "customer_order_names": history["historical_order_names"][:5],
             "historical_order_names": history["historical_order_names"],
+            "customer_history_order_names": history["customer_history_order_names"],
+            "customer_history_window": history["customer_history_window"],
             "customer_history_matched_order_names": history["customer_history_matched_order_names"],
             "customer_history_match_method": history["customer_history_match_method"],
             "customer_history_excluded_weak_matches": history["customer_history_excluded_weak_matches"],
@@ -10657,6 +11175,18 @@ def _local_order_contexts(order_names):
             "customer_history_confidence": history["customer_history_confidence"],
             "customer_history_confirmed": history["customer_history_confirmed"],
             "customer_level_trustpilot_already_sent": history["customer_level_trustpilot_already_sent"],
+            "customer_level_trustpilot_note_evidence_found": history[
+                "customer_level_trustpilot_note_evidence_found"
+            ],
+            "customer_level_trustpilot_note_evidence_order_name": history[
+                "customer_level_trustpilot_note_evidence_order_name"
+            ],
+            "customer_level_trustpilot_note_safe_keyword": history[
+                "customer_level_trustpilot_note_safe_keyword"
+            ],
+            "customer_level_trustpilot_note_field_name": history[
+                "customer_level_trustpilot_note_field_name"
+            ],
             "note_risk_detected": note_risk["note_risk_detected"],
             "note_risk_field": note_risk["note_risk_field"],
             "note_risk_fields": note_risk["note_risk_fields"],
@@ -10686,11 +11216,16 @@ def _local_order_contexts(order_names):
 
 
 def _customer_history_orders_for_selected(selected_orders, value_fields):
-    identities = [
-        identity
-        for identity in (_customer_history_identity(order) for order in selected_orders or [])
-        if identity.get("key")
-    ]
+    identities = []
+    seen_identities = set()
+    for order in selected_orders or []:
+        for identity in _customer_history_identities(order):
+            key = identity.get("key")
+            marker = (identity.get("source"), key)
+            if not key or marker in seen_identities:
+                continue
+            identities.append(identity)
+            seen_identities.add(marker)
     if not identities:
         return {}
 
@@ -10755,46 +11290,51 @@ def _hash_customer_identity(source, value):
     return f"{safe_source}:{digest}"
 
 
-def _customer_history_identity(order):
-    name_identity = _name_history_identity(order)
+def _customer_history_identities(order):
+    name_identities = _name_history_identities(order)
+    primary_name_identity = name_identities[0] if name_identities else {}
+    weak_keys = [item.get("key", "") for item in name_identities if item.get("key")]
+    weak_query = _customer_history_name_query_from_identities(name_identities)
+    identities = []
     customer_id = _customer_history_customer_id(order)
     if customer_id:
-        return {
+        identities.append({
             "source": "shopify_customer_id",
             "confidence": "high",
             "key": f"shopify_customer_id:{customer_id}",
             "query": Q(customer_id__iexact=customer_id) if "customer_id" in (order or {}) else None,
-            "weak_query": name_identity.get("query") if name_identity else None,
-            "weak_key": name_identity.get("key", "") if name_identity else "",
-            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
-        }
+            "weak_query": weak_query,
+            "weak_key": primary_name_identity.get("key", "") if primary_name_identity else "",
+            "weak_keys": weak_keys,
+            "name_raw": primary_name_identity.get("name_raw", "") if primary_name_identity else "",
+        })
 
     email = _safe_runtime_email((order or {}).get("customer_email"))
     if email:
-        return {
+        identities.append({
             "source": "customer_email",
             "confidence": "high",
             "key": f"email:{email}",
             "query": Q(customer_email__iexact=email),
-            "weak_query": name_identity.get("query") if name_identity else None,
-            "weak_key": name_identity.get("key", "") if name_identity else "",
-            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
-        }
+            "weak_query": weak_query,
+            "weak_key": primary_name_identity.get("key", "") if primary_name_identity else "",
+            "weak_keys": weak_keys,
+            "name_raw": primary_name_identity.get("name_raw", "") if primary_name_identity else "",
+        })
 
-    phone = _phone_history_identity(order)
-    if phone:
-        return {
+    for phone in _phone_history_identities(order):
+        identities.append({
             "source": "name_shipping_phone",
             "confidence": "medium",
             "key": phone["key"],
             "query": phone["query"],
-            "weak_query": name_identity.get("query") if name_identity else None,
-            "weak_key": name_identity.get("key", "") if name_identity else "",
-            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
-        }
+            "weak_query": weak_query,
+            "weak_key": phone.get("name_key", ""),
+            "weak_keys": [phone.get("name_key", "")],
+            "name_raw": phone.get("name_raw", ""),
+        })
 
-    shipping = _shipping_history_identity(order)
-    if shipping:
+    for shipping in _shipping_history_identities(order):
         query = (
             Q(shipping_address1__iexact=shipping["address1_raw"])
             & (
@@ -10808,28 +11348,53 @@ def _customer_history_identity(order):
             query &= Q(shipping_country__iexact=shipping["country_raw"])
         if shipping.get("city_raw") and not shipping.get("zip_raw"):
             query &= Q(shipping_city__iexact=shipping["city_raw"])
-        return {
+        identities.append({
             "source": "name_shipping_address_postcode",
             "confidence": "medium",
             "key": shipping["key"],
             "query": query,
-            "weak_query": name_identity.get("query") if name_identity else None,
-            "weak_key": name_identity.get("key", "") if name_identity else "",
-            "name_raw": name_identity.get("name_raw", "") if name_identity else "",
-        }
+            "weak_query": weak_query,
+            "weak_key": shipping.get("name_key", ""),
+            "weak_keys": [shipping.get("name_key", "")],
+            "name_raw": shipping.get("name_raw", ""),
+        })
 
-    if name_identity:
-        return {
-            "source": "name_only",
-            "confidence": "low",
-            "key": name_identity["key"],
-            "query": name_identity["query"],
-            "weak_query": name_identity["query"],
-            "weak_key": name_identity["key"],
-            "name_raw": name_identity["name_raw"],
-        }
+    if not identities and name_identities:
+        for name_identity in name_identities:
+            identities.append({
+                "source": "name_only",
+                "confidence": "low",
+                "key": name_identity["key"],
+                "query": name_identity.get("query"),
+                "weak_query": weak_query,
+                "weak_key": name_identity["key"],
+                "weak_keys": [name_identity["key"]],
+                "name_raw": name_identity["name_raw"],
+            })
 
-    return {"source": "unavailable", "confidence": "unknown", "key": "", "query": None, "weak_query": None}
+    if identities:
+        return _dedupe_customer_history_identities(identities)
+
+    return [{"source": "unavailable", "confidence": "unknown", "key": "", "query": None, "weak_query": None}]
+
+
+def _dedupe_customer_history_identities(identities):
+    result = []
+    seen = set()
+    for identity in identities or []:
+        key = identity.get("key", "")
+        source = identity.get("source", "")
+        marker = (source, key)
+        if not key or marker in seen:
+            continue
+        seen.add(marker)
+        result.append(identity)
+    return result
+
+
+def _customer_history_identity(order):
+    identities = _customer_history_identities(order)
+    return identities[0] if identities else {"source": "unavailable", "confidence": "unknown", "key": ""}
 
 
 def _customer_history_customer_id(order):
@@ -10840,71 +11405,119 @@ def _customer_history_customer_id(order):
     return ""
 
 
-def _name_history_identity(order):
+def _name_history_identities(order):
     order = order or {}
-    name_raw = _safe_text(order.get("customer_name") or order.get("shipping_name"), max_length=120)
-    name = _normalize_customer_history_piece(name_raw)
-    if not name:
-        return {}
-    return {
-        "key": f"name:{name}",
-        "name": name,
-        "name_raw": name_raw,
-        "query": Q(customer_name__iexact=name_raw) | Q(shipping_name__iexact=name_raw),
-    }
+    identities = []
+    by_key = {}
+    for field_name in ("customer_name", "shipping_name"):
+        name_raw = _safe_text(order.get(field_name), max_length=120)
+        name = _normalize_customer_history_piece(name_raw)
+        if not name:
+            continue
+        key = f"name:{name}"
+        query = Q(customer_name__iexact=name_raw) | Q(shipping_name__iexact=name_raw)
+        if key in by_key:
+            by_key[key]["query"] |= query
+            continue
+        identity = {
+            "key": key,
+            "name": name,
+            "name_raw": name_raw,
+            "query": query,
+        }
+        by_key[key] = identity
+        identities.append(identity)
+    return identities
+
+
+def _name_history_identity(order):
+    identities = _name_history_identities(order)
+    return identities[0] if identities else {}
+
+
+def _customer_history_name_query_from_identities(name_identities):
+    query = Q()
+    for identity in name_identities or []:
+        identity_query = identity.get("query")
+        if identity_query:
+            query |= identity_query
+    return query if query else None
 
 
 def _customer_history_name_query(order):
-    name = _name_history_identity(order)
-    return name.get("query") if name else None
+    return _customer_history_name_query_from_identities(_name_history_identities(order))
+
+
+def _phone_history_identities(order):
+    order = order or {}
+    phone_raw = _safe_text(order.get("shipping_phone"), max_length=60)
+    phone = _normalize_customer_history_phone(phone_raw)
+    if not phone:
+        return []
+    identities = []
+    seen = set()
+    for name in _name_history_identities(order):
+        key = f"name_phone:{name['name']}|{phone}"
+        if key in seen:
+            continue
+        seen.add(key)
+        identities.append({
+            "key": key,
+            "name": name["name"],
+            "name_key": name["key"],
+            "name_raw": name["name_raw"],
+            "phone": phone,
+            "phone_raw": phone_raw,
+            "query": (
+                Q(shipping_phone__iexact=phone_raw)
+                & (Q(customer_name__iexact=name["name_raw"]) | Q(shipping_name__iexact=name["name_raw"]))
+            ),
+        })
+    return identities
 
 
 def _phone_history_identity(order):
-    order = order or {}
-    name = _name_history_identity(order)
-    phone_raw = _safe_text(order.get("shipping_phone"), max_length=60)
-    phone = _normalize_customer_history_phone(phone_raw)
-    if not (name and phone):
-        return {}
-    return {
-        "key": f"name_phone:{name['name']}|{phone}",
-        "name": name["name"],
-        "name_raw": name["name_raw"],
-        "phone": phone,
-        "phone_raw": phone_raw,
-        "query": (
-            Q(shipping_phone__iexact=phone_raw)
-            & (Q(customer_name__iexact=name["name_raw"]) | Q(shipping_name__iexact=name["name_raw"]))
-        ),
-    }
+    identities = _phone_history_identities(order)
+    return identities[0] if identities else {}
 
 
-def _shipping_history_identity(order):
+def _shipping_history_identities(order):
     order = order or {}
-    name_raw = _safe_text(order.get("customer_name") or order.get("shipping_name"), max_length=120)
     address1_raw = _safe_text(order.get("shipping_address1"), max_length=160)
     city_raw = _safe_text(order.get("shipping_city"), max_length=120)
     province_raw = _safe_text(order.get("shipping_province"), max_length=120)
     zip_raw = _safe_text(order.get("shipping_zip"), max_length=40)
     country_raw = _safe_text(order.get("shipping_country"), max_length=20)
-    name = _normalize_customer_history_piece(name_raw)
     address1 = _normalize_customer_history_piece(address1_raw)
     city = _normalize_customer_history_piece(city_raw)
     province = _normalize_customer_history_piece(province_raw)
     zip_code = _normalize_customer_history_piece(zip_raw)
     country = _normalize_customer_history_piece(country_raw)
-    if not (name and address1 and (zip_code or (city and country))):
-        return {}
-    key = "shipping:" + "|".join((name, address1, city, province, zip_code, country))
-    return {
-        "key": key,
-        "name_raw": name_raw,
-        "address1_raw": address1_raw,
-        "city_raw": city_raw,
-        "province_raw": province_raw,
-        "zip_raw": zip_raw,
-        "country_raw": country_raw,
-    }
+    if not (address1 and (zip_code or (city and country))):
+        return []
+    identities = []
+    seen = set()
+    for name in _name_history_identities(order):
+        key = "shipping:" + "|".join((name["name"], address1, city, province, zip_code, country))
+        if key in seen:
+            continue
+        seen.add(key)
+        identities.append({
+            "key": key,
+            "name_key": name["key"],
+            "name_raw": name["name_raw"],
+            "address1_raw": address1_raw,
+            "city_raw": city_raw,
+            "province_raw": province_raw,
+            "zip_raw": zip_raw,
+            "country_raw": country_raw,
+        })
+    return identities
+
+
+def _shipping_history_identity(order):
+    identities = _shipping_history_identities(order)
+    return identities[0] if identities else {}
 
 
 def _normalize_customer_history_piece(value):
@@ -10925,24 +11538,27 @@ def _order_matches_customer_history_identity(order, identity):
         email = _safe_runtime_email((order or {}).get("customer_email"))
         return identity["key"] == f"email:{email}" if email else False
     if identity.get("source") == "name_shipping_phone":
-        phone = _phone_history_identity(order)
-        return bool(phone and phone.get("key") == identity["key"])
+        return any(phone.get("key") == identity["key"] for phone in _phone_history_identities(order))
     if identity.get("source") == "name_shipping_address_postcode":
-        shipping = _shipping_history_identity(order)
-        return bool(shipping and shipping.get("key") == identity["key"])
+        return any(shipping.get("key") == identity["key"] for shipping in _shipping_history_identities(order))
     if identity.get("source") == "name_only":
-        name = _name_history_identity(order)
-        return bool(name and name.get("key") == identity["key"])
+        return any(name.get("key") == identity["key"] for name in _name_history_identities(order))
     return False
 
 
 def _order_matches_customer_history_name_identity(order, identity):
-    name = _name_history_identity(order)
-    if not name:
+    names = _name_history_identities(order)
+    if not names:
         return False
+    name_keys = {name["key"] for name in names if name.get("key")}
     weak_key = _safe_text(identity.get("weak_key"), max_length=180)
-    if weak_key:
-        return name["key"] == weak_key
+    weak_keys = [
+        _safe_text(item, max_length=180)
+        for item in ((identity.get("weak_keys") or []) + ([weak_key] if weak_key else []))
+        if _safe_text(item, max_length=180)
+    ]
+    if weak_keys:
+        return bool(name_keys.intersection(weak_keys))
     identity_name = _name_history_identity(
         {
             "customer_name": identity.get("name_raw"),
@@ -10950,10 +11566,10 @@ def _order_matches_customer_history_name_identity(order, identity):
         }
     )
     if identity_name:
-        return name["key"] == identity_name["key"]
+        return identity_name["key"] in name_keys
     if identity.get("source") == "name_only":
-        return name["key"] == identity.get("key")
-    return name["key"] == (_name_history_identity_from_key(identity) or "")
+        return identity.get("key") in name_keys
+    return (_name_history_identity_from_key(identity) or "") in name_keys
 
 
 def _name_history_identity_from_key(identity):
@@ -10967,13 +11583,25 @@ def _name_history_identity_from_key(identity):
 
 
 def _customer_history_for_order(order, history_orders_by_identity, local_sent_records=None):
-    identity = _customer_history_identity(order)
-    identity_key = identity.get("key", "")
-    history_entry = history_orders_by_identity.get(identity_key) or {}
-    if isinstance(history_entry, list):
-        history_entry = {"exact": history_entry, "weak": []}
-    exact_orders = _dedupe_customer_history_orders(history_entry.get("exact") or [])
-    weak_orders = _dedupe_customer_history_orders(history_entry.get("weak") or [])
+    identities = _customer_history_identities(order)
+    exact_orders = []
+    weak_orders = []
+    matched_sources = []
+    matched_confidences = []
+    for identity in identities:
+        identity_key = identity.get("key", "")
+        history_entry = history_orders_by_identity.get(identity_key) or {}
+        if isinstance(history_entry, list):
+            history_entry = {"exact": history_entry, "weak": []}
+        identity_exact_orders = _dedupe_customer_history_orders(history_entry.get("exact") or [])
+        identity_weak_orders = _dedupe_customer_history_orders(history_entry.get("weak") or [])
+        if identity.get("confidence") in {"high", "medium"} and identity_exact_orders:
+            matched_sources.append(identity.get("source") or "unavailable")
+            matched_confidences.append(identity.get("confidence") or "unknown")
+            exact_orders.extend(identity_exact_orders)
+        weak_orders.extend(identity_weak_orders)
+    exact_orders = _dedupe_customer_history_orders(exact_orders)
+    weak_orders = _dedupe_customer_history_orders(weak_orders)
     exact_order_names = _dedupe_order_names(
         _safe_text(item.get("order_name"), max_length=80)
         for item in exact_orders
@@ -10986,14 +11614,24 @@ def _customer_history_for_order(order, history_orders_by_identity, local_sent_re
     )
     excluded_weak_order_names = [name for name in weak_order_names if name not in set(exact_order_names)]
     customer_orders = sorted(exact_orders, key=_customer_history_order_sort_key)
-    confirmed = bool(identity_key and customer_orders and identity.get("confidence") in {"high", "medium"})
+    confirmed = bool(customer_orders and matched_sources)
     order_count = len(customer_orders) if confirmed else 0
     sequence = _customer_order_sequence(order, customer_orders) if confirmed else 0
     historical_order_names = exact_order_names if confirmed else []
     previous_order_names, previous_tag_values = (
         _previous_trustpilot_history(order, customer_orders, local_sent_records or {}) if confirmed else ([], [])
     )
-    confidence = identity.get("confidence") if confirmed else ("low" if excluded_weak_order_names else "unknown")
+    trustpilot_note_evidence = (
+        _customer_trustpilot_note_evidence(order, customer_orders)
+        if confirmed
+        else _empty_trustpilot_note_evidence()
+    )
+    confidence = _customer_history_combined_confidence(matched_confidences) if confirmed else (
+        "low" if excluded_weak_order_names else "unknown"
+    )
+    match_method = "+".join(_dedupe_text(matched_sources)) if confirmed else (
+        (_customer_history_identity(order).get("source") or "unavailable")
+    )
     before_precision_names = _dedupe_order_names(exact_order_names + excluded_weak_order_names)
     return {
         "customer_history_order_count": order_count,
@@ -11006,18 +11644,457 @@ def _customer_history_for_order(order, history_orders_by_identity, local_sent_re
             history_confirmed=confirmed,
         ),
         "historical_order_names": historical_order_names,
+        "customer_history_order_names": historical_order_names,
+        "customer_history_window": "lifetime_local_orders",
         "customer_history_matched_order_names": historical_order_names,
-        "customer_history_match_method": identity.get("source") or "unavailable",
+        "customer_history_match_method": match_method,
         "customer_history_excluded_weak_matches": excluded_weak_order_names,
         "customer_history_weak_match_count": len(excluded_weak_order_names),
         "customer_history_exact_match_count": len(exact_order_names) if confirmed else 0,
         "previous_trustpilot_order_names": previous_order_names,
         "previous_trustpilot_tag_values": previous_tag_values,
-        "customer_history_source": identity.get("source") or "unavailable",
+        "customer_history_source": match_method,
         "customer_history_confidence": confidence,
         "customer_history_confirmed": confirmed,
-        "customer_level_trustpilot_already_sent": bool(previous_order_names),
+        "customer_level_trustpilot_already_sent": bool(
+            previous_order_names or trustpilot_note_evidence.get("evidence_found") is True
+        ),
+        "customer_level_trustpilot_note_evidence_found": trustpilot_note_evidence.get("evidence_found") is True,
+        "customer_level_trustpilot_note_evidence_order_name": _safe_text(
+            trustpilot_note_evidence.get("order_name"), max_length=80
+        ),
+        "customer_level_trustpilot_note_safe_keyword": _safe_text(
+            trustpilot_note_evidence.get("safe_keyword"), max_length=80
+        ),
+        "customer_level_trustpilot_note_field_name": _safe_text(
+            trustpilot_note_evidence.get("field_name"), max_length=120
+        ),
     }
+
+
+def _customer_identity_drilldown_audit(order_name):
+    target_order_name = _canonical_order_name(order_name)
+    value_fields = _customer_identity_drilldown_value_fields()
+    target_order = _customer_identity_drilldown_target_order(target_order_name, value_fields)
+    if not target_order:
+        return {
+            "target_order_found": False,
+            "user_reported_shopify_ui_order_count": CUSTOMER_IDENTITY_DRILLDOWN_USER_REPORTED_ORDER_COUNT,
+            "local_order_fields": {"order_name": target_order_name},
+            "local_confirmed_order_count": 0,
+            "local_confirmed_order_names": [],
+            "local_confirmed_match_method": "",
+            "local_confirmed_confidence": "",
+            "identity_strategy_counts": _empty_identity_strategy_counts(),
+            "identity_strategy_order_names": {},
+            "identity_strategy_details": [],
+            "broader_safe_candidate_matched_order_names": [],
+            "possible_missed_historical_orders": [],
+            "why_only_counted_orders": "Target order was not found in local ShopifyOrder data.",
+            "note_evidence_checks": [],
+            "note_evidence_matches": [],
+            "historical_trustpilot_note_evidence_found": False,
+            "evidence_order_name": "",
+            "evidence_field_name": "",
+            "evidence_safe_keyword": "",
+            "recommended_action": (
+                "Run wider Shopify customer/order sync or sync by customer id/email, then rerun this audit."
+            ),
+        }
+
+    history_by_identity = _customer_history_orders_for_selected([target_order], value_fields)
+    local_sent_records = _local_review_send_success_order_map()
+    history = _customer_history_for_order(target_order, history_by_identity, local_sent_records)
+    local_confirmed_names = _dedupe_order_names(history.get("customer_history_matched_order_names") or [])
+    strategy_details = _customer_identity_strategy_details(target_order, value_fields)
+    strategy_counts = {
+        detail["strategy"]: _int_or_zero(detail.get("match_order_count"))
+        for detail in strategy_details
+    }
+    strategy_order_names = {
+        detail["strategy"]: detail.get("matched_order_names") or []
+        for detail in strategy_details
+    }
+    candidate_order_names = _customer_identity_safe_candidate_order_names(strategy_details)
+    candidate_orders = _customer_identity_orders_by_names(candidate_order_names, value_fields)
+    if target_order_name not in {_canonical_order_name(item.get("order_name")) for item in candidate_orders}:
+        candidate_orders.append(target_order)
+    note_checks, note_matches = _customer_identity_note_evidence_checks(candidate_orders, target_order_name)
+    evidence = note_matches[0] if note_matches else {}
+    possible_missed = [name for name in candidate_order_names if name not in set(local_confirmed_names)]
+    local_missing = len(local_confirmed_names) < CUSTOMER_IDENTITY_DRILLDOWN_USER_REPORTED_ORDER_COUNT
+    return {
+        "target_order_found": True,
+        "user_reported_shopify_ui_order_count": CUSTOMER_IDENTITY_DRILLDOWN_USER_REPORTED_ORDER_COUNT,
+        "local_order_fields": _customer_identity_local_order_fields(target_order),
+        "local_confirmed_order_count": len(local_confirmed_names),
+        "local_confirmed_order_names": local_confirmed_names,
+        "local_confirmed_match_method": _safe_text(history.get("customer_history_match_method"), max_length=120),
+        "local_confirmed_confidence": _safe_text(history.get("customer_history_confidence"), max_length=80),
+        "identity_strategy_counts": strategy_counts,
+        "identity_strategy_order_names": strategy_order_names,
+        "identity_strategy_details": strategy_details,
+        "broader_safe_candidate_matched_order_names": candidate_order_names,
+        "possible_missed_historical_orders": possible_missed,
+        "why_only_counted_orders": _customer_identity_count_reason(
+            local_confirmed_names,
+            history.get("customer_history_match_method"),
+            strategy_details,
+            local_missing,
+        ),
+        "note_evidence_checks": note_checks,
+        "note_evidence_matches": note_matches,
+        "historical_trustpilot_note_evidence_found": bool(note_matches),
+        "evidence_order_name": _safe_text(evidence.get("order_name"), max_length=80),
+        "evidence_field_name": _safe_text(evidence.get("field_name"), max_length=120),
+        "evidence_safe_keyword": _safe_text(evidence.get("matched_keyword"), max_length=80),
+        "recommended_action": _customer_identity_recommended_action(local_missing, possible_missed),
+    }
+
+
+def _customer_identity_drilldown_value_fields():
+    return (
+        "id",
+        "order_name",
+        "order_number",
+        "shopify_order_id",
+        "customer_name",
+        "customer_email",
+        "shipping_name",
+        "shipping_address1",
+        "shipping_address2",
+        "shipping_city",
+        "shipping_province",
+        "shipping_zip",
+        "shipping_country",
+        "shipping_phone",
+        "order_created_at",
+        SHOPIFY_ORDER_TAG_FIELD,
+        "shopify_note",
+        "shopify_note_attributes",
+        "warehouse_note",
+        "transfer_note",
+        "exception_review_reason",
+        "exception_review_response",
+        "cost_calculation_note",
+    )
+
+
+def _customer_identity_drilldown_target_order(order_name, value_fields):
+    query_names = set()
+    query_numbers = set()
+    query_shopify_ids = set()
+    _collect_order_lookup_values(order_name, "", query_names, query_numbers, query_shopify_ids)
+    query = _customer_identity_lookup_query(query_names, query_numbers, query_shopify_ids)
+    if query is None:
+        return {}
+    try:
+        orders = list(ShopifyOrder.objects.filter(query).values(*value_fields)[:10])
+    except Exception:
+        return {}
+    target = _canonical_order_name(order_name)
+    for order in orders:
+        if _canonical_order_name(order.get("order_name") or order.get("order_number")) == target:
+            return order
+    return orders[0] if orders else {}
+
+
+def _customer_identity_lookup_query(query_names, query_numbers, query_shopify_ids):
+    query = None
+    if query_names:
+        query = Q(order_name__in=query_names)
+    if query_numbers:
+        part = Q(order_number__in=query_numbers)
+        query = part if query is None else query | part
+    if query_shopify_ids:
+        part = Q(shopify_order_id__in=query_shopify_ids)
+        query = part if query is None else query | part
+    return query
+
+
+def _customer_identity_strategy_details(order, value_fields):
+    customer_name = _safe_text(order.get("customer_name"), max_length=255)
+    shipping_name = _safe_text(order.get("shipping_name"), max_length=255)
+    email = _safe_runtime_email(order.get("customer_email"))
+    phone = _safe_text(order.get("shipping_phone"), max_length=80)
+    postcode = _safe_text(order.get("shipping_zip"), max_length=40)
+    address1 = _safe_text(order.get("shipping_address1"), max_length=255)
+    city = _safe_text(order.get("shipping_city"), max_length=255)
+    country = _safe_text(order.get("shipping_country"), max_length=20)
+    name_query = _customer_identity_name_query(customer_name, shipping_name)
+
+    strategies = []
+    _customer_identity_add_strategy(
+        strategies,
+        "customer_email_exact",
+        bool(email),
+        Q(customer_email__iexact=email) if email else None,
+        value_fields,
+        ("customer_email",),
+    )
+    _customer_identity_add_strategy(
+        strategies,
+        "customer_name_exact",
+        bool(customer_name),
+        Q(customer_name__iexact=customer_name) if customer_name else None,
+        value_fields,
+        ("customer_name",),
+    )
+    _customer_identity_add_strategy(
+        strategies,
+        "shipping_name_exact",
+        bool(shipping_name),
+        Q(shipping_name__iexact=shipping_name) if shipping_name else None,
+        value_fields,
+        ("shipping_name",),
+    )
+    _customer_identity_add_strategy(
+        strategies,
+        "shipping_phone_exact",
+        bool(phone),
+        Q(shipping_phone__iexact=phone) if phone else None,
+        value_fields,
+        ("shipping_phone",),
+    )
+    _customer_identity_add_strategy(
+        strategies,
+        "shipping_postcode_exact",
+        bool(postcode),
+        Q(shipping_zip__iexact=postcode) if postcode else None,
+        value_fields,
+        ("shipping_zip",),
+    )
+    _customer_identity_add_strategy(
+        strategies,
+        "combined_name_phone",
+        bool(name_query is not None and phone),
+        (name_query & Q(shipping_phone__iexact=phone)) if name_query is not None and phone else None,
+        value_fields,
+        ("customer_name_or_shipping_name", "shipping_phone"),
+    )
+    _customer_identity_add_strategy(
+        strategies,
+        "combined_name_postcode",
+        bool(name_query is not None and postcode),
+        (name_query & Q(shipping_zip__iexact=postcode)) if name_query is not None and postcode else None,
+        value_fields,
+        ("customer_name_or_shipping_name", "shipping_zip"),
+    )
+    _customer_identity_add_strategy(
+        strategies,
+        "shipping_name_postcode_exact",
+        bool(shipping_name and postcode),
+        (Q(shipping_name__iexact=shipping_name) & Q(shipping_zip__iexact=postcode))
+        if shipping_name and postcode
+        else None,
+        value_fields,
+        ("shipping_name", "shipping_zip"),
+    )
+    shipping_address_query = None
+    if shipping_name and address1:
+        shipping_address_query = Q(shipping_name__iexact=shipping_name) & Q(shipping_address1__iexact=address1)
+        if city:
+            shipping_address_query &= Q(shipping_city__iexact=city)
+        if postcode:
+            shipping_address_query &= Q(shipping_zip__iexact=postcode)
+        if country:
+            shipping_address_query &= Q(shipping_country__iexact=country)
+    _customer_identity_add_strategy(
+        strategies,
+        "combined_shipping_name_address",
+        shipping_address_query is not None,
+        shipping_address_query,
+        value_fields,
+        ("shipping_name", "shipping_address"),
+    )
+    return strategies
+
+
+def _customer_identity_name_query(*names):
+    query = None
+    for name in _dedupe_text(_safe_text(value, max_length=255) for value in names):
+        if not name:
+            continue
+        part = Q(customer_name__iexact=name) | Q(shipping_name__iexact=name)
+        query = part if query is None else query | part
+    return query
+
+
+def _customer_identity_add_strategy(strategies, strategy, available, query, value_fields, fields_used):
+    orders = _customer_identity_orders_for_query(query, value_fields) if available and query is not None else []
+    order_names = _dedupe_order_names(
+        _safe_text(order.get("order_name") or order.get("order_number"), max_length=80)
+        for order in orders
+    )
+    strategies.append(
+        {
+            "strategy": strategy,
+            "available": bool(available),
+            "fields_used": list(fields_used),
+            "match_order_count": len(order_names),
+            "matched_order_names": order_names,
+        }
+    )
+
+
+def _customer_identity_orders_for_query(query, value_fields):
+    if query is None:
+        return []
+    try:
+        return list(
+            ShopifyOrder.objects.filter(query)
+            .values(*value_fields)
+            .order_by("order_created_at", "id")[:MAX_LOCAL_ORDER_SCAN_ROWS]
+        )
+    except Exception:
+        return []
+
+
+def _customer_identity_orders_by_names(order_names, value_fields):
+    query_names = set()
+    query_numbers = set()
+    query_shopify_ids = set()
+    for order_name in order_names or []:
+        _collect_order_lookup_values(order_name, "", query_names, query_numbers, query_shopify_ids)
+    query = _customer_identity_lookup_query(query_names, query_numbers, query_shopify_ids)
+    if query is None:
+        return []
+    return _customer_identity_orders_for_query(query, value_fields)
+
+
+def _customer_identity_safe_candidate_order_names(strategy_details):
+    safe_strategies = {
+        "customer_email_exact",
+        "customer_name_exact",
+        "shipping_name_exact",
+        "shipping_phone_exact",
+        "combined_name_phone",
+        "combined_name_postcode",
+        "shipping_name_postcode_exact",
+        "combined_shipping_name_address",
+    }
+    names = []
+    for detail in strategy_details or []:
+        if detail.get("strategy") in safe_strategies:
+            names.extend(detail.get("matched_order_names") or [])
+    return _dedupe_order_names(names)
+
+
+def _customer_identity_note_evidence_checks(candidate_orders, target_order_name):
+    checks = []
+    matches = []
+    target = _canonical_order_name(target_order_name)
+    for order in sorted(_dedupe_customer_history_orders(candidate_orders), key=_customer_history_order_sort_key):
+        order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
+        if not order_name:
+            continue
+        for field_name in CUSTOMER_IDENTITY_DRILLDOWN_NOTE_FIELDS:
+            keyword = ""
+            for fragment in _note_text_fragments(order.get(field_name)):
+                keyword = _trustpilot_note_keyword_in_text(fragment)
+                if keyword:
+                    break
+            check = {
+                "order_name": order_name,
+                "field_name": field_name,
+                "matched_keyword": _safe_text(keyword, max_length=80),
+                "note_evidence_found": bool(keyword),
+            }
+            checks.append(check)
+            if keyword and order_name != target:
+                matches.append(check)
+    return checks, matches
+
+
+def _customer_identity_local_order_fields(order):
+    return {
+        "order_name": _canonical_order_name(order.get("order_name") or order.get("order_number")),
+        "order_number": _safe_text(order.get("order_number"), max_length=80),
+        "customer_name": _partial_person_name(order.get("customer_name")),
+        "customer_name_present": bool(_safe_text(order.get("customer_name"), max_length=120)),
+        "customer_email_present": bool(_safe_runtime_email(order.get("customer_email"))),
+        "shipping_name": _partial_person_name(order.get("shipping_name")),
+        "shipping_name_present": bool(_safe_text(order.get("shipping_name"), max_length=120)),
+        "shipping_phone_present": bool(_safe_text(order.get("shipping_phone"), max_length=80)),
+        "shipping_address_present": bool(
+            _safe_text(order.get("shipping_address1"), max_length=120)
+            or _safe_text(order.get("shipping_address2"), max_length=120)
+            or _safe_text(order.get("shipping_city"), max_length=120)
+            or _safe_text(order.get("shipping_province"), max_length=120)
+            or _safe_text(order.get("shipping_country"), max_length=20)
+        ),
+        "shipping_postcode_present": bool(_safe_text(order.get("shipping_zip"), max_length=40)),
+        "shipping_address_postcode_present": bool(
+            _safe_text(order.get("shipping_address1"), max_length=120)
+            and _safe_text(order.get("shipping_zip"), max_length=40)
+        ),
+    }
+
+
+def _partial_person_name(value):
+    text = _safe_text(value, max_length=120)
+    if not text or EMAIL_RE.search(text):
+        return ""
+    parts = [part for part in re.split(r"\s+", text) if part]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return f"{parts[0][:1]}***"
+    return f"{parts[0][:1]}*** {parts[-1][:1]}***"
+
+
+def _empty_identity_strategy_counts():
+    return {
+        "customer_email_exact": 0,
+        "customer_name_exact": 0,
+        "shipping_name_exact": 0,
+        "shipping_phone_exact": 0,
+        "shipping_postcode_exact": 0,
+        "combined_name_phone": 0,
+        "combined_name_postcode": 0,
+        "shipping_name_postcode_exact": 0,
+        "combined_shipping_name_address": 0,
+    }
+
+
+def _customer_identity_count_reason(local_confirmed_names, match_method, strategy_details, local_missing):
+    confirmed_names = _dedupe_order_names(local_confirmed_names or [])
+    method = _safe_text(match_method, max_length=120) or "unavailable"
+    confirmed_text = _join_order_names(confirmed_names) if confirmed_names else "none"
+    reason = (
+        f"Current customer-history logic confirms {len(confirmed_names)} local orders "
+        f"via {method}: {confirmed_text}."
+    )
+    broader = []
+    for detail in strategy_details or []:
+        count = _int_or_zero(detail.get("match_order_count"))
+        if count > len(confirmed_names):
+            broader.append(f"{detail.get('strategy')}={count}")
+    if broader:
+        reason += (
+            " Broader local identity strategies show additional candidate orders "
+            f"({', '.join(broader)}), but they are drilldown evidence until the matching policy is widened."
+        )
+    elif local_missing:
+        reason += (
+            " No broader local identity strategy found the 7-order Shopify UI history, so local sync or "
+            "identity persistence appears incomplete."
+        )
+    return reason
+
+
+def _customer_identity_recommended_action(local_missing, possible_missed):
+    if local_missing:
+        return (
+            "Run wider Shopify customer/order sync or sync by customer id/email, and add Shopify customer id "
+            "persistence if local orders do not store it."
+        )
+    if possible_missed:
+        return (
+            "Review the broader local candidate matches, then explicitly approve any matching-policy widening "
+            "before changing send eligibility."
+        )
+    return "No wider customer-history sync action is indicated by local data."
 
 
 def _dedupe_customer_history_orders(orders):
@@ -11031,6 +12108,17 @@ def _dedupe_customer_history_orders(orders):
         seen.add(key)
         result.append(order)
     return result
+
+
+def _customer_history_combined_confidence(confidences):
+    values = set(confidences or [])
+    if "high" in values:
+        return "high"
+    if "medium" in values:
+        return "medium"
+    if "low" in values:
+        return "low"
+    return "unknown"
 
 
 def _customer_history_order_sort_key(order):
@@ -11279,6 +12367,12 @@ def _apply_queue_row_context(
         if history_confirmed
         else []
     )
+    trustpilot_note_evidence = (
+        _trustpilot_note_evidence_from_sources(local_context, source_row, row)
+        if history_confirmed
+        else _empty_trustpilot_note_evidence()
+    )
+    trustpilot_note_evidence_found = trustpilot_note_evidence.get("evidence_found") is True
     customer_history_source = (
         _safe_text(local_context.get("customer_history_source"), max_length=80)
         or _safe_text(source_row.get("customer_history_source"), max_length=80)
@@ -11387,7 +12481,7 @@ def _apply_queue_row_context(
         source_row,
         trustpilot_tags,
         prior_order_name,
-    ) or bool(previous_trustpilot_order_names)
+    ) or bool(previous_trustpilot_order_names or trustpilot_note_evidence_found)
     trustpilot_state = _trustpilot_sent_state(
         {
             **source_row,
@@ -11452,6 +12546,7 @@ def _apply_queue_row_context(
         source_row=source_row,
         evidence=row.get("evidence") or row.get("reason", ""),
         previous_trustpilot_order_names=previous_trustpilot_order_names,
+        trustpilot_note_evidence=trustpilot_note_evidence,
     )
 
     row.update(
@@ -11467,6 +12562,12 @@ def _apply_queue_row_context(
             "customer_order_sequence_number": sequence,
             "customer_order_sequence_label": sequence_label,
             "historical_order_names": historical_order_names,
+            "customer_history_order_names": historical_order_names,
+            "customer_history_window": (
+                _safe_text(local_context.get("customer_history_window"), max_length=80)
+                or _safe_text(source_row.get("customer_history_window"), max_length=80)
+                or "lifetime_local_orders"
+            ),
             "customer_history_matched_order_names": historical_order_names,
             "customer_history_match_method": customer_history_match_method,
             "customer_history_excluded_weak_matches": customer_history_excluded_weak_matches,
@@ -11481,7 +12582,29 @@ def _apply_queue_row_context(
             "customer_identity_key": customer_identity_key,
             "customer_identity_source": customer_identity_source,
             "customer_identity_confidence": customer_identity_confidence,
-            "customer_level_trustpilot_already_sent": bool(previous_trustpilot_order_names),
+            "customer_level_trustpilot_already_sent": bool(
+                previous_trustpilot_order_names or trustpilot_note_evidence_found
+            ),
+            "customer_level_trustpilot_note_evidence_found": trustpilot_note_evidence_found,
+            "customer_level_trustpilot_note_evidence_order_name": _safe_text(
+                trustpilot_note_evidence.get("order_name"), max_length=80
+            ),
+            "customer_level_trustpilot_note_safe_keyword": _safe_text(
+                trustpilot_note_evidence.get("safe_keyword"), max_length=80
+            ),
+            "customer_level_trustpilot_note_field_name": _safe_text(
+                trustpilot_note_evidence.get("field_name"), max_length=120
+            ),
+            "trustpilot_note_evidence_found": trustpilot_note_evidence_found,
+            "trustpilot_note_evidence_order_name": _safe_text(
+                trustpilot_note_evidence.get("order_name"), max_length=80
+            ),
+            "trustpilot_note_safe_keyword": _safe_text(
+                trustpilot_note_evidence.get("safe_keyword"), max_length=80
+            ),
+            "trustpilot_note_field_name": _safe_text(
+                trustpilot_note_evidence.get("field_name"), max_length=120
+            ),
             "note_risk_detected": note_risk["note_risk_detected"],
             "note_risk_field": note_risk["note_risk_field"],
             "note_risk_fields": note_risk["note_risk_fields"],
@@ -11535,6 +12658,7 @@ def _apply_queue_row_context(
             "matched_trustpilot_tag_values": trustpilot_state["matched_trustpilot_tag_values"],
             "already_sent_reason": (
                 _safe_text(row.get("already_sent_reason"), max_length=300)
+                or (_trustpilot_note_evidence_reason(trustpilot_note_evidence) if trustpilot_note_evidence_found else "")
                 or trustpilot_state["already_sent_reason"]
             ),
             "review_request_tag_status_label": (
@@ -11722,8 +12846,11 @@ def _trustpilot_history_label(
     source_row,
     evidence,
     previous_trustpilot_order_names=None,
+    trustpilot_note_evidence=None,
 ):
     previous_trustpilot_order_names = _dedupe_order_names(previous_trustpilot_order_names or [])
+    if (trustpilot_note_evidence or {}).get("evidence_found") is True:
+        return _trustpilot_note_history_label(trustpilot_note_evidence)
     if previous_trustpilot_order_names:
         return f"Already sent via {_join_order_names(previous_trustpilot_order_names)}"
     if action_state == "already_sent":
@@ -12115,8 +13242,11 @@ def _review_send_readiness_diagnosis(
     previous_trustpilot_order_names = _dedupe_order_names(
         candidate.get("previous_trustpilot_order_names") or []
     )
+    trustpilot_note_evidence = _trustpilot_note_evidence_from_sources(candidate)
+    trustpilot_note_evidence_found = trustpilot_note_evidence.get("evidence_found") is True
     prior_trustpilot_found = bool(
         previous_trustpilot_order_names
+        or trustpilot_note_evidence_found
         or candidate.get("customer_level_trustpilot_already_sent") is True
         or candidate.get("prior_trustpilot_order_name")
         or candidate.get("trustpilot_sent") is True
@@ -12142,6 +13272,10 @@ def _review_send_readiness_diagnosis(
         blocked_reason = "route/revalidation blocker"
         exact_user_message = "No email was sent. Server-side revalidation blocked this order."
         recommended_fix = "Review the server-side blocker before retrying Review & Send."
+    elif trustpilot_note_evidence_found:
+        blocked_reason = "historical Trustpilot note"
+        exact_user_message = f"No email was sent. {_trustpilot_note_evidence_reason(trustpilot_note_evidence)}"
+        recommended_fix = "Do not send another Trustpilot email for this customer unless a separate manual exception is approved."
     elif candidate_blocked:
         blocked_reason = "candidate no longer eligible"
         exact_user_message = "No email was sent. This order is no longer eligible."
@@ -12178,6 +13312,9 @@ def _review_send_readiness_diagnosis(
         "customer_history_confirmed": customer_history_confirmed,
         "customer_history_changed": customer_history_changed,
         "prior_trustpilot_found": prior_trustpilot_found,
+        "trustpilot_note_evidence_found": trustpilot_note_evidence_found,
+        "trustpilot_note_evidence_order_name": _safe_text(trustpilot_note_evidence.get("order_name"), max_length=80),
+        "trustpilot_note_safe_keyword": _safe_text(trustpilot_note_evidence.get("safe_keyword"), max_length=80),
         "already_sent": already_sent,
         "note_risk_found": note_risk_found,
         "ebay_tag_detected": ebay_tag_detected,
@@ -12371,7 +13508,15 @@ def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
     previous_trustpilot_order_names = _dedupe_order_names(
         candidate.get("previous_trustpilot_order_names") or []
     )
-    if previous_trustpilot_order_names or candidate.get("customer_level_trustpilot_already_sent") is True:
+    trustpilot_note_evidence = _trustpilot_note_evidence_from_sources(candidate)
+    if trustpilot_note_evidence.get("evidence_found") is True:
+        blockers.append(
+            {
+                "status": "blocked_existing_trustpilot_invitation_customer_level",
+                "detail": f"No email was sent. {_trustpilot_note_evidence_reason(trustpilot_note_evidence)}",
+            }
+        )
+    elif previous_trustpilot_order_names or candidate.get("customer_level_trustpilot_already_sent") is True:
         blockers.append(
             {
                 "status": "blocked_existing_trustpilot_invitation_customer_level",

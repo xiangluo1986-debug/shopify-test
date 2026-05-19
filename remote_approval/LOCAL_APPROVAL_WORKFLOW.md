@@ -578,6 +578,29 @@ count, weak name-only matches, note-risk blocks, low-confidence history blocks,
 and active Review & Send before/after counts. It performs no Shopify, Gmail,
 Trustpilot, Kudosi, Ali Reviews, or external API calls and performs no writes.
 
+Phase 5.31 extends the lifetime customer-history guard to scan historical local
+Shopify order notes for Trustpilot evidence such as `trustpilot`, `trustpoilt`,
+`truspilot`, `trustpoit`, and spacing/punctuation variants. Matching evidence
+blocks the customer from Needs review with only the safe keyword and historical
+order number shown; full note text and raw customer email remain hidden.
+
+`shopify_review_request_customer_lifetime_trustpilot_note_audit` is the local
+audit task for Phase 5.31. It reports the `#21687` lifetime order count,
+matched historical order names, match method/confidence, historical Trustpilot
+note evidence order, safe keyword, final eligibility/blockers, note-blocked
+candidate count, and active Review & Send before/after counts. It performs no
+Shopify, Gmail, Trustpilot, Kudosi, Ali Reviews, or external API calls and
+performs no writes.
+
+Phase 5.31B adds `shopify_review_request_customer_identity_drilldown_audit` for
+`#21687`. It compares local identity strategies (email, names, phone,
+postcode, and combined shipping identity), reports potential local matched
+order names, scans only safe historical note fields for Trustpilot/`trustpoilt`
+keywords, and recommends a wider Shopify customer/order sync when the local
+history is smaller than the Shopify UI count. It outputs no raw email, phone,
+address, or full note text and performs no Shopify, Gmail, external API, tag
+write, mutation, email send, or `translationsRegister` call.
+
 Phase 5.28J adds `shopify_review_request_review_send_failure_audit` for the
 `#21075` Review & Send failure and paginates the Needs review email queue. The
 audit reports the exact blocker, Gmail scope status, Gmail send permission
