@@ -262,6 +262,10 @@ review. Normal non-deploy tasks are not blocked.
   stopped only `bluegreen_proxy_test` and `web_green_test` during cleanup.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase.`
+- Final project deployment command policy is documented in
+  [AGENTS.md](../AGENTS.md), [SAFE_DEPLOY.md](SAFE_DEPLOY.md),
+  [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md), and
+  [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) before any production apply.
 - Any future execution request must supply `TargetColor` and `ActiveColor`, they
   must be different, `DeployLockPath` must stay under `.deploy/`, and missing
   migration, scheduler, media/static, or rollback confirmations must block.
@@ -374,6 +378,10 @@ These actions are not approved by this checklist alone:
   validation and separate manual production approval.
 - Proceeding with production apply before the production preflight document is
   reviewed and a separate exact command review is approved.
+- Proceeding with production apply before the final project deployment command
+  policy in `AGENTS.md` and `docs/SAFE_DEPLOY.md` is reviewed and current.
+
+Production remains NO-GO.
 
 ## Rollback Steps
 

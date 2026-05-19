@@ -24,6 +24,8 @@ $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
 $NextBlueGreenStep = "decide whether to implement runtime command execution in a separate task"
+$ProjectDeploymentPolicyPath = ".\AGENTS.md"
+$ProjectDeploymentPolicyStatus = "documented"
 $FinalRuntimeApprovalPath = ".\docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md"
 $FinalRuntimeApprovalStatus = "READY after review"
 $FinalRuntimeApprovalPhrase = "I_APPROVE_ENABLE_BLUE_GREEN_RUNTIME_COMMANDS_AFTER_FINAL_REVIEW"
@@ -206,6 +208,10 @@ function Show-DraftArtifactSummary {
             Path = ".\nginx\bluegreen.local-test.example.conf"
         },
         [pscustomobject]@{
+            Label = "Project deployment command policy"
+            Path = $ProjectDeploymentPolicyPath
+        },
+        [pscustomobject]@{
             Label = "Apply checklist"
             Path = ".\docs\BLUE_GREEN_DEPLOY_APPLY_CHECKLIST.md"
         },
@@ -353,6 +359,16 @@ function Show-DeploymentLockStatus {
         Write-Warn "safe_deploy script is missing: $safeDeployPath"
     }
 
+    if (Test-Path -LiteralPath $ProjectDeploymentPolicyPath) {
+        $policyText = Get-Content -LiteralPath $ProjectDeploymentPolicyPath -Raw
+        $policyDocumented = ($policyText -match "Deployment Command Policy") -and ($policyText -match "Production apply: NO-GO") -and ($policyText -match "Runtime execution: NOT ENABLED")
+        Write-Ok "Project deployment command policy exists: $ProjectDeploymentPolicyPath"
+        Write-Host "Project deployment command policy documented: $policyDocumented"
+    } else {
+        Write-Warn "Project deployment command policy is missing: $ProjectDeploymentPolicyPath"
+        Write-Host "Project deployment command policy documented: False"
+    }
+
     if (Test-Path -LiteralPath $productionApplyPath) {
         $productionApplyText = Get-Content -LiteralPath $productionApplyPath -Raw
         $productionApplySkeletonExists = ($productionApplyText -match "I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW") -and ($productionApplyText -match "Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase")
@@ -481,6 +497,7 @@ function Show-DeploymentLockStatus {
     Write-Host "Rollback command: $RollbackCommandStatus."
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
     Write-Host "Production implementation: $ProductionCommandImplementationStatus."
+    Write-Host "Project deployment command policy: $ProjectDeploymentPolicyStatus."
     Write-Host "Proxy validation hold-open mode: $ProxyValidationHoldOpenStatus in scripts/blue_green_local_inactive_startup.ps1."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Next step: $NextBlueGreenStep."
@@ -649,6 +666,7 @@ function Show-FuturePlan {
     Write-Host "Rollback command: $RollbackCommandStatus."
     Write-Host "Production implementation: $ProductionCommandImplementationStatus."
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
+    Write-Host "Project deployment command policy: $ProjectDeploymentPolicyStatus."
     Write-Host "Production apply: $ProductionApplyStatus."
     Write-Host "Next step: $NextBlueGreenStep."
     Write-Host "Future non-production validation requires explicit approval phrase: $NonProductionValidationApprovalPhrase"
@@ -717,6 +735,7 @@ Write-Ok "Proxy switch command: $ProxySwitchCommandStatus."
 Write-Ok "Rollback command: $RollbackCommandStatus."
 Write-Ok "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
 Write-Ok "Production implementation: $ProductionCommandImplementationStatus."
+Write-Ok "Project deployment command policy: $ProjectDeploymentPolicyStatus."
 Write-Ok "Proxy validation network fix: unified compose example was used for the passed local/test validation."
 Write-Ok "Proxy validation hold-open mode: completed for the passed local/test validation."
 Write-Ok "Local proxy routing validation approval package status: exists if reported above; passed result recorded and future reruns require explicit approval phrase and deployment lock."

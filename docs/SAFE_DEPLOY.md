@@ -228,6 +228,36 @@ an existing lock, it should stop and require a manual rerun after the current
 deploy is complete. Normal non-deploy tasks are not blocked by this deployment
 lock.
 
+## Command policy
+
+Current safe deploy command:
+
+```powershell
+.\scripts\safe_deploy.ps1
+```
+
+Current non-deploy commands remain unchanged. Django checks, Codex runner
+tasks, Review Request dry-runs, Translation dry-runs, documentation updates,
+and read-only reports should keep using their existing task-specific commands
+as long as they do not deploy, restart, switch traffic, write external systems,
+or expose secrets.
+
+Deployment/update commands are special. Do not rely on manual
+`docker compose up -d --build` as the long-term deployment method. Use
+`scripts/safe_deploy.ps1` for the current deployment safety flow. After
+blue-green deployment is implemented and explicitly approved, the future
+blue-green deployment script replaces only the deploy command; normal
+non-deploy commands stay unchanged.
+
+Deployment lock enforcement is active for real `safe_deploy` mode and is
+required for any future runtime-changing blue-green path. If the lock exists,
+the deploy task must stop and require manual rerun; it must not auto-queue.
+Normal dry-run, read-only, documentation, and non-deploy tasks are not blocked
+by the deployment lock.
+
+Current status: production blue-green runtime execution is NOT ENABLED and
+production apply remains NO-GO.
+
 Optional flags:
 
 ```powershell

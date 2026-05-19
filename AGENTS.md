@@ -86,6 +86,67 @@ docker system prune
 python manage.py flush
 ```
 
+## Deployment Command Policy
+
+Normal development and internal task commands remain unchanged. Examples
+include:
+
+```powershell
+docker compose exec -T web python manage.py check
+python remote_approval_runner.py --task <task-name> --approval local
+.\scripts\run_codex_clipboard_task.ps1
+```
+
+Django checks, Codex runner tasks, Review Request dry-runs, Translation
+dry-runs, documentation updates, and read-only reports may continue to use
+their existing task-specific commands as long as they do not deploy, restart,
+switch traffic, write external systems, or expose secrets.
+
+Deployment and update commands are special:
+
+- Do not rely on manual `docker compose up -d --build` as the long-term
+  deployment method.
+- Use `scripts/safe_deploy.ps1` for the current deployment safety flow.
+- After blue-green deployment is implemented and explicitly approved, use the
+  future blue-green deployment script instead of the current safe deploy
+  command.
+- Production blue-green runtime execution is currently NOT ENABLED.
+- Production blue-green apply is currently NO-GO.
+
+Deployment lock rule:
+
+- Any task that may build, restart, deploy, switch, clean up, or otherwise
+  change the web runtime must use the deployment lock.
+- Only one deployment or runtime-changing task may run at a time.
+- If the lock exists, the second deployment task must stop and require a
+  manual rerun after the current deploy completes.
+- Do not auto-queue deployment tasks behind the lock.
+- Normal non-deploy tasks are not blocked by the deployment lock.
+
+New deployable project default rule:
+
+- Add `/healthz/` or `/api/health` early.
+- Add `scripts/safe_deploy.ps1` or `scripts/safe_deploy.sh`.
+- Add `docs/SAFE_DEPLOY.md`.
+- Add health check validation to the deploy flow.
+- Add rollback and log inspection notes.
+- Do not commit secrets, logs, local config, tokens, credentials, database
+  dumps, or runtime state.
+- Do not depend on unsafe manual deploy commands forever.
+
+This default applies especially to Docker, Django, Shopify App, Node, and
+Laravel projects.
+
+Current blue-green status:
+
+- Local inactive runtime validation: PASSED.
+- Local/test proxy routing validation: PASSED.
+- `safe_deploy` lock enforcement: active.
+- Production apply: NO-GO.
+- Runtime execution: NOT ENABLED.
+- Future production apply requires separate implementation, review, deployment
+  lock enforcement, and explicit approval.
+
 ## Shopify API / Token Rules
 
 - Treat Shopify tokens as secrets. Never print them.

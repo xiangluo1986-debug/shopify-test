@@ -54,6 +54,21 @@ The goal is to prevent overlapping operations such as two builds racing, one
 task switching traffic while another restarts a service, or one cleanup command
 stopping a service another task just made active.
 
+## Who Is Affected
+
+Affected tasks include `safe_deploy`, any future blue-green deploy, proxy
+switch, rollback, cleanup, build, restart, start, stop, or other
+runtime-changing web deployment task.
+
+Not affected: normal Codex documentation or code tasks, dry-run reports,
+read-only checks, Review Request dry-runs, Translation dry-runs, normal admin
+usage, and other non-deploy work that does not modify runtime state.
+
+If a second deployment task sees an existing lock, it must block and exit
+non-zero. It must not wait in an automatic queue. The operator should rerun it
+manually after the current deployment/runtime-changing task has completed and
+the lock is released.
+
 ## Runtime-Changing Path Inventory
 
 The following current or future actions are runtime-changing deployment paths.
