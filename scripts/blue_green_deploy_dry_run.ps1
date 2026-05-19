@@ -23,7 +23,7 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO for scripted apply; external route active through 18000 candidate"
-$NextBlueGreenStep = "post-cutover observation and hardening plan"
+$NextBlueGreenStep = "ChatGPT review of post-cutover observation and hardening docs"
 $CloudflareTunnelName = "aftersales-ticket"
 $CloudflarePublishedRouteTarget = "http://127.0.0.1:18000"
 $CloudflareTicketsHostname = "tickets.kidstoyloverapps.com"
@@ -85,6 +85,14 @@ $ExternalRoutingRecommendedNextPath = "post-cutover observation and hardening pl
 $ProductionProxyOwnershipStatus = "Cloudflare routes target 18000 candidate; 8000 remains rollback target; future 8000 ownership not approved"
 $ProductionSwitchRollbackReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md"
 $ProductionSwitchRollbackReviewStatus = "READY after review"
+$PostCutoverObservationPath = ".\docs\BLUE_GREEN_POST_CUTOVER_OBSERVATION.md"
+$PostCutoverObservationStatus = "READY for ChatGPT review"
+$HardeningPlanPath = ".\docs\BLUE_GREEN_HARDENING_PLAN.md"
+$HardeningPlanStatus = "READY for ChatGPT review"
+$RollbackRunbookPath = ".\docs\BLUE_GREEN_ROLLBACK_RUNBOOK.md"
+$RollbackRunbookStatus = "READY for ChatGPT review"
+$LongTermOperationsPath = ".\docs\BLUE_GREEN_LONG_TERM_OPERATIONS.md"
+$LongTermOperationsStatus = "READY for ChatGPT review"
 $RuntimeCommandHelperPath = ".\scripts\blue_green_runtime_commands.ps1"
 $RuntimeCommandHelperStatus = "plan-only / no-action"
 $RuntimeCommandExecutionStatus = "NOT ENABLED"
@@ -360,6 +368,22 @@ function Show-DraftArtifactSummary {
         [pscustomobject]@{
             Label = "Production switch/rollback review"
             Path = $ProductionSwitchRollbackReviewPath
+        },
+        [pscustomobject]@{
+            Label = "Post-cutover observation"
+            Path = $PostCutoverObservationPath
+        },
+        [pscustomobject]@{
+            Label = "Post-cutover hardening plan"
+            Path = $HardeningPlanPath
+        },
+        [pscustomobject]@{
+            Label = "Post-cutover rollback runbook"
+            Path = $RollbackRunbookPath
+        },
+        [pscustomobject]@{
+            Label = "Long-term blue-green operations"
+            Path = $LongTermOperationsPath
         },
         [pscustomobject]@{
             Label = "Local apply simulation read-only preview"
@@ -700,6 +724,14 @@ function Show-DeploymentLockStatus {
     Write-Host "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
     Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
     Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
+    Write-Host "Post-cutover observation: $PostCutoverObservationStatus."
+    Write-Host "Post-cutover observation doc exists: $(Test-Path -LiteralPath $PostCutoverObservationPath)."
+    Write-Host "Post-cutover hardening plan: $HardeningPlanStatus."
+    Write-Host "Post-cutover hardening plan exists: $(Test-Path -LiteralPath $HardeningPlanPath)."
+    Write-Host "Rollback runbook: $RollbackRunbookStatus."
+    Write-Host "Rollback runbook exists: $(Test-Path -LiteralPath $RollbackRunbookPath)."
+    Write-Host "Long-term operations doc: $LongTermOperationsStatus."
+    Write-Host "Long-term operations doc exists: $(Test-Path -LiteralPath $LongTermOperationsPath)."
     Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
     Write-Host "Conservative defaults: nginx proxy candidate; current web owns port 8000 until final approval; web_blue/web_green/bluegreen_proxy service names; .deploy/active-color.json state; rollback to previous_color; at least 10 minutes of observation."
     Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
@@ -919,6 +951,14 @@ function Show-FuturePlan {
     Write-Host "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
     Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
     Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
+    Write-Host "Post-cutover observation: $PostCutoverObservationStatus."
+    Write-Host "Post-cutover observation doc exists: $(Test-Path -LiteralPath $PostCutoverObservationPath)."
+    Write-Host "Post-cutover hardening plan: $HardeningPlanStatus."
+    Write-Host "Post-cutover hardening plan exists: $(Test-Path -LiteralPath $HardeningPlanPath)."
+    Write-Host "Rollback runbook: $RollbackRunbookStatus."
+    Write-Host "Rollback runbook exists: $(Test-Path -LiteralPath $RollbackRunbookPath)."
+    Write-Host "Long-term operations doc: $LongTermOperationsStatus."
+    Write-Host "Long-term operations doc exists: $(Test-Path -LiteralPath $LongTermOperationsPath)."
     Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
     Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
     Write-Host "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."
@@ -1049,6 +1089,14 @@ Write-Ok "External routing recommended next path: $ExternalRoutingRecommendedNex
 Write-Ok "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
 Write-Ok "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
 Write-Ok "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
+Write-Ok "Post-cutover observation: $PostCutoverObservationStatus."
+Write-Ok "Post-cutover observation doc exists: $(Test-Path -LiteralPath $PostCutoverObservationPath)."
+Write-Ok "Post-cutover hardening plan: $HardeningPlanStatus."
+Write-Ok "Post-cutover hardening plan exists: $(Test-Path -LiteralPath $HardeningPlanPath)."
+Write-Ok "Rollback runbook: $RollbackRunbookStatus."
+Write-Ok "Rollback runbook exists: $(Test-Path -LiteralPath $RollbackRunbookPath)."
+Write-Ok "Long-term operations doc: $LongTermOperationsStatus."
+Write-Ok "Long-term operations doc exists: $(Test-Path -LiteralPath $LongTermOperationsPath)."
 Write-Ok "Production proxy/active-color/rollback details have conservative defaults and reviewed switch/rollback design."
 Write-Ok "Active-color state design reviewed."
 Write-Ok "Runtime command helper exists: $(Test-Path -LiteralPath $RuntimeCommandHelperPath)."

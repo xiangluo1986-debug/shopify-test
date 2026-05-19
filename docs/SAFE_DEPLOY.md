@@ -51,6 +51,14 @@ The final pre-cutover live checklist is documented at
 [BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md](BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md).
 The production switch/rollback review document is documented at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+The post-cutover observation document is documented at
+[BLUE_GREEN_POST_CUTOVER_OBSERVATION.md](BLUE_GREEN_POST_CUTOVER_OBSERVATION.md).
+The post-cutover hardening plan is documented at
+[BLUE_GREEN_HARDENING_PLAN.md](BLUE_GREEN_HARDENING_PLAN.md).
+The manual rollback runbook is documented at
+[BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md).
+The long-term operations document is documented at
+[BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md).
 The final runtime approval design is documented at
 [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
 These documents are READY after review; production implementation is NOT
@@ -321,7 +329,9 @@ The rollback target is `http://127.0.0.1:8000`. Candidate services must remain
 running. The final runtime rehearsal has PASSED, and the `18000` candidate
 route has PASSED. The Cloudflare cutover result is documented at
 [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
-The next step is post-cutover observation and hardening plan, not a deploy.
+The post-cutover observation and hardening docs are ready for ChatGPT review;
+the next step is review and separately approved monitoring/proxy hardening,
+not a deploy.
 
 Optional flags:
 
@@ -599,7 +609,7 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
 - Production apply scripts remain no-action / blocked unless separately
   approved.
 - Final runtime rehearsal: PASSED.
-- Next required step: post-cutover observation and hardening plan.
+- Post-cutover observation and hardening docs are ready for ChatGPT review.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
@@ -622,4 +632,4 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
   candidate.
 - Production apply scripts remain no-action / blocked unless separately
   approved.
-- Next required step: post-cutover observation and hardening plan.
+- Post-cutover observation and hardening docs are ready for ChatGPT review.

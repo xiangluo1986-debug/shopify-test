@@ -48,6 +48,10 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md)
 - [BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md](BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+- [BLUE_GREEN_POST_CUTOVER_OBSERVATION.md](BLUE_GREEN_POST_CUTOVER_OBSERVATION.md)
+- [BLUE_GREEN_HARDENING_PLAN.md](BLUE_GREEN_HARDENING_PLAN.md)
+- [BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md)
+- [BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
@@ -277,7 +281,16 @@ configuration untouched.
   candidate.
 - Production apply scripts remain no-action / blocked unless separately
   approved.
-- Next future step: post-cutover observation and hardening plan.
+- Post-cutover observation doc:
+  [BLUE_GREEN_POST_CUTOVER_OBSERVATION.md](BLUE_GREEN_POST_CUTOVER_OBSERVATION.md).
+- Hardening plan:
+  [BLUE_GREEN_HARDENING_PLAN.md](BLUE_GREEN_HARDENING_PLAN.md).
+- Rollback runbook:
+  [BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md).
+- Long-term operations:
+  [BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md).
+- Next future step: review the post-cutover hardening package and implement
+  approved monitoring/proxy hardening in a separate task.
 
 ## Deployment Lock Gate
 
@@ -733,8 +746,14 @@ and remains no-action.
 
 ## Immediate Next Task Recommendation
 
-Continue post-cutover observation and prepare a hardening plan for the active
-Option B Cloudflare route path.
+Review the post-cutover observation and hardening package for the active
+Option B Cloudflare route path:
+
+- [BLUE_GREEN_POST_CUTOVER_OBSERVATION.md](BLUE_GREEN_POST_CUTOVER_OBSERVATION.md)
+- [BLUE_GREEN_HARDENING_PLAN.md](BLUE_GREEN_HARDENING_PLAN.md)
+- [BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md)
+- [BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md)
+
 Use the production runtime details document at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
 the switch/rollback review document at
@@ -817,7 +836,7 @@ separate production task approves the exact runtime path being used.
 - Production apply scripts remain no-action / blocked unless separately
   approved.
 - Final runtime rehearsal: PASSED.
-- Next required step: post-cutover observation and hardening plan.
+- Post-cutover observation and hardening docs are ready for ChatGPT review.
 - The candidate files do not start/stop/restart/build containers, run
   migrations, run collectstatic, reload proxy, switch traffic, write
   active-color state, or change production nginx/proxy config.
@@ -843,4 +862,4 @@ separate production task approves the exact runtime path being used.
   candidate.
 - Production apply scripts remain no-action / blocked unless separately
   approved.
-- Next required step: post-cutover observation and hardening plan.
+- Post-cutover observation and hardening docs are ready for ChatGPT review.
