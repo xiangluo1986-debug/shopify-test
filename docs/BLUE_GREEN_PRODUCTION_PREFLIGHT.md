@@ -11,8 +11,9 @@ created for the exact runtime path and command set.
 The production apply readiness checklist and exact command review package is
 documented separately at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
-It is READY after review, but production command implementation remains NOT
-READY and production apply remains NO-GO.
+It is READY after review, but exact production runtime command implementation
+is not approved yet. The production command path skeleton is implemented but
+blocked, and production apply remains NO-GO.
 
 ## Current Passed Validations
 
@@ -20,7 +21,8 @@ READY and production apply remains NO-GO.
 - Local/test proxy routing validation: PASSED.
 - Deployment lock helper: available.
 - safe_deploy real mode: lock enforced.
-- Production apply skeleton: no-action only.
+- Production command path skeleton: implemented but blocked.
+- Exact production runtime command implementation: not approved yet.
 - Production apply readiness package:
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
   exists for exact command review.
@@ -148,7 +150,8 @@ READY and production apply remains NO-GO.
 - Production preflight document: READY after review.
 - Production apply readiness package: READY after review at
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
-- Production command implementation: NOT READY.
+- Production command path skeleton: implemented but blocked.
+- Exact production runtime command implementation: not approved yet.
 - Production apply: NO-GO.
 - Next step: review
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)

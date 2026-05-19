@@ -10,10 +10,10 @@ The standalone helper now exists at `scripts/deploy_lock.ps1`.
 `scripts/safe_deploy.ps1` now enforces the deployment lock in real
 non-dry-run mode. It also has dry-run/check-only lock awareness for validation
 without deployment. `scripts/blue_green_production_apply.ps1` now exists as a
-no-action production apply skeleton that documents the future lock gates, but
-real production blue-green apply remains NO-GO until a future apply task
-implements exact runtime commands, reviews the successful local/test proxy
-validation, reviews
+blocked production command path skeleton that documents the future lock gates
+and prints all planned phases as `NOT RUN`, but real production blue-green
+apply remains NO-GO until a future apply task approves exact runtime commands,
+reviews the successful local/test proxy validation, reviews
 [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md),
 reviews the production apply readiness package at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md),
@@ -221,25 +221,29 @@ The production apply skeleton is:
 scripts/blue_green_production_apply.ps1
 ```
 
-Current status: skeleton only / no-action. Default execution prints the
-production apply plan, required non-production validation gate, required lock
-behavior, future steps, and exits `0` without acquiring the deployment lock or
-changing runtime state.
+Current status: command path skeleton implemented but blocked. Default
+execution prints the production apply plan, required non-production validation
+gate, required lock behavior, preflight, target color preparation, switch,
+observe, rollback, and cleanup phases, and exits `0` without acquiring the
+deployment lock or changing runtime state.
 
-The required approval phrase for any future production apply execution request
-is:
+The draft readiness phrase used by the current skeleton only to prove blocked
+behavior is:
 
 ```text
-I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK
+I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW
 ```
 
 The skeleton blocks execution requests without the exact phrase, blocks missing
 or same target/active color choices, and blocks any `DeployLockPath` outside
-`.deploy/`. Even with the correct phrase, it still blocks real production apply
+`.deploy/`. Missing migration compatibility, scheduler singleton, shared
+media/static storage, or rollback command confirmations also block execution
+requests. Even when all parameters and confirmations are present, the draft
+phrase is NOT ACTIVE for real production apply and the skeleton still blocks
 with:
 
 ```text
-Real production blue-green apply is not implemented in this phase.
+Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase.
 ```
 
 The skeleton does not run Docker Compose commands, start/stop/restart/build
@@ -258,8 +262,9 @@ and data safety checks.
 The production apply readiness checklist and exact command review package is
 documented at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
-It is READY after review, but production command implementation remains NOT
-READY and production apply remains NO-GO.
+It is READY after review, but exact production runtime command implementation
+is not approved yet. The command path skeleton is implemented but blocked and
+production apply remains NO-GO.
 
 Production apply now has successful local inactive runtime validation and
 local/test proxy routing validation documented in
@@ -341,8 +346,8 @@ runtime-changing actions should use the shared deployment lock.
 
 - `safe_deploy.ps1`: enforced in real mode.
 - Blue-green production apply skeleton:
-  `scripts/blue_green_production_apply.ps1`; no-action by default and real
-  production apply remains blocked.
+  `scripts/blue_green_production_apply.ps1`; command path skeleton implemented
+  but blocked, no-action by default, and real production apply remains blocked.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
@@ -365,7 +370,7 @@ runtime-changing actions should use the shared deployment lock.
   `bluegreen_proxy_test` and `web_green_test` on the same local Docker network.
 - Production apply readiness package:
   `docs/BLUE_GREEN_PRODUCTION_APPLY_READINESS.md`; READY after review for exact
-  command review, production command implementation remains NOT READY, and
+  command review, exact runtime command implementation is not approved yet, and
   production apply remains NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
@@ -386,8 +391,8 @@ runtime-changing actions should use the shared deployment lock.
 - `scripts/safe_deploy.ps1 -ValidateDeployLockOnly` validates acquire/release
   with a selected lock path and runs no deploy commands.
 - `scripts/blue_green_production_apply.ps1` exists as a no-action skeleton. It
-  prints the future lock flow but does not acquire the lock in default or
-  blocked execution modes.
+  prints the future lock flow and structured production command phases but does
+  not acquire the lock in default or blocked execution modes.
 - Production blue-green apply remains NO-GO until a separate future apply task
   approves exact runtime commands, confirms every runtime-changing path uses
   the deployment lock, reviews successful local/test proxy validation, reviews

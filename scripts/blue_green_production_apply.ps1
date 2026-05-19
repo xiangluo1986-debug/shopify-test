@@ -7,19 +7,23 @@ param(
     [string]$DeployLockPath = ".deploy/deploy.lock",
     [string]$TargetColor = "",
     [string]$ActiveColor = "",
-    [switch]$RequireLockValidation = $true
+    [switch]$RequireLockValidation = $true,
+    [switch]$MigrationCompatibilityConfirmed,
+    [switch]$SchedulerSingletonConfirmed,
+    [switch]$SharedMediaStaticStorageConfirmed,
+    [switch]$RollbackCommandConfirmed
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$RequiredApprovalPhrase = "I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK"
+$DraftReadinessApprovalPhrase = "I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW"
+$ActiveProductionApprovalPhrase = "<none - real production apply approval is not active in this phase>"
 $ProjectRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $DeployDirectory = [System.IO.Path]::GetFullPath((Join-Path -Path $ProjectRoot -ChildPath ".deploy"))
 $DeployLockHelperPath = Join-Path -Path $PSScriptRoot -ChildPath "deploy_lock.ps1"
 $ProductionPreflightPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_PREFLIGHT.md"
 $ProductionReadinessPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md"
-$DraftReadinessApprovalPhrase = "I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW"
 
 function Write-Step {
     param([string]$Message)
@@ -113,6 +117,28 @@ function Test-ColorValue {
     return $normalized
 }
 
+function Get-MissingConfirmationGates {
+    $missing = New-Object System.Collections.Generic.List[string]
+
+    if (-not [bool]$MigrationCompatibilityConfirmed) {
+        $missing.Add("MigrationCompatibilityConfirmed")
+    }
+
+    if (-not [bool]$SchedulerSingletonConfirmed) {
+        $missing.Add("SchedulerSingletonConfirmed")
+    }
+
+    if (-not [bool]$SharedMediaStaticStorageConfirmed) {
+        $missing.Add("SharedMediaStaticStorageConfirmed")
+    }
+
+    if (-not [bool]$RollbackCommandConfirmed) {
+        $missing.Add("RollbackCommandConfirmed")
+    }
+
+    return $missing.ToArray()
+}
+
 function Show-PlanHeader {
     param([string]$ResolvedLockPath)
 
@@ -123,17 +149,22 @@ function Show-PlanHeader {
     Write-Host "PlanOnly: $([bool]$PlanOnly)"
     Write-Host "ExecuteProductionApply requested: $([bool]$ExecuteProductionApply)"
     Write-Host "RequireLockValidation: $([bool]$RequireLockValidation)"
-    Write-Host "Required approval phrase: $RequiredApprovalPhrase"
-    Write-Host "Draft readiness approval phrase: $DraftReadinessApprovalPhrase (not active; not accepted by current scripts)"
+    Write-Host "Active production approval phrase: $ActiveProductionApprovalPhrase"
+    Write-Host "Draft readiness approval phrase: $DraftReadinessApprovalPhrase (NOT ACTIVE for real apply; accepted only to prove blocking behavior)"
     Write-Host "TargetColor: $(if ([string]::IsNullOrWhiteSpace($TargetColor)) { '<not provided>' } else { $TargetColor })"
     Write-Host "ActiveColor: $(if ([string]::IsNullOrWhiteSpace($ActiveColor)) { '<not provided>' } else { $ActiveColor })"
     Write-Host "Deployment lock path: $(Get-RelativeProjectPath -Path $ResolvedLockPath)"
     Write-Host "Resolved deployment lock path: $ResolvedLockPath"
     Write-Host "Deployment lock helper exists: $(Test-Path -LiteralPath $DeployLockHelperPath -PathType Leaf)"
+    Write-Host "Migration compatibility confirmation: $([bool]$MigrationCompatibilityConfirmed)"
+    Write-Host "Scheduler singleton confirmation: $([bool]$SchedulerSingletonConfirmed)"
+    Write-Host "Media/static shared storage confirmation: $([bool]$SharedMediaStaticStorageConfirmed)"
+    Write-Host "Rollback command confirmation: $([bool]$RollbackCommandConfirmed)"
 }
 
 function Show-NoActionBoundary {
     Write-Step "No-action boundary"
+    Write-Host "Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase."
     Write-Host "This skeleton does not deploy."
     Write-Host "This skeleton does not start, stop, restart, or build containers."
     Write-Host "This skeleton does not run migrations."
@@ -162,40 +193,70 @@ function Show-ProductionPreflightGate {
     Write-Host "Production preflight document status: READY after review."
     Write-Host "Production apply readiness package status: READY after review."
     Write-Host "Exact production command review is required."
-    Write-Host "Production apply command implementation: NOT READY / not yet implemented."
-    Write-Host "Draft readiness approval phrase is not active yet: $DraftReadinessApprovalPhrase."
+    Write-Host "Production command path skeleton: implemented but blocked."
+    Write-Host "Exact runtime-changing command implementation: not approved yet."
+    Write-Host "Draft readiness approval phrase is not active for real apply: $DraftReadinessApprovalPhrase."
     Write-Host "Production apply still remains NO-GO."
-    Write-Host "Exact production apply command is not implemented in this skeleton."
+    Write-Host "Exact production apply commands are not approved in this skeleton."
     Write-Host "Migration, scheduler singleton, media/static/uploads, proxy/port ownership, active/target color, health check, rollback, observation, cleanup, and data safety checks must pass first."
 }
 
-function Show-LockFlow {
-    Write-Step "Future required deployment lock flow"
+function Show-ConfirmationGatePlan {
+    Write-Step "Required safety confirmations"
+    Write-Host "NOT RUN: migration compatibility confirmation gate. Supplied: $([bool]$MigrationCompatibilityConfirmed)"
+    Write-Host "NOT RUN: scheduler singleton confirmation gate. Supplied: $([bool]$SchedulerSingletonConfirmed)"
+    Write-Host "NOT RUN: media/static shared storage confirmation gate. Supplied: $([bool]$SharedMediaStaticStorageConfirmed)"
+    Write-Host "NOT RUN: rollback command confirmation gate. Supplied: $([bool]$RollbackCommandConfirmed)"
+    Write-Host "Missing confirmations block execution requests. Even complete confirmations do not enable runtime action in this phase."
+}
+
+function Show-ProductionCommandPathSkeleton {
+    Write-Step "Phase 1 - Preflight (planned / NOT RUN)"
+    Write-Host "NOT RUN: git status."
+    Write-Host "NOT RUN: deployment lock status."
+    Write-Host "NOT RUN: current 8000 /healthz/ check."
+    Write-Host "NOT RUN: active color / target color validation."
+    Write-Host "NOT RUN: migration compatibility gate."
+    Write-Host "NOT RUN: scheduler singleton gate."
+    Write-Host "NOT RUN: media/static shared storage gate."
+    Write-Host "NOT RUN: rollback command gate."
+
+    Write-Step "Phase 2 - Lock (planned / NOT RUN)"
     Write-Host "NOT RUN: acquire deployment lock before any build/start/migrate/collectstatic/proxy switch/cleanup."
-    Write-Host "NOT RUN: block immediately if the lock exists; do not queue behind it."
+    Write-Host "NOT RUN: block immediately and exit non-zero if the lock exists."
+    Write-Host "NOT RUN: do not auto-queue behind an existing lock."
     Write-Host "NOT RUN: store a generated lock_id in the lock record for the owning deploy flow."
     Write-Host "NOT RUN: release only the matching lock_id in finally/cleanup handling."
     Write-Host "NOT RUN: print sanitized lock owner metadata for manual review when blocked."
-    Write-Host "NOT RUN: stale lock review must be manual."
-    Write-Host "NOT RUN: no automatic stale lock deletion."
+    Write-Host "NOT RUN: stale lock review must be manual; no automatic stale lock deletion."
     Write-Host "Normal non-deploy tasks are not blocked by this deployment lock."
     Write-Host "Current skeleton lock validation is path and plan validation only; no lock is acquired."
-}
 
-function Show-FutureSteps {
-    Write-Step "Future production apply phases"
-    Write-Host "NOT RUN: exact production apply command review."
-    Write-Host "NOT RUN: preflight git status."
-    Write-Host "NOT RUN: current active health check."
-    Write-Host "NOT RUN: validate target inactive color."
-    Write-Host "NOT RUN: prepare image."
-    Write-Host "NOT RUN: start target inactive color."
-    Write-Host "NOT RUN: health check target color."
-    Write-Host "NOT RUN: optional migration only if policy approved."
-    Write-Host "NOT RUN: proxy switch only after health pass."
-    Write-Host "NOT RUN: observe."
-    Write-Host "NOT RUN: rollback path."
-    Write-Host "NOT RUN: cleanup old color only after observation."
+    Write-Step "Phase 3 - Prepare target color (planned / NOT RUN)"
+    Write-Host "NOT RUN: future image/build preparation."
+    Write-Host "NOT RUN: future target color start."
+    Write-Host "NOT RUN: future target color health check."
+
+    Write-Step "Phase 4 - Switch (planned / NOT RUN)"
+    Write-Host "NOT RUN: future proxy config validation."
+    Write-Host "NOT RUN: future proxy switch."
+    Write-Host "NOT RUN: future post-switch health check."
+
+    Write-Step "Phase 5 - Observe (planned / NOT RUN)"
+    Write-Host "NOT RUN: future observation window."
+    Write-Host "NOT RUN: future log checks."
+    Write-Host "NOT RUN: future health checks."
+
+    Write-Step "Phase 6 - Rollback (planned / NOT RUN)"
+    Write-Host "NOT RUN: future rollback to previous color."
+    Write-Host "NOT RUN: old color retained during observation."
+    Write-Host "NOT RUN: no automatic database rollback."
+
+    Write-Step "Phase 7 - Cleanup (planned / NOT RUN)"
+    Write-Host "NOT RUN: future cleanup only after observation."
+    Write-Host "NOT RUN: no database, media, static, upload, or secret-bearing volume removal."
+    Write-Host "NOT RUN: no scheduler duplication."
+    Write-Host "NOT RUN: no cleanup of previous color until rollback is no longer immediately needed."
 }
 
 function Show-BlockingResult {
@@ -205,8 +266,10 @@ function Show-BlockingResult {
     )
 
     Write-Step "Result"
+    Write-Fail "Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase."
     Write-Fail $Message
     Write-Fail "Production blue-green apply remains blocked. No runtime action was performed."
+    Write-Fail "Production apply remains NO-GO."
     exit $Code
 }
 
@@ -235,8 +298,8 @@ Show-PlanHeader -ResolvedLockPath $resolvedLockPath
 Show-NoActionBoundary
 Show-NonProductionGate
 Show-ProductionPreflightGate
-Show-LockFlow
-Show-FutureSteps
+Show-ConfirmationGatePlan
+Show-ProductionCommandPathSkeleton
 
 if ((-not [string]::IsNullOrWhiteSpace($normalizedTargetColor)) -and
     (-not [string]::IsNullOrWhiteSpace($normalizedActiveColor)) -and
@@ -249,14 +312,10 @@ if (-not $ExecuteProductionApply) {
     Write-Ok "Plan-only production apply skeleton completed. No runtime action was performed."
     Write-Ok "Successful non-production validation and manual approval are required before production apply."
     Write-Ok "Production readiness document exists if reported above; exact command review is required."
-    Write-Ok "Production apply command is still not implemented."
-    Write-Ok "Draft readiness approval phrase is not active yet and is not accepted by current scripts."
+    Write-Ok "Production command path skeleton is implemented but blocked."
+    Write-Ok "Draft readiness approval phrase is not active for real apply."
     Write-Ok "Production real apply remains NO-GO."
     exit 0
-}
-
-if ($Ack -ne $RequiredApprovalPhrase) {
-    Show-BlockingResult -Message "ExecuteProductionApply requires the exact approval phrase." -Code 2
 }
 
 try {
@@ -270,18 +329,27 @@ if ($normalizedTargetColor -eq $normalizedActiveColor) {
     Show-BlockingResult -Message "TargetColor must be different from ActiveColor." -Code 6
 }
 
+if ($Ack -ne $DraftReadinessApprovalPhrase) {
+    Show-BlockingResult -Message "ExecuteProductionApply requires the exact draft readiness phrase for skeleton validation. No active real-apply approval phrase exists in this phase." -Code 2
+}
+
 if (-not $RequireLockValidation) {
     Show-BlockingResult -Message "RequireLockValidation must remain enabled before any future runtime-changing apply." -Code 7
 }
 
+$missingConfirmations = @(Get-MissingConfirmationGates)
+if ($missingConfirmations.Count -gt 0) {
+    Show-BlockingResult -Message ("Missing required production safety confirmations: " + ($missingConfirmations -join ", ") + ".") -Code 8
+}
+
 Write-Step "Approved execution request"
-Write-Warn "The approval phrase matched, target color differs from active color, and the lock path is constrained to .deploy/."
-Write-Fail "Real production blue-green apply is not implemented in this phase."
+Write-Warn "The draft readiness phrase matched, target color differs from active color, confirmation gates were supplied, and the lock path is constrained to .deploy/."
+Write-Fail "Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase."
 Write-Fail "No docker compose up/down/restart/build was run."
 Write-Fail "No proxy switch, migration, collectstatic, traffic switch, or cleanup was run."
 Write-Fail "No deployment lock was acquired because this skeleton has no real production apply implementation."
-Write-Fail "Exact production apply command is not implemented; migration, scheduler, media/static, proxy, rollback, observation, cleanup, and data safety checks must pass first."
-Write-Fail "Draft readiness approval phrase is not active yet; production apply remains NO-GO."
+Write-Fail "Exact production apply commands are not approved; migration, scheduler, media/static, proxy, rollback, observation, cleanup, and data safety checks must pass first."
+Write-Fail "Draft readiness approval phrase is not active for real apply; production apply remains NO-GO."
 
 Write-Step "Result"
 Write-Fail "Production blue-green apply remains blocked by the skeleton."

@@ -83,24 +83,24 @@ The current `web`, port `8000`, production traffic, active Compose file,
 Cloudflare/domain routing, migrations, collectstatic, Shopify/Gmail/API paths,
 and email sending remain out of scope.
 
-The production apply skeleton at
-`scripts/blue_green_production_apply.ps1` is skeleton only / no-action by
-default. It prints the future production apply plan, required non-production
-validation gate, required deployment lock flow, and approval gate, then exits
-without acquiring the production lock,
-running Docker commands, running migrations, running collectstatic, switching
-traffic, or modifying files. The required approval phrase for a future
-execution request is:
+The production apply command path skeleton at
+`scripts/blue_green_production_apply.ps1` is implemented but blocked. It
+prints structured planned phases for preflight, lock, target color preparation,
+switch, observe, rollback, and cleanup, then exits without acquiring the
+production lock, running Docker commands, running migrations, running
+collectstatic, switching traffic, or modifying files. The draft readiness
+phrase used only to prove blocked skeleton behavior is:
 
 ```text
-I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK
+I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW
 ```
 
-Even with the correct approval phrase, real production blue-green apply remains
+This phrase is NOT ACTIVE for real production apply in this phase. Even with
+the draft phrase and valid parameters, real production blue-green apply remains
 blocked in this skeleton phase and prints:
 
 ```text
-Real production blue-green apply is not implemented in this phase.
+Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase.
 ```
 
 Production remains NO-GO.
@@ -130,8 +130,9 @@ The production apply readiness checklist and exact command review package
 exists at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
 It records the future command groups, safety gates, draft approval phrase, and
-remaining production decisions. It is READY after review; production command
-implementation is NOT READY and production apply remains NO-GO.
+remaining production decisions. It is READY after review; the production
+command path skeleton is implemented but blocked, exact runtime command
+implementation is not approved yet, and production apply remains NO-GO.
 
 The local/test proxy routing validation approval package exists at
 [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -157,10 +158,10 @@ configuration untouched.
 
 `scripts/safe_deploy.ps1` now enforces the deployment lock in real mode.
 `scripts/blue_green_production_apply.ps1` now documents the future production
-apply lock gates, but remains no-action and does not implement real apply.
+apply lock gates as a structured skeleton, but remains no-action and blocked.
 Production blue-green apply must still not proceed until a future phase
-implements and validates the same lock rule in the exact runtime-changing
-blue-green path. The shared lock is documented in
+approves and validates exact runtime-changing commands behind the same lock
+rule. The shared lock is documented in
 [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md), with the runtime-only path:
 
 ```text
@@ -206,8 +207,8 @@ Normal non-deploy tasks are not blocked.
   build/check/migrate/collectstatic/restart/health check, then releases only
   the matching `lock_id` in cleanup/finally handling.
 - Blue-green production apply skeleton:
-  `scripts/blue_green_production_apply.ps1`; no-action by default and real
-  apply remains blocked.
+  `scripts/blue_green_production_apply.ps1`; command path skeleton implemented
+  but blocked, no-action by default, and real apply remains blocked.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
@@ -215,9 +216,9 @@ Normal non-deploy tasks are not blocked.
 - Local/test proxy routing validation: PASSED on 2026-05-19.
 - Non-production validation chain: PASSED for inactive runtime plus local/test
   proxy routing.
-- Production apply: NO-GO until a future runtime-changing implementation uses
-  the deployment lock before any build/start/migrate/collectstatic/proxy
-  switch/cleanup action.
+- Production apply: NO-GO until a future runtime-changing implementation is
+  explicitly approved and uses the deployment lock before any
+  build/start/migrate/collectstatic/proxy switch/cleanup/rollback action.
 - Local proxy routing validation approval package: READY after review; future
   validation still requires the exact approval phrase and deployment lock.
 

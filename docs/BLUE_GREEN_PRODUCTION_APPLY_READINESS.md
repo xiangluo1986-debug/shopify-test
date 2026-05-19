@@ -16,7 +16,8 @@ approves the final command set.
 - Deployment lock helper: available.
 - safe_deploy lock enforcement: active in real mode.
 - Production preflight document: exists.
-- Production apply skeleton: no-action only.
+- Production command path skeleton: implemented but blocked.
+- Exact production runtime command implementation: not approved yet.
 
 ## Required Manual Production Decisions Still Needed
 
@@ -37,6 +38,16 @@ approves the final command set.
 All commands in this section are for a future review task only.
 
 NOT RUN IN THIS TASK.
+
+The structured command path now exists in
+`scripts/blue_green_production_apply.ps1` as a skeleton only. It prints
+planned phases for preflight, lock, target color preparation, switch, observe,
+rollback, and cleanup, but every phase is reported as `NOT RUN`.
+
+The skeleton does not deploy, start, stop, restart, or build containers; run
+migrations; run collectstatic; switch traffic; change Cloudflare/domain
+routing; modify active Compose files; or modify production proxy
+configuration.
 
 ### Git Status And Current Commit
 
@@ -201,6 +212,8 @@ Production apply cannot proceed unless all gates below pass:
 - Scheduler singleton confirmed.
 - Media/static shared storage confirmed.
 - Rollback plan reviewed.
+- `TargetColor` and `ActiveColor` supplied and different.
+- `DeployLockPath` constrained under `.deploy/`.
 - Old color retained during observation.
 - Cloudflare/domain impact known.
 - Exact command approved.
@@ -214,13 +227,18 @@ Future draft phrase:
 I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW
 ```
 
-This phrase is not accepted by current scripts yet. Future implementation must
-still require deployment lock and exact command review.
+This phrase is accepted by the current skeleton only to prove that runtime
+execution remains blocked. It is NOT ACTIVE for real production apply in this
+phase. Future implementation must still require deployment lock, exact command
+review, migration compatibility confirmation, scheduler singleton
+confirmation, shared media/static storage confirmation, rollback command
+confirmation, and a separate explicit production approval.
 
 ## Go / No-Go
 
 - Readiness package: READY after review.
-- Production command implementation: NOT READY.
+- Production command path skeleton: implemented but blocked.
+- Exact production runtime command implementation: not approved yet.
 - Production apply: NO-GO.
 
 This readiness package does not deploy, start, stop, restart, or build

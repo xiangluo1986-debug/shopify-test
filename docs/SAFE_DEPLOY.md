@@ -31,8 +31,9 @@ readiness review is documented at
 The production apply readiness checklist and exact command review package is
 documented at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
-It is READY after review; production command implementation remains NOT READY
-and production apply remains NO-GO.
+It is READY after review; exact production runtime command implementation is
+not approved yet. The production command path skeleton is implemented but
+blocked, and production apply remains NO-GO.
 
 The current safe deploy flow now enforces a deployment single-flight lock in
 real non-dry-run mode. The standalone helper exists at
@@ -41,14 +42,17 @@ dry-run/check-only modes without acquiring the real lock. Before any future
 blue-green production apply, proxy switch, rolling restart, or cleanup work,
 the deployment lock described in [DEPLOYMENT_LOCK.md](DEPLOYMENT_LOCK.md) must
 also be enforced by that runtime-changing path.
-`scripts/blue_green_production_apply.ps1` now exists as a no-action production
-apply skeleton. It prints the future lock and apply plan, requires the approval
-phrase below for any execution request, and still blocks real production apply
-in this phase:
+`scripts/blue_green_production_apply.ps1` now exists as a blocked production
+command path skeleton. It prints the future lock and apply plan, planned phases
+for preflight, lock, target color preparation, switch, observe, rollback, and
+cleanup, and still blocks real production apply in this phase. The draft
+readiness phrase used only to prove blocked skeleton behavior is:
 
 ```text
-I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK
+I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW
 ```
+
+This phrase is NOT ACTIVE for real production apply.
 
 The runtime-only lock path is:
 
@@ -65,8 +69,8 @@ service can become healthy.
 
 - `safe_deploy.ps1`: enforced in real mode.
 - Blue-green production apply skeleton:
-  `scripts/blue_green_production_apply.ps1`; no-action by default and real
-  production apply remains blocked.
+  `scripts/blue_green_production_apply.ps1`; command path skeleton implemented
+  but blocked, no-action by default, and real production apply remains blocked.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
@@ -85,8 +89,8 @@ service can become healthy.
   observation, cleanup, and data safety are checked.
 - Production apply readiness package:
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
-  is READY after review; exact command review is still required before any
-  later implementation task.
+  is READY after review; exact runtime command implementation is not approved
+  yet and is still required before any later implementation task.
 
 Runtime-changing deploy paths include container start, container stop,
 container restart, image build, migration, collectstatic, proxy switch, traffic
@@ -162,13 +166,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_product
 
 This skeleton is no-action by default. It does not deploy, acquire the
 deployment lock, run Docker commands, run migrations, run collectstatic, switch
-traffic, or modify files. Execution requests remain blocked unless the exact
-approval phrase, valid target/active colors, and `.deploy/` lock path gate are
-present; even then real production apply remains blocked because it is not
-implemented in this phase. It also reports that local/test proxy validation is
-passed, the production preflight document exists, the production apply
-readiness package exists, exact command review is required, the draft approval
-phrase is not active yet, and production apply remains NO-GO.
+traffic, or modify files. Execution requests remain blocked unless the draft
+readiness phrase, valid target/active colors, `.deploy/` lock path gate,
+migration compatibility confirmation, scheduler singleton confirmation,
+media/static shared storage confirmation, and rollback command confirmation are
+present; even then real production apply remains blocked because runtime
+execution is not approved in this phase. It also reports that local/test proxy
+validation is passed, the production preflight document exists, the production
+apply readiness package exists, exact command review is required, the draft
+approval phrase is not active for real apply, and production apply remains
+NO-GO.
 
 Deployment lock helper status:
 

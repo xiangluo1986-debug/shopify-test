@@ -101,11 +101,14 @@ Related non-active drafts:
 - Deployment lock enforcement for blue-green runtime paths: NO-GO until a
   separate apply task approves exact commands and confirms every
   runtime-changing path uses the shared lock.
-- Production apply skeleton: READY for no-action / plan-only validation at
-  `scripts/blue_green_production_apply.ps1`. It does not deploy, acquire the
-  production lock, run Docker commands, run migrations, run collectstatic,
-  switch traffic, or modify files. Required future approval phrase:
-  `I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK`.
+- Production command path skeleton: implemented but blocked at
+  `scripts/blue_green_production_apply.ps1`. It prints planned phases for
+  preflight, lock, target color preparation, switch, observe, rollback, and
+  cleanup. It does not deploy, acquire the production lock, run Docker
+  commands, run migrations, run collectstatic, switch traffic, or modify files.
+  Draft readiness phrase for blocked skeleton validation only:
+  `I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW`. This phrase
+  is NOT ACTIVE for real production apply.
 - Production preflight document: READY after review at
   [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
   It does not approve production apply. It records required checks for
@@ -116,8 +119,9 @@ Related non-active drafts:
 - Production apply readiness package: READY after review at
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
   It records future command groups, production safety gates, required manual
-  decisions, and the draft approval phrase. Production command implementation
-  remains NOT READY.
+  decisions, and the draft approval phrase. The production command path
+  skeleton is implemented but blocked; exact runtime command implementation is
+  not approved yet.
 - Production apply: NO-GO until the production preflight document is reviewed
   and a separate production task approves exact runtime commands, route, port
   ownership, proxy, scheduler, migration, static/media, rollback, observation,
@@ -130,8 +134,9 @@ Related non-active drafts:
 
 - `safe_deploy.ps1`: enforced in real mode.
 - Blue-green production apply skeleton:
-  `scripts/blue_green_production_apply.ps1`; no-action by default and real
-  production apply remains blocked even with the correct approval phrase.
+  `scripts/blue_green_production_apply.ps1`; command path skeleton implemented
+  but blocked, no-action by default, and real production apply remains blocked
+  even with the draft readiness phrase and valid parameters.
 - Proxy switch script: not implemented yet.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
@@ -209,7 +214,11 @@ review. Normal non-deploy tasks are not blocked.
   `bluegreen_proxy_test` and `web_green_test` shared one Docker network, and
   stopped only `bluegreen_proxy_test` and `web_green_test` during cleanup.
 - The production apply skeleton still blocks a correct approval phrase with:
-  `Real production blue-green apply is not implemented in this phase.`
+  `Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase.`
+- Any future execution request must supply `TargetColor` and `ActiveColor`, they
+  must be different, `DeployLockPath` must stay under `.deploy/`, and missing
+  migration, scheduler, media/static, or rollback confirmations must block.
+  These gates still do not permit runtime action in this phase.
 - Deployment tasks do not auto-queue behind an existing lock. A second deploy
   task stops and requires a manual rerun after the current deploy completes.
 - Normal non-deploy tasks are not blocked by this deployment lock.
@@ -349,13 +358,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_product
   apply in this skeleton phase:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_production_apply.ps1 -ExecuteProductionApply -Ack I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK -TargetColor green -ActiveColor blue
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_production_apply.ps1 -ExecuteProductionApply -Ack I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW -TargetColor green -ActiveColor blue
 ```
 
 - Confirm invalid target/active color choices remain blocked:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_production_apply.ps1 -ExecuteProductionApply -Ack I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK -TargetColor blue -ActiveColor blue
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_production_apply.ps1 -ExecuteProductionApply -Ack I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_AFTER_PREFLIGHT_REVIEW -TargetColor blue -ActiveColor blue
 ```
 
 - Run the read-only deployment lock dry-run helper:
