@@ -139,11 +139,20 @@ Laravel projects.
 
 Current blue-green status:
 
+- Current production traffic path: Cloudflare Tunnel -> `127.0.0.1:18000`
+  -> `bluegreen_proxy_candidate` -> `web_blue` / `web_green`.
+- Rollback target remains `127.0.0.1:8000`.
+- `bluegreen_proxy_candidate`, `web_blue`, and `web_green` must remain
+  running.
+- Do not stop or remove the old `8000` path yet.
 - Local inactive runtime validation: PASSED.
 - Local/test proxy routing validation: PASSED.
 - `safe_deploy` lock enforcement: active.
 - Production apply: NO-GO.
 - Runtime execution: NOT ENABLED.
+- Real deploy or switch actions require the deployment lock.
+- Future Docker/deploy tasks must read `docs/SAFE_DEPLOY.md` and
+  `docs/BLUE_GREEN_LONG_TERM_OPERATIONS.md` before changing runtime.
 - Future production apply requires separate implementation, review, deployment
   lock enforcement, and explicit approval.
 
