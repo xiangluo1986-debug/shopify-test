@@ -109,8 +109,9 @@ Production remains NO-GO.
 
 The no-action Option B route change and rollback plan now exists at
 [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
-It proposes `18000` as a conservative placeholder proxy port, but that port is
-not final. The plan does not approve any Cloudflare change or production apply.
+It records `18000` as the active Cloudflare target after manual cutover and
+keeps `http://127.0.0.1:8000` as the rollback target. This documentation task
+does not perform any Cloudflare change or production apply.
 
 The Cloudflare route change readiness and manual cutover approval package now
 exists at
@@ -150,17 +151,23 @@ rollback plan. It does not approve Cloudflare cutover or production apply.
   [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
 - Cloudflare cutover approval package: READY after review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
-- Proposed Option B proxy port: `18000`, NOT FINAL.
+- Option B proxy port: `18000`, ACTIVE current Cloudflare target.
 - `18000` candidate validation: PASSED.
 - `18000` candidate route: PASSED.
 - Final runtime rehearsal: PASSED.
-- Chosen option: NOT YET.
-- Cloudflare cutover: NOT APPROVED.
-- Cloudflare change: NOT APPROVED.
+- Chosen option: Option B manual Cloudflare route cutover.
+- Cloudflare cutover: PASSED.
+- Cloudflare change in this documentation task: no.
+- Current Cloudflare target: `http://127.0.0.1:18000`.
+- Rollback target: `http://127.0.0.1:8000`.
+- Candidate services must remain running: `bluegreen_proxy_candidate`,
+  `web_blue`, and `web_green`.
 - `8000` takeover: NOT APPROVED.
-- Production apply: NO-GO.
-- Next required step: final manual Cloudflare cutover checklist / operator
-  approval.
+- Production blue-green external traffic path: ACTIVE through `18000`
+  candidate.
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
+- Next required step: post-cutover observation and hardening plan.
 
 ## Production-Candidate Proxy Design Update (2026-05-19)
 
@@ -192,17 +199,18 @@ rollback plan. It does not approve Cloudflare cutover or production apply.
 - Production script requirement: wait for `web_blue` and `web_green` health
   before proxy validation or cutover because the first proxy request can return
   HTTP 502 while backends start.
-- The candidate files keep Option B in design-only status. They do not change
-  Cloudflare, do not take over host port `8000`, and do not enable production
-  apply.
+- The candidate files do not take over host port `8000` and do not enable
+  production apply scripts.
 - Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
-  `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
-- Cloudflare route change: NOT APPROVED.
+  `shopify.kidstoyloverapps.com` now target `http://127.0.0.1:18000`.
+- Previous target / rollback target: `http://127.0.0.1:8000`.
+- Cloudflare cutover: PASSED before this documentation update.
+- Candidate services must remain running while Cloudflare targets `18000`.
 - Host port `8000` takeover: NOT APPROVED.
-- Production apply remains NO-GO.
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
 - Final runtime rehearsal: PASSED.
-- Next required step: final manual Cloudflare cutover checklist / operator
-  approval.
+- Next required step: post-cutover observation and hardening plan.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
@@ -211,10 +219,13 @@ rollback plan. It does not approve Cloudflare cutover or production apply.
 - Final manual Cloudflare cutover checklist exists at
   [BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md](BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md).
 - Manual cutover checklist: READY after review.
-- Approval phrase is documentation-only:
-  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL`.
+- Approval phrase was documentation-only:
+  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_LIVE_CHECKS`.
 - No script should accept the phrase yet.
-- Cloudflare cutover remains NOT APPROVED.
-- Production apply remains NO-GO.
-- Final manual cutover requires operator approval before any Cloudflare route
-  edit.
+- Cloudflare cutover: PASSED.
+- Current Cloudflare target: `http://127.0.0.1:18000`.
+- Rollback target: `http://127.0.0.1:8000`.
+- Candidate services must remain running.
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
+- Next required step: post-cutover observation and hardening plan.

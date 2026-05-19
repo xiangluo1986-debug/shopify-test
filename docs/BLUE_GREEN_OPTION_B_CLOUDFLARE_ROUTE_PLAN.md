@@ -108,17 +108,22 @@ NOT RUN IN THIS TASK.
 - Option B plan: READY after review.
 - Cloudflare cutover approval package: READY after review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
-- Chosen port: NOT FINAL.
-- Proposed placeholder port: `18000`.
+- Chosen port: `18000`, ACTIVE current Cloudflare target.
+- Previous target / rollback target: `http://127.0.0.1:8000`.
 - `18000` candidate validation: PASSED.
 - `18000` candidate route: PASSED.
 - Final runtime rehearsal: PASSED.
-- Cloudflare cutover: NOT APPROVED.
-- Cloudflare change: NOT APPROVED.
-- Production apply: NO-GO.
-- Runtime execution: NOT ENABLED.
-- Next required step: final manual Cloudflare cutover checklist / operator
-  approval.
+- Cloudflare cutover: PASSED.
+- Cloudflare change in this documentation task: no.
+- Candidate services must remain running: `bluegreen_proxy_candidate`,
+  `web_blue`, and `web_green`.
+- Production blue-green external traffic path: ACTIVE through `18000`
+  candidate.
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
+- Runtime command execution remains NOT ENABLED except already-running manual
+  candidate services.
+- Next required step: post-cutover observation and hardening plan.
 
 ## Production-Candidate Proxy Design Update (2026-05-19)
 
@@ -154,11 +159,18 @@ NOT RUN IN THIS TASK.
   active, not used by normal `docker compose` commands, and must not bind
   host port `8000`.
 - Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
-  `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
-- Cloudflare route change: NOT APPROVED.
+  `shopify.kidstoyloverapps.com` now target `http://127.0.0.1:18000`.
+- Previous target / rollback target: `http://127.0.0.1:8000`.
+- Cloudflare route change: PASSED by manual Option B cutover before this
+  documentation update.
 - Host port `8000` takeover: NOT APPROVED.
-- Production apply remains NO-GO.
-- Future cutover requires manual Cloudflare edit and rollback plan review at
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
+- Production blue-green external traffic path is now active through the
+  `18000` candidate.
+- Candidate services must remain running: `bluegreen_proxy_candidate`,
+  `web_blue`, and `web_green`.
+- Post-cutover observation and hardening plan should use the rollback plan at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
 ## Bluegreen Proxy Candidate 18000 Validation Result (2026-05-19)
@@ -173,33 +185,42 @@ NOT RUN IN THIS TASK.
   `web_green` were still health: starting.
 - After waiting for backend health, `18000 /healthz/` returned HTTP 200.
 - `8000 /healthz/` stayed HTTP 200 before and after validation.
-- Cleanup stopped only `bluegreen_proxy_candidate`, `web_green`, and
-  `web_blue`.
-- After cleanup, `18000` was not serving and the candidate compose showed no
-  running services.
+- Earlier validation cleanup stopped only `bluegreen_proxy_candidate`,
+  `web_green`, and `web_blue`.
+- After the later manual Cloudflare cutover, candidate services must remain
+  running because Cloudflare now targets `18000`.
 - Cloudflare change: no.
-- Cloudflare route change: NOT APPROVED.
-- Production traffic switch: no.
-- Production apply: still NO-GO.
+- Cloudflare route change in this documentation task: no.
+- Cloudflare cutover result: PASSED before this documentation task.
+- Current Cloudflare target: `http://127.0.0.1:18000`.
+- Rollback target: `http://127.0.0.1:8000`.
+- Production traffic path: ACTIVE through `18000` candidate.
+- Production apply scripts: still no-action / blocked unless separately
+  approved.
 - Cloudflare cutover approval package exists at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
-- Cloudflare cutover: NOT APPROVED.
+- Cloudflare cutover: PASSED.
 - Final runtime rehearsal: PASSED.
-- Next required step: final manual Cloudflare cutover checklist / operator
-  approval.
+- Next required step: post-cutover observation and hardening plan.
 - Production script requirement: wait for `web_blue` and `web_green` health
   before proxy validation or cutover because the first request may return HTTP
   502 while backends start.
 
 ## Final Manual Checklist Link
 
+- Pre-cutover live checklist exists at
+  [BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md](BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md).
+- Pre-cutover live checklist: READY after review.
 - Final manual Cloudflare cutover checklist exists at
   [BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md](BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md).
 - Manual cutover checklist: READY after review.
 - Approval phrase is documentation-only:
-  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL`.
+  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_LIVE_CHECKS`.
 - No script should accept the phrase yet.
-- Cloudflare cutover remains NOT APPROVED.
-- Production apply remains NO-GO.
-- Final manual cutover requires operator approval before any Cloudflare route
-  edit.
+- Cloudflare cutover: PASSED.
+- Current Cloudflare target: `http://127.0.0.1:18000`.
+- Rollback target: `http://127.0.0.1:8000`.
+- Candidate services must remain running.
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
+- Next required step: post-cutover observation and hardening plan.

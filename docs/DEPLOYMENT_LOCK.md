@@ -25,6 +25,8 @@ reviews the production switch/rollback review document at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md),
 reviews the Cloudflare cutover approval package at
 [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md),
+reviews the pre-cutover live checklist at
+[BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md](BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md),
 reviews the final runtime approval design at
 [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md),
 and uses the same lock before any runtime-changing action.
@@ -440,11 +442,12 @@ runtime-changing actions should use the shared deployment lock.
   NOT IMPLEMENTED, and production apply still NO-GO.
 - Cloudflare cutover approval package:
   `docs/BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md`; READY after review for
-  manual cutover planning only. `18000` candidate validation has PASSED,
-  proposed cutover target is `http://127.0.0.1:18000`, rollback target is
+  manual cutover result tracking. `18000` candidate validation has PASSED,
+  current route target is `http://127.0.0.1:18000`, rollback target is
   `http://127.0.0.1:8000`, the `18000` candidate route has PASSED, final
-  runtime rehearsal has PASSED, Cloudflare cutover is NOT APPROVED, and
-  production apply remains NO-GO.
+  runtime rehearsal has PASSED, Cloudflare cutover has PASSED, candidate
+  services must remain running, and production apply scripts remain no-action /
+  blocked unless separately approved.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, the production preflight document is reviewed, migration
@@ -537,25 +540,37 @@ runtime-changing actions should use the shared deployment lock.
 - Any later local `18000` validation that starts runtime components must use
   the deployment lock if it changes runtime state.
 - Current Cloudflare routes for `tickets.kidstoyloverapps.com` and
-  `shopify.kidstoyloverapps.com` remain `http://127.0.0.1:8000`.
-- Cloudflare route change: NOT APPROVED.
+  `shopify.kidstoyloverapps.com` now target `http://127.0.0.1:18000`.
+- Previous target / rollback target: `http://127.0.0.1:8000`.
+- Cloudflare cutover: PASSED before this documentation update.
+- Candidate services must remain running while Cloudflare targets `18000`.
+- Production blue-green external traffic path: ACTIVE through `18000`
+  candidate.
 - Host port `8000` takeover: NOT APPROVED.
-- Production apply remains NO-GO.
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
 - Final runtime rehearsal: PASSED.
-- Next required step: final manual Cloudflare cutover checklist / operator
-  approval.
+- Next required step: post-cutover observation and hardening plan.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
 ## Final Manual Checklist Link
 
+- Pre-cutover live checklist exists at
+  [BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md](BLUE_GREEN_PRE_CUTOVER_LIVE_CHECKLIST.md).
+- Pre-cutover live checklist: READY after review.
 - Final manual Cloudflare cutover checklist exists at
   [BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md](BLUE_GREEN_MANUAL_CLOUDFLARE_CUTOVER_CHECKLIST.md).
 - Manual cutover checklist: READY after review.
 - Approval phrase is documentation-only:
-  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_FINAL_REHEARSAL`.
+  `I_APPROVE_MANUAL_CLOUDFLARE_CUTOVER_TO_18000_AFTER_LIVE_CHECKS`.
 - No script should accept the phrase yet.
-- Cloudflare cutover remains NOT APPROVED.
-- Production apply remains NO-GO.
-- Final manual cutover requires operator approval before any Cloudflare route
-  edit.
+- Cloudflare cutover: PASSED.
+- Current Cloudflare target: `http://127.0.0.1:18000`.
+- Rollback target: `http://127.0.0.1:8000`.
+- Candidate services must remain running.
+- Production blue-green external traffic path: ACTIVE through `18000`
+  candidate.
+- Production apply scripts remain no-action / blocked unless separately
+  approved.
+- Next required step: post-cutover observation and hardening plan.
