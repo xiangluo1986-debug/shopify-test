@@ -39,6 +39,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+- [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -131,8 +132,17 @@ exists at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
 It records the future command groups, safety gates, draft approval phrase, and
 remaining production decisions. It is READY after review; the production
-command path skeleton is implemented but blocked, exact runtime command
-implementation is not approved yet, and production apply remains NO-GO.
+command path skeleton is implemented but blocked, production implementation is
+NOT READY, exact runtime command implementation is still not enabled, and
+production apply remains NO-GO.
+
+The dedicated production runtime command review exists at
+[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
+It records the exact future command groups for preflight, deployment lock,
+target color preparation, proxy switch, observation, rollback, and cleanup.
+It is READY after review, but production implementation is NOT READY, exact
+runtime command implementation is still not enabled, unresolved blockers
+remain, and production apply remains NO-GO.
 
 The local/test proxy routing validation approval package exists at
 [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -452,9 +462,9 @@ and `docker-compose.bluegreen.proxy-validation.example.yml`. Cleanup stopped
 only `bluegreen_proxy_test` and `web_green_test`; production port `8000` and
 current `web` remained untouched.
 
-Next phase: review the production apply readiness checklist package / exact
-command review in
-[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+Next phase: resolve the production proxy, active-color, and rollback details
+listed in
+[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 Production remains NO-GO. Migration compatibility, scheduler
 singleton behavior, media/static/uploads, proxy ownership, active/target color
 tracking, rollback, observation, cleanup, and data safety still must be
@@ -574,13 +584,11 @@ approve exact commands.
 
 ## Immediate Next Task Recommendation
 
-Review the production preflight readiness document and the production apply
-readiness checklist package at
-[BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
-without touching production traffic. The next separate task should review the
-exact production runtime path, deployment lock handling, port ownership, proxy
-switch design, migration compatibility, scheduler singleton behavior,
-static/media behavior, rollback, observation, cleanup, and data safety
-requirements. Production remains NO-GO until that review is complete, command
-implementation is added in a later task, and a separate production task
-approves the exact runtime path being used.
+Review the production command review document at
+[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+without touching production traffic. The next separate task should resolve the
+production proxy technology/path, active color storage, exact proxy switch and
+rollback commands, observation time, migration policy, scheduler singleton
+confirmation, and media/static confirmation. Production remains NO-GO until
+those blockers are resolved, command implementation is added in a later task,
+and a separate production task approves the exact runtime path being used.

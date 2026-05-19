@@ -16,8 +16,12 @@ approves the final command set.
 - Deployment lock helper: available.
 - safe_deploy lock enforcement: active in real mode.
 - Production preflight document: exists.
+- Production command review document:
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+  exists and is READY after review.
 - Production command path skeleton: implemented but blocked.
-- Exact production runtime command implementation: not approved yet.
+- Production implementation: NOT READY.
+- Exact production runtime command implementation: still not enabled.
 
 ## Required Manual Production Decisions Still Needed
 
@@ -35,7 +39,12 @@ approves the final command set.
 
 ## Exact Command Review
 
-All commands in this section are for a future review task only.
+The dedicated production runtime command review is documented at
+[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
+It is READY after review, but production implementation is NOT READY and
+production apply remains NO-GO.
+
+All commands in this section are for future review context only.
 
 NOT RUN IN THIS TASK.
 
@@ -237,8 +246,11 @@ confirmation, and a separate explicit production approval.
 ## Go / No-Go
 
 - Readiness package: READY after review.
+- Production command review document: READY after review at
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 - Production command path skeleton: implemented but blocked.
-- Exact production runtime command implementation: not approved yet.
+- Production implementation: NOT READY.
+- Exact production runtime command implementation: still not enabled.
 - Production apply: NO-GO.
 
 This readiness package does not deploy, start, stop, restart, or build

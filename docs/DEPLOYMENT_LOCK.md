@@ -17,6 +17,8 @@ reviews the successful local/test proxy validation, reviews
 [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md),
 reviews the production apply readiness package at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md),
+reviews the production command review document at
+[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md),
 and uses the same lock before any runtime-changing action.
 
 ## What The Lock Protects
@@ -263,8 +265,14 @@ The production apply readiness checklist and exact command review package is
 documented at
 [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
 It is READY after review, but exact production runtime command implementation
-is not approved yet. The command path skeleton is implemented but blocked and
-production apply remains NO-GO.
+is still not enabled. Production implementation is NOT READY, the command path
+skeleton is implemented but blocked, and production apply remains NO-GO.
+
+The dedicated production runtime command review is documented at
+[BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
+It is READY after review, but production implementation is NOT READY, exact
+runtime command implementation is still not enabled, unresolved blockers
+remain, and production apply remains NO-GO.
 
 Production apply now has successful local inactive runtime validation and
 local/test proxy routing validation documented in
@@ -370,8 +378,12 @@ runtime-changing actions should use the shared deployment lock.
   `bluegreen_proxy_test` and `web_green_test` on the same local Docker network.
 - Production apply readiness package:
   `docs/BLUE_GREEN_PRODUCTION_APPLY_READINESS.md`; READY after review for exact
-  command review, exact runtime command implementation is not approved yet, and
-  production apply remains NO-GO.
+  command review, production implementation is NOT READY, exact runtime command
+  implementation is still not enabled, and production apply remains NO-GO.
+- Production command review document:
+  `docs/BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md`; READY after review,
+  production implementation is NOT READY, exact runtime command implementation
+  is still not enabled, and production apply remains NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, the production preflight document is reviewed, migration
@@ -398,4 +410,6 @@ runtime-changing actions should use the shared deployment lock.
   the deployment lock, reviews successful local/test proxy validation, reviews
   [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md), and
   reviews
-  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
+  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+  plus
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).

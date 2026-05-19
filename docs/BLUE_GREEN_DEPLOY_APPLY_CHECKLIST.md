@@ -24,6 +24,7 @@ Related non-active drafts:
 - [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
 - [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md)
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
+- [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -62,8 +63,8 @@ Related non-active drafts:
   approve production apply, and requires separate approval for additional
   validation.
 - Next required blue-green step: review
-  [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
-  for exact command readiness.
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+  and resolve production proxy, active-color, and rollback details.
 - Local/test proxy routing validation result: PASSED on 2026-05-19 and
   recorded at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -120,8 +121,14 @@ Related non-active drafts:
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
   It records future command groups, production safety gates, required manual
   decisions, and the draft approval phrase. The production command path
-  skeleton is implemented but blocked; exact runtime command implementation is
-  not approved yet.
+  skeleton is implemented but blocked; production implementation is NOT READY
+  and exact runtime command implementation is still not enabled.
+- Production command review document: READY after review at
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
+  It records the future production command groups. Production implementation is
+  NOT READY, exact runtime command implementation is still not enabled, and
+  unresolved proxy, active-color, rollback, observation, migration, scheduler,
+  and media/static blockers remain.
 - Production apply: NO-GO until the production preflight document is reviewed
   and a separate production task approves exact runtime commands, route, port
   ownership, proxy, scheduler, migration, static/media, rollback, observation,
@@ -203,6 +210,10 @@ review. Normal non-deploy tasks are not blocked.
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
   has been reviewed. It does not implement a production command and does not
   approve production apply.
+- The production command review document in
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
+  has been reviewed. It does not implement or approve production runtime
+  commands.
 - Successful non-production inactive runtime validation has been reviewed, and
   local/test proxy routing validation has passed, before any future production
   apply request.
@@ -347,6 +358,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_product
 
 - Review the production preflight document:
   [BLUE_GREEN_PRODUCTION_PREFLIGHT.md](BLUE_GREEN_PRODUCTION_PREFLIGHT.md).
+
+- Review the production command review document:
+  [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 
 - Confirm execution requests without the exact approval phrase remain blocked:
 
