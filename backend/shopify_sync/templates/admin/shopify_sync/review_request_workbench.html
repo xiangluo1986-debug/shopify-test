@@ -39,6 +39,23 @@
         color: var(--body-quiet-color, #666);
         font-weight: 600;
     }
+    .rrw-history-check {
+        margin-top: 6px;
+    }
+    .rrw-history-check summary {
+        cursor: pointer;
+        color: #2563eb;
+        font-size: 12px;
+        font-weight: 700;
+    }
+    .rrw-history-command {
+        display: block;
+        margin-top: 4px;
+        white-space: normal;
+        word-break: break-word;
+        font-size: 11px;
+        line-height: 1.35;
+    }
     .rrw-subtitle {
         margin: 4px 0;
         color: var(--body-fg, #222);
@@ -569,6 +586,12 @@
                         </td>
                         <td>
                             {{ row.trustpilot_history_label }}
+                            {% if row.customer_level_trustpilot_note_evidence_found %}
+                                <div class="rrw-secondary-line">
+                                    Safe keyword: {{ row.customer_level_trustpilot_note_safe_keyword|default:"trustpilot" }};
+                                    order {{ row.customer_level_trustpilot_note_evidence_order_name }}
+                                </div>
+                            {% endif %}
                             {% if row.previous_trustpilot_tag_values %}
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
                             {% endif %}
@@ -607,6 +630,10 @@
                             {% else %}
                                 <span class="rrw-disabled-action">{{ row.action_status }}</span>
                             {% endif %}
+                            <details class="rrw-history-check">
+                                <summary>{{ row.customer_history_lookup_action_label }}</summary>
+                                <code class="rrw-history-command">{{ row.customer_history_lookup_command }}</code>
+                            </details>
                         </td>
                     </tr>
                 {% empty %}
@@ -779,6 +806,12 @@
                         </td>
                         <td>
                             {{ row.trustpilot_history_label }}
+                            {% if row.customer_level_trustpilot_note_evidence_found %}
+                                <div class="rrw-secondary-line">
+                                    Safe keyword: {{ row.customer_level_trustpilot_note_safe_keyword|default:"trustpilot" }};
+                                    order {{ row.customer_level_trustpilot_note_evidence_order_name }}
+                                </div>
+                            {% endif %}
                             {% if row.previous_trustpilot_tag_values %}
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
                             {% endif %}
@@ -809,6 +842,10 @@
                             {% if row.scan_date_note %}
                                 <div class="rrw-secondary-line">{{ row.scan_date_note }}</div>
                             {% endif %}
+                            <details class="rrw-history-check">
+                                <summary>{{ row.customer_history_lookup_action_label }}</summary>
+                                <code class="rrw-history-command">{{ row.customer_history_lookup_command }}</code>
+                            </details>
                         </td>
                     </tr>
                 {% empty %}

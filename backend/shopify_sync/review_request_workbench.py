@@ -141,6 +141,10 @@ REVIEW_SEND_REUSE_GMAIL_HELPER_AUDIT_TASK_NAME = (
     "shopify_review_request_review_send_reuse_gmail_helper_audit"
 )
 REVIEW_SEND_POST_SEND_AUDIT_TASK_NAME = "shopify_review_request_review_send_post_send_audit"
+ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_TASK_NAME = "shopify_review_request_on_demand_customer_history_lookup"
+ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_REPORT_FILENAME = (
+    "codex_runs/shopify_review_request_on_demand_customer_history_lookup.json"
+)
 GMAIL_SEND_FROM = "info@kidstoylover.com"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
@@ -408,6 +412,12 @@ REPORT_DEFINITIONS = (
         "Customer identity drilldown audit",
         "shopify_review_request_customer_identity_drilldown_audit.json",
         ("report_status", "status"),
+    ),
+    (
+        "on_demand_customer_history_lookup",
+        "On-demand customer history lookup",
+        ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_REPORT_FILENAME,
+        ("lookup_status", "report_status", "status"),
     ),
     (
         "customer_level_duplicate_audit",
@@ -1017,6 +1027,20 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
         result["execution_status"] = group_blockers[0]["status"]
         result["blocking_detail"] = group_blockers[0]["detail"]
         result["blocking_conditions"].extend(group_blockers)
+        return _finalize_review_and_send_result(result)
+
+    live_history_blockers = _runtime_customer_history_live_lookup_blockers(
+        candidate,
+        state["last_60_days_scan"],
+        state["reports"],
+    )
+    if live_history_blockers:
+        result["execution_status"] = live_history_blockers[0]["status"]
+        result["blocking_status"] = live_history_blockers[0]["status"]
+        result["blocking_detail"] = live_history_blockers[0]["detail"]
+        result["blocked_reason"] = live_history_blockers[0].get("blocked_reason", "customer history live check required")
+        result["exact_user_message"] = live_history_blockers[0]["detail"]
+        result["blocking_conditions"].extend(live_history_blockers)
         return _finalize_review_and_send_result(result)
 
     runtime_blockers = _runtime_review_send_blockers(candidate, state["gmail_setup"], diagnosis)
@@ -12698,6 +12722,9 @@ def _apply_queue_row_context(
                 customer_history_source,
                 customer_history_confidence,
             ),
+            "customer_history_lookup_action_label": "Check customer history",
+            "customer_history_lookup_task_name": ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_TASK_NAME,
+            "customer_history_lookup_command": _customer_history_lookup_command(order_name),
             "eligibility_status": _queue_eligibility_status(action_state),
             "eligibility_status_label": _queue_eligibility_status_label(action_state),
             "eligibility_reason_plain": _safe_text(row.get("reason"), max_length=500),
@@ -12949,6 +12976,17 @@ def _queue_action_status(action_state):
     if action_state == "already_sent":
         return "Already sent"
     return "Not ready"
+
+
+def _customer_history_lookup_command(order_name):
+    selected = _canonical_order_name(order_name)
+    if not selected:
+        selected = "#21687"
+    return (
+        f'$env:SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER="{selected}"; '
+        f"python remote_approval_runner.py --task {ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_TASK_NAME} --approval local; "
+        "Remove-Item Env:\\SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER"
+    )
 
 
 def _dedupe_queue_rows(rows):
@@ -13451,6 +13489,92 @@ def _previous_gmail_helper_reuse_blocker(gmail_setup=None):
         "detail": "No email was sent. The previous Gmail send helper is not reusable from this admin action yet.",
         "technical_detail": _safe_text(gmail_setup.get("blocker_if_not_reusable"), max_length=500),
     }
+
+
+def _runtime_customer_history_live_lookup_blockers(candidate, scan, reports):
+    if not _customer_history_live_lookup_required(candidate, scan):
+        return []
+    selected_order = _canonical_order_name(candidate.get("order") or candidate.get("candidate_id"))
+    lookup = _matching_on_demand_customer_history_lookup(reports, selected_order)
+    if not lookup:
+        return [
+            {
+                "status": "blocked_customer_history_live_lookup_required",
+                "blocked_reason": "customer history live check required",
+                "detail": "No email was sent. Customer history needs live Shopify check before sending.",
+            }
+        ]
+    if lookup.get("lookup_status") != "customer_history_lookup_completed" or lookup.get("shopify_api_lookup_performed") is not True:
+        return [
+            {
+                "status": "blocked_customer_history_live_lookup_not_available",
+                "blocked_reason": "customer history live check unavailable",
+                "detail": "No email was sent. Customer history needs live Shopify check before sending.",
+            }
+        ]
+    if lookup.get("trustpilot_note_evidence_found") is True:
+        evidence = {
+            "order_name": lookup.get("evidence_order_name"),
+            "safe_keyword": lookup.get("safe_detected_keyword"),
+        }
+        return [
+            {
+                "status": "blocked_existing_trustpilot_invitation_customer_level",
+                "blocked_reason": "historical Trustpilot note",
+                "detail": f"No email was sent. {_trustpilot_note_evidence_reason(evidence)}",
+            }
+        ]
+    if lookup.get("trustpilot_tag_evidence_found") is True:
+        order_name = _canonical_order_name(lookup.get("evidence_order_name")) or "another order"
+        return [
+            {
+                "status": "blocked_existing_trustpilot_invitation_customer_level",
+                "blocked_reason": "historical Trustpilot tag",
+                "detail": f"No email was sent. Previous Trustpilot tag found on historical order {order_name}.",
+            }
+        ]
+    if lookup.get("should_block_review_send") is True:
+        return [
+            {
+                "status": "blocked_customer_history_live_lookup_failed",
+                "blocked_reason": "customer history live check blocked",
+                "detail": "No email was sent. "
+                + (
+                    _safe_text(lookup.get("blocking_reason"), max_length=300)
+                    or "Customer history needs live Shopify check before sending."
+                ),
+            }
+        ]
+    return []
+
+
+def _customer_history_live_lookup_required(candidate, scan):
+    if not candidate or candidate.get("action_state") != "review_send":
+        return False
+    if candidate.get("customer_history_confirmed") is not True:
+        return True
+    confidence = _safe_text(candidate.get("customer_history_confidence"), max_length=80).lower()
+    if confidence not in {"high", "medium"}:
+        return True
+    order_data_coverage = (scan or {}).get("order_data_coverage") or {}
+    sync_window = _safe_text(order_data_coverage.get("last_shopify_order_sync_window"), max_length=80).lower()
+    if sync_window in {"last 60 days", "latest 3 days", "manual review request window", "unknown"}:
+        return True
+    if _int_or_zero((scan or {}).get("window_days")) == LAST_60_DAY_SCAN_WINDOW_DAYS:
+        history_window = _safe_text(candidate.get("customer_history_window"), max_length=80).lower()
+        if history_window in {"lifetime_local_orders", "last_60_days", "local_shopify_orders"}:
+            return True
+    return False
+
+
+def _matching_on_demand_customer_history_lookup(reports, selected_order):
+    report = (reports or {}).get("on_demand_customer_history_lookup") or {}
+    data = report.get("data") or {}
+    if not data:
+        return {}
+    if _canonical_order_name(data.get("selected_order")) != _canonical_order_name(selected_order):
+        return {}
+    return data
 
 
 def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):

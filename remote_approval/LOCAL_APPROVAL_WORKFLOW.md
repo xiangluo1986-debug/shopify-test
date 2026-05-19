@@ -69,6 +69,7 @@ python remote_approval_runner.py --task shopify_review_request_order_tags_persis
 python remote_approval_runner.py --task shopify_review_request_trustpilot_tag_exclusion_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_customer_history_trustpilot_guard_audit --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_on_demand_customer_history_lookup --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_reuse_gmail_helper_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_post_send_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
@@ -187,6 +188,31 @@ order/time, sent row timing coverage, Already sent page size/visible count, and
 whether the dashboard should show a stale-data warning. It reads local Django
 state and local reports only; it must not call Gmail, Shopify, external review
 APIs, or `translationsRegister`.
+
+Phase 5.31C adds `shopify_review_request_on_demand_customer_history_lookup` for
+selected-order customer lifetime checks when local history is incomplete or
+low-confidence. The local 60-day sync is fast but can miss older Shopify orders,
+so admin `Review & Send` must block with `Customer history needs live Shopify
+check before sending.` until a matching clean lookup report exists.
+
+Run a selected lookup with:
+
+```powershell
+$env:SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER="#21687"
+python remote_approval_runner.py --task shopify_review_request_on_demand_customer_history_lookup --mode dry-run --approval local
+Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER
+```
+
+The lookup may perform read-only Shopify order/customer history reads using the
+existing installation credentials. Lifetime history is only considered
+confirmed when the installed Shopify scope includes `read_all_orders`; otherwise
+the selected order remains blocked even if the live API returns recent orders.
+It must not write Shopify data, mutate tags, call `tagsAdd` / `tagsRemove`,
+send Gmail, create Gmail drafts, call external review APIs, call
+`translationsRegister`, output raw email/phone/address, or output full note
+text. Its report should show only counts, order names, Trustpilot evidence
+booleans, evidence order name, safe keyword, final recommendation, and block
+reason.
 
 Phase 5.29 makes the admin `Review & Send` POST complete the same one-order
 Shopify tag update automatically after Gmail drafts.send succeeds. The POST

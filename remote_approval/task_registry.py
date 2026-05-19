@@ -27,6 +27,9 @@ from remote_approval.tasks.shopify_review_request_customer_lifetime_trustpilot_n
 from remote_approval.tasks.shopify_review_request_customer_identity_drilldown_audit_task import (
     run_shopify_review_request_customer_identity_drilldown_audit_task,
 )
+from remote_approval.tasks.shopify_review_request_on_demand_customer_history_lookup_task import (
+    run_shopify_review_request_on_demand_customer_history_lookup_task,
+)
 from remote_approval.tasks.shopify_review_request_review_send_failure_audit_task import (
     run_shopify_review_request_review_send_failure_audit_task,
 )
@@ -413,6 +416,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_customer_identity_drilldown_audit": (
         run_shopify_review_request_customer_identity_drilldown_audit_task
     ),
+    "shopify_review_request_on_demand_customer_history_lookup": (
+        run_shopify_review_request_on_demand_customer_history_lookup_task
+    ),
     "shopify_review_request_review_send_failure_audit": (
         run_shopify_review_request_review_send_failure_audit_task
     ),
@@ -789,6 +795,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local ShopifyOrder/report audit only, no raw contact or full note output",
         "review_file_path": "logs/shopify_review_request_customer_identity_drilldown_audit.json",
+    },
+    "shopify_review_request_on_demand_customer_history_lookup": {
+        "description": "Run a selected-order read-only Shopify customer history lookup and block Review & Send when live history is missing or shows Trustpilot evidence.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify order/customer history query only; no writes, no Gmail, no raw contact or full note output",
+        "review_file_path": "logs/codex_runs/shopify_review_request_on_demand_customer_history_lookup.json",
     },
     "shopify_review_request_review_send_failure_audit": {
         "description": "Diagnose the latest Review & Send failure for #21075 without Gmail, Shopify, or external review writes.",

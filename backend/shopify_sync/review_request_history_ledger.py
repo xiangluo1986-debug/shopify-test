@@ -85,6 +85,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("report_status", "status"),
     },
     {
+        "key": "customer_lifetime_trustpilot_note_audit",
+        "label": "Customer lifetime Trustpilot note audit",
+        "filename": "shopify_review_request_customer_lifetime_trustpilot_note_audit.json",
+        "channel": "trustpilot",
+        "event_type": "duplicate_block",
+        "status_keys": ("report_status", "status"),
+    },
+    {
         "key": "customer_level_duplicate_audit",
         "label": "Customer-level Trustpilot duplicate audit",
         "filename": "shopify_review_request_customer_level_trustpilot_duplicate_audit.json",
@@ -772,7 +780,24 @@ def _event_from_mapping(report, item, event_type, source_section):
         ),
         "prior_trustpilot_order_name": _safe_text(
             _first_text(item, ("prior_trustpilot_order_name",))
-            or _first_text(data, ("prior_trustpilot_order_name",)),
+            or _first_text(data, ("prior_trustpilot_order_name",))
+            or _first_text(item, ("customer_level_trustpilot_note_evidence_order_name", "order_21687_evidence_order_name"))
+            or _first_text(data, ("order_21687_evidence_order_name", "#21687_evidence_order_name")),
+            max_length=80,
+        ),
+        "trustpilot_note_evidence_found": _source_bool(
+            item,
+            data,
+            (
+                "customer_level_trustpilot_note_evidence_found",
+                "trustpilot_note_evidence_found",
+                "order_21687_trustpilot_note_evidence_found",
+                "#21687_trustpilot_note_evidence_found",
+            ),
+        ),
+        "trustpilot_note_safe_keyword": _safe_text(
+            _first_text(item, ("customer_level_trustpilot_note_safe_keyword", "trustpilot_note_safe_keyword"))
+            or _first_text(data, ("order_21687_safe_detected_keyword", "#21687_safe_detected_keyword")),
             max_length=80,
         ),
         "delivered_tag_present": _source_bool(item, data, ("delivered_tag_present",)),
@@ -1130,6 +1155,8 @@ def _looks_like_duplicate_block(item):
             "same_customer",
             "same_email",
             "prior_trustpilot",
+            "trustpilot_note",
+            "previous trustpilot note",
         )
     )
 
@@ -1171,6 +1198,7 @@ def _event_search_text(event):
             "blocker_reason",
             "next_candidate_order_name",
             "prior_trustpilot_order_name",
+            "trustpilot_note_safe_keyword",
         )
     )
 

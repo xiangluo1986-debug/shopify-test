@@ -1269,6 +1269,31 @@ Future tracking design note:
   Gmail API calls, email sends, Trustpilot/Kudosi/Ali Reviews API calls, or
   `translationsRegister` calls.
 
+## Phase 5.31C On-Demand Shopify Customer History Lookup
+
+- [x] Local 60-day order sync is a fast queue source, but it is not sufficient
+  evidence for customer lifetime history when older Shopify orders may exist.
+- [x] Added `shopify_review_request_on_demand_customer_history_lookup` for a
+  selected order. It defaults to `#21687` and can be targeted with
+  `SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER`.
+- [x] The lookup uses local `ShopifyOrder` only to identify the selected order,
+  then performs read-only Shopify order/customer history reads when the existing
+  installation credentials and read helpers are available.
+- [x] The lookup treats lifetime coverage as unconfirmed unless the installed
+  Shopify scope includes `read_all_orders`; a read that only returns recent
+  orders must still block Review & Send instead of being treated as clean.
+- [x] The report outputs only safe summary fields: order counts, historical
+  order names, Trustpilot evidence booleans, evidence order name, safe keyword,
+  final recommendation, and block reason. It must not output raw email, phone,
+  address, or full note text.
+- [x] Admin `Review & Send` now blocks before Gmail when local customer history
+  is incomplete or low-confidence and no matching clean on-demand lookup report
+  exists. If the live lookup finds Trustpilot note/tag evidence, the selected
+  order stays blocked.
+- [x] The lookup task is read-only. It must not write Shopify data, call
+  `tagsAdd` / `tagsRemove`, send Gmail, create Gmail drafts, call external
+  review APIs, or call `translationsRegister`.
+
 ## Phase 5.28J Review Send Failure Audit And Queue Pagination
 
 - [x] Added `shopify_review_request_review_send_failure_audit` to diagnose the
