@@ -48,30 +48,30 @@ Related non-active drafts:
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
   Non-production inactive runtime validation PASSED on 2026-05-18 using
   `web_green_test` on test port `18080` with image `aftersales-web:latest`.
-  Future runtime validation still requires separate approval, deployment lock
-  acquisition/release, non-`8000` test ports, test-only proxy routing, and no
-  production traffic switch.
+  Local/test proxy routing validation PASSED on 2026-05-19 using
+  `bluegreen_proxy_test` on test port `19080` and the unified proxy validation
+  Compose file. The non-production validation chain is PASSED for inactive
+  runtime plus local/test proxy routing. Future additional runtime validation
+  still requires separate approval, deployment lock acquisition/release,
+  non-`8000` test ports, and no production traffic switch.
 - Non-production runtime validation approval package: READY after review at
   [BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION_APPROVAL.md).
   It records the completed/passed manual inactive runtime validation, does not
   approve production apply, and requires separate approval for additional
   validation.
-- Next required blue-green step: local/test proxy routing validation.
-- Local/test proxy routing validation approval package: READY after review at
+- Next required blue-green step: production preflight design / production
+  apply readiness review.
+- Local/test proxy routing validation result: PASSED on 2026-05-19 and
+  recorded at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
-  Proxy validation remains NO-GO until a separate task supplies
-  `I_APPROVE_LOCAL_PROXY_ROUTING_VALIDATION_NO_PRODUCTION_TRAFFIC`. Future
-  validation must use deployment lock path
+  The validation used deployment lock path
   `.deploy/bluegreen-proxy-validation.lock`, Compose project
   `aftersales-bluegreen-proxy-validation`, inactive service `web_green_test`
-  on port `18080`, and test proxy service `bluegreen_proxy_test` on port
-  `19080`, through
-  `docker-compose.bluegreen.proxy-validation.example.yml`. Port `8000`,
-  current `web`, production traffic, and production proxy configuration must
-  remain untouched. Normal non-deploy tasks are not blocked by this deployment
-  lock. The previous proxy validation failed because the proxy and web test
-  services were launched in separate Docker networks; the unified compose
-  example fixes local/test service discovery.
+  on port `18080`, test proxy service `bluegreen_proxy_test` on port `19080`,
+  and `docker-compose.bluegreen.proxy-validation.example.yml`. Port `8000`,
+  current `web`, production traffic, and production proxy configuration
+  remained untouched. Normal non-deploy tasks are not blocked by this
+  deployment lock.
 - Local simulation execution: NO-GO. A future phase still requires
   `I_APPROVE_LOCAL_ONLY_BLUE_GREEN_SIMULATION_NO_PRODUCTION_TRAFFIC` and
   approval of exact commands. Real local simulation execution is not
@@ -103,10 +103,10 @@ Related non-active drafts:
   production lock, run Docker commands, run migrations, run collectstatic,
   switch traffic, or modify files. Required future approval phrase:
   `I_APPROVE_PRODUCTION_BLUE_GREEN_APPLY_WITH_DEPLOYMENT_LOCK`.
-- Production apply: NO-GO until local/test proxy routing validation also passes
-  and a separate production task approves exact runtime commands, route, port
-  ownership, proxy, scheduler, migration, static/media, rollback, observation,
-  and lock handling.
+- Production apply: NO-GO until production preflight design / production apply
+  readiness review is complete and a separate production task approves exact
+  runtime commands, route, port ownership, proxy, scheduler, migration,
+  static/media, rollback, observation, and lock handling.
 - Runtime behavior changed by this checklist: no.
 - Active Compose/proxy changes: require separate approval.
 - Host port `8000` ownership change: requires separate approval.
@@ -124,13 +124,11 @@ Related non-active drafts:
   deployment lock acquisition before any build/start/migrate/collectstatic,
   proxy switch, traffic switch, cleanup, or rollback action.
 - Non-production inactive runtime validation: PASSED on 2026-05-18 for
-  `web_green_test` on `18080`; future proxy validation route, cleanup, or
-  rollback/no-switch handling must still use the deployment lock.
-- Local/test proxy routing validation: pending; approval package exists and
-  future validation requires hold-open inactive startup, the local proxy
-  approval phrase, mandatory cleanup of only `bluegreen_proxy_test` and
-  `web_green_test`, the unified proxy validation Compose example, and
-  deployment lock.
+  `web_green_test` on `18080`.
+- Local/test proxy routing validation: PASSED on 2026-05-19 for
+  `bluegreen_proxy_test` on `19080` routing to `web_green_test` on `18080`.
+- Deployment lock remains required for future runtime-changing production apply
+  and any future local/test runtime rerun.
 
 Runtime-changing actions that require the deployment lock before any future
 apply include container start, container stop, container restart, image build,
@@ -181,20 +179,13 @@ review. Normal non-deploy tasks are not blocked.
 - Successful non-production inactive runtime validation has been reviewed, and
   local/test proxy routing validation has passed, before any future production
   apply request.
-- The local/test proxy routing validation approval package in
+- The local/test proxy routing validation result in
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md)
-  has been reviewed, the exact local proxy approval phrase is supplied in a
-  separate task, and the future run uses `19080` for the test proxy while
-  leaving `8000` untouched. The future run uses
+  has been reviewed. The completed run used `19080` for the test proxy while
+  leaving `8000` untouched, used
   `docker-compose.bluegreen.proxy-validation.example.yml` so
-  `bluegreen_proxy_test` and `web_green_test` share one Docker network.
-- The inactive startup runner is run with `-HoldOpenForProxyValidation` before
-  the local/test proxy validation so `web_green_test` remains reachable on
-  `18080`.
-- The cleanup command is ready before hold-open startup:
-  `docker compose -f docker-compose.bluegreen.proxy-validation.example.yml stop bluegreen_proxy_test web_green_test`.
-- Cleanup after proxy validation stops only `bluegreen_proxy_test` and
-  `web_green_test`; the current `web` service remains untouched.
+  `bluegreen_proxy_test` and `web_green_test` shared one Docker network, and
+  stopped only `bluegreen_proxy_test` and `web_green_test` during cleanup.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply is not implemented in this phase.`
 - Deployment tasks do not auto-queue behind an existing lock. A second deploy

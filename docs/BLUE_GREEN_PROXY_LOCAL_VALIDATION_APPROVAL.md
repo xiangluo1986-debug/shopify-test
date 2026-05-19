@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Prepare a future local/test proxy routing validation for the blue-green
-deployment path.
+Record the local/test proxy routing validation for the blue-green deployment
+path and keep any future rerun behind the same local-only gates.
 
 This approval package does not approve production. It does not run commands,
 start containers, start nginx, switch traffic, or change runtime behavior.
 
-The future validation should prove only this local/test path:
+The completed validation proved only this local/test path:
 
 - Start the inactive test service on local port `18080` with hold-open mode
   from the unified proxy validation Compose example.
@@ -23,12 +23,46 @@ startup runner otherwise stops `web_green_test` immediately after its direct
 health check. Hold-open mode is local/test only and does not approve
 production.
 
-The latest manual proxy validation failed because `web_green_test` and
+A previous manual proxy validation failed because `web_green_test` and
 `bluegreen_proxy_test` were launched from separate Compose projects/networks.
 nginx logged `host not found in upstream "web_green_test:8000"` even though
-`web_green_test` was running and healthy in its own project. Future validation
-must use `docker-compose.bluegreen.proxy-validation.example.yml` so both test
-services share one Docker network and nginx can resolve `web_green_test:8000`.
+`web_green_test` was running and healthy in its own project. The passed
+validation used `docker-compose.bluegreen.proxy-validation.example.yml` so both
+test services shared one Docker network and nginx could resolve
+`web_green_test:8000`.
+
+## Validation Result - 2026-05-19
+
+- Validation status: PASSED.
+- Scope: local/test proxy routing only.
+- Unified Compose file:
+  `docker-compose.bluegreen.proxy-validation.example.yml`.
+- Inactive web test port: `18080`.
+- Proxy test port: `19080`.
+- Inactive service: `web_green_test`.
+- Proxy service: `bluegreen_proxy_test`.
+- `8000 /healthz/` before validation: HTTP 200 OK.
+- `18080 /healthz/` during validation: HTTP 200 OK.
+- `19080 /healthz/` during validation: HTTP 200 OK.
+- `docker compose ps` during validation showed `bluegreen_proxy_test` running
+  on `19080` and `web_green_test` running healthy on `18080`.
+- Cleanup stopped only `bluegreen_proxy_test` and `web_green_test`.
+- Cleanup succeeded; `bluegreen_proxy_test` and `web_green_test` stopped.
+- `8000 /healthz/` after cleanup: HTTP 200 OK.
+- `18080` after cleanup: not serving / unable to connect.
+- `19080` after cleanup: not serving / unable to connect.
+- `docker compose ps` after cleanup showed no running validation services.
+- Current `web` was not targeted.
+- Port `8000` was not targeted.
+- Production traffic switch: no.
+- Migrations/collectstatic: no.
+- External APIs: no Shopify, Gmail, Trustpilot, Kudosi, Ali Reviews, or email
+  send path was requested.
+- Production status: still NO-GO.
+
+This result records a successful local/test proxy routing validation only. It
+does not approve production apply, production proxy changes, traffic switching,
+migrations, collectstatic, or external API workflows.
 
 ## Explicit Non-Goals
 
@@ -44,10 +78,11 @@ services share one Docker network and nginx can resolve `web_green_test:8000`.
 - No email send.
 - No Trustpilot, Kudosi, or Ali Reviews action.
 
-## Required Approval Phrase
+## Required Approval Phrase For Future Reruns
 
-Local/test proxy routing validation remains NO-GO until a separate task
-provides this exact approval phrase:
+The 2026-05-19 local/test validation is recorded as PASSED. Any future rerun
+that starts test-only services remains NO-GO until a separate task provides
+this exact approval phrase:
 
 ```text
 I_APPROVE_LOCAL_PROXY_ROUTING_VALIDATION_NO_PRODUCTION_TRAFFIC
@@ -257,7 +292,11 @@ production path should remain unchanged.
 
 ## Go / No-Go
 
-- Approval package: READY after review.
-- Local proxy routing validation: NO-GO until the separate explicit approval
-  phrase is provided.
+- Approval package: validation result RECORDED.
+- Local/test proxy routing validation: PASSED on 2026-05-19 for local/test
+  proxy routing only.
 - Production apply: NO-GO.
+- Next required step: production preflight design / production apply readiness
+  review.
+- Migration compatibility and scheduler singleton behavior still must be
+  checked before any production apply.

@@ -20,9 +20,10 @@ For the future zero- or lower-downtime design, see [BLUE_GREEN_DEPLOY_PLAN.md](B
 The non-production runtime validation gate for that future path is documented
 in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
-The local inactive runtime validation passed on 2026-05-18. Production apply
-remains blocked until local/test proxy validation passes and a separate manual
-production approval is given.
+The local inactive runtime validation passed on 2026-05-18, and local/test
+proxy routing validation passed on 2026-05-19. Production apply remains
+blocked until production preflight design / production apply readiness review
+is complete and a separate manual production approval is given.
 
 The current safe deploy flow now enforces a deployment single-flight lock in
 real non-dry-run mode. The standalone helper exists at
@@ -61,12 +62,17 @@ service can become healthy.
 - Cleanup script: not implemented yet.
 - Local inactive startup: separate local-only gate, not production traffic.
 - Non-production inactive runtime validation: passed on 2026-05-18 for
-  `web_green_test` on test port `18080`; local/test proxy validation is still
-  pending and production remains NO-GO.
+  `web_green_test` on test port `18080`.
+- Local/test proxy routing validation: PASSED on 2026-05-19 for
+  `bluegreen_proxy_test` on test port `19080` routing to `web_green_test` on
+  `18080`; production remains NO-GO.
+- Non-production validation chain: PASSED for inactive runtime plus local/test
+  proxy routing.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before any build/start/migrate/collectstatic,
-  proxy switch, traffic switch, cleanup, or rollback action, and local/test
-  proxy validation has passed.
+  proxy switch, traffic switch, cleanup, or rollback action, production
+  preflight design / readiness review is complete, and migration compatibility
+  and scheduler singleton behavior are checked.
 
 Runtime-changing deploy paths include container start, container stop,
 container restart, image build, migration, collectstatic, proxy switch, traffic
@@ -146,7 +152,8 @@ traffic, or modify files. Execution requests remain blocked unless the exact
 approval phrase, valid target/active colors, and `.deploy/` lock path gate are
 present; even then real production apply remains blocked because it is not
 implemented in this phase. It also reports that local/test proxy validation is
-still required before any future production apply.
+passed and production preflight design / readiness review is still required
+before any future production apply.
 
 Deployment lock helper status:
 
