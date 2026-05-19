@@ -26,6 +26,7 @@ Related non-active drafts:
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+- [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -80,6 +81,12 @@ Related non-active drafts:
   migration policy, singleton scheduler, and shared media/uploads.
   Production implementation is still NOT READY and production apply remains
   NO-GO.
+- Production traffic path audit: READY after review at
+  [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
+  It records active Compose `web` on `8000:8000`, Docker Desktop host
+  networking owning port `8000` during the audit, no active Compose proxy
+  service, Cloudflare DNS in front of the domain, and unresolved exact
+  proxy/origin ownership. Production apply remains NO-GO.
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
   It documents the exact future proxy switch flow, active-color state design,
@@ -326,6 +333,10 @@ and rollback steps.
   requires separate approval.
 - Cloudflare/external routing impact: tunnel target, DNS/proxy behavior, and
   any planned maintenance window are not approved for local-only planning.
+- Production traffic path: review
+  [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
+  and manually decide whether future `bluegreen_proxy` owns `8000` or an
+  external proxy/tunnel owns the upstream switch.
 - Migration compatibility rules: backward-compatible only during blue-green
   switch; risky schema changes require separate migration planning.
 - Static/media handling: shared media remains unchanged; `collectstatic`

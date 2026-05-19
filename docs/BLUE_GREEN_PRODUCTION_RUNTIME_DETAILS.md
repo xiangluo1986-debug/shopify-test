@@ -15,6 +15,13 @@ Final runtime approval design is documented in
 It is READY after review, but runtime command execution remains NOT ENABLED
 and production apply remains NO-GO.
 
+The read-only production traffic path audit is documented in
+[BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
+It records that active Compose still declares `web` on host port `8000`, no
+active Compose proxy service was found, DNS is Cloudflare-fronted, and exact
+production proxy/origin ownership still requires manual confirmation. It does
+not approve production apply.
+
 This document does not approve production apply. It does not deploy, start or
 stop containers, run migrations, run collectstatic, switch traffic, change
 Cloudflare or domain routing, modify active Compose files, modify production
@@ -37,6 +44,11 @@ Production remains NO-GO.
 ### B. Port Ownership
 
 - The current production `web` service owns host port `8000` today.
+- The traffic path audit found Docker Desktop host networking listening on
+  `8000` and active Compose declaring `web` as the `8000:8000` service.
+  Docker runtime container listing and the public HTTPS route were not proven
+  from this shell, so external proxy/origin ownership still needs manual
+  confirmation.
 - A future proxy may own port `8000` only after explicit production apply
   approval.
 - No task may take over port `8000` before final approval.
@@ -116,6 +128,8 @@ scheduler.
 ## Go / No-Go
 
 - Runtime details: READY after review.
+- Traffic path audit: READY after review at
+  [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 - Switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production apply implementation: still NOT READY.

@@ -35,6 +35,8 @@ The dedicated production runtime command review is documented at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 The production runtime details document is documented at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+The production traffic path audit is documented at
+[BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 The production switch/rollback review document is documented at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 The final runtime approval design is documented at
@@ -115,6 +117,11 @@ service can become healthy.
   backward-compatible migration policy, singleton scheduler policy, and shared
   media/uploads requirements. Active-color state under `.deploy/` must not be
   committed and must not contain secrets.
+- Production traffic path audit:
+  [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
+  is READY after review. It confirms active Compose still declares `web` on
+  `8000:8000` and no active Compose proxy service was found, but exact
+  Cloudflare/origin/proxy ownership still requires manual decision.
 - Production switch/rollback review document:
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
   is READY after review for design only. It documents the future proxy switch

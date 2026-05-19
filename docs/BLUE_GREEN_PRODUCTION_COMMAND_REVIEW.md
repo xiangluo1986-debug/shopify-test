@@ -31,6 +31,11 @@ Final runtime approval design is documented in
 It is READY after review, but runtime command execution remains NOT ENABLED
 and production apply remains NO-GO.
 
+The production traffic path audit is documented in
+[BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
+It is READY after review, but it leaves proxy/origin ownership as a manual
+decision and does not approve production apply.
+
 ## Current Validated Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -47,6 +52,10 @@ and production apply remains NO-GO.
 - Final runtime approval design:
   [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
   exists and is READY after review; execution remains NOT ENABLED.
+- Production traffic path audit:
+  [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
+  exists and is READY after review; exact proxy ownership still requires a
+  manual decision.
 
 ## Exact Future Production Command Groups
 
@@ -115,6 +124,10 @@ active-color state update, rollback command, and production routing impact are
 reviewed for the specific apply. The dedicated switch/rollback review is
 documented in
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+The current traffic path audit is documented in
+[BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
+and still requires a manual decision on whether `bluegreen_proxy` owns `8000`
+or an external proxy/tunnel performs the upstream switch.
 Conservative defaults are documented in
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md):
 nginx candidate, no port `8000` takeover before final approval, no first-apply
@@ -196,6 +209,8 @@ required gates for every production apply.
 ## Go / No-Go
 
 - Command review doc: READY after review.
+- Traffic path audit: READY after review at
+  [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 - Switch/rollback review doc: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production implementation: NOT READY.

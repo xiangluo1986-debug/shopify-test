@@ -41,6 +41,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+- [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -166,6 +167,11 @@ color state under `.deploy/` must not be committed or contain secrets, exact
 runtime commands are still not implemented, and production apply remains
 NO-GO.
 
+The production traffic path audit exists at
+[BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
+It is READY after review, but exact proxy ownership, Cloudflare/origin routing,
+and the future switch/reload plus rollback commands remain manual decisions.
+
 The production switch/rollback review document exists at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 It records the future proxy switch flow, active-color state shape including
@@ -199,8 +205,11 @@ configuration untouched.
 - Local inactive runtime validation: PASSED.
 - Local/test proxy routing validation: PASSED.
 - Production preflight, readiness, command review, runtime details,
+  traffic path audit,
   switch/rollback review, and final runtime approval docs exist.
 - Production runtime execution: NOT ENABLED.
+- Production traffic path audit: READY after review; proxy ownership still
+  requires manual decision.
 - Production apply: NO-GO.
 - Next future step, only if explicitly approved: implement runtime execution
   under the final approval gates, deployment lock enforcement, and exact
@@ -285,6 +294,13 @@ The current Docker Compose topology has three services:
 There is currently one `web` container. There is no nginx, Caddy, Traefik, HAProxy, or other reverse proxy service in `docker-compose.yml`. There is also no Compose service-level healthcheck.
 
 Because `web` publishes `8000:8000`, any local Cloudflare tunnel, host-level proxy, or direct browser access that targets `127.0.0.1:8000` reaches the single Django web service directly unless another external proxy exists outside this Compose file.
+
+The read-only production traffic path audit is documented in
+[BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
+It found active Compose still declares `web` on `8000:8000`, host port `8000`
+was owned by Docker Desktop host networking during the audit, no active Compose
+proxy service was found, DNS resolves through Cloudflare, and the exact
+Cloudflare/origin/proxy path still requires manual confirmation.
 
 The health endpoint is implemented at:
 

@@ -37,6 +37,9 @@ $ProductionCommandReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md"
 $ProductionCommandReviewStatus = "READY after review"
 $ProductionRuntimeDetailsPath = ".\docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md"
 $ProductionRuntimeDetailsStatus = "READY after review"
+$ProductionTrafficPathAuditPath = ".\docs\BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md"
+$ProductionTrafficPathAuditStatus = "READY after review"
+$ProductionProxyOwnershipStatus = "manual decision required"
 $ProductionSwitchRollbackReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md"
 $ProductionSwitchRollbackReviewStatus = "READY after review"
 $RuntimeCommandHelperPath = ".\scripts\blue_green_runtime_commands.ps1"
@@ -276,6 +279,10 @@ function Show-DraftArtifactSummary {
             Path = $ProductionRuntimeDetailsPath
         },
         [pscustomobject]@{
+            Label = "Production traffic path audit"
+            Path = $ProductionTrafficPathAuditPath
+        },
+        [pscustomobject]@{
             Label = "Production switch/rollback review"
             Path = $ProductionSwitchRollbackReviewPath
         },
@@ -328,6 +335,7 @@ function Show-DeploymentLockStatus {
     $productionReadinessPath = $ProductionReadinessPath
     $productionCommandReviewPath = $ProductionCommandReviewPath
     $productionRuntimeDetailsPath = $ProductionRuntimeDetailsPath
+    $productionTrafficPathAuditPath = $ProductionTrafficPathAuditPath
     $productionSwitchRollbackReviewPath = $ProductionSwitchRollbackReviewPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
@@ -437,6 +445,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Production runtime details document is missing: $productionRuntimeDetailsPath"
     }
 
+    if (Test-Path -LiteralPath $productionTrafficPathAuditPath) {
+        Write-Ok "Production traffic path audit document exists: $productionTrafficPathAuditPath"
+    } else {
+        Write-Warn "Production traffic path audit document is missing: $productionTrafficPathAuditPath"
+    }
+
     if (Test-Path -LiteralPath $productionSwitchRollbackReviewPath) {
         Write-Ok "Production switch/rollback review document exists: $productionSwitchRollbackReviewPath"
     } else {
@@ -478,6 +492,9 @@ function Show-DeploymentLockStatus {
     Write-Host "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
     Write-Host "Production runtime details: $ProductionRuntimeDetailsStatus."
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
+    Write-Host "Production traffic path audit: $ProductionTrafficPathAuditStatus."
+    Write-Host "Production traffic path audit document exists: $(Test-Path -LiteralPath $ProductionTrafficPathAuditPath)."
+    Write-Host "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
     Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
     Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
     Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
@@ -649,6 +666,9 @@ function Show-FuturePlan {
     Write-Host "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
     Write-Host "Production runtime details: $ProductionRuntimeDetailsStatus."
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
+    Write-Host "Production traffic path audit: $ProductionTrafficPathAuditStatus."
+    Write-Host "Production traffic path audit document exists: $(Test-Path -LiteralPath $ProductionTrafficPathAuditPath)."
+    Write-Host "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
     Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
     Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
     Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
@@ -683,6 +703,7 @@ function Show-FuturePlan {
     Write-Host "Production command path skeleton path: .\scripts\blue_green_production_apply.ps1."
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
     Write-Host "Production command review document path: $ProductionCommandReviewPath."
+    Write-Host "Production traffic path audit path: $ProductionTrafficPathAuditPath."
     Write-Host "Non-production validation plan path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
     Write-Host "Production preflight document path: $ProductionPreflightPath."
     Write-Host "Production apply readiness package path: $ProductionReadinessPath."
@@ -718,6 +739,9 @@ Write-Ok "Production command review: $ProductionCommandReviewStatus."
 Write-Ok "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
 Write-Ok "Production runtime details: $ProductionRuntimeDetailsStatus."
 Write-Ok "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
+Write-Ok "Production traffic path audit: $ProductionTrafficPathAuditStatus."
+Write-Ok "Production traffic path audit document exists: $(Test-Path -LiteralPath $ProductionTrafficPathAuditPath)."
+Write-Ok "Production proxy ownership decision: $ProductionProxyOwnershipStatus."
 Write-Ok "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
 Write-Ok "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
 Write-Ok "Production proxy/active-color/rollback details have conservative defaults and reviewed switch/rollback design."
