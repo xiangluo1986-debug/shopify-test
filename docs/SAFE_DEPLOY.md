@@ -41,6 +41,9 @@ The external routing decision package is documented at
 [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
 The traffic path option comparison is documented at
 [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+The no-action Option B Cloudflare route change and rollback plan is documented
+at
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
 The production switch/rollback review document is documented at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 The final runtime approval design is documented at
@@ -50,9 +53,10 @@ READY, exact production runtime command implementation is still not enabled,
 Cloudflare Published application routes for both tickets and shopify are
 confirmed to target `http://127.0.0.1:8000`, and production apply remains
 NO-GO. Option A and Option B are documented; Option B is the conservative
-recommendation but is not approved yet. No Cloudflare/domain routing change and
-no host port `8000` ownership change are approved without separate future
-approval.
+recommendation but is not approved yet. The Option B route plan proposes
+`18000` as a placeholder proxy port only; the final port is not approved. No
+Cloudflare/domain routing change and no host port `8000` ownership change are
+approved without separate future approval.
 
 The final runtime approval design is READY after review, but runtime command
 execution remains NOT ENABLED and the documented future approval phrase is
@@ -142,6 +146,10 @@ service can become healthy.
   is READY after review. Option B is the conservative recommendation, but the
   chosen option is NOT YET, Cloudflare change is NOT APPROVED, `8000` takeover
   is NOT APPROVED, and production apply remains NO-GO.
+- Option B Cloudflare route plan:
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md)
+  is READY after review. Proposed proxy port `18000` is NOT FINAL, Cloudflare
+  change is NOT APPROVED, and production apply remains NO-GO.
 - Production switch/rollback review document:
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
   is READY after review for design only. It documents the future proxy switch
@@ -288,8 +296,11 @@ port `8000` ownership change are approved without separate future approval.
 The confirmed Cloudflare Published application route target for both tickets
 and shopify is `http://127.0.0.1:8000`; Option A and Option B are documented at
 [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
-The conservative recommendation is Option B, but it is not approved. The next
-step is a no-action Cloudflare route change and rollback plan, not a deploy.
+The no-action Option B route plan is documented at
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+The conservative recommendation is Option B, but it is not approved. Proposed
+port `18000` is not final. The next step is manual review and final port /
+routing approval, not a deploy.
 
 Optional flags:
 

@@ -29,6 +29,7 @@ Related non-active drafts:
 - [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
 - [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
 - [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
+- [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -100,6 +101,10 @@ Related non-active drafts:
   Option A and Option B are documented. Option B is the conservative
   recommendation for the first production transition, but the chosen option is
   NOT YET, Cloudflare change is NOT APPROVED, `8000` takeover is NOT APPROVED,
+  and production apply remains NO-GO.
+- Option B Cloudflare route change and rollback plan: READY after review at
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+  Proposed proxy port `18000` is NOT FINAL. Cloudflare change is NOT APPROVED
   and production apply remains NO-GO.
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
@@ -378,6 +383,10 @@ and rollback steps.
   Option A and Option B are documented, Option B is the conservative
   recommendation, chosen option is NOT YET, Cloudflare change is NOT APPROVED,
   and `8000` takeover is NOT APPROVED.
+- Option B route plan: review
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md);
+  proposed port `18000` is a non-final placeholder, rollback returns both
+  routes to `http://127.0.0.1:8000`, and production apply remains NO-GO.
 - Migration compatibility rules: backward-compatible only during blue-green
   switch; risky schema changes require separate migration planning.
 - Static/media handling: shared media remains unchanged; `collectstatic`
@@ -415,6 +424,7 @@ These actions are not approved by this checklist alone:
   approved apply task.
 - Moving host port `8000` from `web` to a proxy.
 - Changing Cloudflare tunnel targets or public routing.
+- Treating proposed proxy port `18000` as final without separate approval.
 - Proceeding before the external routing decision package is reviewed and the
   Option A versus Option B routing choice is approved.
 - Treating the Option B recommendation as approval to edit Cloudflare.

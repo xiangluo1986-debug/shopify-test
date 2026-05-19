@@ -44,6 +44,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
 - [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
 - [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
+- [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md)
 - [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
@@ -193,6 +194,14 @@ conservative recommendation is Option B for the first production transition,
 but the chosen option is NOT YET, Cloudflare change is NOT APPROVED, `8000`
 takeover is NOT APPROVED, and production apply remains NO-GO.
 
+The no-action Option B Cloudflare route change and rollback plan exists at
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+It proposes `18000` as a conservative placeholder for the future
+`bluegreen_proxy` local port, but that port is not final. It documents manual
+future Cloudflare route change steps and rollback to
+`http://127.0.0.1:8000`; it does not approve Cloudflare change or production
+apply.
+
 The production switch/rollback review document exists at
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 It records the future proxy switch flow, active-color state shape including
@@ -235,12 +244,15 @@ configuration untouched.
   application route origin confirmed: YES.
 - Traffic path option comparison: READY after review; Option B is the
   conservative recommendation but not approved.
+- Option B route plan: READY after review; proposed proxy port `18000` is NOT
+  FINAL, Cloudflare change is NOT APPROVED, and production apply remains
+  NO-GO.
 - Chosen option: NOT YET.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.
 - Production apply: NO-GO.
-- Next future step: fill the option comparison manual decision fields and
-  create a no-action Cloudflare route change / rollback plan.
+- Next future step: review the Option B route plan, approve or change the
+  final proxy port, and fill the option comparison manual decision fields.
 
 ## Deployment Lock Gate
 
@@ -710,6 +722,9 @@ to design the future implementation without touching production traffic after
 the routing option is selected. The comparison is documented at
 [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md);
 Option B is the conservative recommendation, but not approved. The next
+route planning reference is
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md),
+where `18000` is proposed only as a non-final placeholder. The next
 implementation task should review the exact proxy config path, active-color
 state update behavior, proxy switch/reload command, rollback command,
 observation checks, migration gate, scheduler singleton confirmation, and

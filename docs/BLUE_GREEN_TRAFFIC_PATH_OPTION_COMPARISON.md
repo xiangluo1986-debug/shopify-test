@@ -102,9 +102,15 @@ Do not edit Cloudflare yet.
 
 Do not take over `8000` yet.
 
-First create a no-action Cloudflare route change plan and rollback plan.
+Review the no-action Cloudflare route change plan and rollback plan before any
+future route edit.
 
 Production remains NO-GO.
+
+The no-action Option B route change and rollback plan now exists at
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+It proposes `18000` as a conservative placeholder proxy port, but that port is
+not final. The plan does not approve any Cloudflare change or production apply.
 
 ## Decision Matrix
 
@@ -133,6 +139,9 @@ Production remains NO-GO.
 ## Go / No-Go
 
 - Option comparison: READY after review.
+- Option B route plan: READY after review at
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Proposed Option B proxy port: `18000`, NOT FINAL.
 - Chosen option: NOT YET.
 - Cloudflare change: NOT APPROVED.
 - `8000` takeover: NOT APPROVED.

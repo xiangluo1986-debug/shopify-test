@@ -23,12 +23,16 @@ $ProxyValidationUnifiedComposePath = ".\docker-compose.bluegreen.proxy-validatio
 $ProxyValidationStatus = "PASSED"
 $ProxyValidationHoldOpenStatus = "completed for 2026-05-19 validation"
 $ProductionApplyStatus = "NO-GO"
-$NextBlueGreenStep = "fill option comparison manual decision fields and create a no-action Cloudflare route change / rollback plan"
+$NextBlueGreenStep = "review Option B route plan, approve or change the final proxy port, and fill option comparison manual decision fields"
 $CloudflareTunnelName = "aftersales-ticket"
 $CloudflarePublishedRouteTarget = "http://127.0.0.1:8000"
 $CloudflareTicketsHostname = "tickets.kidstoyloverapps.com"
 $CloudflareShopifyHostname = "shopify.kidstoyloverapps.com"
 $CloudflarePublishedRouteStatus = "confirmed"
+$OptionBCloudflareRoutePlanPath = ".\docs\BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md"
+$OptionBCloudflareRoutePlanStatus = "READY after review"
+$OptionBProposedProxyPort = "18000"
+$OptionBProposedProxyPortStatus = "NOT FINAL"
 $ProjectDeploymentPolicyPath = ".\AGENTS.md"
 $ProjectDeploymentPolicyStatus = "documented"
 $FinalRuntimeApprovalPath = ".\docs\BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md"
@@ -55,8 +59,8 @@ $Local8000TakeoverApprovalStatus = "NOT APPROVED"
 $ExternalRoutingConfirmedStatus = "Cloudflare Published application route origin confirmed"
 $ExternalRoutingAuditStatus = "READ-ONLY AUDIT UPDATED 2026-05-19"
 $ExternalRoutingHealthObservation = "Cloudflare Access returned externally; app OK was not observed through unauthenticated public /healthz/"
-$ExternalRoutingRecommendedNextPath = "review Option A versus Option B comparison; conservative recommendation Option B, not approved"
-$ProductionProxyOwnershipStatus = "chosen option NOT YET; route target confirmed; future 8000 ownership not approved"
+$ExternalRoutingRecommendedNextPath = "review Option B route plan and approve or change the final proxy port; conservative recommendation Option B, not approved"
+$ProductionProxyOwnershipStatus = "chosen option NOT YET; route target confirmed; proposed Option B port 18000 is not final; future 8000 ownership not approved"
 $ProductionSwitchRollbackReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md"
 $ProductionSwitchRollbackReviewStatus = "READY after review"
 $RuntimeCommandHelperPath = ".\scripts\blue_green_runtime_commands.ps1"
@@ -308,6 +312,10 @@ function Show-DraftArtifactSummary {
             Path = $TrafficPathOptionComparisonPath
         },
         [pscustomobject]@{
+            Label = "Option B Cloudflare route plan"
+            Path = $OptionBCloudflareRoutePlanPath
+        },
+        [pscustomobject]@{
             Label = "Production switch/rollback review"
             Path = $ProductionSwitchRollbackReviewPath
         },
@@ -363,6 +371,7 @@ function Show-DeploymentLockStatus {
     $productionTrafficPathAuditPath = $ProductionTrafficPathAuditPath
     $externalRoutingDecisionPath = $ExternalRoutingDecisionPath
     $trafficPathOptionComparisonPath = $TrafficPathOptionComparisonPath
+    $optionBCloudflareRoutePlanPath = $OptionBCloudflareRoutePlanPath
     $productionSwitchRollbackReviewPath = $ProductionSwitchRollbackReviewPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
@@ -490,6 +499,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Traffic path option comparison is missing: $trafficPathOptionComparisonPath"
     }
 
+    if (Test-Path -LiteralPath $optionBCloudflareRoutePlanPath) {
+        Write-Ok "Option B Cloudflare route plan exists: $optionBCloudflareRoutePlanPath"
+    } else {
+        Write-Warn "Option B Cloudflare route plan is missing: $optionBCloudflareRoutePlanPath"
+    }
+
     if (Test-Path -LiteralPath $productionSwitchRollbackReviewPath) {
         Write-Ok "Production switch/rollback review document exists: $productionSwitchRollbackReviewPath"
     } else {
@@ -537,6 +552,9 @@ function Show-DeploymentLockStatus {
     Write-Host "External routing decision package exists: $(Test-Path -LiteralPath $ExternalRoutingDecisionPath)."
     Write-Host "Traffic path option comparison: $TrafficPathOptionComparisonStatus."
     Write-Host "Traffic path option comparison exists: $(Test-Path -LiteralPath $TrafficPathOptionComparisonPath)."
+    Write-Host "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
+    Write-Host "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
+    Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
     Write-Host "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
     Write-Host "Chosen option: $TrafficPathOptionChosenStatus."
     Write-Host "Cloudflare change: $CloudflareChangeApprovalStatus."
@@ -729,6 +747,9 @@ function Show-FuturePlan {
     Write-Host "External routing decision package exists: $(Test-Path -LiteralPath $ExternalRoutingDecisionPath)."
     Write-Host "Traffic path option comparison: $TrafficPathOptionComparisonStatus."
     Write-Host "Traffic path option comparison exists: $(Test-Path -LiteralPath $TrafficPathOptionComparisonPath)."
+    Write-Host "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
+    Write-Host "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
+    Write-Host "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
     Write-Host "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
     Write-Host "Chosen option: $TrafficPathOptionChosenStatus."
     Write-Host "Cloudflare change: $CloudflareChangeApprovalStatus."
@@ -779,6 +800,7 @@ function Show-FuturePlan {
     Write-Host "Production traffic path audit path: $ProductionTrafficPathAuditPath."
     Write-Host "External routing decision package path: $ExternalRoutingDecisionPath."
     Write-Host "Traffic path option comparison path: $TrafficPathOptionComparisonPath."
+    Write-Host "Option B Cloudflare route plan path: $OptionBCloudflareRoutePlanPath."
     Write-Host "Non-production validation plan path: .\docs\BLUE_GREEN_NON_PRODUCTION_VALIDATION.md."
     Write-Host "Production preflight document path: $ProductionPreflightPath."
     Write-Host "Production apply readiness package path: $ProductionReadinessPath."
@@ -822,6 +844,9 @@ Write-Ok "External routing decision package: $ExternalRoutingDecisionPackageStat
 Write-Ok "External routing decision package exists: $(Test-Path -LiteralPath $ExternalRoutingDecisionPath)."
 Write-Ok "Traffic path option comparison: $TrafficPathOptionComparisonStatus."
 Write-Ok "Traffic path option comparison exists: $(Test-Path -LiteralPath $TrafficPathOptionComparisonPath)."
+Write-Ok "Option B Cloudflare route plan: $OptionBCloudflareRoutePlanStatus."
+Write-Ok "Option B Cloudflare route plan exists: $(Test-Path -LiteralPath $OptionBCloudflareRoutePlanPath)."
+Write-Ok "Option B proposed proxy port: $OptionBProposedProxyPort, $OptionBProposedProxyPortStatus."
 Write-Ok "Recommended conservative direction: $TrafficPathOptionRecommendedDirection."
 Write-Ok "Chosen option: $TrafficPathOptionChosenStatus."
 Write-Ok "Cloudflare change: $CloudflareChangeApprovalStatus."

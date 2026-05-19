@@ -63,6 +63,12 @@ It documents the local `8000` proxy takeover path and the Cloudflare route
 target change path. The conservative recommendation is Option B, but it is not
 approved yet.
 
+No-action Option B Cloudflare route change and rollback plan:
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+It proposes `18000` as a conservative placeholder for a future
+`bluegreen_proxy` local port. The port is not final, the Cloudflare change is
+not approved, and production apply remains NO-GO.
+
 ## Updated Routing Interpretation
 
 - External app traffic reaches local `8000` through Cloudflare Tunnel
@@ -144,6 +150,9 @@ Risk: Cloudflare Published application route service target changes.
 - External routing decision package: READY after review.
 - Option comparison package: READY after review at
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Option B route plan: READY after review at
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Proposed Option B proxy port: `18000`, NOT FINAL.
 - Chosen option: NOT YET.
 - Conservative recommendation: Option B, not approved.
 - Cloudflare Published application route origin confirmed: YES.
@@ -152,6 +161,6 @@ Risk: Cloudflare Published application route service target changes.
 - Production proxy switch implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: fill the manual decision fields in the option comparison
-package and review a no-action Cloudflare route change and rollback plan before
-any future routing change.
+Next required step: review the Option B route plan, approve or change the
+final proxy port, fill the manual decision fields, and separately approve any
+future Cloudflare routing change before it is made.

@@ -50,6 +50,12 @@ It documents both Option A and Option B. The conservative recommendation is
 Option B, but the chosen option is still NOT YET and Cloudflare changes require
 separate approval.
 
+The no-action Option B Cloudflare route change and rollback plan is documented
+in
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+It proposes `18000` as a placeholder `bluegreen_proxy` port. The port is not
+final, Cloudflare change is not approved, and production apply remains NO-GO.
+
 ## Current Validated Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -77,6 +83,10 @@ separate approval.
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md)
   exists after review; Option B is the conservative recommendation, but it is
   not approved yet.
+- Option B route plan:
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md)
+  exists after review; proposed port `18000` is not final, Cloudflare change
+  is NOT APPROVED, and production apply remains NO-GO.
 
 ## Exact Future Production Command Groups
 
@@ -248,6 +258,9 @@ required gates for every production apply.
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
 - Traffic path option comparison: READY after review at
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Option B route plan: READY after review at
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Proposed Option B proxy port: `18000`, NOT FINAL.
 - Conservative recommendation: Option B, not approved.
 - Chosen option: NOT YET.
 - Cloudflare change: NOT APPROVED.
@@ -258,9 +271,10 @@ required gates for every production apply.
 - Production implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: fill the option comparison manual decision fields and
-prepare a no-action Cloudflare route change / rollback plan, then separately
-review and approve the exact runtime command path before any production apply.
+Next required step: review the Option B route plan, approve or change the
+final proxy port, fill the option comparison manual decision fields, then
+separately review and approve the exact runtime command path before any
+production apply.
 
 ## Runtime Command Helper Status
 

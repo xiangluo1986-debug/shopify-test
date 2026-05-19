@@ -37,6 +37,12 @@ It documents Option A, where `bluegreen_proxy` takes local `8000`, and Option
 B, where Cloudflare Published application routes point to a new proxy port. The
 conservative recommendation is Option B, but it is not approved yet.
 
+The no-action Option B Cloudflare route change and rollback plan is documented
+in
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+It proposes `18000` as a placeholder new proxy port. The port is not final,
+Cloudflare change is not approved, and production apply remains NO-GO.
+
 This document does not approve production apply. It does not deploy, start or
 stop containers, run migrations, run collectstatic, switch traffic, change
 Cloudflare or domain routing, modify active Compose files, modify production
@@ -154,6 +160,9 @@ scheduler.
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
 - Traffic path option comparison: READY after review at
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Option B route plan: READY after review at
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Proposed Option B proxy port: `18000`, NOT FINAL.
 - Conservative recommendation: Option B, not approved.
 - Chosen option: NOT YET.
 - Cloudflare change: NOT APPROVED.
@@ -164,9 +173,9 @@ scheduler.
 - Production apply implementation: still NOT READY.
 - Production apply: NO-GO.
 
-Next required step: fill the option comparison manual decision fields and
-create a no-action Cloudflare route change / rollback plan, then request
-separate final production approval before any runtime-changing action.
+Next required step: review the Option B route plan, approve or change the
+final proxy port, fill the option comparison manual decision fields, then
+request separate final production approval before any runtime-changing action.
 
 ## Runtime Command Helper Status
 

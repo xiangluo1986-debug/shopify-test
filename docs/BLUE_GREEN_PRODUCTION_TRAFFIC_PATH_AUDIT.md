@@ -19,6 +19,12 @@ It recommends Option B as the conservative direction for the first production
 transition, but the chosen option is still NOT YET and Cloudflare changes
 require separate approval.
 
+The no-action Option B Cloudflare route change and rollback plan is documented
+in
+[BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+It proposes `18000` as a placeholder proxy port only; the port is not final,
+Cloudflare change is not approved, and production apply remains NO-GO.
+
 This audit did not deploy, build images, start containers, stop containers,
 restart containers, run migrations, run collectstatic, reload proxy, switch
 traffic, write active-color state, change Cloudflare/domain routing, modify
@@ -200,6 +206,9 @@ remains NO-GO.
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
 - Option comparison package: READY after review at
   [BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md](BLUE_GREEN_TRAFFIC_PATH_OPTION_COMPARISON.md).
+- Option B route plan: READY after review at
+  [BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md](BLUE_GREEN_OPTION_B_CLOUDFLARE_ROUTE_PLAN.md).
+- Proposed Option B proxy port: `18000`, NOT FINAL.
 - Conservative recommendation: Option B, not approved.
 - Chosen option: NOT YET.
 - Cloudflare Published application route origin confirmed: YES.
@@ -209,6 +218,7 @@ remains NO-GO.
 - Production runtime execution: NOT ENABLED.
 - Production apply: NO-GO.
 
-Next required step: fill the option comparison manual decision fields and
-create a no-action Cloudflare route change / rollback plan before implementing
-any real blue-green runtime command.
+Next required step: review the Option B route plan, approve or change the
+final proxy port, fill the option comparison manual decision fields, and
+separately approve any future Cloudflare route edit before implementing any
+real blue-green runtime command.
