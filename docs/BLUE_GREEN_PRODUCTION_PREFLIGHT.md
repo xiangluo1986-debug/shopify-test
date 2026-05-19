@@ -15,6 +15,8 @@ The dedicated production runtime command review is documented at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 The production runtime details document is documented at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+The production switch/rollback review is documented at
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 These documents are READY after review, but production implementation is NOT
 READY, exact production runtime command implementation is still not enabled,
 and production apply remains NO-GO.
@@ -37,6 +39,9 @@ and production apply remains NO-GO.
 - Production runtime details document:
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
   exists and records conservative defaults.
+- Production switch/rollback review document:
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+  exists and is READY after review.
 
 ## Required Production Decisions / Checks
 
@@ -108,9 +113,11 @@ and production apply remains NO-GO.
 - Conservative default active color state path:
   `.deploy/active-color.json`.
 - The active color state file should contain `active_color`, `previous_color`,
-  `updated_at`, `updated_by`, and `deploy_id`.
+  `updated_at`, `updated_by`, `deploy_id`, `proxy_config_version`, and
+  `notes`.
 - The active color state file must not be committed and must not contain
   secrets.
+- Active color state writes must be atomic.
 - Target color must be validated and must not equal the active color.
 - The previous active color must be known before switch.
 - Rollback target must be known and recorded before switch.
@@ -179,6 +186,8 @@ and production apply remains NO-GO.
   [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md).
 - Production command review document: READY after review at
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
+- Production switch/rollback review document: READY after review at
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production command path skeleton: implemented but blocked.
 - Production implementation: NOT READY.
 - Exact production runtime command implementation: still not enabled.

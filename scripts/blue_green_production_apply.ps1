@@ -26,6 +26,7 @@ $ProductionPreflightPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GR
 $ProductionReadinessPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_APPLY_READINESS.md"
 $ProductionCommandReviewPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md"
 $ProductionRuntimeDetailsPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md"
+$ProductionSwitchRollbackReviewPath = Join-Path -Path $ProjectRoot -ChildPath "docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md"
 
 function Write-Step {
     param([string]$Message)
@@ -160,6 +161,7 @@ function Show-PlanHeader {
     Write-Host "Deployment lock helper exists: $(Test-Path -LiteralPath $DeployLockHelperPath -PathType Leaf)"
     Write-Host "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath -PathType Leaf)"
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath -PathType Leaf)"
+    Write-Host "Production switch/rollback review document exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath -PathType Leaf)"
     Write-Host "Migration compatibility confirmation: $([bool]$MigrationCompatibilityConfirmed)"
     Write-Host "Scheduler singleton confirmation: $([bool]$SchedulerSingletonConfirmed)"
     Write-Host "Media/static shared storage confirmation: $([bool]$SharedMediaStaticStorageConfirmed)"
@@ -198,10 +200,13 @@ function Show-ProductionPreflightGate {
     Write-Host "Required command review document: docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md."
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath -PathType Leaf)"
     Write-Host "Required runtime details document: docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md."
+    Write-Host "Production switch/rollback review document exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath -PathType Leaf)"
+    Write-Host "Required switch/rollback review document: docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md."
     Write-Host "Production preflight document status: READY after review."
     Write-Host "Production apply readiness package status: READY after review."
     Write-Host "Production command review document status: READY after review if present."
     Write-Host "Production runtime details document status: READY after review if present."
+    Write-Host "Production switch/rollback review document status: READY after review if present."
     Write-Host "Production command path skeleton: implemented but blocked."
     Write-Host "Exact runtime command implementation is still not enabled."
     Write-Host "Conservative defaults now exist for production proxy, colors, active-color state, rollback, observation, migration policy, scheduler singleton, and media/static expectations."
@@ -216,18 +221,21 @@ function Show-ProductionPreflightGate {
 function Show-ProductionRuntimeDefaults {
     Write-Step "Production runtime details (documented defaults / NOT RUN)"
     Write-Host "Runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath -PathType Leaf)"
+    Write-Host "Switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath -PathType Leaf)"
     Write-Host "NOT RUN: use nginx as the production blue-green proxy candidate."
     Write-Host "NOT RUN: current production web keeps host port 8000 until explicit final approval."
     Write-Host "NOT RUN: future service names are web_blue, web_green, and bluegreen_proxy."
-    Write-Host "NOT RUN: active-color state would be .deploy\active-color.json with active_color, previous_color, updated_at, updated_by, and deploy_id."
+    Write-Host "NOT RUN: active-color state design exists for .deploy\active-color.json with active_color, previous_color, updated_at, updated_by, deploy_id, proxy_config_version, and notes."
     Write-Host "NOT RUN: active-color state under .deploy must not be committed and must not contain secrets."
+    Write-Host "NOT RUN: active-color state writes must be atomic and occur only after switch or rollback health passes."
     Write-Host "NOT RUN: future switch would update only a controlled local proxy include/symlink/state file after target health passes."
     Write-Host "NOT RUN: rollback would switch proxy back to previous_color and use the deployment lock."
     Write-Host "NOT RUN: first production apply observation would be at least 10 minutes before cleanup."
     Write-Host "NOT RUN: migration policy allows only backward-compatible migrations during blue-green apply."
     Write-Host "NOT RUN: scheduler remains singleton; no blue/green scheduler is allowed."
     Write-Host "NOT RUN: media/uploads must be shared and static handling must be reviewed before production proxy switch."
-    Write-Host "Real proxy switch/reload and rollback commands are not implemented yet."
+    Write-Host "Exact proxy switch/reload command still not implemented."
+    Write-Host "Rollback command still not implemented."
 }
 
 function Show-ConfirmationGatePlan {
@@ -299,7 +307,8 @@ function Show-BlockingResult {
     Write-Fail $Message
     Write-Fail "Exact runtime command implementation is still not enabled."
     Write-Fail "Conservative runtime defaults are documented, but exact proxy switch/reload and rollback commands are not implemented yet."
-    Write-Fail "Review docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md and docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md before any future implementation task."
+    Write-Fail "Switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath -PathType Leaf)"
+    Write-Fail "Review docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md, docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md, and docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md before any future implementation task."
     Write-Fail "Production blue-green apply remains blocked. No runtime action was performed."
     Write-Fail "Production apply remains NO-GO."
     exit $Code
@@ -347,10 +356,13 @@ if (-not $ExecuteProductionApply) {
     Write-Ok "Production readiness document exists if reported above; production command review is required and should exist if reported above."
     Write-Ok "Production command review document exists if reported above."
     Write-Ok "Production runtime details document exists if reported above."
+    Write-Ok "Production switch/rollback review document exists if reported above."
     Write-Ok "Conservative defaults exist for proxy, colors, active-color state, rollback, observation, migration policy, scheduler singleton, and media/static expectations."
+    Write-Ok "Active-color state design exists and remains no-write in this skeleton."
     Write-Ok "Production command path skeleton is implemented but blocked."
     Write-Ok "Exact runtime command implementation is still not enabled."
-    Write-Ok "Real proxy switch/reload and rollback commands are not implemented yet."
+    Write-Ok "Exact proxy switch/reload command still not implemented."
+    Write-Ok "Rollback command still not implemented."
     Write-Ok "Real production apply remains blocked."
     Write-Ok "Draft readiness approval phrase is not active for real apply."
     Write-Ok "Production real apply remains NO-GO."
@@ -390,7 +402,9 @@ Write-Fail "No deployment lock was acquired because this skeleton has no real pr
 Write-Fail "Exact production apply commands are not approved; migration, scheduler, media/static, proxy, rollback, observation, cleanup, and data safety checks must pass first."
 Write-Fail "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath -PathType Leaf)"
 Write-Fail "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath -PathType Leaf)"
+Write-Fail "Production switch/rollback review document exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath -PathType Leaf)"
 Write-Fail "Exact runtime command implementation is still not enabled."
+Write-Fail "Active-color state design exists and remains no-write in this skeleton."
 Write-Fail "Conservative runtime defaults are documented; exact switch/reload and rollback commands are still not implemented."
 Write-Fail "Draft readiness approval phrase is not active for real apply; production apply remains NO-GO."
 

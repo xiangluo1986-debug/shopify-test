@@ -21,6 +21,8 @@ reviews the production command review document at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md),
 reviews the production runtime details document at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
+reviews the production switch/rollback review document at
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md),
 and uses the same lock before any runtime-changing action.
 
 ## What The Lock Protects
@@ -288,6 +290,13 @@ media/uploads requirements. The active-color state file under `.deploy/` must
 not be committed and must not contain secrets. Exact proxy switch/reload and
 rollback commands still require later implementation and final approval.
 
+The production switch/rollback review document is documented at
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+It is READY after review for design only. It records the future proxy switch
+flow, active-color state shape, atomic state write rule, rollback flow,
+cleanup boundaries, and remaining blockers. Proxy switch command and rollback
+command are still not implemented.
+
 Production apply now has successful local inactive runtime validation and
 local/test proxy routing validation documented in
 [BLUE_GREEN_NON_PRODUCTION_VALIDATION.md](BLUE_GREEN_NON_PRODUCTION_VALIDATION.md).
@@ -402,6 +411,10 @@ runtime-changing actions should use the shared deployment lock.
   `docs/BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md`; READY after review for
   conservative defaults only, with active-color state under `.deploy/` not
   committed and no secrets in runtime state.
+- Production switch/rollback review document:
+  `docs/BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md`; READY after review
+  for design only, with proxy switch command NOT IMPLEMENTED, rollback command
+  NOT IMPLEMENTED, and production apply still NO-GO.
 - Production apply: NO-GO until a future runtime-changing implementation uses
   deployment lock acquisition before build/start/migrate/collectstatic/proxy
   switch/cleanup, the production preflight document is reviewed, migration
@@ -432,4 +445,6 @@ runtime-changing actions should use the shared deployment lock.
   plus
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
   plus
-  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+  [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+  plus
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).

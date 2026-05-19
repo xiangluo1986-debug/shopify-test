@@ -5,6 +5,11 @@
 Resolve production runtime design details before implementing production
 blue-green apply.
 
+The exact future proxy switch, active-color state, and rollback design is
+reviewed separately in
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+That review is READY after review, but it does not approve production apply.
+
 This document does not approve production apply. It does not deploy, start or
 stop containers, run migrations, run collectstatic, switch traffic, change
 Cloudflare or domain routing, modify active Compose files, modify production
@@ -52,9 +57,16 @@ scheduler.
   - `updated_at`
   - `updated_by`
   - `deploy_id`
+  - `proxy_config_version`
+  - `notes`
 - Do not commit the state file.
 - The state file must not contain secrets, tokens, credentials, private URLs,
   database passwords, or private environment values.
+- Writes must be atomic.
+- Update active color only after target health and proxy switch validation
+  pass.
+- Rollback updates `active_color` back to `previous_color` only after rollback
+  switch and rollback health validation pass.
 
 ### E. Proxy Switch Mechanism
 
@@ -99,6 +111,8 @@ scheduler.
 ## Go / No-Go
 
 - Runtime details: READY after review.
+- Switch/rollback review document: READY after review at
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production apply implementation: still NOT READY.
 - Production apply: NO-GO.
 

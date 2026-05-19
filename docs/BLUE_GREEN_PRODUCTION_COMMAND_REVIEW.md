@@ -20,6 +20,12 @@ documented in
 Those defaults resolve the design direction only. They do not approve
 production command implementation or production apply.
 
+The exact future proxy switch, active-color state, and rollback design is
+reviewed in
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+That review is READY after review, but production command implementation is
+still NOT READY.
+
 ## Current Validated Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -30,6 +36,9 @@ production command implementation or production apply.
 - Production runtime details document:
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
   exists and records conservative defaults.
+- Production switch/rollback review document:
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+  exists and is READY after review.
 
 ## Exact Future Production Command Groups
 
@@ -95,7 +104,10 @@ NOT RUN IN THIS TASK:
 The future proxy switch mechanism is not approved by this review document and
 must remain blocked until the exact proxy config path, switch/reload command,
 active-color state update, rollback command, and production routing impact are
-reviewed for the specific apply. Conservative defaults are documented in
+reviewed for the specific apply. The dedicated switch/rollback review is
+documented in
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+Conservative defaults are documented in
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md):
 nginx candidate, no port `8000` takeover before final approval, no first-apply
 Cloudflare/domain routing change unless separately approved, and switch only
@@ -151,9 +163,11 @@ The following conservative defaults are now documented in
 - Production service names: `web_blue`, `web_green`, and `bluegreen_proxy`.
 - Active color storage: local `.deploy/active-color.json` containing
   `active_color`, `previous_color`, `updated_at`, `updated_by`, and
-  `deploy_id`.
+  `deploy_id`, plus `proxy_config_version` and `notes`.
 - Active color state under `.deploy/` must not be committed and must not
   contain secrets.
+- Active color state writes must be atomic and must occur only after target
+  switch or rollback health validation passes.
 - Proxy switch shape: controlled local proxy include/symlink/state update only
   after target health passes.
 - Rollback shape: switch proxy back to `previous_color`, with deployment lock
@@ -174,6 +188,8 @@ required gates for every production apply.
 ## Go / No-Go
 
 - Command review doc: READY after review.
+- Switch/rollback review doc: READY after review at
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production implementation: NOT READY.
 - Production apply: NO-GO.
 

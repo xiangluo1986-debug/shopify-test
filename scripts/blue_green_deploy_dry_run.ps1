@@ -32,8 +32,12 @@ $ProductionCommandReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md"
 $ProductionCommandReviewStatus = "READY after review"
 $ProductionRuntimeDetailsPath = ".\docs\BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md"
 $ProductionRuntimeDetailsStatus = "READY after review"
+$ProductionSwitchRollbackReviewPath = ".\docs\BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md"
+$ProductionSwitchRollbackReviewStatus = "READY after review"
 $ProductionCommandPathSkeletonStatus = "implemented but blocked"
 $ProductionCommandImplementationStatus = "NOT READY"
+$ProxySwitchCommandStatus = "NOT IMPLEMENTED"
+$RollbackCommandStatus = "NOT IMPLEMENTED"
 
 function Write-Step {
     param([string]$Message)
@@ -253,6 +257,10 @@ function Show-DraftArtifactSummary {
             Path = $ProductionRuntimeDetailsPath
         },
         [pscustomobject]@{
+            Label = "Production switch/rollback review"
+            Path = $ProductionSwitchRollbackReviewPath
+        },
+        [pscustomobject]@{
             Label = "Local apply simulation read-only preview"
             Path = ".\scripts\blue_green_local_apply_simulation_preview.ps1"
         },
@@ -296,6 +304,7 @@ function Show-DeploymentLockStatus {
     $productionReadinessPath = $ProductionReadinessPath
     $productionCommandReviewPath = $ProductionCommandReviewPath
     $productionRuntimeDetailsPath = $ProductionRuntimeDetailsPath
+    $productionSwitchRollbackReviewPath = $ProductionSwitchRollbackReviewPath
     $proxyUnifiedComposePath = $ProxyValidationUnifiedComposePath
     $proxyComposePath = ".\docker-compose.bluegreen.proxy-test.example.yml"
     $proxyConfigPath = ".\nginx\bluegreen.local-test.example.conf"
@@ -377,6 +386,12 @@ function Show-DeploymentLockStatus {
         Write-Warn "Production runtime details document is missing: $productionRuntimeDetailsPath"
     }
 
+    if (Test-Path -LiteralPath $productionSwitchRollbackReviewPath) {
+        Write-Ok "Production switch/rollback review document exists: $productionSwitchRollbackReviewPath"
+    } else {
+        Write-Warn "Production switch/rollback review document is missing: $productionSwitchRollbackReviewPath"
+    }
+
     if (Test-Path -LiteralPath $proxyUnifiedComposePath) {
         Write-Ok "Unified local proxy routing compose example exists: $proxyUnifiedComposePath"
         $proxyUnifiedText = Get-Content -LiteralPath $proxyUnifiedComposePath -Raw
@@ -412,9 +427,14 @@ function Show-DeploymentLockStatus {
     Write-Host "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
     Write-Host "Production runtime details: $ProductionRuntimeDetailsStatus."
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
-    Write-Host "Production proxy/active-color/rollback details: conservative defaults documented."
+    Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
+    Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
+    Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
     Write-Host "Conservative defaults: nginx proxy candidate; current web owns port 8000 until final approval; web_blue/web_green/bluegreen_proxy service names; .deploy/active-color.json state; rollback to previous_color; at least 10 minutes of observation."
+    Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
     Write-Host "Active-color state under .deploy must not be committed and must not contain secrets."
+    Write-Host "Proxy switch command: $ProxySwitchCommandStatus."
+    Write-Host "Rollback command: $RollbackCommandStatus."
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
     Write-Host "Production implementation: $ProductionCommandImplementationStatus."
     Write-Host "Proxy validation hold-open mode: $ProxyValidationHoldOpenStatus in scripts/blue_green_local_inactive_startup.ps1."
@@ -568,7 +588,12 @@ function Show-FuturePlan {
     Write-Host "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
     Write-Host "Production runtime details: $ProductionRuntimeDetailsStatus."
     Write-Host "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
-    Write-Host "Production proxy/active-color/rollback details: conservative defaults documented."
+    Write-Host "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
+    Write-Host "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
+    Write-Host "Production proxy/active-color/rollback details: conservative defaults documented and reviewed."
+    Write-Host "Active-color state design reviewed: .deploy/active-color.json remains no-write, uncommitted, no-secrets, and atomic-write only in a future approved implementation."
+    Write-Host "Proxy switch command: $ProxySwitchCommandStatus."
+    Write-Host "Rollback command: $RollbackCommandStatus."
     Write-Host "Production implementation: $ProductionCommandImplementationStatus."
     Write-Host "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
     Write-Host "Production apply: $ProductionApplyStatus."
@@ -622,7 +647,12 @@ Write-Ok "Production command review: $ProductionCommandReviewStatus."
 Write-Ok "Production command review document exists: $(Test-Path -LiteralPath $ProductionCommandReviewPath)."
 Write-Ok "Production runtime details: $ProductionRuntimeDetailsStatus."
 Write-Ok "Production runtime details document exists: $(Test-Path -LiteralPath $ProductionRuntimeDetailsPath)."
-Write-Ok "Production proxy/active-color/rollback details have conservative defaults."
+Write-Ok "Production switch/rollback review: $ProductionSwitchRollbackReviewStatus."
+Write-Ok "Production switch/rollback review doc exists: $(Test-Path -LiteralPath $ProductionSwitchRollbackReviewPath)."
+Write-Ok "Production proxy/active-color/rollback details have conservative defaults and reviewed switch/rollback design."
+Write-Ok "Active-color state design reviewed."
+Write-Ok "Proxy switch command: $ProxySwitchCommandStatus."
+Write-Ok "Rollback command: $RollbackCommandStatus."
 Write-Ok "Production command path skeleton: $ProductionCommandPathSkeletonStatus."
 Write-Ok "Production implementation: $ProductionCommandImplementationStatus."
 Write-Ok "Proxy validation network fix: unified compose example was used for the passed local/test validation."

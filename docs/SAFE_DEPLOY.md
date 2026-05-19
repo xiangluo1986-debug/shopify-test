@@ -35,6 +35,8 @@ The dedicated production runtime command review is documented at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 The production runtime details document is documented at
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+The production switch/rollback review document is documented at
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 These documents are READY after review; production implementation is NOT
 READY, exact production runtime command implementation is still not enabled,
 and production apply remains NO-GO.
@@ -107,6 +109,12 @@ service can become healthy.
   backward-compatible migration policy, singleton scheduler policy, and shared
   media/uploads requirements. Active-color state under `.deploy/` must not be
   committed and must not contain secrets.
+- Production switch/rollback review document:
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+  is READY after review for design only. It documents the future proxy switch
+  flow, active-color state design, rollback flow, cleanup boundaries, and
+  remaining blockers. Proxy switch command: NOT IMPLEMENTED. Rollback command:
+  NOT IMPLEMENTED.
 
 Runtime-changing deploy paths include container start, container stop,
 container restart, image build, migration, collectstatic, proxy switch, traffic
@@ -190,10 +198,12 @@ present; even then real production apply remains blocked because runtime
 execution is not approved in this phase. It also reports that local/test proxy
 validation is passed, the production preflight document exists, the production
 apply readiness package exists, the production command review document exists,
-the production runtime details document exists, conservative defaults are
-documented, exact runtime command implementation is still not enabled, the
-draft approval phrase is not active for real apply, and production apply
-remains NO-GO.
+the production runtime details document exists, the production switch/rollback
+review document exists, active-color state design is reviewed, conservative
+defaults are documented, exact runtime command implementation is still not
+enabled, the proxy switch command and rollback command are still not
+implemented, the draft approval phrase is not active for real apply, and
+production apply remains NO-GO.
 
 Deployment lock helper status:
 

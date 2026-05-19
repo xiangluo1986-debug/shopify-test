@@ -26,6 +26,7 @@ Related non-active drafts:
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+- [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -78,6 +79,12 @@ Related non-active drafts:
   migration policy, singleton scheduler, and shared media/uploads.
   Production implementation is still NOT READY and production apply remains
   NO-GO.
+- Production switch/rollback review document: READY after review at
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+  It documents the exact future proxy switch flow, active-color state design,
+  rollback flow, cleanup boundaries, and remaining blockers. Proxy switch
+  command: NOT IMPLEMENTED. Rollback command: NOT IMPLEMENTED. Production
+  apply remains NO-GO.
 - Local/test proxy routing validation result: PASSED on 2026-05-19 and
   recorded at
   [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -233,6 +240,11 @@ review. Normal non-deploy tasks are not blocked.
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
   has been reviewed. It documents conservative defaults only and does not
   implement or approve production runtime commands.
+- The production switch/rollback review document in
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+  has been reviewed. It documents future switch and rollback design only and
+  does not implement proxy reload, traffic switch, active-color state write, or
+  rollback commands.
 - Successful non-production inactive runtime validation has been reviewed, and
   local/test proxy routing validation has passed, before any future production
   apply request.
@@ -296,6 +308,9 @@ and rollback steps.
 - Production proxy / active-color / rollback defaults are documented in
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md);
   exact implementation and final production approval are still required.
+- The exact future switch/rollback design is documented in
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md);
+  active-color state writes remain future-only and must be atomic.
 - Active color tracking: future file-based marker, documented as draft/example
   only until an apply task creates real runtime state.
 - Port ownership: current `web` service keeps host port `8000`; changing this
@@ -385,6 +400,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\blue_green_product
 
 - Review the production command review document:
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
+
+- Review the production switch/rollback review document:
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 
 - Confirm execution requests without the exact approval phrase remain blocked:
 

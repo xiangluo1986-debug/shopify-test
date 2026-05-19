@@ -41,6 +41,7 @@ traffic or change current deployment commands:
 - [BLUE_GREEN_PRODUCTION_APPLY_READINESS.md](BLUE_GREEN_PRODUCTION_APPLY_READINESS.md)
 - [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 - [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+- [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
 - [docker-compose.bluegreen.proxy-validation.example.yml](../docker-compose.bluegreen.proxy-validation.example.yml)
 - [docker-compose.bluegreen.proxy-test.example.yml](../docker-compose.bluegreen.proxy-test.example.yml)
 - [nginx/bluegreen.local-test.example.conf](../nginx/bluegreen.local-test.example.conf)
@@ -157,6 +158,14 @@ media/uploads requirements. Runtime details are READY after review, but active
 color state under `.deploy/` must not be committed or contain secrets, exact
 runtime commands are still not implemented, and production apply remains
 NO-GO.
+
+The production switch/rollback review document exists at
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+It records the future proxy switch flow, active-color state shape including
+`proxy_config_version` and `notes`, atomic state write rule, rollback flow,
+cleanup boundaries, and remaining blockers. Switch/rollback review is READY
+after review, but exact proxy switch/reload and rollback commands are still
+not implemented and production apply remains NO-GO.
 
 The local/test proxy routing validation approval package exists at
 [BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md](BLUE_GREEN_PROXY_LOCAL_VALIDATION_APPROVAL.md).
@@ -478,7 +487,8 @@ current `web` remained untouched.
 
 Next phase: use the conservative production proxy, active-color, and rollback
 details listed in
-[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md),
 and
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 for a future exact implementation review. Production remains NO-GO. Migration
@@ -575,6 +585,9 @@ Production-specific conservative defaults are documented in
 They resolve design direction only. Production implementation remains NOT
 READY, production apply remains NO-GO, and exact proxy switch/reload plus
 rollback commands still require a later implementation and final approval.
+The exact switch/rollback design is reviewed at
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+and remains no-action.
 
 - Proxy technology default: nginx, example-only until apply phase.
 - Port ownership default: current `web` service keeps host port `8000` until
@@ -607,7 +620,9 @@ rollback commands still require a later implementation and final approval.
 ## Immediate Next Task Recommendation
 
 Use the production runtime details document at
-[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
+[BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md),
+the switch/rollback review document at
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md),
 and the command review document at
 [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md)
 to design the future implementation without touching production traffic. The

@@ -16,6 +16,11 @@ active-color state, proxy switch shape, rollback, observation, migration
 policy, scheduler singleton behavior, and media/static expectations. They do
 not approve production command implementation or production apply.
 
+The exact future proxy switch, active-color state, and rollback design is
+documented in
+[BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
+It is READY after review, but it does not approve production apply.
+
 ## Current Passed Prerequisites
 
 - Local inactive runtime validation: PASSED.
@@ -29,6 +34,9 @@ not approve production command implementation or production apply.
 - Production runtime details document:
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md)
   exists and records conservative defaults.
+- Production switch/rollback review document:
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
+  exists and is READY after review.
 - Production command path skeleton: implemented but blocked.
 - Production implementation: NOT READY.
 - Exact production runtime command implementation: still not enabled.
@@ -43,9 +51,12 @@ Conservative defaults now documented:
 - Future production service names: `web_blue`, `web_green`, and
   `bluegreen_proxy`.
 - Active color state: `.deploy/active-color.json` with `active_color`,
-  `previous_color`, `updated_at`, `updated_by`, and `deploy_id`.
+  `previous_color`, `updated_at`, `updated_by`, `deploy_id`,
+  `proxy_config_version`, and `notes`.
 - Active color state under `.deploy/` must not be committed and must not
   contain secrets.
+- Active color state writes must be atomic and must occur only after target
+  switch or rollback health validation passes.
 - Future proxy switch updates only a controlled local proxy
   include/symlink/state file after target health passes.
 - Rollback switches the proxy back to `previous_color`, uses the deployment
@@ -289,6 +300,8 @@ confirmation, and a separate explicit production approval.
 - Readiness package: READY after review.
 - Production runtime details document: READY after review at
   [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md).
+- Production switch/rollback review document: READY after review at
+  [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production command review document: READY after review at
   [BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md](BLUE_GREEN_PRODUCTION_COMMAND_REVIEW.md).
 - Production command path skeleton: implemented but blocked.
