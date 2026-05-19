@@ -33,14 +33,16 @@ and production apply remains NO-GO.
 
 The production traffic path audit is documented in
 [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
-It is READY after review, but it leaves proxy/origin ownership as a manual
-decision and does not approve production apply.
+It is READY after review and records that Cloudflare Tunnel Published
+application routes for both tickets and shopify target
+`http://127.0.0.1:8000`. It does not approve production apply.
 
 The manual external routing decision package is documented in
 [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
-It records that external routing is NOT YET confirmed. No Cloudflare/domain
-routing change and no host port `8000` ownership change are approved without a
-separate future approval.
+It records the confirmed Published application route targets and the remaining
+Option A versus Option B routing decision. No Cloudflare/domain routing change
+and no host port `8000` ownership change are approved without a separate future
+approval.
 
 ## Current Validated Prerequisites
 
@@ -60,11 +62,12 @@ separate future approval.
   exists and is READY after review; execution remains NOT ENABLED.
 - Production traffic path audit:
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
-  exists and is READY after review; exact proxy ownership still requires a
-  manual decision.
+  exists and is READY after review; both tickets and shopify Cloudflare
+  Published application routes target `http://127.0.0.1:8000`.
 - External routing decision package:
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
-  exists after this package is reviewed; external routing is NOT YET confirmed.
+  exists after this package is reviewed; routing options still require a
+  no-action comparison before implementation.
 
 ## Exact Future Production Command Groups
 
@@ -136,11 +139,14 @@ documented in
 [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 The current traffic path audit is documented in
 [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
-and still requires a manual decision on whether `bluegreen_proxy` owns `8000`
-or an external proxy/tunnel performs the upstream switch.
+and confirms both Cloudflare Published application routes target
+`http://127.0.0.1:8000`. The remaining manual decision is whether
+`bluegreen_proxy` owns `8000` or Cloudflare service targets move to a new proxy
+port.
 The external routing decision package is documented in
 [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
-and must be completed before any production proxy switch implementation.
+and must be used for the Option A versus Option B comparison before any
+production proxy switch implementation.
 Conservative defaults are documented in
 [BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md](BLUE_GREEN_PRODUCTION_RUNTIME_DETAILS.md):
 nginx candidate, no port `8000` takeover before final approval, no first-apply
@@ -194,8 +200,9 @@ The following conservative defaults are now documented in
 - Proxy candidate: nginx.
 - Port ownership: current production `web` owns host port `8000`; a future
   proxy may own `8000` only after explicit final production apply approval.
-- External routing: NOT YET confirmed; production apply remains blocked until
-  the Cloudflare/origin/tunnel path is manually confirmed.
+- External routing: Cloudflare Published application routes are confirmed for
+  both tickets and shopify to `http://127.0.0.1:8000`; production apply remains
+  blocked until the Option A versus Option B routing decision is approved.
 - Production service names: `web_blue`, `web_green`, and `bluegreen_proxy`.
 - Active color storage: local `.deploy/active-color.json` containing
   `active_color`, `previous_color`, `updated_at`, `updated_by`, and
@@ -228,15 +235,15 @@ required gates for every production apply.
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 - External routing decision package: READY after review at
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
-- External routing confirmed: NOT YET.
+- Cloudflare Published application route origin confirmed: YES.
 - Switch/rollback review doc: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: use the conservative runtime details as the input to a
-future implementation task, then separately review and approve the exact
-runtime command path before any production apply.
+Next required step: compare proxy takeover of local `8000` with Cloudflare
+Published application route service target changes, then separately review and
+approve the exact runtime command path before any production apply.
 
 ## Runtime Command Helper Status
 

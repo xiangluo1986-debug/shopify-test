@@ -18,16 +18,17 @@ and production apply remains NO-GO.
 The read-only production traffic path audit is documented in
 [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 It records that active Compose still declares `web` on host port `8000`, no
-active Compose proxy service was found, DNS is Cloudflare-fronted, and exact
-production proxy/origin ownership still requires manual confirmation. It does
-not approve production apply.
+active Compose proxy service was found, and Cloudflare Tunnel Published
+application routes for both `tickets.kidstoyloverapps.com` and
+`shopify.kidstoyloverapps.com` target `http://127.0.0.1:8000`. It does not
+approve production apply.
 
 The manual external routing decision package is documented in
 [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
-It records the Cloudflare/origin/tunnel unknowns, conservative routing options,
-and checklist required before any production blue-green proxy apply. External
-routing is NOT YET confirmed, no Cloudflare/domain routing change is approved,
-no host port `8000` ownership change is approved, and production apply remains
+It records the confirmed Cloudflare Published application route targets,
+conservative routing options, and checklist required before any production
+blue-green proxy apply. No Cloudflare/domain routing change is approved, no
+host port `8000` ownership change is approved, and production apply remains
 NO-GO.
 
 This document does not approve production apply. It does not deploy, start or
@@ -54,14 +55,14 @@ Production remains NO-GO.
 - The current production `web` service owns host port `8000` today.
 - The traffic path audit found Docker Desktop host networking listening on
   `8000` and active Compose declaring `web` as the `8000:8000` service.
-  Docker runtime container listing and the public HTTPS route were not proven
-  from this shell, so external proxy/origin ownership still needs manual
-  confirmation.
+- The Cloudflare route check confirmed both tickets and shopify Published
+  application routes target `http://127.0.0.1:8000`.
 - A future proxy may own port `8000` only after explicit production apply
   approval.
 - No task may take over port `8000` before final approval.
-- External routing must be manually confirmed before deciding whether a future
-  proxy owns `8000` or an external proxy/tunnel points to another proxy port.
+- The next routing decision must compare local proxy takeover of `8000` with a
+  Cloudflare Published application route service target change to a new proxy
+  port.
 
 ### C. Blue / Green Service Names
 
@@ -100,8 +101,8 @@ scheduler.
 - A future switch should update only a controlled local proxy
   include/symlink/state file after the target color passes health checks.
 - The exact proxy reload or switch command must be reviewed later.
-- Do not change Cloudflare or domain routing in the first production apply
-  unless separately approved.
+- Do not change Cloudflare or domain routing, or local `8000` ownership, in
+  any production apply unless separately approved.
 
 ### F. Rollback Command
 
@@ -142,15 +143,16 @@ scheduler.
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 - External routing decision package: READY after review at
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
-- External routing confirmed: NOT YET.
+- Cloudflare Published application route origin confirmed: YES.
 - Switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
 - Production apply implementation: still NOT READY.
 - Production apply: NO-GO.
 
-Next required step: use these conservative defaults to design the future
-production apply implementation and exact command review, then request a
-separate final production approval before any runtime-changing action.
+Next required step: create a no-action comparison of local `8000` proxy
+takeover versus Cloudflare Published application route service target changes,
+then request separate final production approval before any runtime-changing
+action.
 
 ## Runtime Command Helper Status
 

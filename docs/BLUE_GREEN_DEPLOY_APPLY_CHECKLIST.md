@@ -86,13 +86,14 @@ Related non-active drafts:
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
   It records active Compose `web` on `8000:8000`, Docker Desktop host
   networking owning port `8000` during the audit, no active Compose proxy
-  service, Cloudflare DNS in front of the domain, and unresolved exact
-  proxy/origin ownership. Production apply remains NO-GO.
+  service, and Cloudflare Tunnel Published application routes for both
+  `tickets.kidstoyloverapps.com` and `shopify.kidstoyloverapps.com` targeting
+  `http://127.0.0.1:8000`. Production apply remains NO-GO.
 - External routing decision package: READY after review at
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md).
-  External routing is NOT YET confirmed. No Cloudflare/domain routing change
-  and no host port `8000` ownership change are approved without separate
-  future approval.
+  Cloudflare Published application route origin is confirmed. No
+  Cloudflare/domain routing change and no host port `8000` ownership change are
+  approved without separate future approval.
 - Production switch/rollback review document: READY after review at
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md).
   It documents the exact future proxy switch flow, active-color state design,
@@ -275,6 +276,10 @@ review. Normal non-deploy tasks are not blocked.
   stopped only `bluegreen_proxy_test` and `web_green_test` during cleanup.
 - The production apply skeleton still blocks a correct approval phrase with:
   `Real production blue-green apply command path is implemented as a skeleton only and remains blocked in this phase.`
+- Cloudflare Published application routes are confirmed for both tickets and
+  shopify to `http://127.0.0.1:8000`; the next no-action decision must compare
+  local proxy takeover of `8000` with changing both Cloudflare service targets
+  to a new proxy port.
 - Final project deployment command policy is documented in
   [AGENTS.md](../AGENTS.md), [SAFE_DEPLOY.md](SAFE_DEPLOY.md),
   [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md), and
@@ -342,16 +347,19 @@ and rollback steps.
   only until an apply task creates real runtime state.
 - Port ownership: current `web` service keeps host port `8000`; changing this
   requires separate approval.
-- Cloudflare/external routing impact: tunnel target, DNS/proxy behavior, and
-  any planned maintenance window are not approved for local-only planning.
+- Cloudflare/external routing impact: both Published application routes
+  currently share `http://127.0.0.1:8000`; changing either Cloudflare service
+  target or local `8000` ownership requires separate approval.
 - Production traffic path: review
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
-  and manually decide whether future `bluegreen_proxy` owns `8000` or an
-  external proxy/tunnel owns the upstream switch.
+  and manually decide whether future `bluegreen_proxy` owns `8000` or
+  Cloudflare Published application route service targets change to a new proxy
+  port.
 - External routing decision package: review
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md);
-  external routing is NOT YET confirmed and production apply remains blocked
-  until the Cloudflare/origin/tunnel path is manually confirmed.
+  the Cloudflare Published application route origin is confirmed, but
+  production apply remains blocked until the Option A versus Option B routing
+  decision is approved.
 - Migration compatibility rules: backward-compatible only during blue-green
   switch; risky schema changes require separate migration planning.
 - Static/media handling: shared media remains unchanged; `collectstatic`
@@ -390,7 +398,7 @@ These actions are not approved by this checklist alone:
 - Moving host port `8000` from `web` to a proxy.
 - Changing Cloudflare tunnel targets or public routing.
 - Proceeding before the external routing decision package is reviewed and the
-  external origin path is manually confirmed.
+  Option A versus Option B routing choice is approved.
 - Running migrations.
 - Reloading or replacing production proxy configuration.
 - Reloading or replacing any active local proxy configuration without a

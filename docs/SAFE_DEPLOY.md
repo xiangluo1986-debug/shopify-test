@@ -45,9 +45,10 @@ The final runtime approval design is documented at
 [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
 These documents are READY after review; production implementation is NOT
 READY, exact production runtime command implementation is still not enabled,
-external routing is NOT YET confirmed, and production apply remains NO-GO.
-No Cloudflare/domain routing change and no host port `8000` ownership change
-are approved without separate future approval.
+Cloudflare Published application routes for both tickets and shopify are
+confirmed to target `http://127.0.0.1:8000`, and production apply remains
+NO-GO. No Cloudflare/domain routing change and no host port `8000` ownership
+change are approved without separate future approval.
 
 The final runtime approval design is READY after review, but runtime command
 execution remains NOT ENABLED and the documented future approval phrase is
@@ -124,13 +125,14 @@ service can become healthy.
 - Production traffic path audit:
   [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md)
   is READY after review. It confirms active Compose still declares `web` on
-  `8000:8000` and no active Compose proxy service was found, but exact
-  Cloudflare/origin/proxy ownership still requires manual decision.
+  `8000:8000`, no active Compose proxy service was found, and both Cloudflare
+  Published application routes target `http://127.0.0.1:8000`.
 - External routing decision package:
   [BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md](BLUE_GREEN_EXTERNAL_ROUTING_DECISION.md)
-  is READY after review. External routing is NOT YET confirmed, and production
-  apply remains blocked until the Cloudflare/origin/tunnel path is manually
-  confirmed.
+  is READY after review. The Cloudflare Published application route origin is
+  confirmed, and production apply remains blocked until the no-action decision
+  compares local `8000` proxy takeover with changing both Cloudflare service
+  targets to a new proxy port.
 - Production switch/rollback review document:
   [BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md](BLUE_GREEN_PRODUCTION_SWITCH_ROLLBACK_REVIEW.md)
   is READY after review for design only. It documents the future proxy switch
@@ -274,6 +276,9 @@ by the deployment lock.
 Current status: production blue-green runtime execution is NOT ENABLED and
 production apply remains NO-GO. No Cloudflare/domain routing change and no host
 port `8000` ownership change are approved without separate future approval.
+The confirmed Cloudflare Published application route target for both tickets
+and shopify is `http://127.0.0.1:8000`; the next step is an Option A versus
+Option B routing comparison, not a deploy.
 
 Optional flags:
 

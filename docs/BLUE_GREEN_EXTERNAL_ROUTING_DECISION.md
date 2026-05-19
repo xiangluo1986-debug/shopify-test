@@ -30,6 +30,20 @@ Production remains NO-GO.
   Cloudflare AAAA records.
 - A Windows `Cloudflared` service was found running with automatic start, and
   a `cloudflared` process was running.
+- Manual Cloudflare One / Zero Trust check confirmed tunnel
+  `aftersales-ticket`.
+- Tunnel type: `cloudflared`.
+- Tunnel status: HEALTHY.
+- Published application route:
+  `tickets.kidstoyloverapps.com` -> `http://127.0.0.1:8000`.
+- Published application route:
+  `shopify.kidstoyloverapps.com` -> `http://127.0.0.1:8000`.
+- Hostname routes tab has no hostname routes.
+- External access is using Cloudflare Tunnel Published application routes, not
+  hostname routes.
+- This confirms the current tunnel origin target is local
+  `127.0.0.1:8000`.
+- No Cloudflare setting was changed.
 - No nginx, Caddy, Traefik, HAProxy, or app-specific reverse proxy service or
   process was found by name. Windows built-in `SstpSvc` and
   `WinHttpAutoProxySvc` matched generic tunnel/proxy search terms, but they do
@@ -37,28 +51,23 @@ Production remains NO-GO.
 - Unauthenticated `https://tickets.kidstoyloverapps.com/healthz/` returned
   HTTP 200 from Cloudflare with a Cloudflare Access sign-in HTML page, not the
   app `OK` health response.
-- The exact Cloudflare, origin, or tunnel path is not confirmed. The
-  `cloudflared` target was not inspected because service command lines and
-  tunnel config can contain secret tokens.
 - No secret, token, credential, private environment, quick start, or tunnel
   token files were inspected.
 
 Source audit:
 [BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md](BLUE_GREEN_PRODUCTION_TRAFFIC_PATH_AUDIT.md).
 
-## Unknowns To Manually Confirm
+## Updated Routing Interpretation
 
-- Is `tickets.kidstoyloverapps.com` using Cloudflare proxy DNS only?
-- Is it using Cloudflare Tunnel?
-- Is there an external reverse proxy outside Docker?
-- Does external traffic hit host port `8000` directly?
-- Is any firewall or NAT forwarding `443` or `80` to `8000`?
-- Where is the Cloudflare origin configured?
-- If a tunnel exists, what local service and port does it target?
-- Does Cloudflare Access intentionally protect `/healthz/`, or should a
-  health-check bypass rule exist for this endpoint?
-- Who controls Cloudflare settings?
-- What change would be needed for `bluegreen_proxy` to take traffic?
+- External app traffic reaches local `8000` through Cloudflare Tunnel
+  Published application routes.
+- Current Docker `web` owns local `8000`.
+- Both `tickets.kidstoyloverapps.com` and `shopify.kidstoyloverapps.com`
+  share the same `http://127.0.0.1:8000` origin target.
+- Future blue-green production routing must account for both hostnames sharing
+  that origin.
+- Cloudflare Access behavior for unauthenticated `/healthz/` is still a
+  separate access-policy question; it was not changed in this task.
 
 ## Routing Options
 
@@ -68,70 +77,51 @@ Source audit:
 
 The current `web` service no longer binds host port `8000` directly.
 
-This keeps the local origin port stable, but it requires one-time cutover
-approval because it changes local port ownership.
+Cloudflare Published application routes stay pointing to
+`http://127.0.0.1:8000`.
+
+This keeps the Cloudflare service target stable, but it requires one-time local
+port ownership cutover approval.
 
 Risk: port `8000` ownership moves from the current Docker web path to the
 future proxy path.
 
-### Option B - External Proxy Or Tunnel Points To New Proxy Port
+### Option B - Cloudflare Routes Point To New Proxy Port
 
-Keep current `web` on host port `8000` until an external routing change is
+Keep current `web` on host port `8000` until a Cloudflare route edit is
 approved.
 
-`bluegreen_proxy` listens on another local port, and Cloudflare, tunnel, or
-external proxy origin routing changes later.
+`bluegreen_proxy` runs on a new local port.
 
-This avoids immediate `8000` ownership change, but it requires separate
-Cloudflare, tunnel, or external routing approval.
+Cloudflare Published application route service targets for both
+`tickets.kidstoyloverapps.com` and `shopify.kidstoyloverapps.com` change from
+`http://127.0.0.1:8000` to the approved `bluegreen_proxy` port.
 
-### Option C - Existing External Proxy Switches Upstream
+This avoids immediate local `8000` ownership change, but it requires separate
+Cloudflare route edit approval.
 
-If an external nginx, proxy, tunnel, or platform-level router exists outside
-Compose, configure the blue/green upstream switch there.
-
-This requires finding the exact config path, switch or reload command, rollback
-command, owner, and maintenance impact before any production apply.
+Risk: Cloudflare Published application route service target changes.
 
 ## Recommended Safest Next Path
 
-Recommended next path: manual Cloudflare dashboard check fields to fill.
-
-Reason: the audit found Cloudflare DNS, a running local `cloudflared` service,
-and Docker ownership of local `8000`, but did not prove that the tunnel targets
-local `8000`. It also found that unauthenticated external `/healthz/` reaches
-Cloudflare Access rather than the app health response. That is insufficient
-evidence for a tunnel-origin blue-green design, an external proxy upstream
-switch design, or a one-time local proxy takeover design.
-
-Required manual checks, without exposing secrets:
-
-- In Cloudflare DNS, confirm whether `tickets.kidstoyloverapps.com` is proxied
-  DNS to an origin, a CNAME to a tunnel, or another route type.
-- In Cloudflare Zero Trust / Tunnels, confirm the tunnel name, public hostname,
-  and service target for `tickets.kidstoyloverapps.com`.
-- Confirm whether the target is `http://127.0.0.1:8000`,
-  `http://localhost:8000`, another local port, or an external proxy.
-- Confirm whether Cloudflare Access intentionally protects `/healthz/`.
-- Confirm the exact owner who can approve any Cloudflare, tunnel, origin, or
-  local port ownership change.
-
 - Do not change Cloudflare or domain routing yet.
 - Do not let `bluegreen_proxy` take host port `8000` yet.
-- First manually confirm the exact external origin path.
+- Create a no-action comparison / decision package for Option A vs Option B.
 - Require separate approval before any Cloudflare/domain routing change.
 - Require separate approval before any host port `8000` ownership change.
-- Production apply remains NO-GO until the external routing path is confirmed.
+- Production apply remains NO-GO.
 
 ## Manual Checklist
 
-- Cloudflare mode:
-- Tunnel name if any:
+- Cloudflare mode: Cloudflare Tunnel Published application routes.
+- Tunnel name if any: `aftersales-ticket`
 - Tunnel public hostname entry:
-- Tunnel service target:
-- Origin hostname/IP:
-- Origin port:
-- Current target service:
+  - `tickets.kidstoyloverapps.com` -> `http://127.0.0.1:8000`
+  - `shopify.kidstoyloverapps.com` -> `http://127.0.0.1:8000`
+- Tunnel service target: `http://127.0.0.1:8000`
+- Origin hostname/IP: `127.0.0.1`
+- Origin port: `8000`
+- Current target service: current Docker `web`
 - Cloudflare Access applies to `/healthz/`:
 - External proxy exists:
 - Proxy config path:
@@ -142,10 +132,10 @@ Required manual checks, without exposing secrets:
 ## Go / No-Go
 
 - External routing decision package: READY after review.
-- External routing confirmed: NOT YET.
+- Cloudflare Published application route origin confirmed: YES.
 - Production proxy switch implementation: NOT READY.
 - Production apply: NO-GO.
 
-Next required step: manually confirm the Cloudflare, origin, tunnel, and proxy
-path without exposing secrets, then choose whether a future production
-blue-green path changes host port `8000` ownership or external routing.
+Next required step: create a no-action Option A vs Option B comparison package
+covering local `8000` proxy takeover versus Cloudflare Published application
+route service target changes for both hostnames.
