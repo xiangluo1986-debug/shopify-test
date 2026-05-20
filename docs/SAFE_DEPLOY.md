@@ -615,6 +615,52 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
+## Runtime Stability No-Apply Plan
+
+Current repo evidence:
+
+- Active image default in `backend/Dockerfile` is
+  `python manage.py migrate && python manage.py runserver 0.0.0.0:8000`.
+- Active `docker-compose.yml` does not override the `web` command, so the image
+  default applies to the `8000` rollback path.
+- Blue/green candidate examples use
+  `python manage.py runserver 0.0.0.0:8000` for `web_blue` / `web_green`
+  style services and do not include `--noreload`.
+- No active repo runtime command was found for `gunicorn`, `daphne`, or
+  `uvicorn`.
+
+Risk:
+
+- Plain Django `runserver` starts the development server with autoreload unless
+  `--noreload` is supplied. Because the blue/green candidate services mount
+  `./backend:/app`, code edits can trigger autoreload and briefly interrupt
+  `web_blue` / `web_green` behind `bluegreen_proxy_candidate`, which can show
+  up as short Cloudflare 502/504 responses through `127.0.0.1:18000`.
+
+No-apply recommendation:
+
+- Option A, temporary stabilization: in a separately approved runtime task,
+  change only the blue/green production path to `runserver --noreload` while
+  leaving the `8000` rollback path unchanged.
+- Option B, production hardening: move the production path behind
+  `bluegreen_proxy_candidate` to a real WSGI/ASGI server such as Gunicorn or
+  Daphne after dependency, static/media, logging, worker count, timeout, and
+  health behavior are reviewed.
+
+Future apply gates:
+
+- Acquire the deployment lock before any build, restart, runtime command
+  change, proxy switch, cleanup, migration, or collectstatic action.
+- Use a low-traffic apply window and explicit human approval for the exact
+  command changes.
+- Keep `http://127.0.0.1:8000` running as the rollback path; do not change
+  Cloudflare routing in the same step.
+- Before and after the candidate change, check `/healthz/` through the
+  candidate service and through `http://127.0.0.1:18000/healthz/`.
+- If health fails, do not switch traffic. Inspect `web_blue`, `web_green`, and
+  `bluegreen_proxy_candidate` logs, then roll back to the previous reviewed
+  runtime command or the existing `8000` path.
+
 ## Final Manual Checklist Link
 
 - Pre-cutover live checklist exists at

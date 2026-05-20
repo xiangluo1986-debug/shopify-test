@@ -847,6 +847,48 @@ separate production task approves the exact runtime path being used.
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
+## Runtime Command Stability No-Apply Audit (2026-05-20)
+
+Repo-only audit result:
+
+- `backend/Dockerfile` default command runs
+  `python manage.py migrate && python manage.py runserver 0.0.0.0:8000`.
+- Active `docker-compose.yml` does not define a `web` command override.
+- `docker-compose.bluegreen.proxy-candidate.example.yml`,
+  `docker-compose.bluegreen.local-test.example.yml`, and
+  `docker-compose.bluegreen.proxy-validation.example.yml` use plain
+  `python manage.py runserver 0.0.0.0:8000`.
+- No active Compose or Dockerfile command uses `runserver --noreload`,
+  `gunicorn`, `daphne`, or `uvicorn`.
+
+Conclusion:
+
+- The configured blue/green candidate runtime still carries Django development
+  server autoreload risk. Container RestartCount can stay at zero while
+  `runserver` restarts the Python process after mounted source changes.
+
+No-apply plan:
+
+- Option A: after a separate approval, use `python manage.py runserver
+  --noreload 0.0.0.0:8000` for the blue/green production path only. This is a
+  temporary stability step, not the final production web server design.
+- Option B: after dependency review, move the blue/green production path to a
+  real WSGI/ASGI runtime such as Gunicorn or Daphne behind
+  `bluegreen_proxy_candidate`.
+
+Future apply checklist:
+
+- Acquire the deployment lock / single-flight guard.
+- Build only after approval, then run checks/tests.
+- Run migrations only if reviewed and needed; run collectstatic/assets only if
+  reviewed and needed.
+- Start the candidate, wait for service health, and check `/healthz/` before
+  any proxy switch.
+- Keep the `8000` rollback path unchanged.
+- Switch proxy traffic only after health is OK.
+- On health failure, do not switch traffic; print/inspect candidate web and
+  proxy logs and roll back to the previous runtime command or `8000` path.
+
 ## Final Manual Checklist Link
 
 - Pre-cutover live checklist exists at

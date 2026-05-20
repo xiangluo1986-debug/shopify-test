@@ -43,6 +43,26 @@ class Command(BaseCommand):
         self.stdout.write(
             f"needs_review_visible_count: {counters.get('needs_review_visible_count', 0)}"
         )
+        self.stdout.write(
+            "lookup_cache_path_selected: "
+            f"{payload.get('lookup_cache_path_selected') or payload.get('lookup_cache_selected_path') or '-'}"
+        )
+        self.stdout.write(
+            f"lookup_cache_entries_count: {payload.get('lookup_cache_entries_count', 0)}"
+        )
+        self.stdout.write(
+            "base_candidates_needing_live_check: "
+            f"{payload.get('base_candidates_needing_live_check', 0)}"
+        )
+        self.stdout.write(f"clean_lookup_count: {payload.get('clean_lookup_count', 0)}")
+        self.stdout.write(
+            f"final_eligible_after_lookup: {payload.get('final_eligible_after_lookup', 0)}"
+        )
+        focus_22562 = payload.get("order_22562_customer_history_lookup_validation") or {}
+        self.stdout.write(f"#22562 final_section: {focus_22562.get('final_section') or '-'}")
+        self.stdout.write(f"#22562 final_eligibility: {focus_22562.get('final_eligibility') or '-'}")
+        self.stdout.write(f"snapshot_size_bytes: {payload.get('snapshot_size_bytes', 0)}")
+        self.stdout.write(f"embedded_history_reports: {payload.get('embedded_history_reports') is True}")
         self.stdout.write(f"already_sent_total: {counters.get('already_sent_total', 0)}")
         self.stdout.write(f"snapshot_path: {snapshot_paths.get('json_path')}")
         self.stdout.write(f"generated_at: {payload.get('generated_at')}")

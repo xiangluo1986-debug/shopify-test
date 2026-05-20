@@ -1324,12 +1324,16 @@ def review_request_workbench(request):
         if result.get("job_queued") is True:
             messages.success(
                 request,
-                "Review send job queued. Processing will run in the background.",
+                (
+                    "Review send job queued. Run the processor to send it. "
+                    f"{result.get('processor_command') or ''}"
+                ).strip(),
             )
         elif result.get("duplicate_job") is True:
             messages.warning(
                 request,
-                "Review send job already exists. Refresh in a moment.",
+                result.get("message")
+                or "Review send job already exists for this order; no duplicate was queued.",
             )
         else:
             messages.warning(

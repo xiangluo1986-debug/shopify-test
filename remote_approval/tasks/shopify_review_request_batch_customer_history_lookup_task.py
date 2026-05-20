@@ -73,6 +73,8 @@ def run_shopify_review_request_batch_customer_history_lookup_task(mode: str) -> 
 
     lookup_summaries = []
     lookup_results_by_order = {}
+    cache_paths_written = []
+    cache_paths_failed = []
     checked_count = 0
     clean_count = 0
     blocked_count = 0
@@ -94,6 +96,7 @@ def run_shopify_review_request_batch_customer_history_lookup_task(mode: str) -> 
             )
             payload = _apply_self_privacy_assertion(payload)
             cache_result = _persist_lookup_cache(payload)
+            _collect_cache_paths(cache_result, cache_paths_written, cache_paths_failed)
 
         checked_count += 1
         group_status = _lookup_group_status(payload)
@@ -113,6 +116,7 @@ def run_shopify_review_request_batch_customer_history_lookup_task(mode: str) -> 
                 duplicate_payload = _clone_lookup_payload_for_order(payload, duplicate_order)
                 duplicate_payload = _apply_self_privacy_assertion(duplicate_payload)
                 duplicate_cache_result = _persist_lookup_cache(duplicate_payload)
+                _collect_cache_paths(duplicate_cache_result, cache_paths_written, cache_paths_failed)
                 order_cache_results[duplicate_order] = duplicate_cache_result
                 lookup_results_by_order[duplicate_order] = duplicate_payload
 
@@ -163,7 +167,7 @@ def run_shopify_review_request_batch_customer_history_lookup_task(mode: str) -> 
         "generated_at": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.32H",
+        "phase": "5.32I",
         "mode": "dry-run-read-only-batch-customer-history-lookup",
         "command_label": COMMAND_LABEL,
         "task_status": "rate_limited_stop" if rate_limited_stop else "batch_customer_history_lookup_ready",
@@ -200,6 +204,8 @@ def run_shopify_review_request_batch_customer_history_lookup_task(mode: str) -> 
             "still_needs_live_customer_history_check_orders"
         ],
         "focus_22562": focus_22562,
+        "cache_paths_written": sorted(set(cache_paths_written)),
+        "cache_paths_failed": cache_paths_failed,
         "no_gmail_api_call": True,
         "no_shopify_write": True,
         "no_external_review_api": True,
@@ -528,6 +534,8 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "skipped_duplicate_customer_count": payload.get("skipped_duplicate_customer_count", 0),
         "final_eligible_count_after_lookup": payload.get("final_eligible_count_after_lookup", 0),
         "focus_22562": payload.get("focus_22562") or {},
+        "cache_paths_written": payload.get("cache_paths_written") or [],
+        "cache_paths_failed": payload.get("cache_paths_failed") or [],
         "shopify_write_performed": False,
         "mutation_performed": False,
         "tags_add_performed": False,
@@ -559,6 +567,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"#22562 final section: {focus.get('final_section')}\n"
         f"#22562 final eligibility: {focus.get('final_eligibility')}\n"
         f"#22562 blocker: {focus.get('blocker') or '-'}\n"
+        f"Cache paths written: {', '.join(payload.get('cache_paths_written') or []) or '-'}\n"
         "Safety: read-only Shopify lookup only; no Shopify write, no tag mutation, no Gmail API/send, "
         "no external review API, no raw email, no full note output.\n"
         f"JSON report: {json_path}\n"
@@ -589,6 +598,7 @@ def _render_html(payload: dict) -> str:
     blocked_orders = ", ".join(payload.get("blocked_by_historical_trustpilot_evidence_orders") or []) or "-"
     failed_orders = ", ".join(payload.get("blocked_live_lookup_failed_or_incomplete_orders") or []) or "-"
     needs_orders = ", ".join(payload.get("still_needs_live_customer_history_check_orders") or []) or "-"
+    cache_paths = ", ".join(payload.get("cache_paths_written") or []) or "-"
     lookup_rows = "\n".join(
         "<tr>"
         f"<td>{escape(str(row.get('lookup_order', '')))}</td>"
@@ -634,6 +644,7 @@ def _render_html(payload: dict) -> str:
     <tr><th>Blocked by history</th><td>{escape(blocked_orders)}</td></tr>
     <tr><th>Failed/incomplete orders</th><td>{escape(failed_orders)}</td></tr>
     <tr><th>Still need live check</th><td>{escape(needs_orders)}</td></tr>
+    <tr><th>Cache paths written</th><td>{escape(cache_paths)}</td></tr>
   </tbody></table>
   <h2>#22562</h2>
   <table><tbody>
@@ -689,6 +700,15 @@ def _empty_cache_result() -> dict:
         "lookup_cache_paths_written": [],
         "lookup_cache_paths_failed": [],
     }
+
+
+def _collect_cache_paths(cache_result: dict, paths_written: list[str], paths_failed: list[dict]) -> None:
+    for path in cache_result.get("lookup_cache_paths_written") or []:
+        if path not in paths_written:
+            paths_written.append(path)
+    for item in cache_result.get("lookup_cache_paths_failed") or []:
+        if item not in paths_failed:
+            paths_failed.append(item)
 
 
 def _read_json(path: Path) -> dict:

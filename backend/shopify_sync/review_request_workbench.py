@@ -166,7 +166,7 @@ CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS = 300
 LIVE_HISTORY_MISSING_REASON = "Customer history needs live Shopify check before sending."
 LIVE_HISTORY_STALE_REASON = "Customer history check is stale."
 LIVE_HISTORY_INCOMPLETE_REASON = "Live customer history check failed or incomplete."
-BLOCKED_QUEUE_DISPLAY_LIMIT = 50
+BLOCKED_QUEUE_DISPLAY_LIMIT = 25
 REVIEW_QUEUE_SORT_ORDER = (
     "most_recent_delivered_updated_created_date",
     "clean_tags",
@@ -187,14 +187,25 @@ REVIEW_REQUEST_SEND_JOB_SCHEMA_VERSION = 1
 REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT = 10
 REVIEW_REQUEST_SEND_JOB_MAX_STORED = 200
 REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES = {"queued", "running"}
-REVIEW_REQUEST_SEND_JOB_COMPLETED_STATUSES = {"sent", "tag_written"}
+REVIEW_REQUEST_SEND_JOB_COMPLETED_STATUSES = {"sent", "tag_written", "completed"}
+REVIEW_REQUEST_SEND_JOB_DUPLICATE_STATUSES = (
+    REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES
+    | REVIEW_REQUEST_SEND_JOB_COMPLETED_STATUSES
+    | {"unknown_after_start"}
+)
 REVIEW_REQUEST_SEND_JOB_STATUSES = {
     "queued",
     "running",
     "sent",
     "tag_written",
+    "completed",
+    "unknown_after_start",
     "failed",
 }
+REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND = (
+    "docker compose exec -T web python manage.py "
+    "process_review_request_send_jobs --max-jobs 1"
+)
 REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
     "orders_review_request_3",
     "orders_review_request_60",
@@ -1026,12 +1037,14 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
     last_scan = dict(dashboard.get("last_60_days_candidate_scan") or {})
     coverage = dict(dashboard.get("order_data_coverage") or {})
     scan_coverage = dict(last_scan.get("order_data_coverage") or {})
+    lookup_cache = load_customer_history_lookup_cache(_log_dir())
     candidate_review_rows = _snapshot_dict_rows(
         approval_queue.get("all_needs_review_rows")
         or approval_queue.get("needs_review_rows")
         or last_scan.get("review_queue_rows")
         or last_scan.get("eligible_queue_rows"),
         default_action_state="review_send",
+        lookup_cache=lookup_cache,
     )
     review_rows = [
         row for row in candidate_review_rows if row.get("action_state") == "review_send"
@@ -1039,17 +1052,27 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
     demoted_review_rows = [
         row for row in candidate_review_rows if row.get("action_state") != "review_send"
     ]
-    already_sent_rows = _snapshot_dict_rows(
+    already_sent_rows_full = _snapshot_dict_rows(
         approval_queue.get("all_already_sent_rows")
         or approval_queue.get("already_sent_rows")
         or last_scan.get("already_sent_queue_rows"),
         default_action_state="already_sent",
+        lookup_cache=lookup_cache,
     )
-    blocked_rows = demoted_review_rows + _snapshot_dict_rows(
+    blocked_rows_full = demoted_review_rows + _snapshot_dict_rows(
         approval_queue.get("blocked_rows") or last_scan.get("blocked_queue_rows"),
         default_action_state="not_ready",
+        lookup_cache=lookup_cache,
     )
+    already_sent_rows = [_compact_already_sent_snapshot_row(row) for row in already_sent_rows_full]
+    blocked_rows = [_compact_blocked_snapshot_row(row) for row in blocked_rows_full]
     blocked_visible_rows = blocked_rows[:BLOCKED_QUEUE_DISPLAY_LIMIT]
+    review_rows = [_compact_needs_review_snapshot_row(row) for row in review_rows]
+    customer_history_snapshot = _dashboard_customer_history_snapshot_summary(
+        review_rows,
+        blocked_rows,
+        lookup_cache=None,
+    )
     eligible_total = _int_or_zero(
         approval_queue.get("eligible_candidate_count_total")
         or last_scan.get("eligible_candidate_count_total")
@@ -1061,18 +1084,26 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
     blocked_total = _int_or_zero(
         approval_queue.get("blocked_count")
         or last_scan.get("blocked_count")
-        or len(blocked_rows)
+        or len(blocked_rows_full)
     )
     already_sent_total = _int_or_zero(
         approval_queue.get("already_sent_count")
         or last_scan.get("already_sent_count")
-        or len(already_sent_rows)
+        or len(already_sent_rows_full)
     )
-    lookup_cache = load_customer_history_lookup_cache(_log_dir())
+    customer_history_snapshot = _dashboard_customer_history_snapshot_summary(
+        review_rows,
+        blocked_rows,
+        lookup_cache=lookup_cache,
+    )
     order_21687_lookup = _cached_lookup_order_from_cache(lookup_cache, "#21687")
+    order_22562_lookup = _cached_lookup_order_from_cache(lookup_cache, "#22562")
     order_21687_review_orders = {row.get("order") for row in review_rows}
     order_21687_blocked_orders = {row.get("order") for row in blocked_rows}
     order_21687_already_sent_orders = {row.get("order") for row in already_sent_rows}
+    order_22562_review_orders = {row.get("order") for row in review_rows}
+    order_22562_blocked_orders = {row.get("order") for row in blocked_rows}
+    order_22562_already_sent_orders = {row.get("order") for row in already_sent_rows}
     last_shopify_sync_at = _safe_text(
         coverage.get("latest_review_request_sync_finished_at")
         or scan_coverage.get("latest_review_request_sync_finished_at")
@@ -1102,6 +1133,20 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
             max_length=120,
         ),
         "eligible_total": eligible_total,
+        "base_candidates_needing_live_check": customer_history_snapshot["base_candidates_needing_live_check"],
+        "base_candidates_needing_live_check_count": customer_history_snapshot["base_candidates_needing_live_check"],
+        "clean_lookup_count": customer_history_snapshot["clean_lookup_count"],
+        "final_eligible_after_lookup": customer_history_snapshot["final_eligible_after_lookup"],
+        "final_eligible_count_after_lookup": customer_history_snapshot["final_eligible_after_lookup"],
+        "needs_live_customer_history_check_count": customer_history_snapshot[
+            "needs_live_customer_history_check_count"
+        ],
+        "live_checks_completed_count": customer_history_snapshot["live_checks_completed_count"],
+        "live_checks_blocked_count": customer_history_snapshot["live_checks_blocked_count"],
+        "live_checks_failed_incomplete_count": customer_history_snapshot[
+            "live_checks_failed_incomplete_count"
+        ],
+        "customer_history_checks": customer_history_snapshot["customer_history_checks"],
         "review_queue_candidates": review_rows,
         "already_sent_rows": already_sent_rows,
         "blocked_summary": {
@@ -1141,14 +1186,57 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
             "gmail_api_call_performed": False,
             "shopify_write_performed": False,
         },
+        "order_22562_customer_history_lookup_validation": {
+            "lookup_cache_found": bool(order_22562_lookup),
+            "should_block_review_send": order_22562_lookup.get("should_block_review_send") is True,
+            "lookup_clean": bool(
+                order_22562_lookup and order_22562_lookup.get("should_block_review_send") is not True
+            ),
+            "final_section": (
+                "review_queue"
+                if "#22562" in order_22562_review_orders
+                else "blocked"
+                if "#22562" in order_22562_blocked_orders
+                else "already_sent"
+                if "#22562" in order_22562_already_sent_orders
+                else "not_visible"
+            ),
+            "final_eligibility": (
+                "eligible"
+                if "#22562" in order_22562_review_orders
+                else "already_sent"
+                if "#22562" in order_22562_already_sent_orders
+                else "blocked"
+                if "#22562" in order_22562_blocked_orders
+                else "not_scanned"
+            ),
+            "review_send_ready": "#22562" in order_22562_review_orders,
+            "blocking_reason": _safe_text(order_22562_lookup.get("blocking_reason"), max_length=300),
+            "gmail_api_call_performed": False,
+            "shopify_write_performed": False,
+        },
         "lookup_cache_paths_checked": lookup_cache.get("lookup_cache_paths_checked") or lookup_cache.get("paths_checked") or [],
         "lookup_cache_selected_path": lookup_cache.get("lookup_cache_selected_path") or lookup_cache.get("selected_path", ""),
+        "lookup_cache_path_selected": lookup_cache.get("lookup_cache_selected_path") or lookup_cache.get("selected_path", ""),
+        "lookup_cache_found": lookup_cache.get("loaded") is True,
         "lookup_cache_entries_count": _int_or_zero(
             lookup_cache.get("lookup_cache_entries_count") or lookup_cache.get("entries_count")
         ),
         "dashboard_counters": {
-            "ready_to_send_count": _int_or_zero(dashboard.get("ready_to_send_count")),
+            "ready_to_send_count": len(review_rows),
             "eligible_total": eligible_total,
+            "base_candidates_needing_live_check": customer_history_snapshot["base_candidates_needing_live_check"],
+            "clean_lookup_count": customer_history_snapshot["clean_lookup_count"],
+            "final_eligible_after_lookup": customer_history_snapshot["final_eligible_after_lookup"],
+            "final_eligible_count": customer_history_snapshot["final_eligible_after_lookup"],
+            "needs_live_customer_history_check_count": customer_history_snapshot[
+                "needs_live_customer_history_check_count"
+            ],
+            "live_checks_completed_count": customer_history_snapshot["live_checks_completed_count"],
+            "live_checks_blocked_count": customer_history_snapshot["live_checks_blocked_count"],
+            "live_checks_failed_incomplete_count": customer_history_snapshot[
+                "live_checks_failed_incomplete_count"
+            ],
             "needs_review_visible_count": _int_or_zero(
                 approval_queue.get("review_queue_visible_count") or len(review_rows[:DEFAULT_LIMIT])
             ),
@@ -1189,6 +1277,7 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
         ),
         "snapshot_output_json_path": f"logs/{DASHBOARD_SNAPSHOT_REPORT_FILENAME}",
         "snapshot_output_html_path": f"logs/{DASHBOARD_SNAPSHOT_HTML_FILENAME}",
+        "embedded_history_reports": False,
         "normal_page_load_data_source": "cached_snapshot",
         "normal_page_load_shopify_api_call_performed": False,
         "normal_page_load_full_scan_performed": False,
@@ -1212,7 +1301,314 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
             "No Shopify API, Gmail API, external review API, email send, or Shopify write was performed."
         ),
     }
-    return _sanitize_dashboard_snapshot_payload(payload)
+    return _finalize_dashboard_snapshot_payload(payload)
+
+
+def _dashboard_customer_history_snapshot_summary(review_rows, blocked_rows, lookup_cache=None):
+    review_rows = list(review_rows or [])
+    blocked_rows = list(blocked_rows or [])
+    clean_lookup_count = sum(
+        1
+        for row in review_rows
+        if row.get("cached_customer_history_lookup_found") is True
+        and row.get("customer_history_lookup_block_status") == "ready"
+    )
+    needs_live_count = sum(
+        1
+        for row in blocked_rows
+        if row.get("customer_history_lookup_block_status") in {"missing", "stale"}
+        or LIVE_HISTORY_MISSING_REASON in _safe_text(row.get("reason") or row.get("blocked_reason"), max_length=500)
+    )
+    blocked_count = sum(
+        1
+        for row in blocked_rows
+        if row.get("customer_history_lookup_block_status") in {"blocked_trustpilot_note", "blocked_trustpilot_tag"}
+    )
+    failed_count = sum(
+        1
+        for row in blocked_rows
+        if row.get("customer_history_lookup_block_status") in {"incomplete", "blocked_lookup_cache"}
+        or LIVE_HISTORY_INCOMPLETE_REASON in _safe_text(row.get("reason") or row.get("blocked_reason"), max_length=500)
+    )
+    base_count = needs_live_count + clean_lookup_count + blocked_count + failed_count
+    customer_history_checks = {
+        "final_eligible_count": len(review_rows),
+        "final_eligible_orders": _dedupe_order_names(row.get("order") for row in review_rows),
+        "needs_live_customer_history_check_count": needs_live_count,
+        "live_checks_completed_count": clean_lookup_count + blocked_count,
+        "live_checks_blocked_count": blocked_count,
+        "live_checks_failed_incomplete_count": failed_count,
+        "clean_lookup_count": clean_lookup_count,
+        "base_candidates_needing_live_check": base_count,
+        "blocked_by_historical_trustpilot_evidence_orders": _dedupe_order_names(
+            row.get("order") for row in blocked_rows
+            if row.get("customer_history_lookup_block_status") in {"blocked_trustpilot_note", "blocked_trustpilot_tag"}
+        ),
+        "live_lookup_failed_or_incomplete_orders": _dedupe_order_names(
+            row.get("order") for row in blocked_rows
+            if row.get("customer_history_lookup_block_status") in {"incomplete", "blocked_lookup_cache"}
+        ),
+        "needs_live_customer_history_check_orders": _dedupe_order_names(
+            row.get("order") for row in blocked_rows
+            if row.get("customer_history_lookup_block_status") in {"missing", "stale"}
+        ),
+        "batch_lookup_command": _batch_customer_history_lookup_container_command(),
+        "message": (
+            f"{needs_live_count} candidates need live customer history check before they can be reviewed."
+            if needs_live_count
+            else ""
+        ),
+        "lookup_cache_found": (lookup_cache or {}).get("loaded") is True,
+        "lookup_cache_entries_count": _int_or_zero(
+            (lookup_cache or {}).get("lookup_cache_entries_count")
+            or (lookup_cache or {}).get("entries_count")
+        ),
+        "lookup_cache_path_selected": _safe_text(
+            (lookup_cache or {}).get("lookup_cache_selected_path")
+            or (lookup_cache or {}).get("selected_path"),
+            max_length=500,
+        ),
+    }
+    return {
+        "base_candidates_needing_live_check": base_count,
+        "clean_lookup_count": clean_lookup_count,
+        "final_eligible_after_lookup": len(review_rows),
+        "needs_live_customer_history_check_count": needs_live_count,
+        "live_checks_completed_count": clean_lookup_count + blocked_count,
+        "live_checks_blocked_count": blocked_count,
+        "live_checks_failed_incomplete_count": failed_count,
+        "customer_history_checks": customer_history_checks,
+    }
+
+
+def _compact_needs_review_snapshot_row(row):
+    row = dict(row or {})
+    return _compact_snapshot_row(
+        row,
+        keys=(
+            "order",
+            "order_name",
+            "candidate_id",
+            "customer_display_name",
+            "customer",
+            "customer_masked_label",
+            "masked_customer_label",
+            "customer_orders_display",
+            "customer_order_summary",
+            "customer_order_count",
+            "customer_history_order_count",
+            "customer_order_sequence_number",
+            "customer_order_sequence_label",
+            "customer_history_confirmed",
+            "full_history_confirmed",
+            "current_order_delivered",
+            "delivered_confirmed",
+            "customer_history_lookup_status",
+            "customer_history_lookup_block_status",
+            "customer_history_lookup_action_label",
+            "customer_history_lookup_command",
+            "cached_customer_history_lookup_found",
+            "tags",
+            "order_tags_display",
+            "tag_chips",
+            "trustpilot_history_label",
+            "status_chips",
+            "status",
+            "status_label",
+            "status_class",
+            "reason",
+            "eligibility_reason_plain",
+            "action_state",
+            "action_label",
+            "action_status",
+            "can_review_send",
+            "review_send_url",
+            "review_send_post_action",
+            "delivered_status_label",
+            "delivered_status_class",
+            "review_request_tag_present",
+            "review_request_tag_data_loaded",
+            "review_request_tag_status_label",
+            "review_request_tag_status_class",
+            "matched_review_request_tag_value",
+            "review_request_tag_match_detail",
+            "send_job_status_label",
+            "send_job_status_class",
+            "send_job_message",
+            "send_job_last_error",
+            "review_send_job_blocks_action",
+        ),
+    )
+
+
+def _compact_already_sent_snapshot_row(row):
+    row = dict(row or {})
+    return _compact_snapshot_row(
+        row,
+        keys=(
+            "order",
+            "order_name",
+            "customer_display_name",
+            "customer",
+            "customer_masked_label",
+            "masked_customer_label",
+            "sent_at",
+            "sent_time_label",
+            "trustpilot_email_status",
+            "status_class",
+            "shopify_tag_status_label",
+            "shopify_tag_status_class",
+            "tag_written_at",
+            "tag_written_time_label",
+            "evidence",
+            "tags",
+            "order_tags_display",
+            "tag_chips",
+            "action_state",
+            "action_label",
+            "action_status",
+        ),
+    )
+
+
+def _compact_blocked_snapshot_row(row):
+    row = dict(row or {})
+    return _compact_snapshot_row(
+        row,
+        keys=(
+            "order",
+            "order_name",
+            "customer_display_name",
+            "customer",
+            "customer_masked_label",
+            "masked_customer_label",
+            "customer_orders_display",
+            "customer_order_summary",
+            "customer_history_lookup_status",
+            "customer_history_lookup_block_status",
+            "customer_history_lookup_action_label",
+            "customer_history_lookup_command",
+            "blocked_by_customer_history_lookup",
+            "cached_customer_history_lookup_found",
+            "tags",
+            "order_tags_display",
+            "tag_chips",
+            "trustpilot_history_label",
+            "status_chips",
+            "reason",
+            "eligibility_reason_plain",
+            "block_reason",
+            "blocked_reason",
+            "missing_requirement",
+            "evidence",
+            "action_state",
+            "action_label",
+            "action_status",
+            "status",
+            "status_label",
+            "status_class",
+            "merged_order_group",
+            "merged_group_compact_label",
+            "merged_group_label",
+            "review_request_tag_match_detail",
+        ),
+    )
+
+
+def _compact_snapshot_row(row, keys):
+    compact = {}
+    for key in keys:
+        value = row.get(key)
+        if value in (None, "", [], {}):
+            continue
+        compact[key] = _sanitize_dashboard_snapshot_payload(value)
+    compact["full_note_output"] = False
+    compact["raw_email_output"] = False
+    return compact
+
+
+def _compact_dashboard_shell(dashboard):
+    dashboard = dict(dashboard or {})
+    keep_keys = (
+        "ready_to_send_count",
+        "blocked_count",
+        "sent_trustpilot_count",
+        "customer_history_checks",
+        "lookup_cache",
+        "order_data_coverage",
+        "setup_checklist",
+        "current_state_label",
+        "status_cards",
+        "next_action_headline",
+        "send_requirements",
+        "current_blockers",
+        "gmail_setup_ready",
+        "gmail_setup_status_value",
+        "gmail_setup_message",
+        "next_actions",
+        "recent_activity",
+        "ali_reviews_message",
+        "ali_reviews_status_label",
+    )
+    compact = {key: dashboard.get(key) for key in keep_keys if key in dashboard}
+    for key in (
+        "trustpilot_automation",
+        "trustpilot_send_readiness",
+        "trustpilot_auto_refresh",
+        "trustpilot_candidate_simulator",
+        "trustpilot_gmail_send_gate",
+        "trustpilot_gmail_send_executor_shell",
+        "trustpilot_real_send_final_preflight",
+        "trustpilot_real_send_execute",
+        "trustpilot_gmail_real_send_readiness_audit",
+        "trustpilot_gmail_oauth_config_helper",
+        "trustpilot_gmail_config_compatibility_audit",
+        "trustpilot_gmail_env_loading_audit",
+        "trustpilot_gmail_scope_compatibility_resolver",
+        "trustpilot_gmail_draft_only_preflight",
+        "trustpilot_gmail_one_draft_create_locked_runner",
+    ):
+        compact[key] = _compact_report_status(dashboard.get(key) or {})
+    compact["blocked_order_rows"] = []
+    compact["gmail_setup_rows"] = []
+    compact["pipeline_steps"] = dashboard.get("pipeline_steps", [])[:10]
+    return compact
+
+
+def _compact_report_status(report):
+    if not isinstance(report, dict):
+        return {}
+    keep = {}
+    for key in (
+        "report_loaded",
+        "present",
+        "loaded",
+        "success",
+        "status",
+        "report_status",
+        "task_status",
+        "generated_at",
+        "timestamp",
+        "relative_path",
+        "html_relative_path",
+        "error",
+        "message",
+        "status_label",
+        "status_value",
+        "ready",
+        "eligible_candidate_count",
+        "blocked_candidate_count",
+        "gmail_api_call_performed",
+        "gmail_send_performed",
+        "email_sent",
+        "shopify_write_performed",
+        "external_review_api_call_performed",
+        "translations_register_called",
+    ):
+        value = report.get(key)
+        if value not in (None, "", [], {}):
+            keep[key] = _sanitize_dashboard_snapshot_payload(value)
+    return keep
 
 
 def _compact_workbench_for_dashboard_snapshot(
@@ -1225,7 +1621,75 @@ def _compact_workbench_for_dashboard_snapshot(
     blocked_visible_rows,
     blocked_total,
 ):
-    compact_queue = dict(approval_queue or {})
+    compact_queue = {
+        "needs_review_count": len(review_rows),
+        "already_sent_count": len(already_sent_rows),
+        "ready_to_send_count": len(review_rows),
+        "not_ready_count": blocked_total,
+        "blocked_count": blocked_total,
+        "blocked_display_limit": BLOCKED_QUEUE_DISPLAY_LIMIT,
+        "duplicate_block_count": _int_or_zero((approval_queue or {}).get("duplicate_block_count")),
+        "blocked_ebay_order_count": _int_or_zero((approval_queue or {}).get("blocked_ebay_order_count")),
+        "blocked_first_order_count": _int_or_zero((approval_queue or {}).get("blocked_first_order_count")),
+        "blocked_not_second_or_later_count": _int_or_zero(
+            (approval_queue or {}).get("blocked_not_second_or_later_count")
+        ),
+        "blocked_second_order_not_delivered_count": _int_or_zero(
+            (approval_queue or {}).get("blocked_second_order_not_delivered_count")
+        ),
+        "review_send_action_enabled_count": min(len(review_rows), DEFAULT_LIMIT),
+        "email_sent_count": len(already_sent_rows),
+        "merged_group_count": _int_or_zero((approval_queue or {}).get("merged_group_count")),
+        "eligible_candidate_count_before_latest_filter": _int_or_zero(
+            (approval_queue or {}).get("eligible_candidate_count_before_latest_filter") or len(review_rows)
+        ),
+        "eligible_candidate_count_after_latest_filter": _int_or_zero(
+            (approval_queue or {}).get("eligible_candidate_count_after_latest_filter") or len(review_rows)
+        ),
+        "hidden_older_eligible_count": _int_or_zero((approval_queue or {}).get("hidden_older_eligible_count")),
+        "latest_candidate_per_customer_count": _int_or_zero(
+            (approval_queue or {}).get("latest_candidate_per_customer_count") or len(review_rows)
+        ),
+        "focus_22530_22562_latest_decision": (approval_queue or {}).get("focus_22530_22562_latest_decision") or {},
+        "eligible_candidate_count_total": len(review_rows),
+        "base_eligible_candidate_count_total": _int_or_zero(
+            (approval_queue or {}).get("base_eligible_candidate_count_total") or len(review_rows)
+        ),
+        "eligible_candidate_count_before_second_order_rule": _int_or_zero(
+            (approval_queue or {}).get("eligible_candidate_count_before_second_order_rule") or len(review_rows)
+        ),
+        "eligible_candidate_count_after_second_order_rule": _int_or_zero(
+            (approval_queue or {}).get("eligible_candidate_count_after_second_order_rule") or len(review_rows)
+        ),
+        "second_or_later_delivered_candidate_count": _int_or_zero(
+            (approval_queue or {}).get("second_or_later_delivered_candidate_count") or len(review_rows)
+        ),
+        "review_queue_sort_order": (approval_queue or {}).get("review_queue_sort_order") or list(REVIEW_QUEUE_SORT_ORDER),
+        "latest_sent_order": _safe_text((approval_queue or {}).get("latest_sent_order"), max_length=80),
+        "latest_sent_time": _safe_text((approval_queue or {}).get("latest_sent_time"), max_length=120),
+        "latest_tag_write_time": _safe_text((approval_queue or {}).get("latest_tag_write_time"), max_length=120),
+        "stale_counter_warning": (approval_queue or {}).get("stale_counter_warning") is True,
+        "stale_counter_warning_message": _safe_text(
+            (approval_queue or {}).get("stale_counter_warning_message"),
+            max_length=160,
+        ),
+        "shopify_tag_write_enabled_count": 0,
+        "empty_message": _safe_text(
+            (approval_queue or {}).get("empty_message") or "No orders need review email right now.",
+            max_length=160,
+        ),
+        "send_job_manual_process_command": _safe_text(
+            (approval_queue or {}).get("send_job_manual_process_command"),
+            max_length=300,
+        ),
+        "send_job_dry_run_command": _safe_text(
+            (approval_queue or {}).get("send_job_dry_run_command"),
+            max_length=300,
+        ),
+        "send_job_load_error": _safe_text((approval_queue or {}).get("send_job_load_error"), max_length=300),
+        "recent_send_jobs": (approval_queue or {}).get("recent_send_jobs", [])[:REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT],
+        "active_send_job_count": _int_or_zero((approval_queue or {}).get("active_send_job_count")),
+    }
     compact_queue["all_needs_review_rows"] = review_rows
     compact_queue["needs_review_rows"] = review_rows[:DEFAULT_LIMIT]
     compact_queue["all_already_sent_rows"] = already_sent_rows
@@ -1234,7 +1698,7 @@ def _compact_workbench_for_dashboard_snapshot(
     compact_queue["blocked_visible_count"] = len(blocked_visible_rows)
     compact_queue["blocked_count"] = blocked_total
     compact_queue["blocked_overflow_count"] = max(blocked_total - len(blocked_visible_rows), 0)
-    compact_dashboard = dict(dashboard or {})
+    compact_dashboard = _compact_dashboard_shell(dashboard or {})
     compact_dashboard["approval_queue"] = compact_queue
     compact_dashboard["last_60_days_candidate_scan"] = _compact_last_scan_for_dashboard_snapshot(last_scan)
     return {
@@ -1242,29 +1706,29 @@ def _compact_workbench_for_dashboard_snapshot(
         "summary": workbench.get("summary", []),
         "filters": {},
         "filter_summary": {},
-        "latest_scan": workbench.get("latest_scan", {}),
+        "latest_scan": {},
         "candidate_queue": [],
         "invitation_history": [],
         "review_request_queue": [],
         "typo_review_request_rows": [],
         "blocked_orders": [],
         "blocked_reason_counts": workbench.get("blocked_reason_counts", []),
-        "report_readiness": workbench.get("report_readiness", []),
-        "report_history": workbench.get("report_history", []),
+        "report_readiness": [],
+        "report_history": [],
         "history_ledger": [],
         "history_filters": {},
         "history_summary": workbench.get("history_summary", {}),
         "history_focus": workbench.get("history_focus", {}),
-        "history_source_reports": workbench.get("history_source_reports", []),
+        "history_source_reports": [],
         "history_filter_summary": {},
-        "history_channel_filter_options": workbench.get("history_channel_filter_options", []),
-        "history_event_type_filter_options": workbench.get("history_event_type_filter_options", []),
-        "history_limit_filter_options": workbench.get("history_limit_filter_options", []),
-        "history_recommendations": workbench.get("history_recommendations", []),
-        "safety_history": workbench.get("safety_history", []),
+        "history_channel_filter_options": [],
+        "history_event_type_filter_options": [],
+        "history_limit_filter_options": [],
+        "history_recommendations": [],
+        "safety_history": [],
         "local_stats": workbench.get("local_stats", {}),
-        "tracking_design": workbench.get("tracking_design", {}),
-        "candidate_queue_status": workbench.get("candidate_queue_status", {}),
+        "tracking_design": {},
+        "candidate_queue_status": {},
         "trustpilot_email_records": [],
         "ali_reviews_status": workbench.get("ali_reviews_status", {}),
         "trustpilot_aliases": workbench.get("trustpilot_aliases", TRUSTPILOT_TAG_ALIASES),
@@ -1442,7 +1906,7 @@ def _write_dashboard_snapshot_html(payload):
 
 
 def write_review_request_dashboard_snapshot_reports(payload):
-    safe_payload = _sanitize_dashboard_snapshot_payload(payload or {})
+    safe_payload = _finalize_dashboard_snapshot_payload(payload or {})
     json_write = _write_dashboard_snapshot_json(safe_payload)
     safe_payload["snapshot_main_path"] = str(json_write["main_path"])
     safe_payload["snapshot_mirror_paths_written"] = [
@@ -1452,12 +1916,14 @@ def write_review_request_dashboard_snapshot_reports(payload):
     safe_payload["page_expected_paths"] = [
         str(path) for path in get_review_request_dashboard_snapshot_read_paths()
     ]
+    safe_payload = _finalize_dashboard_snapshot_payload(safe_payload)
     html_write = _write_dashboard_snapshot_html(safe_payload)
     safe_payload["snapshot_html_main_path"] = str(html_write["main_path"])
     safe_payload["snapshot_html_mirror_paths_written"] = [
         str(path) for path in html_write["mirror_paths_written"]
     ]
     safe_payload["snapshot_html_paths_failed"] = html_write["paths_failed"]
+    safe_payload = _finalize_dashboard_snapshot_payload(safe_payload)
     _write_dashboard_snapshot_json(safe_payload)
     json_path = json_write["main_path"]
     html_path = html_write["main_path"]
@@ -1524,8 +1990,13 @@ def _render_dashboard_snapshot_report_html(payload):
       <tr><th>Needs review visible count</th><td>{escape(str(counters.get('needs_review_visible_count', 0)))}</td></tr>
       <tr><th>Already sent total</th><td>{escape(str(counters.get('already_sent_total', 0)))}</td></tr>
       <tr><th>Blocked total</th><td>{escape(str(blocked.get('blocked_total', 0)))}</td></tr>
-      <tr><th>Lookup cache selected path</th><td>{escape(str(payload.get('lookup_cache_selected_path') or '-'))}</td></tr>
+      <tr><th>Lookup cache selected path</th><td>{escape(str(payload.get('lookup_cache_path_selected') or payload.get('lookup_cache_selected_path') or '-'))}</td></tr>
       <tr><th>Lookup cache entries</th><td>{escape(str(payload.get('lookup_cache_entries_count', 0)))}</td></tr>
+      <tr><th>Base candidates needing live check</th><td>{escape(str(payload.get('base_candidates_needing_live_check', 0)))}</td></tr>
+      <tr><th>Clean lookup count</th><td>{escape(str(payload.get('clean_lookup_count', 0)))}</td></tr>
+      <tr><th>Final eligible after lookup</th><td>{escape(str(payload.get('final_eligible_after_lookup', 0)))}</td></tr>
+      <tr><th>Snapshot size bytes</th><td>{escape(str(payload.get('snapshot_size_bytes', 0)))}</td></tr>
+      <tr><th>Embedded history reports</th><td>{escape(str(payload.get('embedded_history_reports') is True))}</td></tr>
       <tr><th>#21687 lookup cache found</th><td>{escape(str(order_21687.get('lookup_cache_found') is True))}</td></tr>
       <tr><th>#21687 should block Review & Send</th><td>{escape(str(order_21687.get('should_block_review_send') is True))}</td></tr>
       <tr><th>#21687 evidence order</th><td>{escape(str(order_21687.get('evidence_order_name') or '-'))}</td></tr>
@@ -1558,6 +2029,32 @@ def _build_review_request_workbench_context_from_dashboard_snapshot(params=None)
 
     workbench = dict(workbench)
     dashboard = dict(workbench.get("operating_dashboard") or {})
+    if isinstance(data.get("customer_history_checks"), dict):
+        dashboard["customer_history_checks"] = data["customer_history_checks"]
+    lookup_cache = dict(dashboard.get("lookup_cache") or {})
+    lookup_cache.update(
+        {
+            "found": data.get("lookup_cache_found") is True,
+            "loaded": data.get("lookup_cache_found") is True,
+            "selected_path": _safe_text(data.get("lookup_cache_selected_path"), max_length=500),
+            "path": _safe_text(data.get("lookup_cache_selected_path"), max_length=500),
+            "entries_count": _int_or_zero(data.get("lookup_cache_entries_count")),
+            "paths_checked": data.get("lookup_cache_paths_checked") or lookup_cache.get("paths_checked") or [],
+            "order_22562_lookup_cache_found": (
+                (data.get("order_22562_customer_history_lookup_validation") or {}).get("lookup_cache_found")
+                is True
+            ),
+            "order_22562_final_section": (
+                (data.get("order_22562_customer_history_lookup_validation") or {}).get("final_section")
+                or ""
+            ),
+            "order_22562_final_eligibility": (
+                (data.get("order_22562_customer_history_lookup_validation") or {}).get("final_eligibility")
+                or ""
+            ),
+        }
+    )
+    dashboard["lookup_cache"] = lookup_cache
     dashboard["dashboard_snapshot"] = metadata
     dashboard["normal_page_load_data_source"] = "cached_snapshot"
     dashboard["normal_page_load_shopify_api_call_performed"] = False
@@ -1687,6 +2184,14 @@ def _dashboard_snapshot_container_refresh_command():
     return "docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot"
 
 
+def _batch_customer_history_lookup_container_command(limit=DEFAULT_LIMIT):
+    limit = max(_int_or_zero(limit) or DEFAULT_LIMIT, 1)
+    return (
+        "docker compose exec -T web python manage.py "
+        f"run_review_request_batch_customer_history_lookup --limit {limit}"
+    )
+
+
 def _running_in_docker():
     return Path("/.dockerenv").exists()
 
@@ -1737,6 +2242,9 @@ def _dashboard_snapshot_metadata(report, data=None):
         "selected_path": _safe_text(report.get("selected_path"), max_length=500),
         "selected_mtime": _safe_text(report.get("modified_at"), max_length=120),
         "selected_size_bytes": report.get("size_bytes") or 0,
+        "snapshot_size_bytes": _int_or_zero(data.get("snapshot_size_bytes") or report.get("size_bytes")),
+        "row_counts": data.get("row_counts") if isinstance(data.get("row_counts"), dict) else {},
+        "embedded_history_reports": data.get("embedded_history_reports") is True,
         "paths_checked": report.get("paths_checked") or [],
         "page_expected_paths": report.get("page_expected_paths") or [],
         "error": _safe_text(report.get("error"), max_length=300),
@@ -1848,10 +2356,12 @@ def _empty_dashboard_approval_queue():
 
 def _paginate_dashboard_snapshot(dashboard, filters):
     approval_queue = dict(dashboard.get("approval_queue") or {})
+    snapshot_lookup_cache = {"orders": {}}
     candidate_review_rows = _snapshot_dict_rows(
         approval_queue.get("all_needs_review_rows")
         or approval_queue.get("needs_review_rows"),
         default_action_state="review_send",
+        lookup_cache=snapshot_lookup_cache,
     )
     all_needs_review_rows = [
         row for row in candidate_review_rows if row.get("action_state") == "review_send"
@@ -1863,10 +2373,12 @@ def _paginate_dashboard_snapshot(dashboard, filters):
         approval_queue.get("all_already_sent_rows")
         or approval_queue.get("already_sent_rows"),
         default_action_state="already_sent",
+        lookup_cache=snapshot_lookup_cache,
     )
     blocked_rows = demoted_review_rows + _snapshot_dict_rows(
         approval_queue.get("blocked_rows"),
         default_action_state="not_ready",
+        lookup_cache=snapshot_lookup_cache,
     )
     pagination = _approval_queue_pagination(
         total_count=len(all_needs_review_rows),
@@ -1950,17 +2462,24 @@ def _paginate_dashboard_snapshot(dashboard, filters):
     dashboard["approval_queue"] = approval_queue
 
 
-def _snapshot_dict_rows(value, default_action_state=""):
+def _snapshot_dict_rows(value, default_action_state="", lookup_cache=None):
     return [
-        _normalize_dashboard_snapshot_row(dict(row), default_action_state=default_action_state)
+        _normalize_dashboard_snapshot_row(
+            dict(row),
+            default_action_state=default_action_state,
+            lookup_cache=lookup_cache,
+        )
         for row in (value or [])
         if isinstance(row, dict)
     ]
 
 
-def _normalize_dashboard_snapshot_row(row, default_action_state=""):
+def _normalize_dashboard_snapshot_row(row, default_action_state="", lookup_cache=None):
     order_name = _safe_text(row.get("order_name") or row.get("order"), max_length=80)
-    cached_lookup = lookup_cached_customer_history_result(_log_dir(), order_name)
+    if lookup_cache is None:
+        cached_lookup = lookup_cached_customer_history_result(_log_dir(), order_name)
+    else:
+        cached_lookup = _cached_lookup_order_from_cache(lookup_cache, order_name)
     if cached_lookup:
         row = _apply_cached_customer_history_lookup_to_row(row, cached_lookup)
     action_state = _snapshot_action_state(row, default_action_state)
@@ -2260,6 +2779,31 @@ def _dashboard_snapshot_age_label(age_seconds):
     return f"{days} day{'s' if days != 1 else ''} ago"
 
 
+def _finalize_dashboard_snapshot_payload(payload):
+    safe_payload = _sanitize_dashboard_snapshot_payload(payload or {})
+    row_counts = {
+        "needs_review_rows": len(safe_payload.get("review_queue_candidates") or []),
+        "already_sent_rows": len(safe_payload.get("already_sent_rows") or []),
+        "blocked_rows_embedded": len((safe_payload.get("blocked_summary") or {}).get("rows") or []),
+        "blocked_total": _int_or_zero((safe_payload.get("blocked_summary") or {}).get("blocked_total")),
+    }
+    safe_payload["row_counts"] = row_counts
+    safe_payload["embedded_history_reports"] = False
+    workbench = safe_payload.get("review_request_workbench")
+    if isinstance(workbench, dict):
+        workbench["history_source_reports"] = []
+        dashboard = workbench.get("operating_dashboard")
+        if isinstance(dashboard, dict):
+            dashboard["snapshot_size_report"] = {
+                "row_counts": row_counts,
+                "embedded_history_reports": False,
+            }
+    safe_payload["snapshot_size_bytes"] = len(
+        json.dumps(safe_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    )
+    return safe_payload
+
+
 def _sanitize_dashboard_snapshot_payload(value):
     if isinstance(value, dict):
         return {
@@ -2284,13 +2828,13 @@ def _review_send_dashboard_snapshot_blocker():
     if metadata["missing"]:
         return {
             "status": "blocked_dashboard_snapshot_missing",
-            "detail": "No email was sent. Review queue has not been generated yet. Run the dashboard snapshot refresh command.",
+            "detail": "Review queue is stale. Refresh queue before sending.",
             "snapshot": metadata,
         }
     if metadata["stale"]:
         return {
             "status": "blocked_dashboard_snapshot_stale",
-            "detail": f"No email was sent. {metadata['stale_message']} Run the dashboard snapshot refresh command before sending.",
+            "detail": "Review queue is stale. Refresh queue before sending.",
             "snapshot": metadata,
         }
     return {"status": "", "detail": "", "snapshot": metadata}
@@ -2300,17 +2844,22 @@ def queue_review_request_send_job(order_identifier, admin_username="", params=No
     selected_order = _canonical_order_name(order_identifier)
     request_context = request_context or {}
     now = datetime.now(timezone.utc).isoformat()
+    enqueue_diagnostics = _review_send_enqueue_diagnostics()
     result = {
         "timestamp": now,
+        "route_mode": enqueue_diagnostics["route_mode"],
         "execution_status": "blocked_not_started",
         "success": False,
         "job_queued": False,
+        "job_created": False,
         "duplicate_job": False,
+        "duplicate_job_detected": False,
         "job_id": "",
         "selected_order": selected_order,
         "message": "",
         "blocking_detail": "",
         "blocking_conditions": [],
+        "processor_command": REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND,
         "gmail_api_call_performed": False,
         "gmail_draft_create_attempted": False,
         "gmail_drafts_send_called": False,
@@ -2323,10 +2872,19 @@ def queue_review_request_send_job(order_identifier, admin_username="", params=No
         "tags_remove_performed": False,
         "external_review_api_call_performed": False,
         "translations_register_called": False,
+        "live_lookup_performed": False,
+        "batch_customer_history_lookup_performed": False,
+        "candidate_scan_performed": False,
+        "snapshot_refresh_performed": False,
+        "post_send_audit_performed": False,
+        "trustpilot_duplicate_audit_performed": False,
+        "send_job_processed_inline": False,
+        "enqueue_diagnostics": enqueue_diagnostics,
     }
     if not selected_order:
         result["execution_status"] = "blocked_missing_selected_order"
         result["blocking_detail"] = "Review send job was not queued. No selected order was provided."
+        result["message"] = result["blocking_detail"]
         return result
 
     payload = _load_review_request_send_jobs_payload()
@@ -2344,10 +2902,8 @@ def queue_review_request_send_job(order_identifier, admin_username="", params=No
     if existing_job:
         return _review_request_send_job_duplicate_result(result, existing_job)
 
-    state = _build_review_send_state(params)
     validation = _validate_review_request_send_job_queue_request(
         selected_order,
-        state,
         request_context,
     )
     if validation.get("blocking_conditions"):
@@ -2386,11 +2942,13 @@ def queue_review_request_send_job(order_identifier, admin_username="", params=No
             "execution_status": "review_send_job_queued",
             "success": True,
             "job_queued": True,
+            "job_created": True,
             "job_id": job["job_id"],
             "job": _sanitize_review_request_send_job(job),
-            "message": "Review send job queued. Processing will run in the background.",
+            "message": "Review send job queued. Run the processor to send it.",
         }
     )
+    result["enqueue_diagnostics"] = _review_send_enqueue_diagnostics(job_created=True)
     return result
 
 
@@ -2400,15 +2958,123 @@ def _review_request_send_job_duplicate_result(result, existing_job):
             "execution_status": "review_send_job_already_exists",
             "success": True,
             "duplicate_job": True,
+            "duplicate_job_detected": True,
             "job_id": existing_job.get("job_id", ""),
             "job": existing_job,
-            "message": "Review send job already exists. Refresh in a moment.",
+            "message": "Review send job already exists for this order; no duplicate was queued.",
         }
+    )
+    result["enqueue_diagnostics"] = _review_send_enqueue_diagnostics(
+        duplicate_job_detected=True
     )
     return result
 
 
-def _validate_review_request_send_job_queue_request(selected_order, state, request_context):
+def _review_send_enqueue_diagnostics(job_created=False, duplicate_job_detected=False):
+    return {
+        "route_mode": "enqueue_only",
+        "job_created": job_created is True,
+        "duplicate_job_detected": duplicate_job_detected is True,
+        "gmail_api_call_performed": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "live_lookup_performed": False,
+        "snapshot_refresh_performed": False,
+    }
+
+
+def _build_review_send_enqueue_snapshot_state(snapshot_metadata=None):
+    report = _load_dashboard_snapshot_report()
+    data = report.get("data") if report.get("loaded") else {}
+    workbench = data.get("review_request_workbench") if isinstance(data, dict) else {}
+    if not isinstance(workbench, dict):
+        return {
+            "approval_queue": _empty_dashboard_approval_queue(),
+            "blocking_conditions": [
+                {
+                    "status": "blocked_dashboard_snapshot_invalid",
+                    "detail": "Review queue is stale. Refresh queue before sending.",
+                }
+            ],
+        }
+
+    dashboard = workbench.get("operating_dashboard") or {}
+    source_queue = (dashboard.get("approval_queue") or {}) if isinstance(dashboard, dict) else {}
+    lookup_cache = {"orders": {}}
+    raw_review_rows = source_queue.get("all_needs_review_rows") or source_queue.get("needs_review_rows")
+    candidate_review_rows = _snapshot_dict_rows(
+        raw_review_rows,
+        default_action_state="review_send",
+        lookup_cache=lookup_cache,
+    )
+    ready_rows = [
+        row
+        for row in candidate_review_rows
+        if row.get("action_state") == "review_send" and row.get("can_review_send") is True
+    ]
+    demoted_rows = [
+        row
+        for row in candidate_review_rows
+        if row.get("action_state") != "review_send" or row.get("can_review_send") is not True
+    ]
+    already_sent_rows = _snapshot_dict_rows(
+        source_queue.get("all_already_sent_rows") or source_queue.get("already_sent_rows"),
+        default_action_state="already_sent",
+        lookup_cache=lookup_cache,
+    )
+    blocked_rows = demoted_rows + _snapshot_dict_rows(
+        source_queue.get("blocked_rows"),
+        default_action_state="not_ready",
+        lookup_cache=lookup_cache,
+    )
+    approval_queue = _empty_dashboard_approval_queue()
+    approval_queue.update(
+        {
+            "all_needs_review_rows": ready_rows,
+            "needs_review_rows": ready_rows,
+            "all_already_sent_rows": already_sent_rows,
+            "already_sent_rows": already_sent_rows,
+            "blocked_rows": blocked_rows,
+            "needs_review_count": len(ready_rows),
+            "ready_to_send_count": len(ready_rows),
+            "already_sent_count": len(already_sent_rows),
+            "not_ready_count": len(blocked_rows),
+            "blocked_count": len(blocked_rows),
+            "review_send_action_enabled_count": len(ready_rows),
+            "dashboard_snapshot": snapshot_metadata or {},
+        }
+    )
+    return {"approval_queue": approval_queue, "blocking_conditions": []}
+
+
+def _review_send_enqueue_request_blockers(request_context):
+    blockers = []
+    request_context = request_context or {}
+    if request_context.get("method") != "POST":
+        blockers.append(
+            {
+                "status": "blocked_admin_post_required",
+                "detail": "Review send job was not queued. Review & Send must be submitted by admin POST.",
+            }
+        )
+    if request_context.get("is_staff_admin") is not True:
+        blockers.append(
+            {
+                "status": "blocked_staff_admin_required",
+                "detail": "Review send job was not queued. Review & Send is staff/admin only.",
+            }
+        )
+    if request_context.get("csrf_protection_enabled") is not True:
+        blockers.append(
+            {
+                "status": "blocked_csrf_protection_required",
+                "detail": "Review send job was not queued. CSRF protection is required.",
+            }
+        )
+    return blockers
+
+
+def _validate_review_request_send_job_queue_request(selected_order, request_context):
     snapshot_blocker = _review_send_dashboard_snapshot_blocker()
     if snapshot_blocker["status"]:
         return {
@@ -2422,10 +3088,18 @@ def _validate_review_request_send_job_queue_request(selected_order, state, reque
             ],
         }
 
-    selected_rows = _review_send_selected_rows(state["approval_queue"], selected_order)
+    snapshot_state = _build_review_send_enqueue_snapshot_state(snapshot_blocker.get("snapshot") or {})
+    if snapshot_state.get("blocking_conditions"):
+        return {
+            "candidate": {},
+            "snapshot": snapshot_blocker.get("snapshot") or {},
+            "blocking_conditions": snapshot_state["blocking_conditions"],
+        }
+    approval_queue = snapshot_state["approval_queue"]
+    selected_rows = _review_send_selected_rows(approval_queue, selected_order)
     matches = [
         row
-        for row in state["approval_queue"]["needs_review_rows"]
+        for row in approval_queue["all_needs_review_rows"]
         if row.get("candidate_id") == selected_order
         and row.get("action_state") == "review_send"
         and row.get("can_review_send") is True
@@ -2440,23 +3114,9 @@ def _validate_review_request_send_job_queue_request(selected_order, state, reque
         }
 
     candidate = matches[0]
-    base_result = _base_review_and_send_result(
-        selected_order,
-        "",
-        state,
-        request_context,
-    )
     blocking_conditions = []
-    blocking_conditions.extend(_runtime_review_send_route_blockers(base_result, candidate))
+    blocking_conditions.extend(_review_send_enqueue_request_blockers(request_context))
     blocking_conditions.extend(_runtime_review_send_group_blockers(candidate))
-    blocking_conditions.extend(
-        _runtime_customer_history_live_lookup_blockers(
-            candidate,
-            state["last_60_days_scan"],
-            state["reports"],
-            (snapshot_blocker.get("snapshot") or {}).get("generated_at"),
-        )
-    )
     blocking_conditions.extend(_runtime_review_send_candidate_safety_blockers(candidate))
     return {
         "candidate": candidate,
@@ -2475,11 +3135,20 @@ def _build_review_request_send_job(selected_order, admin_username, created_at, c
         "created_by_admin": _safe_text(admin_username, max_length=120),
         "status": "queued",
         "last_error": "",
-        "message": "Review send job queued. Processing will run in the background.",
+        "message": "Review send job queued. Run the processor to send it.",
         "gmail_send_status": "not_started",
         "shopify_tag_status": "not_started",
         "attempts": 0,
         "source": "admin_review_request_workbench",
+        "route_mode": "enqueue_only",
+        "job_created": True,
+        "duplicate_job_detected": False,
+        "gmail_api_call_performed": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "live_lookup_performed": False,
+        "snapshot_refresh_performed": False,
+        "processor_command": REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND,
         "review_send_report_path": "",
         "dashboard_snapshot_generated_at": _safe_text(
             (snapshot or {}).get("generated_at"),
@@ -3085,11 +3754,21 @@ def _sanitize_review_request_send_job(job):
         "message": _safe_text(job.get("message"), max_length=400),
         "attempts": _int_or_zero(job.get("attempts")),
         "source": _safe_text(job.get("source"), max_length=120),
+        "route_mode": _safe_text(job.get("route_mode") or "enqueue_only", max_length=80),
+        "job_created": job.get("job_created") is True,
+        "duplicate_job_detected": job.get("duplicate_job_detected") is True,
+        "gmail_api_call_performed": job.get("gmail_api_call_performed") is True,
+        "shopify_api_call_performed": job.get("shopify_api_call_performed") is True,
+        "shopify_write_performed": job.get("shopify_write_performed") is True,
+        "live_lookup_performed": job.get("live_lookup_performed") is True,
+        "snapshot_refresh_performed": job.get("snapshot_refresh_performed") is True,
+        "processor_command": _safe_text(job.get("processor_command"), max_length=300),
         "review_send_report_path": _safe_text(job.get("review_send_report_path"), max_length=180),
         "dashboard_snapshot_generated_at": _safe_text(
             job.get("dashboard_snapshot_generated_at"),
             max_length=120,
         ),
+        "selected_masked_customer": _safe_text(job.get("selected_masked_customer"), max_length=120),
     }
     sanitized["status_label"] = _review_request_send_job_status_label(sanitized)
     sanitized["status_class"] = _review_request_send_job_status_class(sanitized)
@@ -3113,6 +3792,8 @@ def _review_request_send_job_status_label(job):
         "running": "Running",
         "sent": "Sent",
         "tag_written": "Tag written",
+        "completed": "Completed",
+        "unknown_after_start": "Unknown after start",
         "failed": "Failed",
     }.get(status, "Queued")
 
@@ -3123,17 +3804,23 @@ def _review_request_send_job_status_class(job):
         return "rrw-badge-bad"
     if status in {"queued", "running"}:
         return "rrw-badge-warn"
-    if status in {"sent", "tag_written"}:
+    if status in {"sent", "tag_written", "completed"}:
         return "rrw-badge-ok"
+    if status == "unknown_after_start":
+        return "rrw-badge-bad"
     return "rrw-badge-muted"
 
 
 def _review_request_send_job_message(job):
     status = _safe_text(job.get("status"), max_length=40)
     if status == "queued":
-        return "Review send job queued. Processing will run in the background."
+        return "Review send job queued. Run the processor to send it."
     if status == "running":
         return "Review send job is running."
+    if status == "completed":
+        return "Review send job completed."
+    if status == "unknown_after_start":
+        return "Review send job status is unknown after send processing started."
     if status == "tag_written":
         return "Trustpilot email sent and Shopify tag written."
     if status == "sent":
@@ -3165,17 +3852,18 @@ def _latest_review_request_send_job_by_order(jobs):
 def _review_request_send_job_prevents_duplicate(job):
     status = _safe_text(job.get("status"), max_length=40)
     return bool(
-        status in REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES
-        or status in REVIEW_REQUEST_SEND_JOB_COMPLETED_STATUSES
+        status in REVIEW_REQUEST_SEND_JOB_DUPLICATE_STATUSES
         or job.get("gmail_send_status") in {"sent", "unknown_after_start"}
+        or job.get("shopify_tag_status") in {"tag_written", "unknown_after_start"}
     )
 
 
 def _review_request_send_job_prevents_processing(job):
     status = _safe_text(job.get("status"), max_length=40)
     return bool(
-        status in {"running", "sent", "tag_written"}
+        status in {"running", "sent", "tag_written", "completed", "unknown_after_start"}
         or job.get("gmail_send_status") in {"sent", "unknown_after_start"}
+        or job.get("shopify_tag_status") in {"tag_written", "unknown_after_start"}
     )
 
 
@@ -3237,14 +3925,8 @@ def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
         "active_job_count": sum(
             1 for job in jobs if job.get("status") in REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES
         ),
-        "manual_process_command": (
-            "docker compose exec -T web python manage.py "
-            "process_review_request_send_jobs --max-jobs 1"
-        ),
-        "dry_run_command": (
-            "docker compose exec -T web python manage.py "
-            "process_review_request_send_jobs --max-jobs 1 --dry-run"
-        ),
+        "manual_process_command": REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND,
+        "dry_run_command": f"{REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND} --dry-run",
     }
     approval_queue["recent_send_jobs"] = summary["recent_jobs"]
     approval_queue["send_job_storage_path"] = summary["storage_relative_path"]
@@ -7319,6 +8001,10 @@ def _lookup_cache_dashboard_summary(scan):
             scan.get("order_21687_blocking_reason"),
             max_length=300,
         ),
+        "order_22562_lookup_cache_found": scan.get("order_22562_lookup_cache_found") is True,
+        "order_22562_final_section": _safe_text(scan.get("order_22562_final_section"), max_length=80),
+        "order_22562_final_eligibility": _safe_text(scan.get("order_22562_final_eligibility"), max_length=80),
+        "batch_lookup_command": _batch_customer_history_lookup_container_command(),
     }
 
 
@@ -10266,6 +10952,11 @@ def _last_60_days_candidate_scan(
     order_21778_diagnosis = _focus_order_diagnosis("#21778", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_22530_diagnosis = _focus_order_diagnosis("#22530", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
     order_22562_diagnosis = _focus_order_diagnosis("#22562", scan_contexts, eligible_rows, blocked_rows, already_sent_rows)
+    order_22562_lookup = _cached_lookup_order_from_cache(lookup_cache, "#22562")
+    order_22562_review_queue_orders = {row.get("order") for row in review_queue_rows}
+    order_22562_eligible_orders = {row.get("order") for row in eligible_rows}
+    order_22562_blocked_orders = {row.get("order") for row in blocked_rows}
+    order_22562_already_sent_orders = {row.get("order") for row in already_sent_rows}
     eligible_candidate_count_total = len(eligible_rows)
     review_queue_visible_count = len(review_queue_rows)
     historical_note_blocked_count = sum(
@@ -10339,6 +11030,28 @@ def _last_60_days_candidate_scan(
         "order_21778_trustpilot_tag_detection": _order_trustpilot_tag_detection(order_21778_diagnosis),
         "order_22530_diagnosis": order_22530_diagnosis,
         "order_22562_diagnosis": order_22562_diagnosis,
+        "order_22562_lookup_cache_found": bool(order_22562_lookup),
+        "order_22562_should_block_review_send": order_22562_lookup.get("should_block_review_send") is True,
+        "order_22562_final_section": (
+            "review_queue"
+            if "#22562" in order_22562_review_queue_orders
+            else "eligible"
+            if "#22562" in order_22562_eligible_orders
+            else "blocked"
+            if "#22562" in order_22562_blocked_orders
+            else "already_sent"
+            if "#22562" in order_22562_already_sent_orders
+            else "not_visible"
+        ),
+        "order_22562_final_eligibility": (
+            "eligible"
+            if "#22562" in order_22562_review_queue_orders or "#22562" in order_22562_eligible_orders
+            else "already_sent"
+            if "#22562" in order_22562_already_sent_orders
+            else "blocked"
+            if "#22562" in order_22562_blocked_orders
+            else "not_scanned"
+        ),
         "local_db_error_sanitized": local_db_error,
         "scanned_order_count": len(scan_contexts),
         "delivered_order_count": delivered_count,
@@ -12927,12 +13640,6 @@ def _customer_history_lookup_is_stale(lookup, reference_at=""):
         return True
     now = datetime.now(timezone.utc)
     if now - lookup_dt > timedelta(hours=CUSTOMER_HISTORY_LOOKUP_TTL_HOURS):
-        return True
-    reference_dt = _parse_datetime_value(reference_at)
-    if (
-        reference_dt
-        and lookup_dt + timedelta(seconds=CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS) < reference_dt
-    ):
         return True
     return False
 
@@ -15884,11 +16591,10 @@ def _queue_action_status(action_state):
 def _customer_history_lookup_command(order_name):
     selected = _canonical_order_name(order_name)
     if not selected:
-        selected = "#21687"
+        return _batch_customer_history_lookup_container_command()
     return (
-        f'$env:SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER="{selected}"; '
-        f"python remote_approval_runner.py --task {ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_TASK_NAME} --approval local; "
-        "Remove-Item Env:\\SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER"
+        "docker compose exec -T web python manage.py "
+        f"run_review_request_batch_customer_history_lookup --limit 1 --order-filter {selected}"
     )
 
 

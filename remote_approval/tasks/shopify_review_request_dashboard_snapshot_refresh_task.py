@@ -223,6 +223,14 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 max_length=120,
             ),
             "eligible_total": eligible_total,
+            "base_candidates_needing_live_check": (
+                customer_history_checks["needs_live_customer_history_check_count"]
+                + customer_history_checks["live_checks_completed_count"]
+                + customer_history_checks["live_checks_blocked_count"]
+                + customer_history_checks["live_checks_failed_incomplete_count"]
+            ),
+            "clean_lookup_count": customer_history_checks["live_checks_completed_count"],
+            "final_eligible_after_lookup": customer_history_checks["final_eligible_count"],
             "final_eligible_count": customer_history_checks["final_eligible_count"],
             "final_eligible_orders": customer_history_checks["final_eligible_orders"],
             "needs_live_customer_history_check_count": customer_history_checks[
@@ -238,7 +246,7 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
             "already_sent_rows": already_sent_rows,
             "blocked_summary": {
                 "blocked_total": blocked_total,
-                "blocked_visible_count": len(blocked_rows[:50]),
+                "blocked_visible_count": len(blocked_rows[:25]),
                 "blocked_ebay_order_count": _int_value(scan.get("blocked_ebay_order_count")),
                 "blocked_duplicate_customer_count": _int_value(scan.get("blocked_duplicate_customer_count")),
                 "blocked_merged_group_count": _int_value(scan.get("blocked_merged_group_count")),
@@ -249,7 +257,7 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 "blocked_second_order_not_delivered_count": _int_value(
                     scan.get("blocked_second_order_not_delivered_count")
                 ),
-                "rows": blocked_rows[:50],
+                "rows": blocked_rows[:25],
             },
             "order_21687_customer_history_lookup_validation": {
                 "lookup_cache_found": scan.get("order_21687_lookup_cache_found") is True,
@@ -289,6 +297,14 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                     scan.get("second_or_later_delivered_candidate_count") or eligible_total
                 ),
                 "final_eligible_count": customer_history_checks["final_eligible_count"],
+                "final_eligible_after_lookup": customer_history_checks["final_eligible_count"],
+                "base_candidates_needing_live_check": (
+                    customer_history_checks["needs_live_customer_history_check_count"]
+                    + customer_history_checks["live_checks_completed_count"]
+                    + customer_history_checks["live_checks_blocked_count"]
+                    + customer_history_checks["live_checks_failed_incomplete_count"]
+                ),
+                "clean_lookup_count": customer_history_checks["live_checks_completed_count"],
                 "needs_live_customer_history_check_count": customer_history_checks[
                     "needs_live_customer_history_check_count"
                 ],
@@ -361,7 +377,7 @@ def _approval_queue_from_scan(
     )
     return {
         "needs_review_rows": visible_review_rows,
-        "blocked_rows": blocked_rows[:50],
+        "blocked_rows": blocked_rows[:25],
         "already_sent_rows": visible_sent_rows,
         "all_needs_review_rows": review_rows,
         "all_already_sent_rows": already_sent_rows,
@@ -370,9 +386,9 @@ def _approval_queue_from_scan(
         "ready_to_send_count": eligible_total,
         "not_ready_count": _int_value(scan.get("blocked_count") or len(blocked_rows)),
         "blocked_count": _int_value(scan.get("blocked_count") or len(blocked_rows)),
-        "blocked_visible_count": min(50, len(blocked_rows)),
-        "blocked_display_limit": 50,
-        "blocked_overflow_count": max(len(blocked_rows) - 50, 0),
+        "blocked_visible_count": min(25, len(blocked_rows)),
+        "blocked_display_limit": 25,
+        "blocked_overflow_count": max(len(blocked_rows) - 25, 0),
         "duplicate_block_count": _int_value(scan.get("blocked_duplicate_customer_count")),
         "blocked_ebay_order_count": _int_value(scan.get("blocked_ebay_order_count")),
         "blocked_first_order_count": _int_value(scan.get("blocked_first_order_count")),
@@ -763,6 +779,7 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
 
 
 def _write_reports(payload: dict) -> dict:
+    _add_snapshot_size_report(payload)
     json_main_path, json_mirror_paths = _snapshot_write_paths(REPORT_JSON_PATH.name)
     html_main_path, html_mirror_paths = _snapshot_write_paths(REPORT_HTML_PATH.name)
     payload["snapshot_main_path"] = str(json_main_path)
@@ -774,6 +791,7 @@ def _write_reports(payload: dict) -> dict:
     payload["page_expected_paths"] = [
         _display_path(path) for path in _snapshot_read_candidate_paths(REPORT_JSON_PATH.name)
     ]
+    _add_snapshot_size_report(payload)
 
     json_result = _write_json_to_paths(payload, json_main_path, json_mirror_paths)
     html_result = _write_html_to_paths(payload, html_main_path, html_mirror_paths)
@@ -783,10 +801,25 @@ def _write_reports(payload: dict) -> dict:
         str(path) for path in html_result["mirror_paths_written"]
     ]
     payload["snapshot_html_paths_failed"] = html_result["paths_failed"]
+    _add_snapshot_size_report(payload)
     json_result = _write_json_to_paths(payload, json_main_path, json_mirror_paths)
     payload["snapshot_mirror_paths_written"] = [str(path) for path in json_result["mirror_paths_written"]]
     payload["snapshot_paths_failed"] = json_result["paths_failed"]
     return {"json_path": json_main_path, "html_path": html_main_path}
+
+
+def _add_snapshot_size_report(payload: dict) -> None:
+    blocked = payload.get("blocked_summary") if isinstance(payload.get("blocked_summary"), dict) else {}
+    payload["row_counts"] = {
+        "needs_review_rows": len(payload.get("review_queue_candidates") or []),
+        "already_sent_rows": len(payload.get("already_sent_rows") or []),
+        "blocked_rows_embedded": len(blocked.get("rows") or []),
+        "blocked_total": _int_value(blocked.get("blocked_total")),
+    }
+    payload["embedded_history_reports"] = False
+    payload["snapshot_size_bytes"] = len(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    )
 
 
 def _snapshot_read_candidate_paths(filename: str) -> list[Path]:
@@ -960,7 +993,21 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "order_21687_blocking_reason": order_21687.get("blocking_reason", ""),
         "lookup_cache_paths_checked": payload.get("lookup_cache_paths_checked") or [],
         "lookup_cache_selected_path": payload.get("lookup_cache_selected_path", ""),
+        "lookup_cache_path_selected": payload.get("lookup_cache_path_selected")
+        or payload.get("lookup_cache_selected_path", ""),
         "lookup_cache_entries_count": _int_value(payload.get("lookup_cache_entries_count")),
+        "base_candidates_needing_live_check": _int_value(
+            payload.get("base_candidates_needing_live_check")
+            or counters.get("base_candidates_needing_live_check")
+        ),
+        "clean_lookup_count": _int_value(payload.get("clean_lookup_count") or counters.get("clean_lookup_count")),
+        "final_eligible_after_lookup": _int_value(
+            payload.get("final_eligible_after_lookup")
+            or counters.get("final_eligible_after_lookup")
+            or payload.get("final_eligible_count_after_lookup")
+        ),
+        "snapshot_size_bytes": _int_value(payload.get("snapshot_size_bytes")),
+        "embedded_history_reports": payload.get("embedded_history_reports") is True,
         "final_eligible_count": _int_value(counters.get("final_eligible_count") or payload.get("final_eligible_count")),
         "needs_live_customer_history_check_count": _int_value(
             counters.get("needs_live_customer_history_check_count")
@@ -1015,8 +1062,13 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"#21687 removed from Needs review: {order_21687.get('removed_from_needs_review')}\n"
         f"#21687 Review & Send disabled: {order_21687.get('review_send_button_disabled')}\n"
         f"#21687 blocking reason: {order_21687.get('blocking_reason') or '-'}\n"
-        f"Lookup cache selected path: {payload.get('lookup_cache_selected_path') or '-'}\n"
+        f"Lookup cache selected path: {payload.get('lookup_cache_path_selected') or payload.get('lookup_cache_selected_path') or '-'}\n"
         f"Lookup cache entries: {payload.get('lookup_cache_entries_count') or 0}\n"
+        f"Base candidates needing live check: {payload.get('base_candidates_needing_live_check') or counters.get('base_candidates_needing_live_check') or 0}\n"
+        f"Clean lookup count: {payload.get('clean_lookup_count') or counters.get('clean_lookup_count') or 0}\n"
+        f"Final eligible after lookup: {payload.get('final_eligible_after_lookup') or counters.get('final_eligible_after_lookup') or 0}\n"
+        f"Snapshot size bytes: {payload.get('snapshot_size_bytes') or 0}\n"
+        f"Embedded history reports: {payload.get('embedded_history_reports') is True}\n"
         f"Last Shopify sync: {payload.get('last_shopify_sync_at') or 'Unknown'}\n"
         f"Last candidate scan: {payload.get('last_candidate_scan_at') or 'Unknown'}\n\n"
         "Safety: no Shopify API call, no Shopify write, no Gmail API call, no email send, "
@@ -1089,8 +1141,13 @@ def _render_html(payload: dict) -> str:
       <tr><th>Blocked first-order count</th><td>{escape(str(blocked.get('blocked_first_order_count', 0)))}</td></tr>
       <tr><th>Blocked not second-or-later count</th><td>{escape(str(blocked.get('blocked_not_second_or_later_count', 0)))}</td></tr>
       <tr><th>Blocked second-order not delivered count</th><td>{escape(str(blocked.get('blocked_second_order_not_delivered_count', 0)))}</td></tr>
-      <tr><th>Lookup cache selected path</th><td>{escape(str(payload.get('lookup_cache_selected_path') or '-'))}</td></tr>
+      <tr><th>Lookup cache selected path</th><td>{escape(str(payload.get('lookup_cache_path_selected') or payload.get('lookup_cache_selected_path') or '-'))}</td></tr>
       <tr><th>Lookup cache entries</th><td>{escape(str(payload.get('lookup_cache_entries_count', 0)))}</td></tr>
+      <tr><th>Base candidates needing live check</th><td>{escape(str(payload.get('base_candidates_needing_live_check') or counters.get('base_candidates_needing_live_check') or 0))}</td></tr>
+      <tr><th>Clean lookup count</th><td>{escape(str(payload.get('clean_lookup_count') or counters.get('clean_lookup_count') or 0))}</td></tr>
+      <tr><th>Final eligible after lookup</th><td>{escape(str(payload.get('final_eligible_after_lookup') or counters.get('final_eligible_after_lookup') or 0))}</td></tr>
+      <tr><th>Snapshot size bytes</th><td>{escape(str(payload.get('snapshot_size_bytes', 0)))}</td></tr>
+      <tr><th>Embedded history reports</th><td>{escape(str(payload.get('embedded_history_reports') is True))}</td></tr>
       <tr><th>#21687 lookup cache found</th><td>{escape(str(order_21687.get('lookup_cache_found') is True))}</td></tr>
       <tr><th>#21687 should block Review & Send</th><td>{escape(str(order_21687.get('should_block_review_send') is True))}</td></tr>
       <tr><th>#21687 evidence order</th><td>{escape(str(order_21687.get('evidence_order_name') or '-'))}</td></tr>

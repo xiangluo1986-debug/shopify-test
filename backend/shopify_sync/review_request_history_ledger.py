@@ -571,17 +571,6 @@ def customer_history_lookup_cache_write_paths(log_dir, order_name=""):
         project_root / "backend" / "logs" / filename,
         log_path / filename,
     ]
-    if not _canonical_order_name(order_name):
-        mirror_candidates.extend(
-            [
-                project_root / "logs" / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
-                Path("/app/logs") / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
-                Path("/app/backend/logs") / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
-                project_root / "backend" / "logs" / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
-                log_path / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
-            ]
-        )
-
     paths = [main_path]
     for path in _dedupe_paths(mirror_candidates):
         if _path_identity(path) == _path_identity(main_path):
@@ -832,7 +821,18 @@ def load_customer_history_lookup_cache_for_order(log_dir, order_name=""):
     candidate_paths = _dedupe_paths(candidate_paths)
     checked = [_read_customer_history_lookup_cache_candidate(path) for path in candidate_paths]
     loaded = [item for item in checked if item.get("loaded")]
-    selected = max(loaded, key=lambda item: item.get("mtime") or 0) if loaded else {}
+    aggregate_loaded = [
+        item
+        for item in loaded
+        if Path(item.get("path", "")).name == CUSTOMER_HISTORY_LOOKUP_CACHE_BASENAME
+    ]
+    preferred_aggregate_loaded = [
+        item
+        for item in aggregate_loaded
+        if "codex_runs" not in str(item.get("path", "")).replace("\\", "/")
+    ]
+    selected_pool = preferred_aggregate_loaded or aggregate_loaded or loaded
+    selected = max(selected_pool, key=lambda item: item.get("mtime") or 0) if selected_pool else {}
     selected_path = selected.get("path", "")
     orders = {}
     for item in loaded:

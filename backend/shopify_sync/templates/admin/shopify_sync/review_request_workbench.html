@@ -480,6 +480,8 @@
                     <tr><th>Selected path</th><td><code>{{ dashboard.dashboard_snapshot.selected_path|default:"-" }}</code></td></tr>
                     <tr><th>File modified</th><td>{{ dashboard.dashboard_snapshot.selected_mtime|default:"-" }}</td></tr>
                     <tr><th>File size</th><td>{{ dashboard.dashboard_snapshot.selected_size_bytes|default:"0" }} bytes</td></tr>
+                    <tr><th>Snapshot payload size</th><td>{{ dashboard.dashboard_snapshot.snapshot_size_bytes|default:"0" }} bytes</td></tr>
+                    <tr><th>Embedded history reports</th><td>{{ dashboard.dashboard_snapshot.embedded_history_reports|yesno:"true,false" }}</td></tr>
                     <tr><th>Host refresh command</th><td><code>{{ dashboard.dashboard_snapshot.host_refresh_command }}</code></td></tr>
                     <tr><th>Container refresh command</th><td><code>{{ dashboard.dashboard_snapshot.container_refresh_command }}</code></td></tr>
                 </tbody>
@@ -519,6 +521,9 @@
                 <tbody>
                     <tr><th>Selected path</th><td><code>{{ dashboard.lookup_cache.selected_path|default:"-" }}</code></td></tr>
                     <tr><th>Entries</th><td>{{ dashboard.lookup_cache.entries_count|default:"0" }}</td></tr>
+                    <tr><th>#22562 lookup cache found</th><td>{{ dashboard.lookup_cache.order_22562_lookup_cache_found|yesno:"true,false" }}</td></tr>
+                    <tr><th>#22562 final section</th><td>{{ dashboard.lookup_cache.order_22562_final_section|default:"-" }}</td></tr>
+                    <tr><th>#22562 final eligibility</th><td>{{ dashboard.lookup_cache.order_22562_final_eligibility|default:"-" }}</td></tr>
                     <tr><th>#21687 lookup cache found</th><td>{{ dashboard.lookup_cache.order_21687_lookup_cache_found|yesno:"true,false" }}</td></tr>
                     <tr><th>#21687 should block Review &amp; Send</th><td>{{ dashboard.lookup_cache.order_21687_should_block_review_send|yesno:"true,false" }}</td></tr>
                     <tr><th>#21687 evidence order</th><td>{{ dashboard.lookup_cache.order_21687_evidence_order_name|default:"-" }}</td></tr>
@@ -621,10 +626,12 @@
             Refresh snapshot:
             <code>docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot</code>
         </p>
+        {% if dashboard.customer_history_checks.needs_live_customer_history_check_count > 0 %}
         <p class="rrw-muted">
             Batch live history lookup:
-            <code>python remote_approval_runner.py --task shopify_review_request_batch_customer_history_lookup --approval local</code>
+            <code>{% firstof dashboard.customer_history_checks.batch_lookup_command "docker compose exec -T web python manage.py run_review_request_batch_customer_history_lookup --limit 25" %}</code>
         </p>
+        {% endif %}
     </div>
 
     <div class="rrw-section">
@@ -875,7 +882,7 @@
 
     <div class="rrw-section">
         <h2>Already sent</h2>
-        <p class="rrw-muted">Successful Review &amp; Send now runs the one-order Shopify tag update automatically. Existing pending rows still need the manual post-send tag write.</p>
+        <p class="rrw-muted">Review &amp; Send web requests only queue a one-order job. Run the manual processor to send Gmail and perform any approved post-send Shopify tag update.</p>
         <p class="rrw-note">
             Showing {{ dashboard.approval_queue.already_sent_showing_start }}&ndash;{{ dashboard.approval_queue.already_sent_showing_end }} of
             {{ dashboard.approval_queue.already_sent_count }} sent records.
