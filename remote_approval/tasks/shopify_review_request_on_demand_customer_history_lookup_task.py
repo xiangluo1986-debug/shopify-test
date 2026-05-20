@@ -1488,6 +1488,15 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
     tag_evidence = lookup.get("trustpilot_tag_evidence_found") is True
     customer_count = _int_or_zero(lookup.get("shopify_customer_history_count"))
     lifetime_history_scope_confirmed = lookup.get("lifetime_history_scope_confirmed") is True
+    shopify_api_lookup_performed = lookup.get("shopify_api_lookup_performed") is True
+    read_all_orders_scope_present = lookup.get("read_all_orders_scope_present") is True
+    full_history_confirmed = bool(
+        completed
+        and lifetime_history_scope_confirmed
+        and read_all_orders_scope_present
+        and shopify_api_lookup_performed
+        and customer_count > 0
+    )
     evidence_order = _canonical_order_name(lookup.get("evidence_order_name"))
     safe_keyword = _safe_text(lookup.get("safe_detected_keyword"), 80)
     blocking_reason = ""
@@ -1501,8 +1510,8 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
         blocking_reason = f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}."
     elif tag_evidence:
         blocking_reason = f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}."
-    elif not lifetime_history_scope_confirmed:
-        blocking_reason = "Customer history needs live Shopify check before sending."
+    elif not full_history_confirmed:
+        blocking_reason = "Customer history could not be fully verified."
     elif customer_count <= 1:
         blocking_reason = "Live Shopify customer history does not confirm a repeat customer."
 
@@ -1512,7 +1521,7 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.31D",
+        "phase": "5.32E",
         "mode": "dry-run-read-only-on-demand-customer-history-lookup",
         "command_label": COMMAND_LABEL,
         "lookup_status": lookup_status,
@@ -1523,7 +1532,7 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
         "local_customer_history_count": _int_or_zero(lookup.get("local_customer_history_count")),
         "local_customer_history_order_names": _safe_order_names(lookup.get("local_customer_history_order_names") or []),
         "local_customer_history_match_method": _safe_text(lookup.get("local_customer_history_match_method"), 120),
-        "shopify_api_lookup_performed": lookup.get("shopify_api_lookup_performed") is True,
+        "shopify_api_lookup_performed": shopify_api_lookup_performed,
         "read_only_shopify_lookup_performed": lookup.get("read_only_shopify_lookup_performed") is True,
         "shopify_selected_order_found": lookup.get("shopify_selected_order_found") is True,
         "shopify_customer_identity_found": lookup.get("shopify_customer_identity_found") is True,
@@ -1535,13 +1544,18 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
         "token_scope_source": _safe_text(lookup.get("token_scope_source"), 120) or "unavailable",
         "active_token_scope_verified": lookup.get("active_token_scope_verified") is True,
         "read_orders_scope_present": lookup.get("read_orders_scope_present") is True,
-        "read_all_orders_scope_present": lookup.get("read_all_orders_scope_present") is True,
+        "read_all_orders_scope_present": read_all_orders_scope_present,
         "lifetime_history_scope_confirmed": lifetime_history_scope_confirmed,
+        "full_history_confirmed": full_history_confirmed,
+        "full_history_unavailable_reason": ""
+        if full_history_confirmed
+        else _safe_text(blocking_reason or "Customer history could not be fully verified.", 300),
         "reauthorization_required": lookup.get("reauthorization_required") is True,
         "next_admin_action": _safe_text(lookup.get("next_admin_action"), 400),
         "scope_verification_status": _safe_text(lookup.get("scope_verification_status"), 120),
         "customer_history_permission_status": _customer_history_permission_status(lookup, completed),
         "shopify_customer_history_count": customer_count,
+        "historical_order_names": _safe_order_names(lookup.get("shopify_history_order_names") or []),
         "shopify_history_order_names": _safe_order_names(lookup.get("shopify_history_order_names") or []),
         "shopify_history_lookup_method": _safe_text(lookup.get("shopify_history_lookup_method"), 120),
         "customer_history_lookup_methods_attempted": [

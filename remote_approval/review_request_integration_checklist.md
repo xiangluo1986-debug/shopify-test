@@ -275,6 +275,21 @@ Phase 0.2 automation decision:
   safe-keyword, Needs-review removal, button-disabled, and no-write safety
   diagnostics.
 
+#### Phase 5.32E Mandatory Live History Gate
+
+- [x] Every visible Trustpilot `Review & Send` candidate now requires a live
+  Shopify customer history cache result before the button can remain visible.
+- [x] Missing, stale, or incomplete live lookups move the row to Blocked / Not
+  ready with a plain message and no Gmail or Shopify write path.
+- [x] A clean live lookup must confirm full Shopify history, `read_all_orders`,
+  a read-only Shopify lookup, and no Trustpilot note/tag evidence.
+- [x] Historical Trustpilot evidence blocks Review & Send with
+  `Previous Trustpilot note found on historical order #xxxxx.` or the tag
+  equivalent; the UI shows the shorter `via #xxxxx` history label.
+- [x] `shopify_review_request_live_history_gate_audit` reports `#21687` live
+  count, local count, evidence order/keyword, Needs-review removal, button
+  disabled status, visible rows missing live lookup, and no-write safety flags.
+
 #### Phase 5.29 Automatic Post-Send Shopify Tag Write
 
 - [x] Admin `Review & Send` now builds an immediate in-memory post-send audit

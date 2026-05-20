@@ -177,6 +177,11 @@ REVIEW_QUEUE_SORT_ORDER = (
     "no_duplicate_risk",
     "order_number_descending",
 )
+CUSTOMER_HISTORY_LOOKUP_TTL_HOURS = 24
+CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS = 300
+LIVE_HISTORY_MISSING_REASON = "Customer history needs live Shopify check before sending."
+LIVE_HISTORY_STALE_REASON = "Customer history check is stale."
+LIVE_HISTORY_INCOMPLETE_REASON = "Customer history could not be fully verified."
 
 
 def run_shopify_review_request_last_60_days_candidate_scan_task(mode: str) -> dict:
@@ -537,7 +542,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
             cutoff,
             customer_history_by_order.get(order_name, {}),
         )
-        row = _apply_cached_customer_history_lookup_block(row, lookup_cache)
+        row = _apply_cached_customer_history_lookup_block(row, lookup_cache, now.isoformat())
         if row["candidate_status"] == "already_sent":
             already_sent_rows.append(row)
             already_sent_orders.add(row["order"])
@@ -551,7 +556,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     eligible_rows, hidden_older_eligible_rows, latest_filter_summary = _apply_latest_eligible_customer_filter(eligible_rows)
     blocked_rows.extend(hidden_older_eligible_rows)
     eligible_rows, review_queue_rows = _apply_review_queue_selection(eligible_rows)
-    blocked_rows.sort(key=lambda row: (0 if "#22582" in row.get("group_order_names", [row["order"]]) else 1, row["order"]))
+    blocked_rows.sort(key=_blocked_queue_sort_key)
     already_sent_rows = _dedupe_summary_rows(already_sent_rows)
     already_sent_rows.sort(key=lambda row: {"#22621": 0, "#22620": 1}.get(row["order"], 9))
     order_22530_found = "#22530" in local_by_order
@@ -687,6 +692,14 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "customer_history_lookup_cache_found": lookup_cache.get("present") is True,
         "customer_history_lookup_cache_loaded": lookup_cache.get("loaded") is True,
         "customer_history_lookup_cache_path": lookup_cache.get("relative_path", ""),
+        "visible_rows_missing_live_lookup_count": sum(
+            1 for row in review_queue_rows if row.get("cached_customer_history_lookup_found") is not True
+        ),
+        "visible_rows_blocked_by_missing_or_stale_live_lookup_count": sum(
+            1
+            for row in blocked_rows
+            if row.get("customer_history_lookup_block_status") in {"missing", "stale", "incomplete"}
+        ),
         "order_21778_diagnosis": order_21778_diagnosis,
         "order_21778_trustpilot_tag_detection": {
             "order_name": "#21778",
@@ -1607,61 +1620,29 @@ def _lookup_cache_order(lookup_cache: dict, order_name: str) -> dict:
     return (lookup_cache.get("orders") or {}).get(selected, {})
 
 
-def _apply_cached_customer_history_lookup_block(row: dict, lookup_cache: dict) -> dict:
+def _apply_cached_customer_history_lookup_block(row: dict, lookup_cache: dict, reference_at: str = "") -> dict:
     lookup = _lookup_cache_order(lookup_cache, row.get("order"))
-    if not lookup:
+    if not lookup and row.get("candidate_status") != "eligible":
         return row
-    history_names = _safe_order_names(lookup.get("historical_order_names") or [])
-    history_count = _int_value(lookup.get("shopify_customer_history_count")) or len(history_names)
-    evidence_order = _canonical_order_name(lookup.get("evidence_order_name"))
-    safe_keyword = _safe_text(lookup.get("safe_detected_keyword"), 80)
-    reason = _safe_text(lookup.get("blocking_reason"), 300)
-    note_evidence = lookup.get("trustpilot_note_evidence_found") is True
-    tag_evidence = lookup.get("trustpilot_tag_evidence_found") is True
-    if not reason and note_evidence:
-        reason = f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}."
-    elif not reason and tag_evidence:
-        reason = f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}."
-    history_label = _cached_customer_history_lookup_label(lookup)
-    row.update(
-        {
-            "cached_customer_history_lookup_found": True,
-            "cached_customer_history_lookup_generated_at": _safe_text(lookup.get("generated_at"), 120),
-            "cached_customer_history_lookup_should_block_review_send": lookup.get("should_block_review_send") is True,
-            "cached_customer_history_lookup_blocking_reason": reason,
-            "customer_history_lookup_status": "Customer history checked",
-            "customer_history_lookup_action_label": "Customer history checked",
-            "shopify_customer_history_count": history_count,
-            "customer_history_order_count": history_count or _int_value(row.get("customer_history_order_count")),
-            "customer_order_count": history_count or _int_value(row.get("customer_order_count")),
-            "historical_order_names": history_names or row.get("historical_order_names", []),
-            "customer_history_order_names": history_names or row.get("customer_history_order_names", []),
-            "customer_history_matched_order_names": history_names
-            or row.get("customer_history_matched_order_names", []),
-            "customer_history_window": "shopify_lifetime_on_demand_lookup",
-            "customer_history_source": "on_demand_shopify_customer_history_lookup",
-            "customer_history_confidence": "high",
-            "customer_history_confirmed": True,
-            "customer_level_trustpilot_note_evidence_found": note_evidence,
-            "customer_level_trustpilot_note_evidence_order_name": evidence_order,
-            "customer_level_trustpilot_note_safe_keyword": safe_keyword,
-            "trustpilot_note_evidence_found": note_evidence,
-            "trustpilot_note_evidence_order_name": evidence_order,
-            "trustpilot_note_safe_keyword": safe_keyword,
-            "trustpilot_history": history_label or row.get("trustpilot_history", ""),
-            "trustpilot_history_label": history_label or row.get("trustpilot_history_label", ""),
-        }
-    )
-    if lookup.get("should_block_review_send") is True:
+    gate = _customer_history_lookup_gate(lookup, reference_at)
+    row = _decorate_row_with_customer_history_lookup(row, lookup, gate)
+    if row.get("candidate_status") != "eligible":
+        return row
+    if gate["blocked"]:
+        reason = gate["reason"]
         row.update(
             {
                 "candidate_status": "blocked",
-                "trustpilot_email_status": "Already sent",
-                "customer_level_trustpilot_already_sent": note_evidence or tag_evidence,
-                "already_sent_reason": reason,
+                "trustpilot_email_status": "Not ready",
+                "customer_level_trustpilot_already_sent": gate["evidence_found"],
+                "already_sent_reason": reason if gate["evidence_found"] else "",
                 "block_reason": reason,
-                "missing_requirement": "No prior Trustpilot send",
+                "missing_requirement": gate["missing_requirement"],
                 "evidence": reason,
+                "blocked_by_customer_history_lookup": True,
+                "customer_history_lookup_block_status": gate["status"],
+                "customer_history_lookup_status": gate["label"],
+                "customer_history_lookup_action_label": gate["action_label"],
             }
         )
     return row
@@ -1676,6 +1657,185 @@ def _cached_customer_history_lookup_label(lookup: dict) -> str:
     if (lookup or {}).get("should_block_review_send") is True:
         return _safe_text((lookup or {}).get("blocking_reason"), 300)
     return ""
+
+
+def _decorate_row_with_customer_history_lookup(row: dict, lookup: dict, gate: dict) -> dict:
+    if not lookup:
+        row.update(
+            {
+                "cached_customer_history_lookup_found": False,
+                "customer_history_lookup_status": gate["label"],
+                "customer_history_lookup_action_label": gate["action_label"],
+                "trustpilot_history": "",
+                "trustpilot_history_label": "Needs live check",
+            }
+        )
+        return row
+
+    history_names = _safe_order_names(lookup.get("historical_order_names") or [])
+    history_count = _int_value(lookup.get("shopify_customer_history_count")) or len(history_names)
+    evidence_order = _canonical_order_name(lookup.get("evidence_order_name"))
+    safe_keyword = _safe_text(lookup.get("safe_detected_keyword"), 80)
+    note_evidence = lookup.get("trustpilot_note_evidence_found") is True
+    tag_evidence = lookup.get("trustpilot_tag_evidence_found") is True
+    history_label = _cached_customer_history_lookup_label(lookup)
+    if gate["status"] == "ready":
+        history_label = "No previous Trustpilot found"
+    elif gate["status"] in {"stale", "incomplete"} and not history_label:
+        history_label = "Needs live check"
+    row.update(
+        {
+            "cached_customer_history_lookup_found": True,
+            "cached_customer_history_lookup_generated_at": _safe_text(lookup.get("generated_at"), 120),
+            "cached_customer_history_lookup_should_block_review_send": gate["blocked"],
+            "cached_customer_history_lookup_blocking_reason": gate["reason"],
+            "customer_history_lookup_block_status": gate["status"],
+            "customer_history_lookup_status": gate["label"],
+            "customer_history_lookup_action_label": gate["action_label"],
+            "shopify_customer_history_count": history_count,
+            "customer_history_order_count": history_count or _int_value(row.get("customer_history_order_count")),
+            "customer_order_count": history_count or _int_value(row.get("customer_order_count")),
+            "historical_order_names": history_names or row.get("historical_order_names", []),
+            "customer_history_order_names": history_names or row.get("customer_history_order_names", []),
+            "customer_history_matched_order_names": history_names
+            or row.get("customer_history_matched_order_names", []),
+            "customer_history_window": "shopify_lifetime_on_demand_lookup",
+            "customer_history_source": "on_demand_shopify_customer_history_lookup",
+            "customer_history_confidence": "high",
+            "customer_history_confirmed": gate["full_history_confirmed"],
+            "full_history_confirmed": gate["full_history_confirmed"],
+            "customer_level_trustpilot_note_evidence_found": note_evidence,
+            "customer_level_trustpilot_note_evidence_order_name": evidence_order,
+            "customer_level_trustpilot_note_safe_keyword": safe_keyword,
+            "trustpilot_note_evidence_found": note_evidence,
+            "trustpilot_note_evidence_order_name": evidence_order,
+            "trustpilot_note_safe_keyword": safe_keyword,
+            "trustpilot_history": history_label or row.get("trustpilot_history", ""),
+            "trustpilot_history_label": history_label or row.get("trustpilot_history_label", ""),
+        }
+    )
+    return row
+
+
+def _customer_history_lookup_gate(lookup: dict, reference_at: str = "") -> dict:
+    if not lookup:
+        return _customer_history_lookup_gate_result(
+            status="missing",
+            reason=LIVE_HISTORY_MISSING_REASON,
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Live Shopify history check",
+        )
+
+    history_count = _int_value(lookup.get("shopify_customer_history_count"))
+    note_evidence = lookup.get("trustpilot_note_evidence_found") is True
+    tag_evidence = lookup.get("trustpilot_tag_evidence_found") is True
+    evidence_order = _canonical_order_name(lookup.get("evidence_order_name"))
+    full_history_confirmed = _lookup_full_history_confirmed(lookup)
+
+    if note_evidence:
+        return _customer_history_lookup_gate_result(
+            status="blocked_trustpilot_note",
+            reason=f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}.",
+            label="Blocked: previous Trustpilot found",
+            action_label="Customer history checked",
+            missing_requirement="No prior Trustpilot send",
+            evidence_found=True,
+            full_history_confirmed=full_history_confirmed,
+        )
+    if tag_evidence:
+        return _customer_history_lookup_gate_result(
+            status="blocked_trustpilot_tag",
+            reason=f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}.",
+            label="Blocked: previous Trustpilot found",
+            action_label="Customer history checked",
+            missing_requirement="No prior Trustpilot send",
+            evidence_found=True,
+            full_history_confirmed=full_history_confirmed,
+        )
+    if lookup.get("should_block_review_send") is True:
+        return _customer_history_lookup_gate_result(
+            status="blocked_lookup_cache",
+            reason=_safe_text(lookup.get("blocking_reason"), 300) or "Customer history lookup blocked Review & Send.",
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Live Shopify history check",
+            full_history_confirmed=full_history_confirmed,
+        )
+    if _customer_history_lookup_is_stale(lookup, reference_at):
+        return _customer_history_lookup_gate_result(
+            status="stale",
+            reason=LIVE_HISTORY_STALE_REASON,
+            label="Stale check",
+            action_label="Recheck customer history",
+            missing_requirement="Fresh live Shopify history check",
+            full_history_confirmed=full_history_confirmed,
+        )
+    if not full_history_confirmed:
+        return _customer_history_lookup_gate_result(
+            status="incomplete",
+            reason=LIVE_HISTORY_INCOMPLETE_REASON,
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Full Shopify history",
+            full_history_confirmed=False,
+        )
+    return _customer_history_lookup_gate_result(
+        status="ready",
+        reason="",
+        label=f"Checked: {history_count} order{'s' if history_count != 1 else ''}",
+        action_label="Customer history checked",
+        missing_requirement="",
+        full_history_confirmed=True,
+    )
+
+
+def _customer_history_lookup_gate_result(
+    status: str,
+    reason: str,
+    label: str,
+    action_label: str,
+    missing_requirement: str,
+    evidence_found: bool = False,
+    full_history_confirmed: bool = False,
+) -> dict:
+    return {
+        "status": status,
+        "blocked": status != "ready",
+        "reason": reason,
+        "label": label,
+        "action_label": action_label,
+        "missing_requirement": missing_requirement,
+        "evidence_found": evidence_found,
+        "full_history_confirmed": full_history_confirmed,
+    }
+
+
+def _lookup_full_history_confirmed(lookup: dict) -> bool:
+    if not lookup:
+        return False
+    return bool(
+        lookup.get("full_history_confirmed") is True
+        or (
+            lookup.get("lookup_status") == "customer_history_lookup_completed"
+            and lookup.get("read_all_orders_scope_present") is True
+            and lookup.get("shopify_api_lookup_performed") is True
+            and _int_value(lookup.get("shopify_customer_history_count")) > 0
+        )
+    )
+
+
+def _customer_history_lookup_is_stale(lookup: dict, reference_at: str = "") -> bool:
+    lookup_dt = _parse_dt((lookup or {}).get("generated_at"))
+    if not lookup_dt:
+        return True
+    now = datetime.now(timezone.utc)
+    if now - lookup_dt > timedelta(hours=CUSTOMER_HISTORY_LOOKUP_TTL_HOURS):
+        return True
+    reference_dt = _parse_dt(reference_at)
+    if reference_dt and lookup_dt + timedelta(seconds=CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS) < reference_dt:
+        return True
+    return False
 
 
 def _effective_order_tags(local, source):
@@ -2432,6 +2592,19 @@ def _review_queue_display_context_available(row: dict) -> bool:
     return bool(order_name and customer and customer != "Masked in reports")
 
 
+def _blocked_queue_sort_key(row: dict):
+    order_names = [row.get("order"), *(row.get("group_order_names") or [])]
+    if "#21687" in order_names:
+        priority = 0
+    elif row.get("blocked_by_customer_history_lookup") is True:
+        priority = 1
+    elif "#22582" in order_names:
+        priority = 2
+    else:
+        priority = 3
+    return (priority, row.get("order", ""))
+
+
 def _review_queue_customer_key(row: dict) -> str:
     identity_key = _safe_text(row.get("customer_identity_key"), 120)
     identity_confidence = _safe_text(row.get("customer_identity_confidence"), 80)
@@ -2547,12 +2720,14 @@ def _eligible_summary(row: dict) -> dict:
         "customer_order_sequence_label": row.get("customer_order_sequence_label", ""),
         "customer_order_summary": _customer_order_summary_text(row),
         "customer_orders_display": _customer_order_summary_text(row),
-        "customer_history_lookup_status": (
+        "customer_history_lookup_status": row.get("customer_history_lookup_status")
+        or (
             "Customer history checked"
             if row.get("customer_history_confirmed") is True
-            else "Customer history not confirmed"
+            else "Needs live check"
         ),
-        "customer_history_lookup_action_label": (
+        "customer_history_lookup_action_label": row.get("customer_history_lookup_action_label")
+        or (
             "Customer history checked"
             if row.get("customer_history_confirmed") is True
             else "Check customer history"
@@ -2562,6 +2737,10 @@ def _eligible_summary(row: dict) -> dict:
         "customer_history_window": row.get("customer_history_window", ""),
         "customer_history_matched_order_names": row.get("customer_history_matched_order_names", []),
         "customer_history_match_method": row.get("customer_history_match_method", ""),
+        "customer_history_lookup_block_status": row.get("customer_history_lookup_block_status", ""),
+        "cached_customer_history_lookup_found": row.get("cached_customer_history_lookup_found") is True,
+        "cached_customer_history_lookup_generated_at": row.get("cached_customer_history_lookup_generated_at", ""),
+        "full_history_confirmed": row.get("full_history_confirmed") is True,
         "customer_history_excluded_weak_matches": row.get("customer_history_excluded_weak_matches", []),
         "customer_history_weak_match_count": _int_value(row.get("customer_history_weak_match_count")),
         "customer_history_exact_match_count": _int_value(row.get("customer_history_exact_match_count")),
@@ -2605,7 +2784,7 @@ def _eligible_summary(row: dict) -> dict:
         ),
         "review_request_tag_status_class": "rrw-badge-ok" if review_request_present else "rrw-badge-warn",
         "trustpilot_history": row.get("trustpilot_history", ""),
-        "trustpilot_history_label": row.get("trustpilot_history", "") or "No previous Trustpilot email found",
+        "trustpilot_history_label": row.get("trustpilot_history", "") or "No previous Trustpilot found",
         "trustpilot_history_evidence": row.get("evidence", ""),
         "status": "Ready",
         "status_label": "Ready",
@@ -2655,12 +2834,14 @@ def _blocked_summary(row: dict) -> dict:
         "customer_order_sequence_label": row.get("customer_order_sequence_label", ""),
         "customer_order_summary": _customer_order_summary_text(row),
         "customer_orders_display": _customer_order_summary_text(row),
-        "customer_history_lookup_status": (
+        "customer_history_lookup_status": row.get("customer_history_lookup_status")
+        or (
             "Customer history checked"
             if row.get("customer_history_confirmed") is True
-            else "Customer history not confirmed"
+            else "Needs live check"
         ),
-        "customer_history_lookup_action_label": (
+        "customer_history_lookup_action_label": row.get("customer_history_lookup_action_label")
+        or (
             "Customer history checked"
             if row.get("customer_history_confirmed") is True
             else "Check customer history"
@@ -2670,6 +2851,10 @@ def _blocked_summary(row: dict) -> dict:
         "customer_history_window": row.get("customer_history_window", ""),
         "customer_history_matched_order_names": row.get("customer_history_matched_order_names", []),
         "customer_history_match_method": row.get("customer_history_match_method", ""),
+        "customer_history_lookup_block_status": row.get("customer_history_lookup_block_status", ""),
+        "cached_customer_history_lookup_found": row.get("cached_customer_history_lookup_found") is True,
+        "cached_customer_history_lookup_generated_at": row.get("cached_customer_history_lookup_generated_at", ""),
+        "full_history_confirmed": row.get("full_history_confirmed") is True,
         "customer_history_excluded_weak_matches": row.get("customer_history_excluded_weak_matches", []),
         "customer_history_weak_match_count": _int_value(row.get("customer_history_weak_match_count")),
         "customer_history_exact_match_count": _int_value(row.get("customer_history_exact_match_count")),
@@ -2719,7 +2904,7 @@ def _blocked_summary(row: dict) -> dict:
         "eligibility_reason_plain": row.get("block_reason", ""),
         "missing_requirement": row.get("missing_requirement", ""),
         "evidence": row.get("evidence", ""),
-        "trustpilot_history_label": row.get("trustpilot_history", "") or "History not confirmed",
+        "trustpilot_history_label": row.get("trustpilot_history_label") or row.get("trustpilot_history", "") or "History not confirmed",
         "trustpilot_history_evidence": row.get("evidence", ""),
         "status": "Not ready",
         "status_label": "Not ready",
@@ -2729,6 +2914,7 @@ def _blocked_summary(row: dict) -> dict:
         "action_label": "Not ready",
         "action_status": "Not ready",
         "can_review_send": False,
+        "blocked_by_customer_history_lookup": row.get("blocked_by_customer_history_lookup") is True,
         "review_send_url": "",
         "second_or_later_order": row.get("second_or_later_order") is True,
         "current_order_delivered": delivered,

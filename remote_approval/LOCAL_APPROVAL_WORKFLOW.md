@@ -64,6 +64,7 @@ python remote_approval_runner.py --task shopify_translation_single_field_real_wr
 python remote_approval_runner.py --task shopify_review_request_ali_reviews_capability_discovery --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_candidate_scan --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_last_60_days_candidate_scan --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_live_history_gate_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_order_sync_coverage --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_order_tags_persistence_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_tag_exclusion_audit --mode dry-run --approval local
@@ -250,6 +251,13 @@ disable Review & Send. This phase remains cache/UI/revalidation only: no Gmail
 API call, no email send, no Shopify write/tag mutation, no external review API,
 no raw email output, and no full note output.
 
+Phase 5.32E makes the live Shopify customer history cache mandatory for every
+visible Trustpilot `Review & Send` row. Missing, stale, incomplete, or
+Trustpilot-positive live lookups block before Gmail and move the row to Blocked
+/ Not ready. The main table shows simple labels such as `Needs live check`,
+`Checked: 9 orders`, `Blocked: previous Trustpilot found`, and `Stale check`;
+source/confidence details stay in Advanced technical details.
+
 Run the scope verification with:
 
 ```powershell
@@ -262,6 +270,12 @@ Run a selected lookup with:
 $env:SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER="#21687"
 python remote_approval_runner.py --task shopify_review_request_on_demand_customer_history_lookup --mode dry-run --approval local
 Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER
+```
+
+Run the live-history gate audit with:
+
+```powershell
+python remote_approval_runner.py --task shopify_review_request_live_history_gate_audit --mode dry-run --approval local
 ```
 
 The lookup may perform read-only Shopify order/customer history reads using the

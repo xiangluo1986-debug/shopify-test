@@ -161,6 +161,11 @@ GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_BROAD_SCOPE = "https://mail.google.com/"
 LAST_60_DAY_SCAN_WINDOW_DAYS = 60
 REVIEW_QUEUE_BATCH_SIZE = 25
+CUSTOMER_HISTORY_LOOKUP_TTL_HOURS = 24
+CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS = 300
+LIVE_HISTORY_MISSING_REASON = "Customer history needs live Shopify check before sending."
+LIVE_HISTORY_STALE_REASON = "Customer history check is stale."
+LIVE_HISTORY_INCOMPLETE_REASON = "Customer history could not be fully verified."
 BLOCKED_QUEUE_DISPLAY_LIMIT = 50
 REVIEW_QUEUE_SORT_ORDER = (
     "most_recent_delivered_updated_created_date",
@@ -2348,6 +2353,7 @@ def review_request_review_and_send(order_identifier, admin_username="", params=N
         candidate,
         state["last_60_days_scan"],
         state["reports"],
+        (snapshot_blocker.get("snapshot") or {}).get("generated_at"),
     )
     if live_history_blockers:
         result["execution_status"] = live_history_blockers[0]["status"]
@@ -6721,6 +6727,11 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "customer_history_lookup_cache_found": scan.get("customer_history_lookup_cache_found") is True,
         "customer_history_lookup_cache_loaded": scan.get("customer_history_lookup_cache_loaded") is True,
         "customer_history_lookup_cache_path": scan.get("customer_history_lookup_cache_path", ""),
+        "visible_rows_missing_live_lookup_count": scan.get("visible_rows_missing_live_lookup_count", 0),
+        "visible_rows_blocked_by_missing_or_stale_live_lookup_count": scan.get(
+            "visible_rows_blocked_by_missing_or_stale_live_lookup_count",
+            0,
+        ),
         "order_21778_diagnosis": scan["order_21778_diagnosis"],
         "order_21778_trustpilot_tag_detection": scan["order_21778_trustpilot_tag_detection"],
         "order_22530_diagnosis": scan["order_22530_diagnosis"],
@@ -9334,9 +9345,10 @@ def _last_60_days_candidate_scan(
     )
     queue_rows = _dedupe_queue_rows(queue_rows)
     queue_rows = [
-        _apply_cached_customer_history_lookup_to_row(
+        _apply_customer_history_lookup_gate_to_queue_row(
             row,
-            _cached_lookup_order_from_cache(lookup_cache, row.get("order")),
+            lookup_cache,
+            now.isoformat(),
         )
         for row in queue_rows
     ]
@@ -9452,6 +9464,14 @@ def _last_60_days_candidate_scan(
         "customer_history_lookup_cache_found": lookup_cache.get("present") is True,
         "customer_history_lookup_cache_loaded": lookup_cache.get("loaded") is True,
         "customer_history_lookup_cache_path": lookup_cache.get("relative_path", ""),
+        "visible_rows_missing_live_lookup_count": sum(
+            1 for row in review_queue_rows if row.get("cached_customer_history_lookup_found") is not True
+        ),
+        "visible_rows_blocked_by_missing_or_stale_live_lookup_count": sum(
+            1
+            for row in blocked_rows
+            if row.get("customer_history_lookup_block_status") in {"missing", "stale", "incomplete"}
+        ),
         "order_21778_diagnosis": order_21778_diagnosis,
         "order_21778_trustpilot_tag_detection": _order_trustpilot_tag_detection(order_21778_diagnosis),
         "order_22530_diagnosis": order_22530_diagnosis,
@@ -10508,7 +10528,15 @@ def _attach_scan_date_context(queue_row, scan_context):
 
 
 def _blocked_queue_sort_key(row):
-    priority = 0 if "#22582" in [row.get("order"), *(row.get("group_order_names") or [])] else 1
+    order_names = [row.get("order"), *(row.get("group_order_names") or [])]
+    if "#21687" in order_names:
+        priority = 0
+    elif row.get("blocked_by_customer_history_lookup") is True:
+        priority = 1
+    elif "#22582" in order_names:
+        priority = 2
+    else:
+        priority = 3
     return (priority, row.get("order", ""))
 
 
@@ -11042,6 +11070,16 @@ def _queue_candidate_summary(row):
             row.get("customer_history_lookup_action_label"),
             max_length=120,
         ),
+        "customer_history_lookup_block_status": _safe_text(
+            row.get("customer_history_lookup_block_status"),
+            max_length=80,
+        ),
+        "cached_customer_history_lookup_found": row.get("cached_customer_history_lookup_found") is True,
+        "cached_customer_history_lookup_generated_at": _safe_text(
+            row.get("cached_customer_history_lookup_generated_at"),
+            max_length=120,
+        ),
+        "full_history_confirmed": row.get("full_history_confirmed") is True,
         "customer_history_lookup_command": _safe_text(row.get("customer_history_lookup_command"), max_length=500),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
         "customer_history_matched_order_names": _dedupe_order_names(
@@ -11108,6 +11146,7 @@ def _queue_candidate_summary(row):
         "action_label": _safe_text(row.get("action_status"), max_length=120),
         "action_status": _safe_text(row.get("action_status"), max_length=120),
         "can_review_send": row.get("action_state") == "review_send",
+        "blocked_by_customer_history_lookup": row.get("blocked_by_customer_history_lookup") is True,
         "review_send_url": "",
         "hidden_block_reason": _safe_text(row.get("hidden_reason"), max_length=120),
         "action": "Review & Send" if visible else "Queued for later review",
@@ -11155,6 +11194,16 @@ def _blocked_candidate_summary(row):
             row.get("customer_history_lookup_action_label"),
             max_length=120,
         ),
+        "customer_history_lookup_block_status": _safe_text(
+            row.get("customer_history_lookup_block_status"),
+            max_length=80,
+        ),
+        "cached_customer_history_lookup_found": row.get("cached_customer_history_lookup_found") is True,
+        "cached_customer_history_lookup_generated_at": _safe_text(
+            row.get("cached_customer_history_lookup_generated_at"),
+            max_length=120,
+        ),
+        "full_history_confirmed": row.get("full_history_confirmed") is True,
         "customer_history_lookup_command": _safe_text(row.get("customer_history_lookup_command"), max_length=500),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
         "customer_history_matched_order_names": _dedupe_order_names(
@@ -11226,6 +11275,7 @@ def _blocked_candidate_summary(row):
         "action_label": _safe_text(row.get("action_status"), max_length=120) or "Not ready",
         "action_status": _safe_text(row.get("action_status"), max_length=120) or "Not ready",
         "can_review_send": False,
+        "blocked_by_customer_history_lookup": row.get("blocked_by_customer_history_lookup") is True,
         "review_send_url": "",
         "second_or_later_order": row.get("second_or_later_order") is True,
         "current_order_delivered": row.get("current_order_delivered") is True,
@@ -11882,9 +11932,132 @@ def _cached_customer_history_lookup_label(lookup):
     return ""
 
 
+def _customer_history_lookup_gate(lookup, reference_at=""):
+    if not lookup:
+        return _customer_history_lookup_gate_result(
+            status="missing",
+            reason=LIVE_HISTORY_MISSING_REASON,
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Live Shopify history check",
+        )
+    history_count = _int_or_zero((lookup or {}).get("shopify_customer_history_count"))
+    note_evidence = (lookup or {}).get("trustpilot_note_evidence_found") is True
+    tag_evidence = (lookup or {}).get("trustpilot_tag_evidence_found") is True
+    evidence_order = _canonical_order_name((lookup or {}).get("evidence_order_name"))
+    full_history_confirmed = _lookup_full_history_confirmed(lookup)
+    if note_evidence:
+        return _customer_history_lookup_gate_result(
+            status="blocked_trustpilot_note",
+            reason=f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}.",
+            label="Blocked: previous Trustpilot found",
+            action_label="Customer history checked",
+            missing_requirement="No prior Trustpilot send",
+            evidence_found=True,
+            full_history_confirmed=full_history_confirmed,
+        )
+    if tag_evidence:
+        return _customer_history_lookup_gate_result(
+            status="blocked_trustpilot_tag",
+            reason=f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}.",
+            label="Blocked: previous Trustpilot found",
+            action_label="Customer history checked",
+            missing_requirement="No prior Trustpilot send",
+            evidence_found=True,
+            full_history_confirmed=full_history_confirmed,
+        )
+    if (lookup or {}).get("should_block_review_send") is True:
+        return _customer_history_lookup_gate_result(
+            status="blocked_lookup_cache",
+            reason=_cached_customer_history_lookup_reason(lookup),
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Live Shopify history check",
+            full_history_confirmed=full_history_confirmed,
+        )
+    if _customer_history_lookup_is_stale(lookup, reference_at):
+        return _customer_history_lookup_gate_result(
+            status="stale",
+            reason=LIVE_HISTORY_STALE_REASON,
+            label="Stale check",
+            action_label="Recheck customer history",
+            missing_requirement="Fresh live Shopify history check",
+            full_history_confirmed=full_history_confirmed,
+        )
+    if not full_history_confirmed:
+        return _customer_history_lookup_gate_result(
+            status="incomplete",
+            reason=LIVE_HISTORY_INCOMPLETE_REASON,
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Full Shopify history",
+            full_history_confirmed=False,
+        )
+    return _customer_history_lookup_gate_result(
+        status="ready",
+        reason="",
+        label=f"Checked: {history_count} order{'s' if history_count != 1 else ''}",
+        action_label="Customer history checked",
+        missing_requirement="",
+        full_history_confirmed=True,
+    )
+
+
+def _customer_history_lookup_gate_result(
+    status,
+    reason,
+    label,
+    action_label,
+    missing_requirement,
+    evidence_found=False,
+    full_history_confirmed=False,
+):
+    return {
+        "status": status,
+        "blocked": status != "ready",
+        "reason": _safe_text(reason, max_length=300),
+        "label": _safe_text(label, max_length=120),
+        "action_label": _safe_text(action_label, max_length=120),
+        "missing_requirement": _safe_text(missing_requirement, max_length=160),
+        "evidence_found": evidence_found,
+        "full_history_confirmed": full_history_confirmed,
+    }
+
+
+def _lookup_full_history_confirmed(lookup):
+    if not lookup:
+        return False
+    return bool(
+        (lookup or {}).get("full_history_confirmed") is True
+        or (
+            (lookup or {}).get("lookup_status") == "customer_history_lookup_completed"
+            and (lookup or {}).get("read_all_orders_scope_present") is True
+            and (lookup or {}).get("shopify_api_lookup_performed") is True
+            and _int_or_zero((lookup or {}).get("shopify_customer_history_count")) > 0
+        )
+    )
+
+
+def _customer_history_lookup_is_stale(lookup, reference_at=""):
+    lookup_dt = _parse_datetime_value((lookup or {}).get("generated_at"))
+    if not lookup_dt:
+        return True
+    now = datetime.now(timezone.utc)
+    if now - lookup_dt > timedelta(hours=CUSTOMER_HISTORY_LOOKUP_TTL_HOURS):
+        return True
+    reference_dt = _parse_datetime_value(reference_at)
+    if (
+        reference_dt
+        and lookup_dt + timedelta(seconds=CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS) < reference_dt
+    ):
+        return True
+    return False
+
+
 def _apply_cached_customer_history_lookup_to_row(row, lookup):
     if not lookup:
         return row
+    gate = _customer_history_lookup_gate(lookup)
     history_names = _dedupe_order_names(
         (lookup or {}).get("historical_order_names")
         or (lookup or {}).get("shopify_history_order_names")
@@ -11895,9 +12068,13 @@ def _apply_cached_customer_history_lookup_to_row(row, lookup):
     safe_keyword = _safe_text((lookup or {}).get("safe_detected_keyword"), max_length=80)
     note_evidence = (lookup or {}).get("trustpilot_note_evidence_found") is True
     tag_evidence = (lookup or {}).get("trustpilot_tag_evidence_found") is True
-    should_block = (lookup or {}).get("should_block_review_send") is True
-    reason = _cached_customer_history_lookup_reason(lookup) if should_block else ""
+    should_block = gate["blocked"]
+    reason = gate["reason"]
     history_label = _cached_customer_history_lookup_label(lookup)
+    if gate["status"] == "ready":
+        history_label = "No previous Trustpilot found"
+    elif gate["status"] in {"stale", "incomplete"} and not history_label:
+        history_label = "Needs live check"
     row.update(
         {
             "cached_customer_history_lookup_found": True,
@@ -11906,6 +12083,7 @@ def _apply_cached_customer_history_lookup_to_row(row, lookup):
             ),
             "cached_customer_history_lookup_should_block_review_send": should_block,
             "cached_customer_history_lookup_blocking_reason": reason,
+            "customer_history_lookup_block_status": gate["status"],
             "shopify_customer_history_count": history_count,
             "customer_history_order_count": history_count or _int_or_zero(row.get("customer_history_order_count")),
             "customer_order_count": history_count or _int_or_zero(row.get("customer_order_count")),
@@ -11916,9 +12094,10 @@ def _apply_cached_customer_history_lookup_to_row(row, lookup):
             "customer_history_window": "shopify_lifetime_on_demand_lookup",
             "customer_history_source": "on_demand_shopify_customer_history_lookup",
             "customer_history_confidence": "high",
-            "customer_history_confirmed": True,
-            "customer_history_lookup_status": "Customer history checked",
-            "customer_history_lookup_action_label": "Customer history checked",
+            "customer_history_confirmed": gate["full_history_confirmed"],
+            "full_history_confirmed": gate["full_history_confirmed"],
+            "customer_history_lookup_status": gate["label"],
+            "customer_history_lookup_action_label": gate["action_label"],
             "customer_level_trustpilot_note_evidence_found": note_evidence,
             "customer_level_trustpilot_note_evidence_order_name": evidence_order,
             "customer_level_trustpilot_note_safe_keyword": safe_keyword,
@@ -11948,13 +12127,57 @@ def _apply_cached_customer_history_lookup_to_row(row, lookup):
                 "can_review_send": False,
                 "review_send_post_action": "",
                 "candidate_status": "blocked",
-                "missing_requirement": "No prior Trustpilot send",
-                "trustpilot_email_status": "Already sent",
+                "missing_requirement": gate["missing_requirement"] or "Live Shopify history check",
+                "trustpilot_email_status": "Already sent" if gate["evidence_found"] else "Not ready",
                 "customer_level_trustpilot_already_sent": note_evidence or tag_evidence,
-                "already_sent_reason": reason,
+                "already_sent_reason": reason if gate["evidence_found"] else "",
                 "blocked_by_customer_history_lookup": True,
             }
         )
+    return row
+
+
+def _apply_customer_history_lookup_gate_to_queue_row(row, lookup_cache, reference_at=""):
+    lookup = _cached_lookup_order_from_cache(lookup_cache, (row or {}).get("order"))
+    if lookup:
+        row = _apply_cached_customer_history_lookup_to_row(row, lookup)
+    elif (row or {}).get("action_state") != "review_send":
+        return row
+    gate = _customer_history_lookup_gate(lookup, reference_at)
+    if not gate["blocked"] or (row or {}).get("action_state") != "review_send":
+        return row
+    reason = gate["reason"]
+    row.update(
+        {
+            "status": "Not ready",
+            "status_label": "Not ready",
+            "status_class": "rrw-badge-warn",
+            "reason": reason,
+            "eligibility_reason_plain": reason,
+            "block_reason": reason,
+            "blocked_reason": reason,
+            "hidden_reason": reason,
+            "evidence": reason,
+            "action_state": "not_ready",
+            "action_label": "Not ready",
+            "action_status": "Not ready",
+            "can_review_send": False,
+            "review_send_post_action": "",
+            "candidate_status": "blocked",
+            "missing_requirement": gate["missing_requirement"] or "Live Shopify history check",
+            "trustpilot_email_status": "Not ready",
+            "customer_level_trustpilot_already_sent": gate["evidence_found"],
+            "already_sent_reason": reason if gate["evidence_found"] else "",
+            "blocked_by_customer_history_lookup": True,
+            "customer_history_lookup_block_status": gate["status"],
+            "customer_history_lookup_status": gate["label"],
+            "customer_history_lookup_action_label": gate["action_label"],
+            "cached_customer_history_lookup_found": bool(lookup),
+            "trustpilot_history_label": row.get("trustpilot_history_label")
+            if gate["evidence_found"]
+            else "Needs live check",
+        }
+    )
     return row
 
 
@@ -15239,115 +15462,55 @@ def _previous_gmail_helper_reuse_blocker(gmail_setup=None):
     }
 
 
-def _runtime_customer_history_live_lookup_blockers(candidate, scan, reports):
+def _runtime_customer_history_live_lookup_blockers(candidate, scan, reports, reference_at=""):
     selected_order = _canonical_order_name(candidate.get("order") or candidate.get("candidate_id"))
     lookup = _matching_on_demand_customer_history_lookup(reports, selected_order)
-    if lookup.get("should_block_review_send") is True:
-        return [
-            {
-                "status": "blocked_customer_history_lookup_cache",
-                "blocked_reason": "cached customer history lookup blocked Review & Send",
-                "detail": "No email was sent. " + _cached_customer_history_lookup_reason(lookup),
-            }
-        ]
     if not _customer_history_live_lookup_required(candidate, scan):
         return []
-    if not lookup:
+    gate = _customer_history_lookup_gate(
+        lookup,
+        reference_at or _customer_history_lookup_reference_at(scan),
+    )
+    if gate["status"] == "missing":
         scope_blocker = _customer_history_scope_report_blocker(reports)
-        if scope_blocker:
-            return [
-                {
-                    "status": "blocked_shopify_history_permission_missing",
-                    "blocked_reason": "shopify read_all_orders permission missing",
-                    "detail": f"No email was sent. {scope_blocker}",
-                }
-            ]
         return [
             {
-                "status": "blocked_customer_history_live_lookup_required",
-                "blocked_reason": "customer history live check required",
-                "detail": "No email was sent. Customer history needs live Shopify check before sending.",
+                "status": "blocked_shopify_history_permission_missing"
+                if scope_blocker
+                else "blocked_customer_history_live_lookup_required",
+                "blocked_reason": "shopify read_all_orders permission missing"
+                if scope_blocker
+                else "customer history live check required",
+                "detail": f"No email was sent. {scope_blocker or gate['reason']}",
             }
         ]
-    if lookup.get("reauthorization_required") is True or (
-        "read_all_orders_scope_present" in lookup and lookup.get("read_all_orders_scope_present") is not True
-    ):
+    if gate["blocked"]:
+        status = {
+            "blocked_trustpilot_note": "blocked_existing_trustpilot_invitation_customer_level",
+            "blocked_trustpilot_tag": "blocked_existing_trustpilot_invitation_customer_level",
+            "stale": "blocked_customer_history_live_lookup_stale",
+            "incomplete": "blocked_customer_history_live_lookup_not_available",
+            "blocked_lookup_cache": "blocked_customer_history_lookup_cache",
+        }.get(gate["status"], "blocked_customer_history_live_lookup_not_available")
+        blocked_reason = {
+            "blocked_trustpilot_note": "historical Trustpilot note",
+            "blocked_trustpilot_tag": "historical Trustpilot tag",
+            "stale": "customer history check is stale",
+            "incomplete": "customer history live check unavailable",
+            "blocked_lookup_cache": "cached customer history lookup blocked Review & Send",
+        }.get(gate["status"], "customer history live check blocked")
         return [
             {
-                "status": "blocked_shopify_history_permission_missing",
-                "blocked_reason": "shopify read_all_orders permission missing",
-                "detail": f"No email was sent. {READ_ALL_ORDERS_MISSING_MESSAGE}",
-            }
-        ]
-    if lookup.get("lookup_status") and lookup.get("lookup_status") != "customer_history_lookup_completed":
-        return [
-            {
-                "status": "blocked_customer_history_live_lookup_not_available",
-                "blocked_reason": "customer history live check unavailable",
-                "detail": "No email was sent. Customer history needs live Shopify check before sending.",
-            }
-        ]
-    if "shopify_api_lookup_performed" in lookup and lookup.get("shopify_api_lookup_performed") is not True:
-        return [
-            {
-                "status": "blocked_customer_history_live_lookup_not_available",
-                "blocked_reason": "customer history live check unavailable",
-                "detail": "No email was sent. Customer history needs live Shopify check before sending.",
-            }
-        ]
-    if lookup.get("trustpilot_note_evidence_found") is True:
-        evidence = {
-            "order_name": lookup.get("evidence_order_name"),
-            "safe_keyword": lookup.get("safe_detected_keyword"),
-        }
-        return [
-            {
-                "status": "blocked_existing_trustpilot_invitation_customer_level",
-                "blocked_reason": "historical Trustpilot note",
-                "detail": f"No email was sent. {_trustpilot_note_evidence_reason(evidence)}",
-            }
-        ]
-    if lookup.get("trustpilot_tag_evidence_found") is True:
-        order_name = _canonical_order_name(lookup.get("evidence_order_name")) or "another order"
-        return [
-            {
-                "status": "blocked_existing_trustpilot_invitation_customer_level",
-                "blocked_reason": "historical Trustpilot tag",
-                "detail": f"No email was sent. Previous Trustpilot tag found on historical order {order_name}.",
-            }
-        ]
-    if lookup.get("should_block_review_send") is True:
-        return [
-            {
-                "status": "blocked_customer_history_live_lookup_failed",
-                "blocked_reason": "customer history live check blocked",
-                "detail": "No email was sent. "
-                + (
-                    _safe_text(lookup.get("blocking_reason"), max_length=300)
-                    or "Customer history needs live Shopify check before sending."
-                ),
+                "status": status,
+                "blocked_reason": blocked_reason,
+                "detail": f"No email was sent. {gate['reason']}",
             }
         ]
     return []
 
 
 def _customer_history_live_lookup_required(candidate, scan):
-    if not candidate or candidate.get("action_state") != "review_send":
-        return False
-    if candidate.get("customer_history_confirmed") is not True:
-        return True
-    confidence = _safe_text(candidate.get("customer_history_confidence"), max_length=80).lower()
-    if confidence not in {"high", "medium"}:
-        return True
-    order_data_coverage = (scan or {}).get("order_data_coverage") or {}
-    sync_window = _safe_text(order_data_coverage.get("last_shopify_order_sync_window"), max_length=80).lower()
-    if sync_window in {"last 60 days", "latest 3 days", "manual review request window", "unknown"}:
-        return True
-    if _int_or_zero((scan or {}).get("window_days")) == LAST_60_DAY_SCAN_WINDOW_DAYS:
-        history_window = _safe_text(candidate.get("customer_history_window"), max_length=80).lower()
-        if history_window in {"lifetime_local_orders", "last_60_days", "local_shopify_orders"}:
-            return True
-    return False
+    return bool(candidate and candidate.get("action_state") == "review_send")
 
 
 def _matching_on_demand_customer_history_lookup(reports, selected_order):
@@ -15371,6 +15534,10 @@ def _customer_history_lookup_gated_rows(rows, scan, reports):
             reports,
             (row or {}).get("order") or (row or {}).get("candidate_id"),
         )
+        gate = _customer_history_lookup_gate(
+            lookup,
+            _customer_history_lookup_reference_at(scan),
+        )
         decorated = _apply_cached_customer_history_lookup_to_row(dict(row or {}), lookup)
         decorated = _attach_customer_history_lookup_status(decorated, scan, reports)
         blocker = _customer_history_lookup_row_blocker(decorated, scan, reports)
@@ -15388,6 +15555,13 @@ def _customer_history_lookup_gated_rows(rows, scan, reports):
                     "candidate_status": "blocked",
                     "block_reason": blocker,
                     "blocked_by_customer_history_lookup": True,
+                    "customer_history_lookup_block_status": gate["status"],
+                    "customer_history_lookup_status": gate["label"],
+                    "customer_history_lookup_action_label": gate["action_label"],
+                    "missing_requirement": gate["missing_requirement"] or "Live Shopify history check",
+                    "trustpilot_history_label": decorated.get("trustpilot_history_label")
+                    if gate["evidence_found"]
+                    else "Needs live check",
                 }
             )
             blocked_rows.append(blocked)
@@ -15399,26 +15573,15 @@ def _customer_history_lookup_gated_rows(rows, scan, reports):
 def _customer_history_lookup_row_blocker(row, scan, reports):
     selected_order = _canonical_order_name(row.get("order") or row.get("candidate_id"))
     lookup = _matching_on_demand_customer_history_lookup(reports, selected_order)
-    if lookup.get("should_block_review_send") is True:
-        return _cached_customer_history_lookup_reason(lookup)
     if not _customer_history_live_lookup_required(row, scan):
         return ""
-    if lookup:
-        if lookup.get("reauthorization_required") is True or (
-            "read_all_orders_scope_present" in lookup and lookup.get("read_all_orders_scope_present") is not True
-        ):
-            return READ_ALL_ORDERS_MISSING_MESSAGE
-        if lookup.get("lookup_status") and lookup.get("lookup_status") != "customer_history_lookup_completed":
-            return _safe_text(lookup.get("blocking_reason"), max_length=300) or "Customer history needs live Shopify check before sending."
-        if "shopify_api_lookup_performed" in lookup and lookup.get("shopify_api_lookup_performed") is not True:
-            return _safe_text(lookup.get("blocking_reason"), max_length=300) or "Customer history needs live Shopify check before sending."
-        if lookup.get("should_block_review_send") is True:
-            return _safe_text(lookup.get("blocking_reason"), max_length=300) or "Customer history needs live Shopify check before sending."
-        return ""
-    scope_blocker = _customer_history_scope_report_blocker(reports)
-    if scope_blocker:
-        return scope_blocker
-    return "Customer history needs live Shopify check before sending."
+    gate = _customer_history_lookup_gate(lookup, _customer_history_lookup_reference_at(scan))
+    if gate["blocked"]:
+        if gate["status"] == "missing":
+            scope_blocker = _customer_history_scope_report_blocker(reports)
+            return scope_blocker or gate["reason"]
+        return gate["reason"]
+    return ""
 
 
 def _attach_customer_history_lookup_status(row, scan, reports):
@@ -15432,35 +15595,41 @@ def _attach_customer_history_lookup_status(row, scan, reports):
 def _customer_history_lookup_plain_status(row, scan, reports):
     selected_order = _canonical_order_name((row or {}).get("order") or (row or {}).get("candidate_id"))
     lookup = _matching_on_demand_customer_history_lookup(reports, selected_order)
+    if _customer_history_live_lookup_required(row, scan):
+        return _customer_history_lookup_gate(
+            lookup,
+            _customer_history_lookup_reference_at(scan),
+        )["label"]
     if lookup:
-        if lookup.get("should_block_review_send") is True:
-            return "Customer history checked"
-        if lookup.get("reauthorization_required") is True:
-            return "Reauthorization needed"
-        if "read_all_orders_scope_present" in lookup and lookup.get("read_all_orders_scope_present") is not True:
-            return "Shopify history permission missing"
-        if lookup.get("lookup_status") == "customer_history_lookup_completed":
-            return "Full Shopify history available"
-        return "Customer history incomplete"
+        return _customer_history_lookup_gate(lookup)["label"]
     scope_data = _shopify_scope_verification_data(reports)
     if scope_data:
         if scope_data.get("reauthorization_required") is True:
             return "Reauthorization needed"
         if scope_data.get("read_all_orders_present") is False:
             return "Shopify history permission missing"
-    if _customer_history_live_lookup_required(row, scan):
-        return "Customer history incomplete"
     if (row or {}).get("customer_history_confirmed") is True:
         return "Customer history checked"
-    return "Customer history incomplete"
+    return "Needs live check"
 
 
 def _customer_history_lookup_action_label(status):
     if status in {"Shopify history permission missing", "Reauthorization needed"}:
         return "Needs Shopify read_all_orders permission"
-    if status in {"Full Shopify history available", "Customer history checked"}:
+    if status.startswith("Checked:") or status in {"Customer history checked", "Blocked: previous Trustpilot found"}:
         return "Customer history checked"
+    if status == "Stale check":
+        return "Recheck customer history"
     return "Check customer history"
+
+
+def _customer_history_lookup_reference_at(scan):
+    return _safe_text(
+        (scan or {}).get("candidate_scan_freshness")
+        or (scan or {}).get("scan_window_ended_at")
+        or (scan or {}).get("timestamp"),
+        max_length=120,
+    )
 
 
 def _customer_history_scope_report_blocker(reports):

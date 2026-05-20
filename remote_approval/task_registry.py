@@ -81,6 +81,9 @@ from remote_approval.tasks.shopify_review_request_next_repeat_customer_candidate
 from remote_approval.tasks.shopify_review_request_last_60_days_candidate_scan_task import (
     run_shopify_review_request_last_60_days_candidate_scan_task,
 )
+from remote_approval.tasks.shopify_review_request_live_history_gate_audit_task import (
+    run_shopify_review_request_live_history_gate_audit_task,
+)
 from remote_approval.tasks.shopify_review_request_shopify_order_sync_coverage_task import (
     run_shopify_review_request_shopify_order_sync_coverage_task,
 )
@@ -462,6 +465,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     ),
     "shopify_review_request_last_60_days_candidate_scan": (
         run_shopify_review_request_last_60_days_candidate_scan_task
+    ),
+    "shopify_review_request_live_history_gate_audit": (
+        run_shopify_review_request_live_history_gate_audit_task
     ),
     "shopify_review_request_shopify_order_sync_coverage": (
         run_shopify_review_request_shopify_order_sync_coverage_task
@@ -921,6 +927,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "none; local synced order/report scan only",
         "review_file_path": "logs/shopify_review_request_last_60_days_candidate_scan.json",
+    },
+    "shopify_review_request_live_history_gate_audit": {
+        "description": "Audit the mandatory live Shopify customer history gate for #21687 and visible Review & Send rows using local reports only.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; local report audit only, no Shopify/Gmail/API calls",
+        "review_file_path": "logs/codex_runs/shopify_review_request_live_history_gate_audit.json",
     },
     "shopify_review_request_shopify_order_sync_coverage": {
         "description": "Check local Shopify order coverage for Review Requests and prepare safe 60-day / 3-day sync commands without calling Shopify.",

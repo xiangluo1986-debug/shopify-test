@@ -641,9 +641,7 @@
                             {% if row.merged_order_group %}
                                 <div><span class="rrw-pill rrw-badge-info">Merged order group</span></div>
                             {% endif %}
-                            <div class="rrw-secondary-line">{% firstof row.customer_order_sequence_label "Customer history not confirmed" %}</div>
-                            <div class="rrw-secondary-line">{% firstof row.customer_history_match_label "History not confirmed" %}</div>
-                            <div class="rrw-secondary-line">{% firstof row.customer_history_lookup_status "Customer history not confirmed" %}</div>
+                            <div class="rrw-secondary-line">Customer history: {% firstof row.customer_history_lookup_status "Needs live check" %}</div>
                         </td>
                         <td class="rrw-tags-col">
                             {% for chip in row.tag_chips %}
@@ -654,12 +652,6 @@
                         </td>
                         <td>
                             {% firstof row.trustpilot_history_label row.trustpilot_history "History not confirmed" %}
-                            {% if row.customer_level_trustpilot_note_evidence_found %}
-                                <div class="rrw-secondary-line">
-                                    Safe keyword: {{ row.customer_level_trustpilot_note_safe_keyword|default:"trustpilot" }};
-                                    order {{ row.customer_level_trustpilot_note_evidence_order_name }}
-                                </div>
-                            {% endif %}
                             {% if row.previous_trustpilot_tag_values %}
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
                             {% endif %}
@@ -874,9 +866,7 @@
                         </td>
                         <td>
                             {% firstof row.customer_orders_display row.customer_order_summary "Customer history not confirmed" %}
-                            <div class="rrw-secondary-line">{% firstof row.customer_order_sequence_label "Customer history not confirmed" %}</div>
-                            <div class="rrw-secondary-line">{% firstof row.customer_history_match_label "History not confirmed" %}</div>
-                            <div class="rrw-secondary-line">{% firstof row.customer_history_lookup_status "Customer history not confirmed" %}</div>
+                            <div class="rrw-secondary-line">Customer history: {% firstof row.customer_history_lookup_status "Needs live check" %}</div>
                         </td>
                         <td>
                             {% for chip in row.tag_chips %}
@@ -887,12 +877,6 @@
                         </td>
                         <td>
                             {% firstof row.trustpilot_history_label row.trustpilot_history "History not confirmed" %}
-                            {% if row.customer_level_trustpilot_note_evidence_found %}
-                                <div class="rrw-secondary-line">
-                                    Safe keyword: {{ row.customer_level_trustpilot_note_safe_keyword|default:"trustpilot" }};
-                                    order {{ row.customer_level_trustpilot_note_evidence_order_name }}
-                                </div>
-                            {% endif %}
                             {% if row.previous_trustpilot_tag_values %}
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
                             {% endif %}
@@ -949,6 +933,42 @@
         <p class="rrw-muted">
             Internal task names, report paths, safety flags, simulator data, and local debug tables are kept here.
         </p>
+        <div class="rrw-section">
+            <h2>Customer History Match Diagnostics</h2>
+            <table class="rrw-table">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Source</th>
+                        <th>Confidence</th>
+                        <th>Window</th>
+                        <th>Live check</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in dashboard.approval_queue.needs_review_rows %}
+                        <tr>
+                            <td>{{ row.order }}</td>
+                            <td>{{ row.customer_history_source|default:"-" }}</td>
+                            <td>{{ row.customer_history_confidence|default:"-" }}</td>
+                            <td>{{ row.customer_history_window|default:"-" }}</td>
+                            <td>{% firstof row.customer_history_lookup_block_status row.customer_history_lookup_status "Needs live check" %}</td>
+                        </tr>
+                    {% endfor %}
+                    {% for row in dashboard.approval_queue.blocked_rows %}
+                        {% if row.blocked_by_customer_history_lookup %}
+                            <tr>
+                                <td>{{ row.order }}</td>
+                                <td>{{ row.customer_history_source|default:"-" }}</td>
+                                <td>{{ row.customer_history_confidence|default:"-" }}</td>
+                                <td>{{ row.customer_history_window|default:"-" }}</td>
+                                <td>{% firstof row.customer_history_lookup_block_status row.customer_history_lookup_status "Needs live check" %}</td>
+                            </tr>
+                        {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
 
     <div class="rrw-section">
         <h2>Last 60 days candidate scan</h2>

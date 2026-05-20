@@ -119,6 +119,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("cache_status", "report_status", "status"),
     },
     {
+        "key": "live_history_gate_audit",
+        "label": "Live history gate audit",
+        "filename": "codex_runs/shopify_review_request_live_history_gate_audit.json",
+        "channel": "trustpilot",
+        "event_type": "audit",
+        "status_keys": ("audit_status", "report_status", "status"),
+    },
+    {
         "key": "shopify_scope_verification",
         "label": "Shopify read_all_orders scope verification",
         "filename": "codex_runs/shopify_review_request_shopify_scope_verification.json",
@@ -509,10 +517,27 @@ def sanitize_customer_history_lookup_result(payload):
     note_evidence_found = payload.get("trustpilot_note_evidence_found") is True
     tag_evidence_found = payload.get("trustpilot_tag_evidence_found") is True
     evidence_order = _canonical_order_name(payload.get("evidence_order_name"))
+    lookup_status = _safe_text(payload.get("lookup_status"), max_length=120)
+    shopify_api_lookup_performed = (
+        payload.get("shopify_api_lookup_performed") is True
+        or payload.get("read_only_shopify_lookup_performed") is True
+    )
+    read_all_orders_scope_present = (
+        payload.get("read_all_orders_scope_present") is True
+        or payload.get("lifetime_history_scope_confirmed") is True
+        or payload.get("customer_history_permission_status") == "full_history_available"
+    )
+    full_history_confirmed = payload.get("full_history_confirmed") is True or bool(
+        lookup_status == "customer_history_lookup_completed"
+        and shopify_api_lookup_performed
+        and read_all_orders_scope_present
+        and _int_value(payload.get("shopify_customer_history_count")) > 0
+    )
     should_block = (
         payload.get("should_block_review_send") is True
         or note_evidence_found
         or tag_evidence_found
+        or not full_history_confirmed
     )
     blocking_reason = _safe_text(payload.get("blocking_reason"), max_length=300)
     if should_block and not blocking_reason:
@@ -524,6 +549,8 @@ def sanitize_customer_history_lookup_result(payload):
             blocking_reason = (
                 f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}."
             )
+        elif not full_history_confirmed:
+            blocking_reason = "Customer history could not be fully verified."
         else:
             blocking_reason = "Customer history lookup blocked Review & Send."
     return {
@@ -545,8 +572,18 @@ def sanitize_customer_history_lookup_result(payload):
         "safe_detected_keyword": _safe_text(payload.get("safe_detected_keyword"), max_length=80),
         "should_block_review_send": should_block,
         "blocking_reason": blocking_reason,
-        "lookup_status": _safe_text(payload.get("lookup_status"), max_length=120),
+        "lookup_status": lookup_status,
         "final_recommendation": _safe_text(payload.get("final_recommendation"), max_length=120),
+        "shopify_api_lookup_performed": shopify_api_lookup_performed,
+        "read_only_shopify_lookup_performed": shopify_api_lookup_performed,
+        "read_all_orders_scope_present": read_all_orders_scope_present,
+        "lifetime_history_scope_confirmed": read_all_orders_scope_present,
+        "full_history_confirmed": full_history_confirmed,
+        "customer_history_permission_status": _safe_text(
+            payload.get("customer_history_permission_status")
+            or ("full_history_available" if full_history_confirmed else "full_history_unavailable"),
+            max_length=120,
+        ),
         "full_note_output": False,
         "raw_email_output": False,
     }
