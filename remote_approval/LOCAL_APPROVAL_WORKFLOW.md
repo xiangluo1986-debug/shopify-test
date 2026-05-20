@@ -74,6 +74,7 @@ python remote_approval_runner.py --task shopify_review_request_review_send_reuse
 python remote_approval_runner.py --task shopify_review_request_review_send_post_send_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_dashboard_counts_audit --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_dashboard_snapshot_refresh --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_gmail_readiness_package --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_shopify_tag_permission_readiness --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_tag_discovery --mode dry-run --approval local
@@ -201,6 +202,34 @@ the active Shopify token, not just the app config, has both `read_orders` and
 old installed token unchanged; if the report shows the active token is missing
 `read_all_orders`, reauthorize or reinstall the Shopify app and save the new
 token before sending any Review Request email.
+
+Phase 5.32 adds `shopify_review_request_dashboard_snapshot_refresh` for the
+admin Review Requests page cache. The task builds
+`logs/shopify_review_request_dashboard_snapshot.json` and
+`logs/shopify_review_request_dashboard_snapshot.html` from local synced
+ShopifyOrder data and local Review Request reports. Normal page loads read this
+cached snapshot and must not call Shopify APIs, Gmail APIs, external review
+APIs, `translationsRegister`, or recompute the full queue. If the snapshot is
+missing, the page shows `Review queue has not been generated yet.` If it is
+stale, the page shows the last-updated warning and Review & Send blocks until a
+fresh snapshot exists.
+
+Initial setup:
+
+```powershell
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --request-delay 1.0 --skip-fulfillment-orders --apply-local
+python remote_approval_runner.py --task shopify_review_request_dashboard_snapshot_refresh --approval local
+```
+
+Daily refresh:
+
+```powershell
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --request-delay 1.0 --skip-fulfillment-orders --apply-local
+python remote_approval_runner.py --task shopify_review_request_dashboard_snapshot_refresh --approval local
+```
+
+Optional schedule: run the 3-day sync and snapshot refresh every 4 hours, and
+keep a daily full 60-day sync/candidate refresh for wider coverage.
 
 Run the scope verification with:
 

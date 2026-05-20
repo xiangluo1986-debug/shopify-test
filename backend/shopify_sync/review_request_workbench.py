@@ -166,6 +166,11 @@ REVIEW_QUEUE_SORT_ORDER = (
 )
 OLDER_ELIGIBLE_ORDER_REASON = "A newer eligible order exists for this customer."
 LAST_60_DAY_SCAN_TASK_NAME = "shopify_review_request_last_60_days_candidate_scan"
+DASHBOARD_SNAPSHOT_TASK_NAME = "shopify_review_request_dashboard_snapshot_refresh"
+DASHBOARD_SNAPSHOT_REPORT_FILENAME = "shopify_review_request_dashboard_snapshot.json"
+DASHBOARD_SNAPSHOT_HTML_FILENAME = "shopify_review_request_dashboard_snapshot.html"
+DASHBOARD_SNAPSHOT_STALE_AFTER_MINUTES = 240
+MAX_DASHBOARD_SNAPSHOT_BYTES = 12_000_000
 REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
     "orders_review_request_3",
     "orders_review_request_60",
@@ -721,7 +726,13 @@ MAX_LOCAL_ORDER_SCAN_ROWS = 5_000
 MAX_TABLE_ROWS = DEFAULT_LIMIT
 
 
-def build_review_request_workbench_context(params=None):
+def build_review_request_workbench_context(params=None, use_dashboard_snapshot=True):
+    if use_dashboard_snapshot:
+        return _build_review_request_workbench_context_from_dashboard_snapshot(params)
+    return _build_review_request_workbench_context_live(params)
+
+
+def _build_review_request_workbench_context_live(params=None):
     filters = _normalize_filters(params)
     reports = _load_known_reports()
     history_ledger = build_review_request_history_ledger(_log_dir(), params)
@@ -877,6 +888,7 @@ def build_review_request_workbench_context(params=None):
         trustpilot_gmail_scope_compatibility_resolver=trustpilot_gmail_scope_compatibility_resolver,
         trustpilot_gmail_draft_only_preflight=trustpilot_gmail_draft_only_preflight,
         trustpilot_gmail_one_draft_create_locked_runner=trustpilot_gmail_one_draft_create_locked_runner,
+        reports=reports,
         filters=filters,
     )
 
@@ -963,11 +975,704 @@ def build_review_request_workbench_context(params=None):
     }
 
 
+def build_review_request_dashboard_snapshot_payload(params=None, generated_by="manual_runner"):
+    generated_at = datetime.now(timezone.utc).isoformat()
+    context = _build_review_request_workbench_context_live(params)
+    workbench = dict(context.get("review_request_workbench") or {})
+    dashboard = dict(workbench.get("operating_dashboard") or {})
+    approval_queue = dict(dashboard.get("approval_queue") or {})
+    last_scan = dict(dashboard.get("last_60_days_candidate_scan") or {})
+    coverage = dict(dashboard.get("order_data_coverage") or {})
+    scan_coverage = dict(last_scan.get("order_data_coverage") or {})
+    review_rows = _snapshot_dict_rows(
+        approval_queue.get("all_needs_review_rows")
+        or approval_queue.get("needs_review_rows")
+        or last_scan.get("review_queue_rows")
+        or last_scan.get("eligible_queue_rows")
+    )
+    already_sent_rows = _snapshot_dict_rows(
+        approval_queue.get("all_already_sent_rows")
+        or approval_queue.get("already_sent_rows")
+        or last_scan.get("already_sent_queue_rows")
+    )
+    blocked_rows = _snapshot_dict_rows(
+        approval_queue.get("blocked_rows") or last_scan.get("blocked_queue_rows")
+    )
+    blocked_visible_rows = blocked_rows[:BLOCKED_QUEUE_DISPLAY_LIMIT]
+    eligible_total = _int_or_zero(
+        approval_queue.get("eligible_candidate_count_total")
+        or last_scan.get("eligible_candidate_count_total")
+        or last_scan.get("eligible_candidate_count")
+        or len(review_rows)
+    )
+    blocked_total = _int_or_zero(
+        approval_queue.get("blocked_count")
+        or last_scan.get("blocked_count")
+        or len(blocked_rows)
+    )
+    already_sent_total = _int_or_zero(
+        approval_queue.get("already_sent_count")
+        or last_scan.get("already_sent_count")
+        or len(already_sent_rows)
+    )
+    last_shopify_sync_at = _safe_text(
+        coverage.get("latest_review_request_sync_finished_at")
+        or scan_coverage.get("latest_review_request_sync_finished_at")
+        or scan_coverage.get("latest_local_order_synced_at"),
+        max_length=120,
+    )
+    last_candidate_scan_at = _safe_text(
+        last_scan.get("candidate_scan_freshness")
+        or last_scan.get("scan_window_ended_at")
+        or last_scan.get("timestamp")
+        or generated_at,
+        max_length=120,
+    )
+    payload = {
+        "task": DASHBOARD_SNAPSHOT_TASK_NAME,
+        "task_name": DASHBOARD_SNAPSHOT_TASK_NAME,
+        "phase": "5.32",
+        "snapshot_status": "dashboard_snapshot_ready",
+        "report_status": "dashboard_snapshot_ready",
+        "success": True,
+        "generated_at": generated_at,
+        "generated_by": _safe_text(generated_by, max_length=120),
+        "sync_source": _safe_text(
+            coverage.get("last_shopify_order_sync_window")
+            or scan_coverage.get("last_shopify_order_sync_window")
+            or "Unknown",
+            max_length=120,
+        ),
+        "eligible_total": eligible_total,
+        "review_queue_candidates": review_rows,
+        "already_sent_rows": already_sent_rows,
+        "blocked_summary": {
+            "blocked_total": blocked_total,
+            "blocked_visible_count": len(blocked_visible_rows),
+            "blocked_ebay_order_count": _int_or_zero(
+                approval_queue.get("blocked_ebay_order_count")
+                or last_scan.get("blocked_ebay_order_count")
+            ),
+            "blocked_duplicate_customer_count": _int_or_zero(
+                approval_queue.get("duplicate_block_count")
+                or last_scan.get("blocked_duplicate_customer_count")
+            ),
+            "blocked_merged_group_count": _int_or_zero(
+                approval_queue.get("merged_group_count")
+                or last_scan.get("blocked_merged_group_count")
+            ),
+            "rows": blocked_visible_rows,
+        },
+        "dashboard_counters": {
+            "ready_to_send_count": _int_or_zero(dashboard.get("ready_to_send_count")),
+            "eligible_total": eligible_total,
+            "needs_review_visible_count": _int_or_zero(
+                approval_queue.get("review_queue_visible_count") or len(review_rows[:DEFAULT_LIMIT])
+            ),
+            "already_sent_total": already_sent_total,
+            "blocked_total": blocked_total,
+            "older_eligible_hidden": _int_or_zero(approval_queue.get("hidden_older_eligible_count")),
+            "latest_sent_order": _safe_text(approval_queue.get("latest_sent_order"), max_length=80),
+            "latest_sent_time": _safe_text(approval_queue.get("latest_sent_time"), max_length=120),
+            "latest_tag_write_time": _safe_text(approval_queue.get("latest_tag_write_time"), max_length=120),
+        },
+        "stale_after_minutes": DASHBOARD_SNAPSHOT_STALE_AFTER_MINUTES,
+        "scan_report_source": _safe_text(
+            last_scan.get("scan_source")
+            or coverage.get("scan_source")
+            or "local_dashboard_snapshot_refresh",
+            max_length=120,
+        ),
+        "last_shopify_sync_at": last_shopify_sync_at,
+        "last_candidate_scan_at": last_candidate_scan_at,
+        "review_request_workbench": _compact_workbench_for_dashboard_snapshot(
+            workbench,
+            dashboard,
+            approval_queue,
+            last_scan,
+            review_rows,
+            already_sent_rows,
+            blocked_visible_rows,
+            blocked_total,
+        ),
+        "snapshot_output_json_path": f"logs/{DASHBOARD_SNAPSHOT_REPORT_FILENAME}",
+        "snapshot_output_html_path": f"logs/{DASHBOARD_SNAPSHOT_HTML_FILENAME}",
+        "normal_page_load_data_source": "cached_snapshot",
+        "normal_page_load_shopify_api_call_performed": False,
+        "normal_page_load_full_scan_performed": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "translations_register_performed": False,
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "external_review_api_call_performed": False,
+        "trustpilot_api_call_performed": False,
+        "kudosi_api_call_performed": False,
+        "ali_reviews_api_call_performed": False,
+        "raw_customer_email_output": False,
+        "secret_values_printed": False,
+        "detected_issue_summary": (
+            "Dashboard snapshot refreshed from local Review Request data. "
+            "No Shopify API, Gmail API, external review API, email send, or Shopify write was performed."
+        ),
+    }
+    return _sanitize_dashboard_snapshot_payload(payload)
+
+
+def _compact_workbench_for_dashboard_snapshot(
+    workbench,
+    dashboard,
+    approval_queue,
+    last_scan,
+    review_rows,
+    already_sent_rows,
+    blocked_visible_rows,
+    blocked_total,
+):
+    compact_queue = dict(approval_queue or {})
+    compact_queue["all_needs_review_rows"] = review_rows
+    compact_queue["needs_review_rows"] = review_rows[:DEFAULT_LIMIT]
+    compact_queue["all_already_sent_rows"] = already_sent_rows
+    compact_queue["already_sent_rows"] = already_sent_rows[:DEFAULT_LIMIT]
+    compact_queue["blocked_rows"] = blocked_visible_rows
+    compact_queue["blocked_visible_count"] = len(blocked_visible_rows)
+    compact_queue["blocked_count"] = blocked_total
+    compact_queue["blocked_overflow_count"] = max(blocked_total - len(blocked_visible_rows), 0)
+    compact_dashboard = dict(dashboard or {})
+    compact_dashboard["approval_queue"] = compact_queue
+    compact_dashboard["last_60_days_candidate_scan"] = _compact_last_scan_for_dashboard_snapshot(last_scan)
+    return {
+        "operating_dashboard": compact_dashboard,
+        "summary": workbench.get("summary", []),
+        "filters": {},
+        "filter_summary": {},
+        "latest_scan": workbench.get("latest_scan", {}),
+        "candidate_queue": [],
+        "invitation_history": [],
+        "review_request_queue": [],
+        "typo_review_request_rows": [],
+        "blocked_orders": [],
+        "blocked_reason_counts": workbench.get("blocked_reason_counts", []),
+        "report_readiness": workbench.get("report_readiness", []),
+        "report_history": workbench.get("report_history", []),
+        "history_ledger": [],
+        "history_filters": {},
+        "history_summary": workbench.get("history_summary", {}),
+        "history_focus": workbench.get("history_focus", {}),
+        "history_source_reports": workbench.get("history_source_reports", []),
+        "history_filter_summary": {},
+        "history_channel_filter_options": workbench.get("history_channel_filter_options", []),
+        "history_event_type_filter_options": workbench.get("history_event_type_filter_options", []),
+        "history_limit_filter_options": workbench.get("history_limit_filter_options", []),
+        "history_recommendations": workbench.get("history_recommendations", []),
+        "safety_history": workbench.get("safety_history", []),
+        "local_stats": workbench.get("local_stats", {}),
+        "tracking_design": workbench.get("tracking_design", {}),
+        "candidate_queue_status": workbench.get("candidate_queue_status", {}),
+        "trustpilot_email_records": [],
+        "ali_reviews_status": workbench.get("ali_reviews_status", {}),
+        "trustpilot_aliases": workbench.get("trustpilot_aliases", TRUSTPILOT_TAG_ALIASES),
+        "review_request_tag_aliases": workbench.get("review_request_tag_aliases", REVIEW_REQUEST_TAG_ALIASES),
+        "delivered_tag_aliases": workbench.get("delivered_tag_aliases", DELIVERED_TAG_ALIASES),
+        "canonical_review_request_tag": workbench.get("canonical_review_request_tag", CANONICAL_REVIEW_REQUEST_TAG),
+        "typo_review_request_tag": workbench.get("typo_review_request_tag", TYPO_REVIEW_REQUEST_TAG),
+        "delivered_tag": workbench.get("delivered_tag", DELIVERED_TAG),
+        "status_filter_options": [],
+        "tag_filter_options": [],
+        "limit_filter_options": [],
+        "review_queue_page_size_options": [],
+        "safety_confirmations": workbench.get("safety_confirmations", []),
+    }
+
+
+def _compact_last_scan_for_dashboard_snapshot(last_scan):
+    row_keys = {
+        "eligible_queue_rows",
+        "review_queue_rows",
+        "blocked_queue_rows",
+        "already_sent_queue_rows",
+        "eligible_candidates_summary",
+        "blocked_candidates_summary",
+        "already_sent_summary",
+    }
+    compact = {}
+    for key, value in (last_scan or {}).items():
+        if key in row_keys:
+            continue
+        if isinstance(value, list) and len(value) > 50:
+            compact[key] = value[:50]
+            continue
+        compact[key] = value
+    return compact
+
+
+def write_review_request_dashboard_snapshot_reports(payload):
+    safe_payload = _sanitize_dashboard_snapshot_payload(payload or {})
+    json_path = _log_dir() / DASHBOARD_SNAPSHOT_REPORT_FILENAME
+    html_path = _log_dir() / DASHBOARD_SNAPSHOT_HTML_FILENAME
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with json_path.open("w", encoding="utf-8") as report_file:
+        json.dump(safe_payload, report_file, ensure_ascii=False, indent=2)
+        report_file.write("\n")
+    json.loads(json_path.read_text(encoding="utf-8"))
+    html_path.write_text(_render_dashboard_snapshot_report_html(safe_payload), encoding="utf-8")
+    return {
+        "json_path": str(json_path),
+        "html_path": str(html_path),
+        "relative_json_path": f"logs/{DASHBOARD_SNAPSHOT_REPORT_FILENAME}",
+        "relative_html_path": f"logs/{DASHBOARD_SNAPSHOT_HTML_FILENAME}",
+    }
+
+
+def _render_dashboard_snapshot_report_html(payload):
+    counters = payload.get("dashboard_counters") if isinstance(payload.get("dashboard_counters"), dict) else {}
+    blocked = payload.get("blocked_summary") if isinstance(payload.get("blocked_summary"), dict) else {}
+    safety_rows = "\n".join(
+        f"<tr><th>{escape(label)}</th><td>{escape(str(payload.get(key) is True))}</td></tr>"
+        for label, key in (
+            ("Shopify API call performed", "shopify_api_call_performed"),
+            ("Shopify write performed", "shopify_write_performed"),
+            ("Gmail API call performed", "gmail_api_call_performed"),
+            ("Email sent", "email_sent"),
+            ("External review API call performed", "external_review_api_call_performed"),
+            ("translationsRegister called", "translations_register_called"),
+            ("Raw customer email output", "raw_customer_email_output"),
+            ("Secret values printed", "secret_values_printed"),
+        )
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Review Request Dashboard Snapshot</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; line-height: 1.45; }}
+    table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
+    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }}
+    th {{ background: #f6f6f6; }}
+  </style>
+</head>
+<body>
+  <h1>Review Request Dashboard Snapshot</h1>
+  <table>
+    <tbody>
+      <tr><th>Status</th><td>{escape(str(payload.get('snapshot_status', 'unknown')))}</td></tr>
+      <tr><th>Generated at</th><td>{escape(str(payload.get('generated_at', '')))}</td></tr>
+      <tr><th>Generated by</th><td>{escape(str(payload.get('generated_by', '')))}</td></tr>
+      <tr><th>Sync source</th><td>{escape(str(payload.get('sync_source', '')))}</td></tr>
+      <tr><th>Scan report source</th><td>{escape(str(payload.get('scan_report_source', '')))}</td></tr>
+      <tr><th>Last Shopify sync</th><td>{escape(str(payload.get('last_shopify_sync_at', '')))}</td></tr>
+      <tr><th>Last candidate scan</th><td>{escape(str(payload.get('last_candidate_scan_at', '')))}</td></tr>
+      <tr><th>Eligible total</th><td>{escape(str(payload.get('eligible_total', 0)))}</td></tr>
+      <tr><th>Needs review visible count</th><td>{escape(str(counters.get('needs_review_visible_count', 0)))}</td></tr>
+      <tr><th>Already sent total</th><td>{escape(str(counters.get('already_sent_total', 0)))}</td></tr>
+      <tr><th>Blocked total</th><td>{escape(str(blocked.get('blocked_total', 0)))}</td></tr>
+    </tbody>
+  </table>
+  <h2>Safety</h2>
+  <table><tbody>{safety_rows}</tbody></table>
+</body>
+</html>
+"""
+
+
+def _build_review_request_workbench_context_from_dashboard_snapshot(params=None):
+    filters = _normalize_filters(params)
+    report = _load_dashboard_snapshot_report()
+    metadata = _dashboard_snapshot_metadata(report, report.get("data") if report.get("loaded") else {})
+    if not report.get("loaded"):
+        return _empty_dashboard_snapshot_context(filters, metadata)
+
+    data = report.get("data") or {}
+    workbench = data.get("review_request_workbench")
+    if not isinstance(workbench, dict):
+        metadata["status"] = "present_but_invalid"
+        metadata["status_label"] = "Missing"
+        metadata["missing"] = True
+        metadata["message"] = "Review queue has not been generated yet."
+        return _empty_dashboard_snapshot_context(filters, metadata)
+
+    workbench = dict(workbench)
+    dashboard = dict(workbench.get("operating_dashboard") or {})
+    dashboard["dashboard_snapshot"] = metadata
+    dashboard["normal_page_load_data_source"] = "cached_snapshot"
+    dashboard["normal_page_load_shopify_api_call_performed"] = False
+    dashboard["normal_page_load_full_scan_performed"] = False
+    _paginate_dashboard_snapshot(dashboard, filters)
+    workbench["operating_dashboard"] = dashboard
+    workbench["filters"] = filters
+    workbench["status_filter_options"] = _selected_options(STATUS_FILTER_OPTIONS, filters["status"])
+    workbench["tag_filter_options"] = _selected_options(TAG_FILTER_OPTIONS, filters["tag"])
+    workbench["limit_filter_options"] = _selected_limit_options(filters["limit"])
+    workbench["review_queue_page_size_options"] = _selected_page_size_options(filters["page_size"])
+    workbench["dashboard_snapshot"] = metadata
+    return {"review_request_workbench": workbench}
+
+
+def _load_dashboard_snapshot_report():
+    path = _log_dir() / DASHBOARD_SNAPSHOT_REPORT_FILENAME
+    report = {
+        "relative_path": f"logs/{DASHBOARD_SNAPSHOT_REPORT_FILENAME}",
+        "present": False,
+        "loaded": False,
+        "status": "missing",
+        "timestamp": "",
+        "modified_at": "",
+        "error": "",
+        "data": {},
+    }
+    if not path.exists():
+        return report
+    report["present"] = True
+    try:
+        stat = path.stat()
+        report["modified_at"] = _safe_text(_format_file_time(stat.st_mtime))
+        report["size_bytes"] = stat.st_size
+        if stat.st_size > MAX_DASHBOARD_SNAPSHOT_BYTES:
+            report["status"] = "present_but_too_large_for_dashboard"
+            report["error"] = "dashboard_snapshot_too_large"
+            return report
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        report["status"] = "present_but_unreadable"
+        report["error"] = _sanitize_text(str(exc), max_length=300)
+        return report
+    if not isinstance(data, dict):
+        report["status"] = "present_but_not_object"
+        report["error"] = "top_level_json_is_not_object"
+        return report
+    report["loaded"] = True
+    report["data"] = data
+    report["status"] = _safe_text(data.get("snapshot_status") or data.get("report_status") or "loaded", max_length=120)
+    report["timestamp"] = _safe_text(data.get("generated_at") or data.get("timestamp"), max_length=120)
+    return report
+
+
+def _dashboard_snapshot_metadata(report, data=None):
+    data = data or {}
+    generated_at = _safe_text(data.get("generated_at") or report.get("timestamp"), max_length=120)
+    stale_after_minutes = _int_or_zero(data.get("stale_after_minutes") or DASHBOARD_SNAPSHOT_STALE_AFTER_MINUTES)
+    if stale_after_minutes <= 0:
+        stale_after_minutes = DASHBOARD_SNAPSHOT_STALE_AFTER_MINUTES
+    generated_dt = _parse_snapshot_datetime(generated_at)
+    age_seconds = None
+    if generated_dt:
+        age_seconds = max(int((datetime.now(timezone.utc) - generated_dt).total_seconds()), 0)
+    stale = bool(age_seconds is None or age_seconds > stale_after_minutes * 60)
+    loaded = report.get("loaded") is True
+    missing = not loaded
+    status_label = "Missing" if missing else ("Stale" if stale else "Fresh")
+    stale_message = ""
+    if loaded and stale:
+        stale_message = f"Data may be stale. Last updated {_dashboard_snapshot_age_label(age_seconds)}."
+    return {
+        "relative_path": f"logs/{DASHBOARD_SNAPSHOT_REPORT_FILENAME}",
+        "html_relative_path": f"logs/{DASHBOARD_SNAPSHOT_HTML_FILENAME}",
+        "present": report.get("present") is True,
+        "loaded": loaded,
+        "missing": missing,
+        "stale": bool(loaded and stale),
+        "fresh": bool(loaded and not stale),
+        "status": "missing" if missing else ("stale" if stale else "fresh"),
+        "status_label": status_label,
+        "message": "Review queue has not been generated yet." if missing else "",
+        "stale_message": stale_message,
+        "generated_at": generated_at,
+        "generated_at_display": _format_snapshot_time(generated_at),
+        "age_seconds": age_seconds if age_seconds is not None else "",
+        "age_label": _dashboard_snapshot_age_label(age_seconds),
+        "stale_after_minutes": stale_after_minutes,
+        "generated_by": _safe_text(data.get("generated_by"), max_length=120),
+        "sync_source": _safe_text(data.get("sync_source") or "Unknown", max_length=120),
+        "scan_report_source": _safe_text(data.get("scan_report_source") or "Unknown", max_length=120),
+        "last_shopify_sync_at": _safe_text(data.get("last_shopify_sync_at"), max_length=120),
+        "last_candidate_scan_at": _safe_text(data.get("last_candidate_scan_at"), max_length=120),
+        "data_source_label": "Cached snapshot",
+        "refresh_command": (
+            f"python remote_approval_runner.py --task {DASHBOARD_SNAPSHOT_TASK_NAME} --approval local"
+        ),
+        "error": _safe_text(report.get("error"), max_length=300),
+    }
+
+
+def _empty_dashboard_snapshot_context(filters, metadata):
+    dashboard = _empty_dashboard_for_missing_snapshot(metadata)
+    return {
+        "review_request_workbench": {
+            "operating_dashboard": dashboard,
+            "filters": filters,
+            "dashboard_snapshot": metadata,
+            "status_filter_options": _selected_options(STATUS_FILTER_OPTIONS, filters["status"]),
+            "tag_filter_options": _selected_options(TAG_FILTER_OPTIONS, filters["tag"]),
+            "limit_filter_options": _selected_limit_options(filters["limit"]),
+            "review_queue_page_size_options": _selected_page_size_options(filters["page_size"]),
+            "safety_confirmations": _current_page_safety_confirmations(),
+        }
+    }
+
+
+def _empty_dashboard_for_missing_snapshot(metadata):
+    approval_queue = _empty_dashboard_approval_queue()
+    return {
+        "dashboard_snapshot": metadata,
+        "ready_to_send_count": 0,
+        "blocked_count": 0,
+        "sent_trustpilot_count": 0,
+        "approval_queue": approval_queue,
+        "last_60_days_candidate_scan": {},
+        "order_data_coverage": {
+            "incomplete": True,
+            "incomplete_message": "Review queue has not been generated yet.",
+            "last_shopify_order_sync_window": "Unknown",
+            "local_data_source_label": "Cached snapshot",
+            "selected_local_tag_field": SHOPIFY_ORDER_TAG_FIELD_LABEL,
+            "local_orders_with_shopify_tag_data": 0,
+            "order_22530_found_label": "Unknown",
+            "candidate_scan_freshness": "Unknown",
+            "last_sent_record_time": TIME_NOT_RECORDED_LABEL,
+            "last_tag_write_time": TIME_NOT_RECORDED_LABEL,
+            "stale_counter_warning": True,
+            "stale_counter_warning_message": "Review queue has not been generated yet.",
+            "warning_label": "snapshot_missing",
+        },
+        "current_state_label": "Review queue missing",
+        "status_cards": [],
+        "send_requirements": [],
+        "current_blockers": [],
+        "blocked_order_rows": [],
+        "pipeline_steps": [],
+        "next_actions": [],
+        "recent_activity": [],
+        "ali_reviews_message": "",
+        "ali_reviews_status_label": "Unavailable",
+    }
+
+
+def _empty_dashboard_approval_queue():
+    pagination = _approval_queue_pagination(0, 1, DEFAULT_LIMIT)
+    sent_pagination = _already_sent_pagination(0, 1, DEFAULT_LIMIT, 1, DEFAULT_LIMIT)
+    return {
+        "needs_review_rows": [],
+        "blocked_rows": [],
+        "already_sent_rows": [],
+        "all_needs_review_rows": [],
+        "all_already_sent_rows": [],
+        "needs_review_count": 0,
+        "already_sent_count": 0,
+        "ready_to_send_count": 0,
+        "not_ready_count": 0,
+        "blocked_count": 0,
+        "blocked_visible_count": 0,
+        "blocked_display_limit": BLOCKED_QUEUE_DISPLAY_LIMIT,
+        "blocked_overflow_count": 0,
+        "duplicate_block_count": 0,
+        "blocked_ebay_order_count": 0,
+        "review_send_action_enabled_count": 0,
+        "email_sent_count": 0,
+        "eligible_candidate_count_total": 0,
+        "eligible_candidate_count_before_latest_filter": 0,
+        "eligible_candidate_count_after_latest_filter": 0,
+        "hidden_older_eligible_count": 0,
+        "review_queue_batch_size": DEFAULT_LIMIT,
+        "review_queue_page_size": pagination["page_size"],
+        "review_queue_page": pagination["page"],
+        "review_queue_total_pages": pagination["total_pages"],
+        "review_queue_has_previous": pagination["has_previous"],
+        "review_queue_has_next": pagination["has_next"],
+        "review_queue_previous_page_url": pagination["previous_page_url"],
+        "review_queue_next_page_url": pagination["next_page_url"],
+        "review_queue_showing_start": pagination["showing_start"],
+        "review_queue_showing_end": pagination["showing_end"],
+        "review_queue_visible_count": 0,
+        "review_queue_page_size_options": _selected_page_size_options(DEFAULT_LIMIT),
+        **_already_sent_pagination_summary(sent_pagination, [], [], 1, DEFAULT_LIMIT),
+        "latest_sent_order": "",
+        "latest_sent_time": "",
+        "latest_tag_write_time": "",
+        "stale_counter_warning": True,
+        "stale_counter_warning_message": "Review queue has not been generated yet.",
+        "shopify_tag_write_enabled_count": 0,
+        "empty_message": "Review queue has not been generated yet.",
+    }
+
+
+def _paginate_dashboard_snapshot(dashboard, filters):
+    approval_queue = dict(dashboard.get("approval_queue") or {})
+    all_needs_review_rows = _snapshot_dict_rows(
+        approval_queue.get("all_needs_review_rows")
+        or approval_queue.get("needs_review_rows")
+    )
+    all_already_sent_rows = _snapshot_dict_rows(
+        approval_queue.get("all_already_sent_rows")
+        or approval_queue.get("already_sent_rows")
+    )
+    pagination = _approval_queue_pagination(
+        total_count=len(all_needs_review_rows),
+        page=filters["page"],
+        page_size=filters["page_size"],
+    )
+    visible_review_rows = [
+        _review_queue_visible_row(row, pagination)
+        for row in all_needs_review_rows[pagination["start_index"] : pagination["end_index"]]
+    ]
+    sent_pagination = _already_sent_pagination(
+        total_count=len(all_already_sent_rows),
+        sent_page=filters["sent_page"],
+        sent_page_size=filters["sent_page_size"],
+        review_page=pagination["page"],
+        review_page_size=pagination["page_size"],
+    )
+    visible_sent_rows = [
+        _already_sent_visible_row(row, sent_pagination)
+        for row in all_already_sent_rows[
+            sent_pagination["start_index"] : sent_pagination["end_index"]
+        ]
+    ]
+    approval_queue["all_needs_review_rows"] = all_needs_review_rows
+    approval_queue["needs_review_rows"] = visible_review_rows
+    approval_queue["all_already_sent_rows"] = all_already_sent_rows
+    approval_queue["already_sent_rows"] = visible_sent_rows
+    approval_queue["needs_review_count"] = _int_or_zero(
+        approval_queue.get("needs_review_count") or len(all_needs_review_rows)
+    )
+    approval_queue["ready_to_send_count"] = _int_or_zero(
+        approval_queue.get("ready_to_send_count") or len(all_needs_review_rows)
+    )
+    approval_queue["already_sent_count"] = len(all_already_sent_rows)
+    approval_queue["eligible_candidate_count_total"] = _int_or_zero(
+        approval_queue.get("eligible_candidate_count_total") or len(all_needs_review_rows)
+    )
+    approval_queue["review_send_action_enabled_count"] = len(visible_review_rows)
+    approval_queue["review_queue_batch_size"] = pagination["page_size"]
+    approval_queue["review_queue_page_size"] = pagination["page_size"]
+    approval_queue["review_queue_page"] = pagination["page"]
+    approval_queue["review_queue_total_pages"] = pagination["total_pages"]
+    approval_queue["review_queue_has_previous"] = pagination["has_previous"]
+    approval_queue["review_queue_has_next"] = pagination["has_next"]
+    approval_queue["review_queue_previous_page"] = pagination["previous_page"]
+    approval_queue["review_queue_next_page"] = pagination["next_page"]
+    approval_queue["review_queue_previous_page_url"] = pagination["previous_page_url"]
+    approval_queue["review_queue_next_page_url"] = pagination["next_page_url"]
+    approval_queue["review_queue_showing_start"] = pagination["showing_start"]
+    approval_queue["review_queue_showing_end"] = pagination["showing_end"]
+    approval_queue["review_queue_visible_count"] = len(visible_review_rows)
+    approval_queue["review_queue_overflow_count"] = max(
+        len(all_needs_review_rows) - pagination["showing_end"],
+        0,
+    )
+    approval_queue["review_queue_page_size_options"] = _selected_page_size_options(pagination["page_size"])
+    approval_queue.update(
+        _already_sent_pagination_summary(
+            sent_pagination,
+            visible_sent_rows,
+            all_already_sent_rows,
+            pagination["page"],
+            pagination["page_size"],
+        )
+    )
+    dashboard["approval_queue"] = approval_queue
+
+
+def _snapshot_dict_rows(value):
+    return [dict(row) for row in (value or []) if isinstance(row, dict)]
+
+
+def _parse_snapshot_datetime(value):
+    text = _safe_text(value, max_length=120)
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_snapshot_time(value):
+    text = _safe_text(value, max_length=120)
+    return text or "Not generated yet"
+
+
+def _dashboard_snapshot_age_label(age_seconds):
+    if age_seconds is None or age_seconds == "":
+        return "unknown"
+    age_seconds = max(_int_or_zero(age_seconds), 0)
+    if age_seconds < 60:
+        return "less than a minute ago"
+    minutes = age_seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = hours // 24
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def _sanitize_dashboard_snapshot_payload(value):
+    if isinstance(value, dict):
+        return {
+            _safe_text(key, max_length=160): _sanitize_dashboard_snapshot_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_dashboard_snapshot_payload(item) for item in value]
+    if isinstance(value, str):
+        text = CONTROL_CHARS_RE.sub("", value)
+        text = EMAIL_RE.sub(lambda match: mask_email(match.group(0)), text)
+        text = SECRET_VALUE_RE.sub("[secret redacted]", text)
+        return text
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return _sanitize_dashboard_snapshot_payload(str(value))
+
+
+def _review_send_dashboard_snapshot_blocker():
+    report = _load_dashboard_snapshot_report()
+    metadata = _dashboard_snapshot_metadata(report, report.get("data") if report.get("loaded") else {})
+    if metadata["missing"]:
+        return {
+            "status": "blocked_dashboard_snapshot_missing",
+            "detail": "No email was sent. Review queue has not been generated yet. Run the dashboard snapshot refresh command.",
+            "snapshot": metadata,
+        }
+    if metadata["stale"]:
+        return {
+            "status": "blocked_dashboard_snapshot_stale",
+            "detail": f"No email was sent. {metadata['stale_message']} Run the dashboard snapshot refresh command before sending.",
+            "snapshot": metadata,
+        }
+    return {"status": "", "detail": "", "snapshot": metadata}
+
+
 def review_request_review_and_send(order_identifier, admin_username="", params=None, request_context=None):
     state = _build_review_send_state(params)
     selected_order = _safe_text(order_identifier, max_length=80)
     request_context = request_context or {}
     result = _base_review_and_send_result(selected_order, admin_username, state, request_context)
+    snapshot_blocker = _review_send_dashboard_snapshot_blocker()
+    result["dashboard_snapshot"] = snapshot_blocker["snapshot"]
+    if snapshot_blocker["status"]:
+        result["execution_status"] = snapshot_blocker["status"]
+        result["blocking_conditions"].append(
+            {
+                "status": snapshot_blocker["status"],
+                "detail": snapshot_blocker["detail"],
+            }
+        )
+        result["blocking_status"] = snapshot_blocker["status"]
+        result["blocking_detail"] = snapshot_blocker["detail"]
+        result["exact_user_message"] = snapshot_blocker["detail"]
+        result["next_admin_action"] = "Refresh the Review Requests dashboard snapshot before sending."
+        return _finalize_review_and_send_result(result)
     selected_rows = _review_send_selected_rows(state["approval_queue"], selected_order)
     matches = [
         row
@@ -5026,9 +5731,11 @@ def _operating_dashboard(
     trustpilot_gmail_scope_compatibility_resolver,
     trustpilot_gmail_draft_only_preflight,
     trustpilot_gmail_one_draft_create_locked_runner,
+    reports=None,
     filters=None,
 ):
     filters = filters or _normalize_filters({})
+    reports = reports or {}
     focus = history_ledger.get("focus") or {}
     summary = history_ledger.get("summary") or {}
     events = history_ledger.get("all_events") or []
@@ -5488,7 +6195,7 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
 
 def build_review_request_dashboard_counts_audit_report(params=None):
     params = params or {}
-    context = build_review_request_workbench_context(params)
+    context = build_review_request_workbench_context(params, use_dashboard_snapshot=False)
     dashboard = context["review_request_workbench"]["operating_dashboard"]
     queue = dashboard["approval_queue"]
     latest_sent_order = _safe_text(queue.get("latest_sent_order"), max_length=80)

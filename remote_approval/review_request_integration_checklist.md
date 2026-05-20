@@ -219,6 +219,31 @@ Phase 0.2 automation decision:
   found flags, selected order, email sent confirmation, sent count, and
   `why_not_ready`.
 
+#### Phase 5.32 Dashboard Snapshot Cache
+
+- [x] Add `shopify_review_request_dashboard_snapshot_refresh` as a local
+  no-write task that builds
+  `logs/shopify_review_request_dashboard_snapshot.json` and
+  `logs/shopify_review_request_dashboard_snapshot.html`.
+- [x] Normal Review Requests page loads read the cached dashboard snapshot and
+  do not call Shopify APIs, Gmail APIs, Trustpilot/Kudosi/Ali Reviews APIs, or
+  `translationsRegister`.
+- [x] Normal page loads do not recompute the full local candidate queue; the
+  scheduled/local refresh task owns queue recomputation.
+- [x] The dashboard shows `Review queue last updated`, data source `Cached
+  snapshot`, and status `Fresh`, `Stale`, or `Missing`.
+- [x] If the snapshot is missing, the dashboard shows `Review queue has not
+  been generated yet.` and the exact refresh command.
+- [x] If the snapshot is stale, the dashboard shows `Data may be stale. Last
+  updated X hours ago.` and Review & Send blocks until refresh.
+- [x] Suggested schedule:
+  initial 60-day sync plus snapshot refresh, daily 3-day sync plus snapshot
+  refresh, optional every-4-hours 3-day sync plus snapshot refresh, and daily
+  full candidate refresh.
+- [x] The snapshot cache remains local report-only: no customer email send, no
+  Gmail draft, no Shopify write/tag mutation, no external review API call, no
+  raw email output, and no secret output.
+
 #### Phase 5.29 Automatic Post-Send Shopify Tag Write
 
 - [x] Admin `Review & Send` now builds an immediate in-memory post-send audit

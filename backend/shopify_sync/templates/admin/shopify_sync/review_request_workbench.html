@@ -460,6 +460,25 @@
     <h1>Review Requests</h1>
     <p class="rrw-subtitle">Review and send Trustpilot review emails.</p>
 
+    <div class="rrw-section">
+        <div class="{% if dashboard.dashboard_snapshot.stale or dashboard.dashboard_snapshot.missing %}rrw-warning{% else %}rrw-note{% endif %}">
+            <strong>Review queue last updated:</strong> {{ dashboard.dashboard_snapshot.generated_at_display }}<br>
+            <strong>Data source:</strong> {{ dashboard.dashboard_snapshot.data_source_label }}<br>
+            <strong>Status:</strong> {{ dashboard.dashboard_snapshot.status_label }}
+            {% if dashboard.dashboard_snapshot.stale_message %}
+                <br>{{ dashboard.dashboard_snapshot.stale_message }}
+            {% endif %}
+        </div>
+    </div>
+
+    {% if dashboard.dashboard_snapshot.missing %}
+        <div class="rrw-warning">Review queue has not been generated yet.</div>
+        <p class="rrw-muted">
+            Run:
+            <code>{{ dashboard.dashboard_snapshot.refresh_command }}</code>
+        </p>
+    {% else %}
+
     {% if dashboard.approval_queue.ready_to_send_count == 0 %}
         <div class="rrw-note">{{ dashboard.approval_queue.empty_message }}</div>
     {% endif %}
@@ -2539,6 +2558,7 @@
         </div>
     </details>
     </details>
+    {% endif %}
 </div>
 {% endwith %}
 {% endblock %}
