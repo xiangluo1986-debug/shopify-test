@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -10,7 +11,11 @@ HISTORY_LIMIT_OPTIONS = (25, 50, 100)
 MAX_REPORT_BYTES = 4_000_000
 MAX_EVENTS = 700
 TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
-CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME = "codex_runs/shopify_review_request_customer_history_lookup_cache.json"
+CUSTOMER_HISTORY_LOOKUP_CACHE_BASENAME = "shopify_review_request_customer_history_lookup_cache.json"
+CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME = CUSTOMER_HISTORY_LOOKUP_CACHE_BASENAME
+CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME = f"codex_runs/{CUSTOMER_HISTORY_LOOKUP_CACHE_BASENAME}"
+CUSTOMER_HISTORY_LOOKUP_CACHE_ENV_PATH = "REVIEW_REQUEST_CUSTOMER_HISTORY_LOOKUP_CACHE_PATH"
+CUSTOMER_HISTORY_LOOKUP_ORDER_CACHE_PREFIX = "shopify_review_request_customer_history_lookup_"
 CUSTOMER_HISTORY_LOOKUP_CACHE_VERSION = 1
 
 HISTORY_REPORT_DEFINITIONS = (
@@ -503,7 +508,224 @@ def load_history_source_reports(log_dir):
 
 
 def customer_history_lookup_cache_path(log_dir):
-    return Path(log_dir) / CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME
+    return customer_history_lookup_cache_write_paths(log_dir)[0]
+
+
+def customer_history_lookup_cache_filename(order_name=""):
+    selected_order = _canonical_order_name(order_name)
+    if not selected_order:
+        return CUSTOMER_HISTORY_LOOKUP_CACHE_BASENAME
+    suffix = re.sub(r"[^0-9A-Za-z_-]+", "", selected_order.lstrip("#"))
+    if not suffix:
+        return CUSTOMER_HISTORY_LOOKUP_CACHE_BASENAME
+    return f"{CUSTOMER_HISTORY_LOOKUP_ORDER_CACHE_PREFIX}{suffix}.json"
+
+
+def customer_history_lookup_cache_read_paths(log_dir, order_name=""):
+    filename = customer_history_lookup_cache_filename(order_name)
+    log_path = Path(log_dir).expanduser()
+    project_root = _project_root_from_log_dir(log_path)
+    paths = []
+    env_path = _customer_history_lookup_cache_env_path(filename)
+    if env_path:
+        paths.append(env_path)
+    paths.extend(
+        [
+            Path("/app/logs") / filename,
+            Path("/app/backend/logs") / filename,
+            project_root / "logs" / filename,
+            project_root / "backend" / "logs" / filename,
+            log_path / filename,
+        ]
+    )
+    if not _canonical_order_name(order_name):
+        paths.extend(
+            [
+                Path("/app/logs") / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                Path("/app/backend/logs") / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                project_root / "logs" / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                project_root / "backend" / "logs" / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                log_path / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+            ]
+        )
+    return _dedupe_paths(paths)
+
+
+def customer_history_lookup_cache_write_paths(log_dir, order_name=""):
+    filename = customer_history_lookup_cache_filename(order_name)
+    log_path = Path(log_dir).expanduser()
+    project_root = _project_root_from_log_dir(log_path)
+    main_path = _customer_history_lookup_cache_env_path(filename) or (project_root / "logs" / filename)
+    mirror_candidates = [
+        project_root / "logs" / filename,
+        Path("/app/logs") / filename,
+        Path("/app/backend/logs") / filename,
+        project_root / "backend" / "logs" / filename,
+        log_path / filename,
+    ]
+    if not _canonical_order_name(order_name):
+        mirror_candidates.extend(
+            [
+                project_root / "logs" / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                Path("/app/logs") / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                Path("/app/backend/logs") / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                project_root / "backend" / "logs" / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+                log_path / CUSTOMER_HISTORY_LOOKUP_CACHE_LEGACY_FILENAME,
+            ]
+        )
+
+    paths = [main_path]
+    for path in _dedupe_paths(mirror_candidates):
+        if _path_identity(path) == _path_identity(main_path):
+            continue
+        if path.parent.exists():
+            paths.append(path)
+    return _dedupe_paths(paths)
+
+
+def _customer_history_lookup_cache_env_path(filename):
+    raw_path = os.environ.get(CUSTOMER_HISTORY_LOOKUP_CACHE_ENV_PATH, "").strip()
+    if not raw_path:
+        return None
+    path = Path(raw_path).expanduser()
+    if _path_looks_like_directory(path, raw_path):
+        return path / filename
+    if filename != CUSTOMER_HISTORY_LOOKUP_CACHE_BASENAME:
+        return path.parent / filename
+    return path
+
+
+def _project_root_from_log_dir(log_dir):
+    log_path = Path(log_dir).expanduser()
+    if log_path.name == "logs":
+        return log_path.parent
+    if log_path.name == "codex_runs":
+        return log_path.parent.parent
+    return log_path
+
+
+def _path_looks_like_directory(path, raw_path):
+    if raw_path.endswith(("/", "\\")):
+        return True
+    try:
+        if path.exists() and path.is_dir():
+            return True
+    except OSError:
+        return False
+    return not path.suffix
+
+
+def _dedupe_paths(paths):
+    seen = set()
+    deduped = []
+    for path in paths:
+        if not path:
+            continue
+        identity = _path_identity(path)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(path)
+    return deduped
+
+
+def _path_identity(path):
+    try:
+        resolved = Path(path).expanduser().resolve(strict=False)
+    except OSError:
+        resolved = Path(path)
+    text = str(resolved)
+    return text.lower() if os.name == "nt" else text
+
+
+def _existing_per_order_lookup_cache_paths(log_dir):
+    paths = []
+    for base_path in customer_history_lookup_cache_read_paths(log_dir):
+        directory = base_path.parent
+        try:
+            if not directory.exists() or not directory.is_dir():
+                continue
+            paths.extend(sorted(directory.glob(f"{CUSTOMER_HISTORY_LOOKUP_ORDER_CACHE_PREFIX}*.json")))
+        except OSError:
+            continue
+    return _dedupe_paths(paths)
+
+
+def _customer_history_lookup_public_path_check(item, selected_path=""):
+    return {
+        "path": item.get("path", ""),
+        "present": item.get("present") is True,
+        "loaded": item.get("loaded") is True,
+        "selected": bool(selected_path and item.get("path") == selected_path),
+        "status": _safe_text(item.get("status"), max_length=120),
+        "modified_at": _safe_text(item.get("modified_at"), max_length=120),
+        "size_bytes": item.get("size_bytes") or 0,
+        "error": _safe_text(item.get("error"), max_length=300),
+    }
+
+
+def _read_customer_history_lookup_cache_candidate(path):
+    result = {
+        "path": str(path),
+        "present": False,
+        "loaded": False,
+        "status": "missing",
+        "timestamp": "",
+        "modified_at": "",
+        "mtime": 0,
+        "size_bytes": 0,
+        "error": "",
+        "orders": {},
+    }
+    try:
+        if not path.exists():
+            return result
+        stat = path.stat()
+        result["present"] = True
+        result["modified_at"] = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+        result["mtime"] = stat.st_mtime
+        result["size_bytes"] = stat.st_size
+        if stat.st_size > MAX_REPORT_BYTES:
+            result["status"] = "present_but_too_large"
+            result["error"] = "cache_too_large"
+            return result
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        result["status"] = "present_but_unreadable"
+        result["error"] = _safe_text(str(exc), max_length=300)
+        return result
+    if not isinstance(data, dict):
+        result["status"] = "present_but_not_object"
+        result["error"] = "top_level_json_is_not_object"
+        return result
+
+    orders = {}
+    if isinstance(data.get("orders"), dict):
+        for value in data.get("orders", {}).values():
+            sanitized = sanitize_customer_history_lookup_result(value)
+            if sanitized:
+                orders[sanitized["selected_order"]] = sanitized
+    else:
+        sanitized = sanitize_customer_history_lookup_result(data)
+        if sanitized:
+            orders[sanitized["selected_order"]] = sanitized
+
+    result["loaded"] = True
+    result["orders"] = orders
+    result["status"] = _safe_text(data.get("cache_status") or data.get("report_status") or "loaded", max_length=120)
+    result["timestamp"] = _safe_text(data.get("generated_at") or data.get("timestamp"), max_length=120)
+    return result
+
+
+def _newer_lookup_result(existing, candidate):
+    if not existing:
+        return candidate
+    if _safe_text(candidate.get("generated_at"), max_length=120) >= _safe_text(
+        existing.get("generated_at"),
+        max_length=120,
+    ):
+        return candidate
+    return existing
 
 
 def sanitize_customer_history_lookup_result(payload):
@@ -590,37 +812,46 @@ def sanitize_customer_history_lookup_result(payload):
 
 
 def load_customer_history_lookup_cache(log_dir):
-    path = customer_history_lookup_cache_path(log_dir)
-    result = {
-        "present": False,
-        "loaded": False,
-        "path": str(path),
-        "relative_path": f"logs/{CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME}",
-        "orders": {},
-        "error": "",
-    }
-    if not path.exists():
-        return result
-    result["present"] = True
-    try:
-        stat = path.stat()
-        if stat.st_size > MAX_REPORT_BYTES:
-            result["error"] = "cache_too_large"
-            return result
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        result["error"] = _safe_text(str(exc), max_length=300)
-        return result
-    if not isinstance(data, dict):
-        result["error"] = "top_level_json_is_not_object"
-        return result
+    return load_customer_history_lookup_cache_for_order(log_dir)
+
+
+def load_customer_history_lookup_cache_for_order(log_dir, order_name=""):
+    candidate_paths = customer_history_lookup_cache_read_paths(log_dir)
+    if order_name:
+        candidate_paths.extend(customer_history_lookup_cache_read_paths(log_dir, order_name))
+    else:
+        candidate_paths.extend(_existing_per_order_lookup_cache_paths(log_dir))
+    candidate_paths = _dedupe_paths(candidate_paths)
+    checked = [_read_customer_history_lookup_cache_candidate(path) for path in candidate_paths]
+    loaded = [item for item in checked if item.get("loaded")]
+    selected = max(loaded, key=lambda item: item.get("mtime") or 0) if loaded else {}
+    selected_path = selected.get("path", "")
     orders = {}
-    for value in (data.get("orders") or {}).values():
-        sanitized = sanitize_customer_history_lookup_result(value)
-        if sanitized:
-            orders[sanitized["selected_order"]] = sanitized
-    result["loaded"] = True
-    result["orders"] = orders
+    for item in loaded:
+        for selected_order, cached_order in (item.get("orders") or {}).items():
+            orders[selected_order] = _newer_lookup_result(orders.get(selected_order), cached_order)
+
+    primary_path = str(candidate_paths[0]) if candidate_paths else ""
+    result = {
+        "present": any(item.get("present") for item in checked),
+        "loaded": bool(loaded),
+        "path": selected_path or primary_path,
+        "relative_path": selected_path or primary_path,
+        "orders": orders,
+        "error": next((item.get("error") for item in checked if item.get("error")), ""),
+        "paths_checked": [
+            _customer_history_lookup_public_path_check(item, selected_path=selected_path)
+            for item in checked
+        ],
+        "lookup_cache_paths_checked": [
+            _customer_history_lookup_public_path_check(item, selected_path=selected_path)
+            for item in checked
+        ],
+        "selected_path": selected_path,
+        "lookup_cache_selected_path": selected_path,
+        "entries_count": len(orders),
+        "lookup_cache_entries_count": len(orders),
+    }
     return result
 
 
@@ -628,14 +859,26 @@ def lookup_cached_customer_history_result(log_dir, order_name):
     selected_order = _canonical_order_name(order_name)
     if not selected_order:
         return {}
-    return (load_customer_history_lookup_cache(log_dir).get("orders") or {}).get(selected_order, {})
+    return (
+        load_customer_history_lookup_cache_for_order(log_dir, selected_order).get("orders") or {}
+    ).get(selected_order, {})
 
 
 def write_customer_history_lookup_cache(log_dir, lookup_payload):
+    result = write_customer_history_lookup_cache_with_mirrors(log_dir, lookup_payload)
+    return result.get("main_path")
+
+
+def write_customer_history_lookup_cache_with_mirrors(log_dir, lookup_payload):
     sanitized = sanitize_customer_history_lookup_result(lookup_payload)
     if not sanitized:
-        return None
-    path = customer_history_lookup_cache_path(log_dir)
+        return {
+            "main_path": None,
+            "paths_written": [],
+            "paths_failed": [],
+            "order_cache_paths_written": [],
+            "aggregate_cache_paths_written": [],
+        }
     cache = load_customer_history_lookup_cache(log_dir)
     orders = dict(cache.get("orders") or {})
     orders[sanitized["selected_order"]] = sanitized
@@ -657,14 +900,62 @@ def write_customer_history_lookup_cache(log_dir, lookup_payload):
         "translations_register_called": False,
         "external_review_api_call_performed": False,
     }
+    _assert_lookup_cache_privacy(payload)
+
+    aggregate_paths = customer_history_lookup_cache_write_paths(log_dir)
+    aggregate_result = _write_customer_history_lookup_cache_payload(payload, aggregate_paths)
+
+    order_payload = {
+        **payload,
+        **sanitized,
+        "cache_status": "customer_history_lookup_order_cache_ready",
+        "report_status": "customer_history_lookup_order_cache_ready",
+        "order_count": 1,
+        "orders": {sanitized["selected_order"]: sanitized},
+    }
+    _assert_lookup_cache_privacy(order_payload)
+    order_paths = customer_history_lookup_cache_write_paths(log_dir, sanitized["selected_order"])
+    order_result = _write_customer_history_lookup_cache_payload(order_payload, order_paths)
+    paths_written = aggregate_result["paths_written"] + order_result["paths_written"]
+    paths_failed = aggregate_result["paths_failed"] + order_result["paths_failed"]
+    return {
+        "main_path": aggregate_result["main_path"],
+        "paths_written": paths_written,
+        "paths_failed": paths_failed,
+        "aggregate_cache_paths_written": aggregate_result["paths_written"],
+        "order_cache_paths_written": order_result["paths_written"],
+    }
+
+
+def _write_customer_history_lookup_cache_payload(payload, paths):
+    main_path = paths[0] if paths else None
+    paths_written = []
+    paths_failed = []
+    for index, path in enumerate(paths):
+        try:
+            if index == 0:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            elif not path.parent.exists():
+                continue
+            with path.open("w", encoding="utf-8") as cache_file:
+                json.dump(payload, cache_file, ensure_ascii=False, indent=2, sort_keys=True)
+                cache_file.write("\n")
+            json.loads(path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            paths_failed.append({"path": str(path), "error": _safe_text(str(exc), max_length=300)})
+            continue
+        paths_written.append(str(path))
+    return {
+        "main_path": main_path,
+        "paths_written": paths_written,
+        "paths_failed": paths_failed,
+    }
+
+
+def _assert_lookup_cache_privacy(payload):
     text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     if EMAIL_RE.search(text) or SECRET_VALUE_RE.search(text):
         raise ValueError("Sanitized customer history lookup cache failed privacy scan.")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as cache_file:
-        json.dump(payload, cache_file, ensure_ascii=False, indent=2, sort_keys=True)
-        cache_file.write("\n")
-    return path
 
 
 def _load_report(log_dir, definition):

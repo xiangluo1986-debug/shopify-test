@@ -514,6 +514,48 @@
                     {% endfor %}
                 </tbody>
             </table>
+            <h2>Customer history lookup cache diagnostics</h2>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>Selected path</th><td><code>{{ dashboard.lookup_cache.selected_path|default:"-" }}</code></td></tr>
+                    <tr><th>Entries</th><td>{{ dashboard.lookup_cache.entries_count|default:"0" }}</td></tr>
+                    <tr><th>#21687 lookup cache found</th><td>{{ dashboard.lookup_cache.order_21687_lookup_cache_found|yesno:"true,false" }}</td></tr>
+                    <tr><th>#21687 should block Review &amp; Send</th><td>{{ dashboard.lookup_cache.order_21687_should_block_review_send|yesno:"true,false" }}</td></tr>
+                    <tr><th>#21687 evidence order</th><td>{{ dashboard.lookup_cache.order_21687_evidence_order_name|default:"-" }}</td></tr>
+                    <tr><th>#21687 safe keyword</th><td>{{ dashboard.lookup_cache.order_21687_safe_detected_keyword|default:"-" }}</td></tr>
+                    <tr><th>#21687 blocking reason</th><td>{{ dashboard.lookup_cache.order_21687_blocking_reason|default:"-" }}</td></tr>
+                </tbody>
+            </table>
+            <table class="rrw-table">
+                <thead>
+                    <tr>
+                        <th>Lookup cache path checked</th>
+                        <th>Present</th>
+                        <th>Loaded</th>
+                        <th>Selected</th>
+                        <th>Status</th>
+                        <th>Modified</th>
+                        <th>Size</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for path in dashboard.lookup_cache.paths_checked %}
+                        <tr>
+                            <td><code>{{ path.path }}</code></td>
+                            <td>{{ path.present|yesno:"true,false" }}</td>
+                            <td>{{ path.loaded|yesno:"true,false" }}</td>
+                            <td>{{ path.selected|yesno:"true,false" }}</td>
+                            <td><code>{{ path.status }}</code></td>
+                            <td>{{ path.modified_at|default:"-" }}</td>
+                            <td>{{ path.size_bytes }} bytes</td>
+                            <td>{{ path.error|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8" class="rrw-muted">No customer history lookup cache paths were checked.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </details>
 
@@ -654,6 +696,12 @@
                             {% firstof row.trustpilot_history_label row.trustpilot_history "History not confirmed" %}
                             {% if row.previous_trustpilot_tag_values %}
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
+                            {% endif %}
+                            {% if row.trustpilot_note_evidence_order_name %}
+                                <div class="rrw-secondary-line">Evidence order: {{ row.trustpilot_note_evidence_order_name }}</div>
+                            {% endif %}
+                            {% if row.trustpilot_note_safe_keyword %}
+                                <div class="rrw-secondary-line">Safe keyword: {{ row.trustpilot_note_safe_keyword }}</div>
                             {% endif %}
                         </td>
                         <td class="rrw-status-col">
@@ -879,6 +927,12 @@
                             {% firstof row.trustpilot_history_label row.trustpilot_history "History not confirmed" %}
                             {% if row.previous_trustpilot_tag_values %}
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
+                            {% endif %}
+                            {% if row.trustpilot_note_evidence_order_name %}
+                                <div class="rrw-secondary-line">Evidence order: {{ row.trustpilot_note_evidence_order_name }}</div>
+                            {% endif %}
+                            {% if row.trustpilot_note_safe_keyword %}
+                                <div class="rrw-secondary-line">Safe keyword: {{ row.trustpilot_note_safe_keyword }}</div>
                             {% endif %}
                         </td>
                         <td>{% firstof row.eligibility_reason_plain row.reason row.block_reason "Not ready" %}</td>

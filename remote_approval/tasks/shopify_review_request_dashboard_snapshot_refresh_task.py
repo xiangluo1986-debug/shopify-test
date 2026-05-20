@@ -235,6 +235,9 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 "gmail_api_call_performed": False,
                 "shopify_write_performed": False,
             },
+            "lookup_cache_paths_checked": scan.get("lookup_cache_paths_checked") or [],
+            "lookup_cache_selected_path": _safe_text(scan.get("lookup_cache_selected_path"), max_length=500),
+            "lookup_cache_entries_count": _int_value(scan.get("lookup_cache_entries_count")),
             "dashboard_counters": {
                 "ready_to_send_count": eligible_total,
                 "eligible_total": eligible_total,
@@ -426,6 +429,28 @@ def _dashboard_from_scan(
         "sent_trustpilot_count": already_sent_total,
         "approval_queue": approval_queue,
         "last_60_days_candidate_scan": _compact_scan_for_snapshot(scan),
+        "lookup_cache": {
+            "found": scan.get("customer_history_lookup_cache_found") is True,
+            "loaded": scan.get("customer_history_lookup_cache_loaded") is True,
+            "path": _safe_text(scan.get("customer_history_lookup_cache_path"), max_length=500),
+            "paths_checked": scan.get("lookup_cache_paths_checked") or [],
+            "selected_path": _safe_text(scan.get("lookup_cache_selected_path"), max_length=500),
+            "entries_count": _int_value(scan.get("lookup_cache_entries_count")),
+            "order_21687_lookup_cache_found": scan.get("order_21687_lookup_cache_found") is True,
+            "order_21687_should_block_review_send": scan.get("order_21687_should_block_review_send") is True,
+            "order_21687_evidence_order_name": _safe_text(
+                scan.get("order_21687_evidence_order_name"),
+                max_length=80,
+            ),
+            "order_21687_safe_detected_keyword": _safe_text(
+                scan.get("order_21687_safe_detected_keyword"),
+                max_length=80,
+            ),
+            "order_21687_blocking_reason": _safe_text(
+                scan.get("order_21687_blocking_reason"),
+                max_length=300,
+            ),
+        },
         "order_data_coverage": order_data_coverage,
         "setup_checklist": {"items": []},
         "current_state_label": "Ready for final review" if eligible_total else "Waiting for eligible orders",
@@ -784,9 +809,14 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         ),
         "order_21687_lookup_cache_found": order_21687.get("lookup_cache_found") is True,
         "order_21687_should_block_review_send": order_21687.get("should_block_review_send") is True,
+        "order_21687_evidence_order_name": order_21687.get("evidence_order_name", ""),
+        "order_21687_safe_detected_keyword": order_21687.get("safe_detected_keyword", ""),
         "order_21687_removed_from_needs_review": order_21687.get("removed_from_needs_review") is True,
         "order_21687_review_send_button_disabled": order_21687.get("review_send_button_disabled") is True,
         "order_21687_blocking_reason": order_21687.get("blocking_reason", ""),
+        "lookup_cache_paths_checked": payload.get("lookup_cache_paths_checked") or [],
+        "lookup_cache_selected_path": payload.get("lookup_cache_selected_path", ""),
+        "lookup_cache_entries_count": _int_value(payload.get("lookup_cache_entries_count")),
         "stale_counter_warning": False,
         "shopify_api_call_performed": payload.get("shopify_api_call_performed") is True,
         "shopify_write_performed": payload.get("shopify_write_performed") is True,
@@ -816,9 +846,13 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Already sent total: {counters.get('already_sent_total', 0)}\n"
         f"#21687 lookup cache found: {order_21687.get('lookup_cache_found')}\n"
         f"#21687 should block Review & Send: {order_21687.get('should_block_review_send')}\n"
+        f"#21687 evidence order: {order_21687.get('evidence_order_name') or '-'}\n"
+        f"#21687 safe keyword: {order_21687.get('safe_detected_keyword') or '-'}\n"
         f"#21687 removed from Needs review: {order_21687.get('removed_from_needs_review')}\n"
         f"#21687 Review & Send disabled: {order_21687.get('review_send_button_disabled')}\n"
         f"#21687 blocking reason: {order_21687.get('blocking_reason') or '-'}\n"
+        f"Lookup cache selected path: {payload.get('lookup_cache_selected_path') or '-'}\n"
+        f"Lookup cache entries: {payload.get('lookup_cache_entries_count') or 0}\n"
         f"Last Shopify sync: {payload.get('last_shopify_sync_at') or 'Unknown'}\n"
         f"Last candidate scan: {payload.get('last_candidate_scan_at') or 'Unknown'}\n\n"
         "Safety: no Shopify API call, no Shopify write, no Gmail API call, no email send, "
@@ -834,6 +868,11 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
 def _render_html(payload: dict) -> str:
     counters = payload.get("dashboard_counters") if isinstance(payload.get("dashboard_counters"), dict) else {}
     blocked = payload.get("blocked_summary") if isinstance(payload.get("blocked_summary"), dict) else {}
+    order_21687 = (
+        payload.get("order_21687_customer_history_lookup_validation")
+        if isinstance(payload.get("order_21687_customer_history_lookup_validation"), dict)
+        else {}
+    )
     safety_rows = "\n".join(
         f"<tr><th>{escape(label)}</th><td>{escape(str(payload.get(key) is True))}</td></tr>"
         for label, key in (
@@ -881,6 +920,13 @@ def _render_html(payload: dict) -> str:
       <tr><th>Blocked first-order count</th><td>{escape(str(blocked.get('blocked_first_order_count', 0)))}</td></tr>
       <tr><th>Blocked not second-or-later count</th><td>{escape(str(blocked.get('blocked_not_second_or_later_count', 0)))}</td></tr>
       <tr><th>Blocked second-order not delivered count</th><td>{escape(str(blocked.get('blocked_second_order_not_delivered_count', 0)))}</td></tr>
+      <tr><th>Lookup cache selected path</th><td>{escape(str(payload.get('lookup_cache_selected_path') or '-'))}</td></tr>
+      <tr><th>Lookup cache entries</th><td>{escape(str(payload.get('lookup_cache_entries_count', 0)))}</td></tr>
+      <tr><th>#21687 lookup cache found</th><td>{escape(str(order_21687.get('lookup_cache_found') is True))}</td></tr>
+      <tr><th>#21687 should block Review & Send</th><td>{escape(str(order_21687.get('should_block_review_send') is True))}</td></tr>
+      <tr><th>#21687 evidence order</th><td>{escape(str(order_21687.get('evidence_order_name') or '-'))}</td></tr>
+      <tr><th>#21687 safe keyword</th><td>{escape(str(order_21687.get('safe_detected_keyword') or '-'))}</td></tr>
+      <tr><th>#21687 blocking reason</th><td>{escape(str(order_21687.get('blocking_reason') or '-'))}</td></tr>
       <tr><th>Stale after minutes</th><td>{escape(str(payload.get('stale_after_minutes', '')))}</td></tr>
     </tbody>
   </table>

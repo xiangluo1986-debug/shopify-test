@@ -1049,7 +1049,8 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
         or last_scan.get("already_sent_count")
         or len(already_sent_rows)
     )
-    order_21687_lookup = lookup_cached_customer_history_result(_log_dir(), "#21687")
+    lookup_cache = load_customer_history_lookup_cache(_log_dir())
+    order_21687_lookup = _cached_lookup_order_from_cache(lookup_cache, "#21687")
     order_21687_review_orders = {row.get("order") for row in review_rows}
     order_21687_blocked_orders = {row.get("order") for row in blocked_rows}
     order_21687_already_sent_orders = {row.get("order") for row in already_sent_rows}
@@ -1121,6 +1122,11 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
             "gmail_api_call_performed": False,
             "shopify_write_performed": False,
         },
+        "lookup_cache_paths_checked": lookup_cache.get("lookup_cache_paths_checked") or lookup_cache.get("paths_checked") or [],
+        "lookup_cache_selected_path": lookup_cache.get("lookup_cache_selected_path") or lookup_cache.get("selected_path", ""),
+        "lookup_cache_entries_count": _int_or_zero(
+            lookup_cache.get("lookup_cache_entries_count") or lookup_cache.get("entries_count")
+        ),
         "dashboard_counters": {
             "ready_to_send_count": _int_or_zero(dashboard.get("ready_to_send_count")),
             "eligible_total": eligible_total,
@@ -1454,6 +1460,11 @@ def write_review_request_dashboard_snapshot_reports(payload):
 def _render_dashboard_snapshot_report_html(payload):
     counters = payload.get("dashboard_counters") if isinstance(payload.get("dashboard_counters"), dict) else {}
     blocked = payload.get("blocked_summary") if isinstance(payload.get("blocked_summary"), dict) else {}
+    order_21687 = (
+        payload.get("order_21687_customer_history_lookup_validation")
+        if isinstance(payload.get("order_21687_customer_history_lookup_validation"), dict)
+        else {}
+    )
     safety_rows = "\n".join(
         f"<tr><th>{escape(label)}</th><td>{escape(str(payload.get(key) is True))}</td></tr>"
         for label, key in (
@@ -1494,6 +1505,13 @@ def _render_dashboard_snapshot_report_html(payload):
       <tr><th>Needs review visible count</th><td>{escape(str(counters.get('needs_review_visible_count', 0)))}</td></tr>
       <tr><th>Already sent total</th><td>{escape(str(counters.get('already_sent_total', 0)))}</td></tr>
       <tr><th>Blocked total</th><td>{escape(str(blocked.get('blocked_total', 0)))}</td></tr>
+      <tr><th>Lookup cache selected path</th><td>{escape(str(payload.get('lookup_cache_selected_path') or '-'))}</td></tr>
+      <tr><th>Lookup cache entries</th><td>{escape(str(payload.get('lookup_cache_entries_count', 0)))}</td></tr>
+      <tr><th>#21687 lookup cache found</th><td>{escape(str(order_21687.get('lookup_cache_found') is True))}</td></tr>
+      <tr><th>#21687 should block Review & Send</th><td>{escape(str(order_21687.get('should_block_review_send') is True))}</td></tr>
+      <tr><th>#21687 evidence order</th><td>{escape(str(order_21687.get('evidence_order_name') or '-'))}</td></tr>
+      <tr><th>#21687 safe keyword</th><td>{escape(str(order_21687.get('safe_detected_keyword') or '-'))}</td></tr>
+      <tr><th>#21687 blocking reason</th><td>{escape(str(order_21687.get('blocking_reason') or '-'))}</td></tr>
     </tbody>
   </table>
   <h2>Safety</h2>
@@ -6404,6 +6422,7 @@ def _operating_dashboard(
         "sent_trustpilot_count": sent_count,
         "approval_queue": approval_queue,
         "last_60_days_candidate_scan": last_60_days_scan,
+        "lookup_cache": _lookup_cache_dashboard_summary(last_60_days_scan),
         "order_data_coverage": order_data_coverage,
         "setup_checklist": setup_checklist,
         "current_state_label": (
@@ -6487,6 +6506,31 @@ def _operating_dashboard(
             "for sending requests and checking request status."
         ),
         "ali_reviews_status_label": _admin_status_label(ali_reviews_status.get("status")),
+    }
+
+
+def _lookup_cache_dashboard_summary(scan):
+    return {
+        "found": scan.get("customer_history_lookup_cache_found") is True,
+        "loaded": scan.get("customer_history_lookup_cache_loaded") is True,
+        "path": _safe_text(scan.get("customer_history_lookup_cache_path"), max_length=500),
+        "paths_checked": scan.get("lookup_cache_paths_checked") or [],
+        "selected_path": _safe_text(scan.get("lookup_cache_selected_path"), max_length=500),
+        "entries_count": _int_or_zero(scan.get("lookup_cache_entries_count")),
+        "order_21687_lookup_cache_found": scan.get("order_21687_lookup_cache_found") is True,
+        "order_21687_should_block_review_send": scan.get("order_21687_should_block_review_send") is True,
+        "order_21687_evidence_order_name": _safe_text(
+            scan.get("order_21687_evidence_order_name"),
+            max_length=80,
+        ),
+        "order_21687_safe_detected_keyword": _safe_text(
+            scan.get("order_21687_safe_detected_keyword"),
+            max_length=80,
+        ),
+        "order_21687_blocking_reason": _safe_text(
+            scan.get("order_21687_blocking_reason"),
+            max_length=300,
+        ),
     }
 
 
@@ -6727,6 +6771,9 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "customer_history_lookup_cache_found": scan.get("customer_history_lookup_cache_found") is True,
         "customer_history_lookup_cache_loaded": scan.get("customer_history_lookup_cache_loaded") is True,
         "customer_history_lookup_cache_path": scan.get("customer_history_lookup_cache_path", ""),
+        "lookup_cache_paths_checked": scan.get("lookup_cache_paths_checked") or [],
+        "lookup_cache_selected_path": scan.get("lookup_cache_selected_path", ""),
+        "lookup_cache_entries_count": _int_or_zero(scan.get("lookup_cache_entries_count")),
         "visible_rows_missing_live_lookup_count": scan.get("visible_rows_missing_live_lookup_count", 0),
         "visible_rows_blocked_by_missing_or_stale_live_lookup_count": scan.get(
             "visible_rows_blocked_by_missing_or_stale_live_lookup_count",
@@ -9464,6 +9511,11 @@ def _last_60_days_candidate_scan(
         "customer_history_lookup_cache_found": lookup_cache.get("present") is True,
         "customer_history_lookup_cache_loaded": lookup_cache.get("loaded") is True,
         "customer_history_lookup_cache_path": lookup_cache.get("relative_path", ""),
+        "lookup_cache_paths_checked": lookup_cache.get("lookup_cache_paths_checked") or lookup_cache.get("paths_checked") or [],
+        "lookup_cache_selected_path": lookup_cache.get("lookup_cache_selected_path") or lookup_cache.get("selected_path", ""),
+        "lookup_cache_entries_count": _int_or_zero(
+            lookup_cache.get("lookup_cache_entries_count") or lookup_cache.get("entries_count")
+        ),
         "visible_rows_missing_live_lookup_count": sum(
             1 for row in review_queue_rows if row.get("cached_customer_history_lookup_found") is not True
         ),
@@ -11950,7 +12002,7 @@ def _customer_history_lookup_gate(lookup, reference_at=""):
         return _customer_history_lookup_gate_result(
             status="blocked_trustpilot_note",
             reason=f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}.",
-            label="Blocked: previous Trustpilot found",
+            label=f"Checked: {history_count} order{'s' if history_count != 1 else ''}",
             action_label="Customer history checked",
             missing_requirement="No prior Trustpilot send",
             evidence_found=True,
@@ -11960,7 +12012,7 @@ def _customer_history_lookup_gate(lookup, reference_at=""):
         return _customer_history_lookup_gate_result(
             status="blocked_trustpilot_tag",
             reason=f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}.",
-            label="Blocked: previous Trustpilot found",
+            label=f"Checked: {history_count} order{'s' if history_count != 1 else ''}",
             action_label="Customer history checked",
             missing_requirement="No prior Trustpilot send",
             evidence_found=True,

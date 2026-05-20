@@ -692,6 +692,11 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "customer_history_lookup_cache_found": lookup_cache.get("present") is True,
         "customer_history_lookup_cache_loaded": lookup_cache.get("loaded") is True,
         "customer_history_lookup_cache_path": lookup_cache.get("relative_path", ""),
+        "lookup_cache_paths_checked": lookup_cache.get("lookup_cache_paths_checked") or lookup_cache.get("paths_checked") or [],
+        "lookup_cache_selected_path": lookup_cache.get("lookup_cache_selected_path") or lookup_cache.get("selected_path", ""),
+        "lookup_cache_entries_count": _int_value(
+            lookup_cache.get("lookup_cache_entries_count") or lookup_cache.get("entries_count")
+        ),
         "visible_rows_missing_live_lookup_count": sum(
             1 for row in review_queue_rows if row.get("cached_customer_history_lookup_found") is not True
         ),
@@ -1737,7 +1742,7 @@ def _customer_history_lookup_gate(lookup: dict, reference_at: str = "") -> dict:
         return _customer_history_lookup_gate_result(
             status="blocked_trustpilot_note",
             reason=f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}.",
-            label="Blocked: previous Trustpilot found",
+            label=f"Checked: {history_count} order{'s' if history_count != 1 else ''}",
             action_label="Customer history checked",
             missing_requirement="No prior Trustpilot send",
             evidence_found=True,
@@ -1747,7 +1752,7 @@ def _customer_history_lookup_gate(lookup: dict, reference_at: str = "") -> dict:
         return _customer_history_lookup_gate_result(
             status="blocked_trustpilot_tag",
             reason=f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}.",
-            label="Blocked: previous Trustpilot found",
+            label=f"Checked: {history_count} order{'s' if history_count != 1 else ''}",
             action_label="Customer history checked",
             missing_requirement="No prior Trustpilot send",
             evidence_found=True,
@@ -2265,6 +2270,9 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "order_21687_removed_from_needs_review": payload.get("order_21687_removed_from_needs_review") is True,
         "order_21687_review_send_button_disabled": payload.get("order_21687_review_send_button_disabled") is True,
         "order_21687_blocking_reason": payload.get("order_21687_blocking_reason", ""),
+        "lookup_cache_paths_checked": payload.get("lookup_cache_paths_checked") or [],
+        "lookup_cache_selected_path": payload.get("lookup_cache_selected_path", ""),
+        "lookup_cache_entries_count": int(payload.get("lookup_cache_entries_count") or 0),
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "gmail_api_call_performed": False,
@@ -2297,6 +2305,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"#21687 removed from Needs review: {payload.get('order_21687_removed_from_needs_review')}\n"
         f"#21687 Review & Send disabled: {payload.get('order_21687_review_send_button_disabled')}\n"
         f"#21687 blocking reason: {payload.get('order_21687_blocking_reason') or '-'}\n"
+        f"Lookup cache selected path: {payload.get('lookup_cache_selected_path') or '-'}\n"
+        f"Lookup cache entries: {payload.get('lookup_cache_entries_count') or 0}\n"
         f"Coverage warnings: {', '.join(payload.get('coverage_warnings') or []) or 'none'}\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"
@@ -2345,6 +2355,13 @@ def _render_html(payload: dict) -> str:
     <tr><th>Already sent count</th><td>{escape(str(payload.get("already_sent_count", 0)))}</td></tr>
     <tr><th>Blocked / not ready count</th><td>{escape(str(payload.get("blocked_count", 0)))}</td></tr>
     <tr><th>Blocked eBay order count</th><td>{escape(str(payload.get("blocked_ebay_order_count", 0)))}</td></tr>
+    <tr><th>Lookup cache selected path</th><td>{escape(str(payload.get("lookup_cache_selected_path", "") or "-"))}</td></tr>
+    <tr><th>Lookup cache entries</th><td>{escape(str(payload.get("lookup_cache_entries_count", 0)))}</td></tr>
+    <tr><th>#21687 lookup cache found</th><td>{escape(str(payload.get("order_21687_lookup_cache_found") is True))}</td></tr>
+    <tr><th>#21687 should block Review & Send</th><td>{escape(str(payload.get("order_21687_should_block_review_send") is True))}</td></tr>
+    <tr><th>#21687 evidence order</th><td>{escape(str(payload.get("order_21687_evidence_order_name", "") or "-"))}</td></tr>
+    <tr><th>#21687 safe keyword</th><td>{escape(str(payload.get("order_21687_safe_detected_keyword", "") or "-"))}</td></tr>
+    <tr><th>#21687 blocking reason</th><td>{escape(str(payload.get("order_21687_blocking_reason", "") or "-"))}</td></tr>
   </tbody></table>
   <h2>Review Queue Batch</h2>
   {_summary_table(payload.get("review_queue_candidates") or [])}

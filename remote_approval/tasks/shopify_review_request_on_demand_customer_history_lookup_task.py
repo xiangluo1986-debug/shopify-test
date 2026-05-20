@@ -10,7 +10,7 @@ from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
-from backend.shopify_sync.review_request_history_ledger import write_customer_history_lookup_cache
+from backend.shopify_sync.review_request_history_ledger import write_customer_history_lookup_cache_with_mirrors
 from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 
@@ -1517,11 +1517,13 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
 
     should_block = bool(blocking_reason)
     final_recommendation = "block_review_send" if should_block else "allow_review_send"
+    generated_at = utc_now_iso()
     payload = {
-        "timestamp": utc_now_iso(),
+        "timestamp": generated_at,
+        "generated_at": generated_at,
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.32E",
+        "phase": "5.32F",
         "mode": "dry-run-read-only-on-demand-customer-history-lookup",
         "command_label": COMMAND_LABEL,
         "lookup_status": lookup_status,
@@ -1657,6 +1659,10 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "blocking_reason": payload["blocking_reason"],
         "lookup_cache_saved": payload.get("lookup_cache_saved") is True,
         "lookup_cache_path": payload.get("lookup_cache_path", ""),
+        "lookup_cache_paths_written": payload.get("lookup_cache_paths_written") or [],
+        "lookup_cache_paths_failed": payload.get("lookup_cache_paths_failed") or [],
+        "lookup_cache_aggregate_paths_written": payload.get("lookup_cache_aggregate_paths_written") or [],
+        "lookup_cache_order_paths_written": payload.get("lookup_cache_order_paths_written") or [],
         "lookup_cache_write_error_sanitized": payload.get("lookup_cache_write_error_sanitized", ""),
         "shopify_write_performed": False,
         "mutation_performed": False,
@@ -1687,14 +1693,23 @@ def _write_html_report(payload: dict) -> Path:
 
 def _persist_lookup_cache(payload: dict) -> dict:
     try:
-        cache_path = write_customer_history_lookup_cache(LOG_DIR, payload)
+        cache_result = write_customer_history_lookup_cache_with_mirrors(LOG_DIR, payload)
     except (OSError, ValueError) as exc:
         payload["lookup_cache_saved"] = False
         payload["lookup_cache_path"] = ""
+        payload["lookup_cache_paths_written"] = []
+        payload["lookup_cache_paths_failed"] = []
+        payload["lookup_cache_aggregate_paths_written"] = []
+        payload["lookup_cache_order_paths_written"] = []
         payload["lookup_cache_write_error_sanitized"] = _safe_text(exc, 300)
         return payload
+    cache_path = cache_result.get("main_path")
     payload["lookup_cache_saved"] = cache_path is not None
     payload["lookup_cache_path"] = str(cache_path) if cache_path else ""
+    payload["lookup_cache_paths_written"] = cache_result.get("paths_written") or []
+    payload["lookup_cache_paths_failed"] = cache_result.get("paths_failed") or []
+    payload["lookup_cache_aggregate_paths_written"] = cache_result.get("aggregate_cache_paths_written") or []
+    payload["lookup_cache_order_paths_written"] = cache_result.get("order_cache_paths_written") or []
     payload["lookup_cache_write_error_sanitized"] = ""
     return payload
 
@@ -1703,6 +1718,9 @@ def _render_html_report(payload: dict) -> str:
     history_names = ", ".join(payload["shopify_history_order_names"]) or "-"
     local_names = ", ".join(payload["local_customer_history_order_names"]) or "-"
     methods = ", ".join(payload["customer_history_lookup_methods_attempted"]) or "-"
+    cache_paths = "<br>".join(
+        escape(str(path)) for path in (payload.get("lookup_cache_paths_written") or [])
+    ) or "-"
     safety_rows = "\n".join(
         f"<tr><th>{escape(str(key))}</th><td>{escape(str(payload.get(key)))}</td></tr>"
         for key in (
@@ -1757,6 +1775,7 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>Trustpilot tag evidence found</th><td>{escape(str(payload["trustpilot_tag_evidence_found"]))}</td></tr>
       <tr><th>Evidence order</th><td>{escape(payload["evidence_order_name"] or "-")}</td></tr>
       <tr><th>Safe keyword</th><td>{escape(payload["safe_detected_keyword"] or "-")}</td></tr>
+      <tr><th>Lookup cache paths written</th><td>{cache_paths}</td></tr>
     </tbody>
   </table>
   <h2>Safety</h2>
@@ -1784,6 +1803,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Should block Review & Send: {payload.get('should_block_review_send')}\n"
         f"Blocking reason: {payload.get('blocking_reason') or '-'}\n"
         f"Lookup cache saved: {payload.get('lookup_cache_saved')}\n"
+        f"Lookup cache path: {payload.get('lookup_cache_path') or '-'}\n"
+        f"Lookup cache paths written: {', '.join(payload.get('lookup_cache_paths_written') or []) or '-'}\n"
         "Safety: no Shopify write, no tag mutation, no Gmail API/send, no raw email, no full note output.\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"
