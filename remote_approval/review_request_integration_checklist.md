@@ -1294,6 +1294,27 @@ Future tracking design note:
   `tagsAdd` / `tagsRemove`, send Gmail, create Gmail drafts, call external
   review APIs, or call `translationsRegister`.
 
+## Phase 5.31D Active Shopify read_all_orders Scope Verification
+
+- [x] Added `shopify_review_request_shopify_scope_verification` to verify the
+  active Shopify token through the read-only access-scope endpoint.
+- [x] The scope report checks both `read_orders` and `read_all_orders`, reports
+  `reauthorization_required`, and never outputs the access token.
+- [x] Documented that adding `read_all_orders` in Shopify app config may require
+  app reauthorization/reinstall and saving a new token before Review Requests
+  can use full customer history.
+- [x] The on-demand customer history lookup now blocks before customer-history
+  reads unless the active token scope check confirms `read_all_orders`.
+- [x] `SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER="#21687"` remains the retest path;
+  after scope is available, the report should show the full Shopify customer
+  history count, historical order names, and safe Trustpilot note/tag evidence
+  if present.
+- [x] The Review Requests dashboard shows customer history lookup status and
+  keeps `Review & Send` hidden for rows that still need a full-history check or
+  Shopify `read_all_orders` permission.
+- [x] No Review Request send is allowed when full Shopify customer history cannot
+  be confirmed.
+
 ## Phase 5.28J Review Send Failure Audit And Queue Pagination
 
 - [x] Added `shopify_review_request_review_send_failure_audit` to diagnose the

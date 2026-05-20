@@ -195,6 +195,19 @@ low-confidence. The local 60-day sync is fast but can miss older Shopify orders,
 so admin `Review & Send` must block with `Customer history needs live Shopify
 check before sending.` until a matching clean lookup report exists.
 
+Phase 5.31D adds `shopify_review_request_shopify_scope_verification` to verify
+the active Shopify token, not just the app config, has both `read_orders` and
+`read_all_orders`. Adding `read_all_orders` in Shopify app settings may leave an
+old installed token unchanged; if the report shows the active token is missing
+`read_all_orders`, reauthorize or reinstall the Shopify app and save the new
+token before sending any Review Request email.
+
+Run the scope verification with:
+
+```powershell
+python remote_approval_runner.py --task shopify_review_request_shopify_scope_verification --mode dry-run --approval local
+```
+
 Run a selected lookup with:
 
 ```powershell
@@ -204,15 +217,21 @@ Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER
 ```
 
 The lookup may perform read-only Shopify order/customer history reads using the
-existing installation credentials. Lifetime history is only considered
-confirmed when the installed Shopify scope includes `read_all_orders`; otherwise
-the selected order remains blocked even if the live API returns recent orders.
+existing installation credentials. It first checks the active token through
+Shopify's read-only access-scope endpoint. Lifetime history is only considered
+confirmed when the active token includes `read_all_orders`; otherwise the
+selected order remains blocked with `Shopify token does not have
+read_all_orders. Reauthorize app before sending.` even if the live API returns
+recent orders.
 It must not write Shopify data, mutate tags, call `tagsAdd` / `tagsRemove`,
 send Gmail, create Gmail drafts, call external review APIs, call
 `translationsRegister`, output raw email/phone/address, or output full note
 text. Its report should show only counts, order names, Trustpilot evidence
 booleans, evidence order name, safe keyword, final recommendation, and block
-reason.
+reason. For `#21687`, rerun the selected lookup above after scope verification;
+the expected clean-history signal is a full Shopify customer history count that
+matches Shopify UI, with historical order names listed and Trustpilot
+note/tag evidence reported only as a safe keyword plus order name.
 
 Phase 5.29 makes the admin `Review & Send` POST complete the same one-order
 Shopify tag update automatically after Gmail drafts.send succeeds. The POST

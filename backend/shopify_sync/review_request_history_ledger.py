@@ -101,6 +101,22 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("customer_level_duplicate_audit_status", "report_status", "status"),
     },
     {
+        "key": "on_demand_customer_history_lookup",
+        "label": "On-demand customer history lookup",
+        "filename": "codex_runs/shopify_review_request_on_demand_customer_history_lookup.json",
+        "channel": "trustpilot",
+        "event_type": "duplicate_block",
+        "status_keys": ("lookup_status", "report_status", "status"),
+    },
+    {
+        "key": "shopify_scope_verification",
+        "label": "Shopify read_all_orders scope verification",
+        "filename": "codex_runs/shopify_review_request_shopify_scope_verification.json",
+        "channel": "trustpilot",
+        "event_type": "coverage_check",
+        "status_keys": ("scope_verification_status", "report_status", "status"),
+    },
+    {
         "key": "trustpilot_one_candidate_gmail_draft_package",
         "label": "Trustpilot one-candidate Gmail draft package",
         "filename": "shopify_review_request_trustpilot_one_candidate_gmail_draft_package.json",

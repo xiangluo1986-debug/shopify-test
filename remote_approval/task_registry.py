@@ -30,6 +30,9 @@ from remote_approval.tasks.shopify_review_request_customer_identity_drilldown_au
 from remote_approval.tasks.shopify_review_request_on_demand_customer_history_lookup_task import (
     run_shopify_review_request_on_demand_customer_history_lookup_task,
 )
+from remote_approval.tasks.shopify_review_request_shopify_scope_verification_task import (
+    run_shopify_review_request_shopify_scope_verification_task,
+)
 from remote_approval.tasks.shopify_review_request_review_send_failure_audit_task import (
     run_shopify_review_request_review_send_failure_audit_task,
 )
@@ -419,6 +422,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_on_demand_customer_history_lookup": (
         run_shopify_review_request_on_demand_customer_history_lookup_task
     ),
+    "shopify_review_request_shopify_scope_verification": (
+        run_shopify_review_request_shopify_scope_verification_task
+    ),
     "shopify_review_request_review_send_failure_audit": (
         run_shopify_review_request_review_send_failure_audit_task
     ),
@@ -801,6 +807,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify order/customer history query only; no writes, no Gmail, no raw contact or full note output",
         "review_file_path": "logs/codex_runs/shopify_review_request_on_demand_customer_history_lookup.json",
+    },
+    "shopify_review_request_shopify_scope_verification": {
+        "description": "Verify the active Shopify token has read_orders and read_all_orders for Review Request full-history checks.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify access scope endpoint only; no writes, no Gmail, no token output",
+        "review_file_path": "logs/codex_runs/shopify_review_request_shopify_scope_verification.json",
     },
     "shopify_review_request_review_send_failure_audit": {
         "description": "Diagnose the latest Review & Send failure for #21075 without Gmail, Shopify, or external review writes.",

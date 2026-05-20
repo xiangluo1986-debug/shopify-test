@@ -578,6 +578,7 @@
                             {% endif %}
                             <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
                             <div class="rrw-secondary-line">{{ row.customer_history_match_label }}</div>
+                            <div class="rrw-secondary-line">{{ row.customer_history_lookup_status }}</div>
                         </td>
                         <td class="rrw-tags-col">
                             {% for chip in row.tag_chips %}
@@ -798,6 +799,7 @@
                             {{ row.customer_orders_display }}
                             <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
                             <div class="rrw-secondary-line">{{ row.customer_history_match_label }}</div>
+                            <div class="rrw-secondary-line">{{ row.customer_history_lookup_status }}</div>
                         </td>
                         <td>
                             {% for chip in row.tag_chips %}

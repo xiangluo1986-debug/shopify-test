@@ -145,6 +145,11 @@ ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_TASK_NAME = "shopify_review_request_on_demand_
 ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_REPORT_FILENAME = (
     "codex_runs/shopify_review_request_on_demand_customer_history_lookup.json"
 )
+SHOPIFY_SCOPE_VERIFICATION_TASK_NAME = "shopify_review_request_shopify_scope_verification"
+SHOPIFY_SCOPE_VERIFICATION_REPORT_FILENAME = (
+    "codex_runs/shopify_review_request_shopify_scope_verification.json"
+)
+READ_ALL_ORDERS_MISSING_MESSAGE = "Shopify token does not have read_all_orders. Reauthorize app before sending."
 GMAIL_SEND_FROM = "info@kidstoylover.com"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
@@ -418,6 +423,12 @@ REPORT_DEFINITIONS = (
         "On-demand customer history lookup",
         ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_REPORT_FILENAME,
         ("lookup_status", "report_status", "status"),
+    ),
+    (
+        "shopify_scope_verification",
+        "Shopify read_all_orders scope verification",
+        SHOPIFY_SCOPE_VERIFICATION_REPORT_FILENAME,
+        ("scope_verification_status", "report_status", "status"),
     ),
     (
         "customer_level_duplicate_audit",
@@ -5068,6 +5079,7 @@ def _operating_dashboard(
         focus=focus,
         gmail_setup=gmail_setup,
         last_60_days_scan=last_60_days_scan,
+        reports=reports,
         page=filters["page"],
         page_size=filters["page_size"],
         sent_page=filters["sent_page"],
@@ -5319,6 +5331,7 @@ def _build_review_send_state(params=None):
         focus=history_ledger.get("focus") or {},
         gmail_setup=gmail_setup,
         last_60_days_scan=last_60_days_scan,
+        reports=reports,
         page=filters["page"],
         page_size=filters["page_size"],
         sent_page=filters["sent_page"],
@@ -7450,10 +7463,12 @@ def _approval_queue(
     page_size=DEFAULT_LIMIT,
     sent_page=1,
     sent_page_size=DEFAULT_LIMIT,
+    reports=None,
 ):
     if last_60_days_scan:
         return _approval_queue_from_last_60_days_scan(
             last_60_days_scan,
+            reports=reports,
             page=page,
             page_size=page_size,
             sent_page=sent_page,
@@ -7703,6 +7718,7 @@ def _review_queue_visible_row(row, pagination):
 
 def _approval_queue_from_last_60_days_scan(
     scan,
+    reports=None,
     page=1,
     page_size=DEFAULT_LIMIT,
     sent_page=1,
@@ -7710,13 +7726,25 @@ def _approval_queue_from_last_60_days_scan(
 ):
     needs_review_source_rows = list(scan.get("eligible_queue_rows") or scan.get("review_queue_rows") or [])
     blocked_rows = list(scan.get("blocked_queue_rows") or [])
+    needs_review_source_rows, live_history_blocked_rows = _customer_history_lookup_gated_rows(
+        needs_review_source_rows,
+        scan,
+        reports or {},
+    )
+    blocked_rows = [
+        _attach_customer_history_lookup_status(row, scan, reports or {})
+        for row in (blocked_rows + live_history_blocked_rows)
+    ]
     already_sent_source_rows = _finalize_already_sent_rows(
         scan.get("already_sent_queue_rows") or []
     )
     merged_groups = scan.get("merged_groups") or []
-    eligible_total = _int_or_zero(
-        scan.get("eligible_candidate_count_total") or scan.get("eligible_candidate_count") or len(needs_review_source_rows)
+    ungated_eligible_total = _int_or_zero(
+        scan.get("eligible_candidate_count_total")
+        or scan.get("eligible_candidate_count")
+        or len(needs_review_source_rows) + len(live_history_blocked_rows)
     )
+    eligible_total = len(needs_review_source_rows)
     pagination = _approval_queue_pagination(
         total_count=len(needs_review_source_rows) or eligible_total,
         page=page,
@@ -7764,10 +7792,10 @@ def _approval_queue_from_last_60_days_scan(
         "merged_group_count": scan.get("blocked_merged_group_count", 0),
         "merged_groups": merged_groups,
         "eligible_candidate_count_before_latest_filter": _int_or_zero(
-            scan.get("eligible_candidate_count_before_latest_filter") or eligible_total
+            scan.get("eligible_candidate_count_before_latest_filter") or ungated_eligible_total
         ),
         "eligible_candidate_count_after_latest_filter": _int_or_zero(
-            scan.get("eligible_candidate_count_after_latest_filter") or eligible_total
+            scan.get("eligible_candidate_count_after_latest_filter") or ungated_eligible_total
         ),
         "hidden_older_eligible_count": _int_or_zero(scan.get("hidden_older_eligible_count")),
         "hidden_older_eligible_summary": scan.get("hidden_older_eligible_summary") or [],
@@ -7775,7 +7803,7 @@ def _approval_queue_from_last_60_days_scan(
             scan.get("latest_candidate_per_customer_count") or eligible_total
         ),
         "focus_22530_22562_latest_decision": scan.get("focus_22530_22562_latest_decision") or {},
-        "eligible_candidate_count_total": eligible_total,
+        "eligible_candidate_count_total": ungated_eligible_total,
         "review_queue_batch_size": pagination["page_size"],
         "review_queue_page_size": pagination["page_size"],
         "review_queue_page": pagination["page"],
@@ -7825,10 +7853,10 @@ def _approval_queue_from_last_60_days_scan(
             "delivered_order_count": scan.get("delivered_order_count", 0),
             "eligible_candidate_count": eligible_total,
             "eligible_candidate_count_before_latest_filter": _int_or_zero(
-                scan.get("eligible_candidate_count_before_latest_filter") or eligible_total
+                scan.get("eligible_candidate_count_before_latest_filter") or ungated_eligible_total
             ),
             "eligible_candidate_count_after_latest_filter": _int_or_zero(
-                scan.get("eligible_candidate_count_after_latest_filter") or eligible_total
+                scan.get("eligible_candidate_count_after_latest_filter") or ungated_eligible_total
             ),
             "hidden_older_eligible_count": _int_or_zero(scan.get("hidden_older_eligible_count")),
             "blocked_count": scan.get("blocked_count", 0),
@@ -12722,7 +12750,10 @@ def _apply_queue_row_context(
                 customer_history_source,
                 customer_history_confidence,
             ),
-            "customer_history_lookup_action_label": "Check customer history",
+            "customer_history_lookup_status": row.get("customer_history_lookup_status")
+            or ("Customer history checked" if history_confirmed else "Customer history incomplete"),
+            "customer_history_lookup_action_label": row.get("customer_history_lookup_action_label")
+            or ("Customer history checked" if history_confirmed else "Check customer history"),
             "customer_history_lookup_task_name": ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_TASK_NAME,
             "customer_history_lookup_command": _customer_history_lookup_command(order_name),
             "eligibility_status": _queue_eligibility_status(action_state),
@@ -13497,11 +13528,28 @@ def _runtime_customer_history_live_lookup_blockers(candidate, scan, reports):
     selected_order = _canonical_order_name(candidate.get("order") or candidate.get("candidate_id"))
     lookup = _matching_on_demand_customer_history_lookup(reports, selected_order)
     if not lookup:
+        scope_blocker = _customer_history_scope_report_blocker(reports)
+        if scope_blocker:
+            return [
+                {
+                    "status": "blocked_shopify_history_permission_missing",
+                    "blocked_reason": "shopify read_all_orders permission missing",
+                    "detail": f"No email was sent. {scope_blocker}",
+                }
+            ]
         return [
             {
                 "status": "blocked_customer_history_live_lookup_required",
                 "blocked_reason": "customer history live check required",
                 "detail": "No email was sent. Customer history needs live Shopify check before sending.",
+            }
+        ]
+    if lookup.get("reauthorization_required") is True or lookup.get("read_all_orders_scope_present") is not True:
+        return [
+            {
+                "status": "blocked_shopify_history_permission_missing",
+                "blocked_reason": "shopify read_all_orders permission missing",
+                "detail": f"No email was sent. {READ_ALL_ORDERS_MISSING_MESSAGE}",
             }
         ]
     if lookup.get("lookup_status") != "customer_history_lookup_completed" or lookup.get("shopify_api_lookup_performed") is not True:
@@ -13575,6 +13623,108 @@ def _matching_on_demand_customer_history_lookup(reports, selected_order):
     if _canonical_order_name(data.get("selected_order")) != _canonical_order_name(selected_order):
         return {}
     return data
+
+
+def _customer_history_lookup_gated_rows(rows, scan, reports):
+    ready_rows = []
+    blocked_rows = []
+    for row in rows or []:
+        decorated = _attach_customer_history_lookup_status(dict(row or {}), scan, reports)
+        blocker = _customer_history_lookup_row_blocker(decorated, scan, reports)
+        if blocker:
+            blocked = dict(decorated)
+            blocked.update(
+                {
+                    "status": "Not ready",
+                    "status_class": "rrw-badge-warn",
+                    "reason": blocker,
+                    "evidence": blocker,
+                    "eligibility_reason_plain": blocker,
+                    "action_state": "not_ready",
+                    "action_status": "Not ready",
+                    "candidate_status": "blocked",
+                    "block_reason": blocker,
+                    "blocked_by_customer_history_lookup": True,
+                }
+            )
+            blocked_rows.append(blocked)
+            continue
+        ready_rows.append(decorated)
+    return ready_rows, blocked_rows
+
+
+def _customer_history_lookup_row_blocker(row, scan, reports):
+    if not _customer_history_live_lookup_required(row, scan):
+        return ""
+    selected_order = _canonical_order_name(row.get("order") or row.get("candidate_id"))
+    lookup = _matching_on_demand_customer_history_lookup(reports, selected_order)
+    if lookup:
+        if lookup.get("reauthorization_required") is True or lookup.get("read_all_orders_scope_present") is not True:
+            return READ_ALL_ORDERS_MISSING_MESSAGE
+        if lookup.get("lookup_status") != "customer_history_lookup_completed" or lookup.get("shopify_api_lookup_performed") is not True:
+            return _safe_text(lookup.get("blocking_reason"), max_length=300) or "Customer history needs live Shopify check before sending."
+        if lookup.get("should_block_review_send") is True:
+            return _safe_text(lookup.get("blocking_reason"), max_length=300) or "Customer history needs live Shopify check before sending."
+        return ""
+    scope_blocker = _customer_history_scope_report_blocker(reports)
+    if scope_blocker:
+        return scope_blocker
+    return "Customer history needs live Shopify check before sending."
+
+
+def _attach_customer_history_lookup_status(row, scan, reports):
+    row["customer_history_lookup_status"] = _customer_history_lookup_plain_status(row, scan, reports)
+    row["customer_history_lookup_action_label"] = _customer_history_lookup_action_label(
+        row["customer_history_lookup_status"]
+    )
+    return row
+
+
+def _customer_history_lookup_plain_status(row, scan, reports):
+    selected_order = _canonical_order_name((row or {}).get("order") or (row or {}).get("candidate_id"))
+    lookup = _matching_on_demand_customer_history_lookup(reports, selected_order)
+    if lookup:
+        if lookup.get("reauthorization_required") is True:
+            return "Reauthorization needed"
+        if lookup.get("read_all_orders_scope_present") is not True:
+            return "Shopify history permission missing"
+        if lookup.get("lookup_status") == "customer_history_lookup_completed":
+            return "Full Shopify history available"
+        return "Customer history incomplete"
+    scope_data = _shopify_scope_verification_data(reports)
+    if scope_data:
+        if scope_data.get("reauthorization_required") is True:
+            return "Reauthorization needed"
+        if scope_data.get("read_all_orders_present") is False:
+            return "Shopify history permission missing"
+    if _customer_history_live_lookup_required(row, scan):
+        return "Customer history incomplete"
+    if (row or {}).get("customer_history_confirmed") is True:
+        return "Customer history checked"
+    return "Customer history incomplete"
+
+
+def _customer_history_lookup_action_label(status):
+    if status in {"Shopify history permission missing", "Reauthorization needed"}:
+        return "Needs Shopify read_all_orders permission"
+    if status in {"Full Shopify history available", "Customer history checked"}:
+        return "Customer history checked"
+    return "Check customer history"
+
+
+def _customer_history_scope_report_blocker(reports):
+    scope_data = _shopify_scope_verification_data(reports)
+    if not scope_data:
+        return ""
+    if scope_data.get("reauthorization_required") is True or scope_data.get("read_all_orders_present") is False:
+        return READ_ALL_ORDERS_MISSING_MESSAGE
+    return ""
+
+
+def _shopify_scope_verification_data(reports):
+    report = (reports or {}).get("shopify_scope_verification") or {}
+    data = report.get("data") or {}
+    return data if isinstance(data, dict) else {}
 
 
 def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):

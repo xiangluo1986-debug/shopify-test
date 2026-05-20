@@ -27,6 +27,9 @@ LOOKUP_ORDER_ENV = "SHOPIFY_REVIEW_REQUEST_LOOKUP_ORDER"
 DOCKER_TIMEOUT_SECONDS = 240
 JSON_BEGIN = "SHOPIFY_REVIEW_REQUEST_ON_DEMAND_CUSTOMER_HISTORY_JSON_BEGIN"
 JSON_END = "SHOPIFY_REVIEW_REQUEST_ON_DEMAND_CUSTOMER_HISTORY_JSON_END"
+REQUIRED_HISTORY_SCOPES = ("read_orders", "read_all_orders")
+READ_ALL_ORDERS_MISSING_MESSAGE = "Shopify token does not have read_all_orders. Reauthorize app before sending."
+READ_ORDERS_MISSING_MESSAGE = "Shopify token does not have read_orders. Reauthorize app before sending."
 
 TRUSTPILOT_KEYWORDS = (
     "1: trustpilot",
@@ -176,8 +179,9 @@ def _run_host_sqlite_lookup(selected_order: str, docker_failure: dict) -> dict:
                 return lookup
             lookup["shopify_installation_found"] = True
             installation_scope = str(installation["scope"] or "")
-            lookup["read_all_orders_scope_present"] = _scope_present(installation_scope, "read_all_orders")
-            lookup["lifetime_history_scope_confirmed"] = lookup["read_all_orders_scope_present"] is True
+            lookup["configured_scope_source"] = "ShopifyInstallation.scope"
+            lookup["configured_read_orders_scope_present"] = _scope_present(installation_scope, "read_orders")
+            lookup["configured_read_all_orders_scope_present"] = _scope_present(installation_scope, "read_all_orders")
             access_token = str(installation["access_token"] or "")
             lookup["shopify_credentials_found"] = bool(access_token)
             if not access_token:
@@ -186,6 +190,30 @@ def _run_host_sqlite_lookup(selected_order: str, docker_failure: dict) -> dict:
                 return lookup
 
             shop = str(installation["shop"] or SHOP_DOMAIN)
+            _host_verify_access_scopes(shop, access_token, lookup)
+            if lookup.get("active_token_scope_verified") is not True:
+                lookup["lookup_status"] = "blocked_customer_history_lookup_not_available"
+                lookup["failure_type"] = "access_scope_verification_unavailable"
+                lookup["error_sanitized"] = "Shopify token scopes could not be verified. Customer history needs live Shopify check before sending."
+                lookup["reauthorization_required"] = True
+                lookup["next_admin_action"] = "Verify Shopify access scopes from /admin/oauth/access_scopes.json before sending."
+                return lookup
+            if lookup.get("read_orders_scope_present") is not True:
+                lookup["lookup_status"] = "blocked_shopify_history_permission_missing"
+                lookup["failure_type"] = "read_orders_scope_missing"
+                lookup["error_sanitized"] = READ_ORDERS_MISSING_MESSAGE
+                lookup["reauthorization_required"] = True
+                lookup["next_admin_action"] = "Reauthorize or reinstall the Shopify app with read_orders and read_all_orders before sending."
+                return lookup
+            if lookup.get("read_all_orders_scope_present") is not True:
+                lookup["lookup_status"] = "blocked_shopify_history_permission_missing"
+                lookup["failure_type"] = "read_all_orders_scope_missing"
+                lookup["error_sanitized"] = READ_ALL_ORDERS_MISSING_MESSAGE
+                lookup["reauthorization_required"] = True
+                lookup["next_admin_action"] = "Reauthorize or reinstall the Shopify app, then save the new access token before sending."
+                return lookup
+            lookup["lifetime_history_scope_confirmed"] = True
+
             rest_base = f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}"
             selected_shopify_order = _host_rest_selected_order(
                 rest_base,
@@ -388,6 +416,42 @@ def _sqlite_installation(connection):
 def _scope_present(scope_text, required_scope):
     scopes = {part.strip() for part in re.split(r"[\s,]+", str(scope_text or "")) if part.strip()}
     return required_scope in scopes
+
+
+def _host_verify_access_scopes(shop, access_token, lookup):
+    lookup["token_scope_source"] = "shopify_access_scopes_endpoint"
+    lookup["active_token_scope_verified"] = False
+    data = _host_shopify_get_json(
+        f"https://{shop}/admin/oauth/access_scopes.json",
+        access_token,
+        {},
+        "host_sqlite_access_scope_verification",
+        lookup,
+    )
+    handles = {
+        str(scope.get("handle") or "").strip()
+        for scope in (data or {}).get("access_scopes", [])
+        if isinstance(scope, dict) and str(scope.get("handle") or "").strip()
+    }
+    lookup["read_orders_scope_present"] = "read_orders" in handles
+    lookup["read_all_orders_scope_present"] = "read_all_orders" in handles
+    lookup["active_token_scope_verified"] = bool(handles)
+    lookup["lifetime_history_scope_confirmed"] = lookup["read_all_orders_scope_present"] is True
+    lookup["reauthorization_required"] = not all(scope in handles for scope in REQUIRED_HISTORY_SCOPES)
+    if lookup["read_orders_scope_present"] and lookup["read_all_orders_scope_present"]:
+        lookup["scope_verification_status"] = "active_token_scope_verified"
+        lookup["customer_history_permission_status"] = "full_history_available"
+        lookup["next_admin_action"] = "No reauthorization needed for Review Request customer history reads."
+    elif handles:
+        lookup["scope_verification_status"] = "read_all_orders_missing_reauthorization_required"
+        lookup["customer_history_permission_status"] = "permission_missing"
+        lookup["next_admin_action"] = "Reauthorize or reinstall the Shopify app, then save the new access token before sending."
+    else:
+        lookup["scope_verification_status"] = "access_scope_endpoint_unavailable"
+        lookup["customer_history_permission_status"] = "permission_unverified"
+        lookup["next_admin_action"] = (
+            "Verify Shopify access scopes from /admin/oauth/access_scopes.json before sending."
+        )
 
 
 def _host_rest_selected_order(rest_base, access_token, selected_order, local_shopify_order_id, lookup):
@@ -793,6 +857,18 @@ result = {
     "shopify_history_order_names": [],
     "shopify_history_lookup_method": "",
     "customer_history_lookup_methods_attempted": [],
+    "configured_scope_source": "unavailable",
+    "configured_read_orders_scope_present": False,
+    "configured_read_all_orders_scope_present": False,
+    "token_scope_source": "unavailable",
+    "active_token_scope_verified": False,
+    "read_orders_scope_present": False,
+    "read_all_orders_scope_present": False,
+    "lifetime_history_scope_confirmed": False,
+    "reauthorization_required": True,
+    "next_admin_action": "",
+    "scope_verification_status": "scope_check_not_started",
+    "customer_history_permission_status": "permission_unverified",
     "trustpilot_note_evidence_found": False,
     "trustpilot_tag_evidence_found": False,
     "evidence_order_name": "",
@@ -1034,6 +1110,53 @@ def rest_get_json(url, access_token, params, label):
     result["shopify_http_status"] = response.status_code
     return response.json(), response
 
+def verify_access_scopes(shop_domain, access_token):
+    result["token_scope_source"] = "shopify_access_scopes_endpoint"
+    result["customer_history_lookup_methods_attempted"].append("access_scope_verification")
+    try:
+        result["shopify_api_lookup_performed"] = True
+        result["read_only_shopify_lookup_performed"] = True
+        response = shopify_get(
+            "https://" + shop_domain + "/admin/oauth/access_scopes.json",
+            access_token,
+            timeout=20,
+            max_retries=2,
+            request_context="review_request_access_scope_verification",
+            stop_on_429=False,
+        )
+        result["shopify_http_status"] = response.status_code
+        data = response.json()
+    except Exception as exc:
+        result["shopify_api_response_error_count"] += 1
+        result["shopify_api_response_errors_sanitized"].append(sanitize(exc))
+        result["scope_verification_status"] = "access_scope_endpoint_unavailable"
+        result["customer_history_permission_status"] = "permission_unverified"
+        result["next_admin_action"] = "Verify Shopify access scopes from /admin/oauth/access_scopes.json before sending."
+        return set()
+    handles = {
+        str(scope.get("handle") or "").strip()
+        for scope in data.get("access_scopes", [])
+        if isinstance(scope, dict) and str(scope.get("handle") or "").strip()
+    }
+    result["active_token_scope_verified"] = bool(handles)
+    result["read_orders_scope_present"] = "read_orders" in handles
+    result["read_all_orders_scope_present"] = "read_all_orders" in handles
+    result["lifetime_history_scope_confirmed"] = result["read_all_orders_scope_present"] is True
+    result["reauthorization_required"] = not all(scope in handles for scope in __REQUIRED_HISTORY_SCOPES_LITERAL__)
+    if result["read_orders_scope_present"] and result["read_all_orders_scope_present"]:
+        result["scope_verification_status"] = "active_token_scope_verified"
+        result["customer_history_permission_status"] = "full_history_available"
+        result["next_admin_action"] = "No reauthorization needed for Review Request customer history reads."
+    elif handles:
+        result["scope_verification_status"] = "read_all_orders_missing_reauthorization_required"
+        result["customer_history_permission_status"] = "permission_missing"
+        result["next_admin_action"] = "Reauthorize or reinstall the Shopify app, then save the new access token before sending."
+    else:
+        result["scope_verification_status"] = "access_scope_endpoint_unavailable"
+        result["customer_history_permission_status"] = "permission_unverified"
+        result["next_admin_action"] = "Verify Shopify access scopes from /admin/oauth/access_scopes.json before sending."
+    return handles
+
 def rest_order_by_id(rest_base, access_token, order_id):
     if not str(order_id or "").isdigit():
         return {}
@@ -1157,14 +1280,47 @@ try:
     installation = ShopifyInstallation.objects.get(shop=shop)
     result["shopify_installation_found"] = True
     installation_scope = str(getattr(installation, "scope", "") or "")
-    result["read_all_orders_scope_present"] = scope_present(installation_scope, "read_all_orders")
-    result["lifetime_history_scope_confirmed"] = result["read_all_orders_scope_present"] is True
+    result["configured_scope_source"] = "ShopifyInstallation.scope"
+    result["configured_read_orders_scope_present"] = scope_present(installation_scope, "read_orders")
+    result["configured_read_all_orders_scope_present"] = scope_present(installation_scope, "read_all_orders")
     access_token = getattr(installation, "access_" + "token")
     result["shopify_credentials_found"] = bool(access_token)
     if not access_token:
         result["lookup_status"] = "blocked_customer_history_lookup_not_available"
         result["failure_type"] = "missing_shopify_access_token"
         result["error_sanitized"] = "Shopify installation exists, but the access token is empty."
+        print("__JSON_BEGIN__")
+        print(json.dumps(result, ensure_ascii=True, sort_keys=True))
+        print("__JSON_END__")
+        raise SystemExit(0)
+
+    verify_access_scopes(installation.shop, access_token)
+    if result["active_token_scope_verified"] is not True:
+        result["lookup_status"] = "blocked_customer_history_lookup_not_available"
+        result["failure_type"] = "access_scope_verification_unavailable"
+        result["error_sanitized"] = "Shopify token scopes could not be verified. Customer history needs live Shopify check before sending."
+        result["reauthorization_required"] = True
+        result["next_admin_action"] = "Verify Shopify access scopes from /admin/oauth/access_scopes.json before sending."
+        print("__JSON_BEGIN__")
+        print(json.dumps(result, ensure_ascii=True, sort_keys=True))
+        print("__JSON_END__")
+        raise SystemExit(0)
+    if result["read_orders_scope_present"] is not True:
+        result["lookup_status"] = "blocked_shopify_history_permission_missing"
+        result["failure_type"] = "read_orders_scope_missing"
+        result["error_sanitized"] = __READ_ORDERS_MISSING_MESSAGE_LITERAL__
+        result["reauthorization_required"] = True
+        result["next_admin_action"] = "Reauthorize or reinstall the Shopify app with read_orders and read_all_orders before sending."
+        print("__JSON_BEGIN__")
+        print(json.dumps(result, ensure_ascii=True, sort_keys=True))
+        print("__JSON_END__")
+        raise SystemExit(0)
+    if result["read_all_orders_scope_present"] is not True:
+        result["lookup_status"] = "blocked_shopify_history_permission_missing"
+        result["failure_type"] = "read_all_orders_scope_missing"
+        result["error_sanitized"] = __READ_ALL_ORDERS_MISSING_MESSAGE_LITERAL__
+        result["reauthorization_required"] = True
+        result["next_admin_action"] = "Reauthorize or reinstall the Shopify app, then save the new access token before sending."
         print("__JSON_BEGIN__")
         print(json.dumps(result, ensure_ascii=True, sort_keys=True))
         print("__JSON_END__")
@@ -1315,6 +1471,9 @@ except Exception as exc:
     script = script.replace("__API_VERSION_LITERAL__", json.dumps(SHOPIFY_API_VERSION))
     script = script.replace("__ORDER_LITERAL__", json.dumps(selected_order))
     script = script.replace("__KEYWORDS_LITERAL__", json.dumps(list(TRUSTPILOT_KEYWORDS)))
+    script = script.replace("__REQUIRED_HISTORY_SCOPES_LITERAL__", json.dumps(list(REQUIRED_HISTORY_SCOPES)))
+    script = script.replace("__READ_ALL_ORDERS_MISSING_MESSAGE_LITERAL__", json.dumps(READ_ALL_ORDERS_MISSING_MESSAGE))
+    script = script.replace("__READ_ORDERS_MISSING_MESSAGE_LITERAL__", json.dumps(READ_ORDERS_MISSING_MESSAGE))
     script = script.replace("__JSON_BEGIN__", JSON_BEGIN)
     script = script.replace("__JSON_END__", JSON_END)
     return script
@@ -1330,7 +1489,11 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
     evidence_order = _canonical_order_name(lookup.get("evidence_order_name"))
     safe_keyword = _safe_text(lookup.get("safe_detected_keyword"), 80)
     blocking_reason = ""
-    if not completed:
+    if lookup.get("failure_type") == "read_all_orders_scope_missing":
+        blocking_reason = READ_ALL_ORDERS_MISSING_MESSAGE
+    elif lookup.get("failure_type") == "read_orders_scope_missing":
+        blocking_reason = READ_ORDERS_MISSING_MESSAGE
+    elif not completed:
         blocking_reason = "Customer history needs live Shopify check before sending."
     elif note_evidence:
         blocking_reason = f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}."
@@ -1347,7 +1510,7 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
         "timestamp": utc_now_iso(),
         "task": TASK_NAME,
         "task_name": TASK_NAME,
-        "phase": "5.31C",
+        "phase": "5.31D",
         "mode": "dry-run-read-only-on-demand-customer-history-lookup",
         "command_label": COMMAND_LABEL,
         "lookup_status": lookup_status,
@@ -1364,8 +1527,18 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
         "shopify_customer_identity_found": lookup.get("shopify_customer_identity_found") is True,
         "shopify_customer_id_available": lookup.get("shopify_customer_id_available") is True,
         "runtime_email_available": lookup.get("runtime_email_available") is True,
+        "configured_scope_source": _safe_text(lookup.get("configured_scope_source"), 120),
+        "configured_read_orders_scope_present": lookup.get("configured_read_orders_scope_present") is True,
+        "configured_read_all_orders_scope_present": lookup.get("configured_read_all_orders_scope_present") is True,
+        "token_scope_source": _safe_text(lookup.get("token_scope_source"), 120) or "unavailable",
+        "active_token_scope_verified": lookup.get("active_token_scope_verified") is True,
+        "read_orders_scope_present": lookup.get("read_orders_scope_present") is True,
         "read_all_orders_scope_present": lookup.get("read_all_orders_scope_present") is True,
         "lifetime_history_scope_confirmed": lifetime_history_scope_confirmed,
+        "reauthorization_required": lookup.get("reauthorization_required") is True,
+        "next_admin_action": _safe_text(lookup.get("next_admin_action"), 400),
+        "scope_verification_status": _safe_text(lookup.get("scope_verification_status"), 120),
+        "customer_history_permission_status": _customer_history_permission_status(lookup, completed),
         "shopify_customer_history_count": customer_count,
         "shopify_history_order_names": _safe_order_names(lookup.get("shopify_history_order_names") or []),
         "shopify_history_lookup_method": _safe_text(lookup.get("shopify_history_lookup_method"), 120),
@@ -1452,8 +1625,13 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "shopify_api_lookup_performed": payload["shopify_api_lookup_performed"],
         "shopify_customer_history_count": payload["shopify_customer_history_count"],
         "shopify_history_order_names": payload["shopify_history_order_names"],
+        "read_orders_scope_present": payload["read_orders_scope_present"],
         "read_all_orders_scope_present": payload["read_all_orders_scope_present"],
         "lifetime_history_scope_confirmed": payload["lifetime_history_scope_confirmed"],
+        "token_scope_source": payload["token_scope_source"],
+        "reauthorization_required": payload["reauthorization_required"],
+        "next_admin_action": payload["next_admin_action"],
+        "customer_history_permission_status": payload["customer_history_permission_status"],
         "trustpilot_note_evidence_found": payload["trustpilot_note_evidence_found"],
         "trustpilot_tag_evidence_found": payload["trustpilot_tag_evidence_found"],
         "evidence_order_name": payload["evidence_order_name"],
@@ -1535,6 +1713,9 @@ def _render_html_report(payload: dict) -> str:
       <tr><th>Local customer history count</th><td>{escape(str(payload["local_customer_history_count"]))}</td></tr>
       <tr><th>Local order names</th><td>{escape(local_names)}</td></tr>
       <tr><th>Shopify live lookup performed</th><td>{escape(str(payload["shopify_api_lookup_performed"]))}</td></tr>
+      <tr><th>read_orders scope present</th><td>{escape(str(payload["read_orders_scope_present"]))}</td></tr>
+      <tr><th>read_all_orders scope present</th><td>{escape(str(payload["read_all_orders_scope_present"]))}</td></tr>
+      <tr><th>Customer history permission status</th><td>{escape(payload["customer_history_permission_status"])}</td></tr>
       <tr><th>Shopify customer history count</th><td>{escape(str(payload["shopify_customer_history_count"]))}</td></tr>
       <tr><th>Shopify history order names</th><td>{escape(history_names)}</td></tr>
       <tr><th>Lookup methods attempted</th><td>{escape(methods)}</td></tr>
@@ -1552,11 +1733,14 @@ def _render_html_report(payload: dict) -> str:
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     return (
-        "Shopify review request Phase 5.31C on-demand customer history lookup finished.\n"
+        "Shopify review request Phase 5.31D on-demand customer history lookup finished.\n"
         f"Lookup status: {payload.get('lookup_status')}\n"
         f"Selected order: {payload.get('selected_order')}\n"
         f"Local history count: {payload.get('local_customer_history_count')}\n"
         f"Shopify live lookup performed: {payload.get('shopify_api_lookup_performed')}\n"
+        f"read_orders present: {payload.get('read_orders_scope_present')}\n"
+        f"read_all_orders present: {payload.get('read_all_orders_scope_present')}\n"
+        f"Customer history permission status: {payload.get('customer_history_permission_status')}\n"
         f"Shopify customer history count: {payload.get('shopify_customer_history_count')}\n"
         f"Trustpilot note evidence found: {payload.get('trustpilot_note_evidence_found')}\n"
         f"Trustpilot tag evidence found: {payload.get('trustpilot_tag_evidence_found')}\n"
@@ -1598,6 +1782,12 @@ def _empty_lookup() -> dict:
         "read_only_shopify_lookup_performed": False,
         "shopify_customer_history_count": 0,
         "shopify_history_order_names": [],
+        "configured_scope_source": "unavailable",
+        "configured_read_orders_scope_present": False,
+        "configured_read_all_orders_scope_present": False,
+        "token_scope_source": "unavailable",
+        "active_token_scope_verified": False,
+        "read_orders_scope_present": False,
         "trustpilot_note_evidence_found": False,
         "trustpilot_tag_evidence_found": False,
         "evidence_order_name": "",
@@ -1606,6 +1796,10 @@ def _empty_lookup() -> dict:
         "error_sanitized": "",
         "read_all_orders_scope_present": False,
         "lifetime_history_scope_confirmed": False,
+        "reauthorization_required": True,
+        "next_admin_action": "",
+        "scope_verification_status": "scope_check_not_available",
+        "customer_history_permission_status": "customer_history_incomplete",
     }
 
 
@@ -1626,6 +1820,18 @@ def _apply_self_privacy_assertion(payload: dict) -> dict:
         payload["privacy_assertion_passed"] = False
         payload["raw_email_leak_risk_detected"] = bool(raw_emails)
     return payload
+
+
+def _customer_history_permission_status(lookup: dict, completed: bool) -> str:
+    if lookup.get("reauthorization_required") is True:
+        return "reauthorization_needed"
+    if lookup.get("read_all_orders_scope_present") is not True:
+        return "permission_missing"
+    if completed and lookup.get("lifetime_history_scope_confirmed") is True:
+        return "full_history_available"
+    if completed:
+        return "customer_history_checked"
+    return "customer_history_incomplete"
 
 
 def _issue_summary(
