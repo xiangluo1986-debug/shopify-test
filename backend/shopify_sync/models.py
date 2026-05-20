@@ -72,6 +72,12 @@ class ShopifyOrder(models.Model):
         ('exception', '同步异常待审核'),
         ('exception_review', '异常待审核'),
     ]
+    SETTLEMENT_SYNC_PROTECTED_STATUSES = {
+        "pending_payment",
+        "payment_submitted",
+        "paid",
+        "cancelled",
+    }
 
     installation = models.ForeignKey(
         ShopifyInstallation, on_delete=models.CASCADE, related_name="orders"
@@ -118,6 +124,15 @@ class ShopifyOrder(models.Model):
         choices=SETTLEMENT_STATUS_CHOICES,
         default='pending_warehouse'
     )
+    settlement_cancel_reason = models.TextField(blank=True, default="")
+    settlement_cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="shopify_orders_settlement_cancelled",
+    )
+    settlement_cancelled_at = models.DateTimeField(null=True, blank=True)
 
     # Order-level cost fields
     total_actual_weight_kg = models.DecimalField(
@@ -201,6 +216,23 @@ class ShopifyOrder(models.Model):
 
     def __str__(self):
         return f"{self.order_name} ({self.customer_name})"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            previous = self.__class__.objects.filter(pk=self.pk).values(
+                "settlement_status",
+                "settlement_batch_id",
+            ).first()
+            if (
+                previous
+                and self.settlement_status != previous["settlement_status"]
+                and (
+                    previous["settlement_status"] in self.SETTLEMENT_SYNC_PROTECTED_STATUSES
+                    or previous["settlement_batch_id"]
+                )
+            ):
+                self.settlement_status = previous["settlement_status"]
+        super().save(*args, **kwargs)
 
     @property
     def missing_product_data(self):

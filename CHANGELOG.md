@@ -2,6 +2,7 @@
 
 ## 2026-05-15
 
+- Added an Admin/Finance Shopify Order action to mark eligible Shenzhen settlement orders as `cancelled` with a required local cancellation reason, cancelled-by user, timestamp, merged-group guard, payment/batch lock guard, refund warning display, and model-level protection so manually cancelled or payment-locked settlement statuses are not overwritten by ordinary sync saves.
 - Added merged Shenzhen settlement group cost confirmation and withdrawal actions so Shenzhen Warehouse, Admin, Finance, or superusers can move a complete group between `pending_warehouse` and `cost_confirmed` without changing member order statuses, member batches, Shopify sync, or payment exports.
 
 ## 2026-05-14

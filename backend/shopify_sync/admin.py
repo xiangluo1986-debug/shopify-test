@@ -40,6 +40,26 @@ SHENZHEN_ITEM_LOCATION = "shenzhen"
 ZERO = Decimal("0.00")
 SHENZHEN_COST_EDITABLE_STATUSES = {"pending_warehouse", "warehouse_fulfilled", "exception_review"}
 FINANCE_LOCKED_STATUSES = {"pending_payment", "payment_submitted", "paid"}
+SHENZHEN_FULFILLMENT_CANCEL_ALLOWED_STATUSES = {
+    "pending_warehouse",
+    "warehouse_fulfilled",
+    "cost_confirmed",
+    "admin_confirmed",
+    "exception_review",
+}
+SHENZHEN_FULFILLMENT_CANCEL_BLOCKED_STATUSES = {
+    "pending_payment",
+    "payment_submitted",
+    "paid",
+    "cancelled",
+    "transferred",
+    "exception",
+}
+REFUND_REVIEW_FINANCIAL_STATUS_MARKERS = (
+    "refunded",
+    "partially_refunded",
+    "voided",
+)
 MERGED_SETTLEMENT_ALLOWED_STATUSES = {"pending_warehouse", "warehouse_fulfilled", "exception_review"}
 MERGED_SETTLEMENT_BLOCKED_STATUSES = {
     "pending_payment",
@@ -250,6 +270,14 @@ def settlement_status_admin_label(status):
     labels = dict(ShopifyOrder.SETTLEMENT_STATUS_CHOICES)
     labels.update(SETTLEMENT_STATUS_ADMIN_LABELS)
     return labels.get(status, status or "-")
+
+
+def needs_refund_cancel_review(order):
+    financial_status = (getattr(order, "financial_status", "") or "").casefold()
+    return (
+        any(marker in financial_status for marker in REFUND_REVIEW_FINANCIAL_STATUS_MARKERS)
+        and getattr(order, "settlement_status", None) not in {"cancelled", "paid"}
+    )
 
 
 def parse_ordering_note_first_line(note_text):
@@ -1394,6 +1422,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "save_order_item_shipping_as_product_country_default",
         "mark_cost_confirmed",
         "withdraw_cost_confirmation",
+        "mark_shenzhen_fulfillment_cancelled",
         "mark_pending_payment",
         "submit_payment",
         "mark_paid",
@@ -1433,6 +1462,8 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         "tracking_info_summary",
         "shopify_note_display",
         "cost_calculated_at",
+        "settlement_cancelled_by",
+        "settlement_cancelled_at",
         "transferred_at",
     )
     search_fields = ("order_name", "order_number", "customer_name", "customer_email")
@@ -1487,6 +1518,9 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                     "settlement_status_display",
                     "settlement_batch",
                     "merged_settlement_group_display",
+                    "settlement_cancel_reason",
+                    "settlement_cancelled_by",
+                    "settlement_cancelled_at",
                     "transferred_at",
                     "transfer_note",
                     "tracking_number",
@@ -1682,6 +1716,11 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 self.admin_site.admin_view(self.resubmit_exception_review_order),
                 name="shopify_sync_shopifyorder_resubmit_exception_review",
             ),
+            path(
+                "<path:object_id>/cancel-shenzhen-fulfillment/",
+                self.admin_site.admin_view(self.cancel_shenzhen_fulfillment_order),
+                name="shopify_sync_shopifyorder_cancel_shenzhen_fulfillment",
+            ),
         ]
         return custom_urls + urls
 
@@ -1784,6 +1823,96 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
         </html>
         """
         return HttpResponse(html)
+
+    def _can_cancel_shenzhen_fulfillment(self, request):
+        return self.is_finance_user(request) or self.is_super_admin(request)
+
+    def _shenzhen_fulfillment_cancel_block_message(self, order):
+        active_group_message = self._active_merged_group_guard_message(
+            order,
+            action_message="请在合并组中处理。",
+        )
+        if active_group_message:
+            return active_group_message
+
+        order_label = self._merge_order_label(order)
+        if order.settlement_batch_id:
+            return f"订单 {order_label} 已加入结算批次，不能取消深圳仓履约。"
+        active_coverage = (
+            SettlementBatchEntryCoveredOrder.objects.select_related("entry__settlement_batch")
+            .filter(order=order, released_at__isnull=True)
+            .order_by("id")
+            .first()
+        )
+        if active_coverage:
+            batch_no = active_coverage.entry.settlement_batch.batch_no
+            return f"订单 {order_label} 已被结算批次 {batch_no} 覆盖，不能取消深圳仓履约。"
+        if order.settlement_status in SHENZHEN_FULFILLMENT_CANCEL_BLOCKED_STATUSES:
+            return (
+                f"订单 {order_label} 当前状态为 "
+                f"{settlement_status_admin_label(order.settlement_status)}，不能取消深圳仓履约。"
+            )
+        if order.settlement_status not in SHENZHEN_FULFILLMENT_CANCEL_ALLOWED_STATUSES:
+            allowed = ", ".join(sorted(SHENZHEN_FULFILLMENT_CANCEL_ALLOWED_STATUSES))
+            return f"订单 {order_label} 当前状态不允许取消深圳仓履约；允许状态：{allowed}。"
+        return ""
+
+    def cancel_shenzhen_fulfillment_order(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if not obj:
+            self.message_user(request, "订单不存在。", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:shopify_sync_shopifyorder_changelist"))
+        if not self._can_cancel_shenzhen_fulfillment(request):
+            self.message_user(request, "只有 Admin / Finance / Superuser 可以取消深圳仓履约。", level=messages.WARNING)
+            return self._redirect_to_change(obj)
+
+        block_message = self._shenzhen_fulfillment_cancel_block_message(obj)
+        if block_message:
+            self.message_user(request, block_message, level=messages.WARNING)
+            return self._redirect_to_change(obj)
+
+        if request.method == "POST":
+            reason = (request.POST.get("settlement_cancel_reason") or "").strip()
+            if not reason:
+                return self._review_text_form_response(
+                    request,
+                    obj,
+                    "标记为已取消深圳仓履约 / 退款取消",
+                    "settlement_cancel_reason",
+                    "取消原因",
+                    "确认取消深圳仓履约",
+                    initial_text=reason,
+                    error_message="必须填写取消原因。",
+                    help_text="请说明 Shopify 已退款、客人取消、仓库无需履约或 Admin/Finance 判定不应支付的原因。",
+                )
+
+            updated = ShopifyOrder.objects.filter(
+                pk=obj.pk,
+                settlement_status__in=SHENZHEN_FULFILLMENT_CANCEL_ALLOWED_STATUSES,
+                settlement_batch__isnull=True,
+            ).update(
+                settlement_status="cancelled",
+                settlement_cancel_reason=reason,
+                settlement_cancelled_by_id=request.user.pk,
+                settlement_cancelled_at=timezone.now(),
+            )
+            if not updated:
+                self.message_user(request, "订单状态已变化，未取消深圳仓履约。", level=messages.WARNING)
+                return self._redirect_to_change(obj)
+
+            self.message_user(request, f"订单 {self._merge_order_label(obj)} 已标记为已取消深圳仓履约。")
+            return self._redirect_after_successful_review(request)
+
+        return self._review_text_form_response(
+            request,
+            obj,
+            "标记为已取消深圳仓履约 / 退款取消",
+            "settlement_cancel_reason",
+            "取消原因",
+            "确认取消深圳仓履约",
+            initial_text=obj.settlement_cancel_reason,
+            help_text="提交后仅更新本地深圳仓结算状态和取消记录；不会删除订单、item、成本或 package，也不会写 Shopify。",
+        )
 
     def request_exception_review_order(self, request, object_id):
         obj = self.get_object(request, object_id)
@@ -2087,7 +2216,14 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
     review_workflow_actions.short_description = "审核操作"
 
     def settlement_status_display(self, obj):
-        return settlement_status_admin_label(obj.settlement_status)
+        label = settlement_status_admin_label(obj.settlement_status)
+        if needs_refund_cancel_review(obj):
+            return format_html(
+                '{}<br><span style="color:#b42318;font-weight:600;">{}</span>',
+                label,
+                "Shopify 订单可能已退款，请确认是否取消深圳仓履约。",
+            )
+        return label
     settlement_status_display.short_description = "结算状态"
     settlement_status_display.admin_order_field = "settlement_status"
 
@@ -2805,6 +2941,7 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 "allocate_package_costs",
                 "save_order_item_shipping_as_product_country_default",
                 "copy_product_cost_to_items",
+                "mark_shenzhen_fulfillment_cancelled",
             ]:
                 if action_name in actions:
                     del actions[action_name]
@@ -2813,6 +2950,48 @@ class ShopifyOrderAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin):
                 if action_name in actions:
                     del actions[action_name]
         return actions
+
+    def mark_shenzhen_fulfillment_cancelled(self, request, queryset):
+        if not self._can_cancel_shenzhen_fulfillment(request):
+            self.message_user(
+                request,
+                "只有 Admin / Finance / Superuser 可以取消深圳仓履约。",
+                level=messages.WARNING,
+            )
+            return
+
+        selected_count = queryset.count()
+        if selected_count != 1:
+            self.message_user(
+                request,
+                "请一次只选择 1 个订单，并在下一页填写取消原因。",
+                level=messages.WARNING,
+            )
+            return
+
+        order = (
+            queryset.select_related("settlement_batch")
+            .prefetch_related("merged_settlement_group_links__group")
+            .first()
+        )
+        if not order:
+            self.message_user(request, "未找到选中的订单。", level=messages.ERROR)
+            return
+
+        block_message = self._shenzhen_fulfillment_cancel_block_message(order)
+        if block_message:
+            self.message_user(request, block_message, level=messages.WARNING)
+            return
+
+        return HttpResponseRedirect(
+            self._review_action_url(
+                request,
+                "shopify_sync_shopifyorder_cancel_shenzhen_fulfillment",
+                order,
+            )
+        )
+
+    mark_shenzhen_fulfillment_cancelled.short_description = "标记为已取消深圳仓履约 / 退款取消"
 
     def recalculate_order_shipping_cost(self, request, queryset):
         from .sync_helpers import recalculate_order_shipping_cost as recalc_helper
