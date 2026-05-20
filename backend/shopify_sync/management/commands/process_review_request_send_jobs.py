@@ -43,7 +43,17 @@ class Command(BaseCommand):
         self.stdout.write(f"status: {status}")
         self.stdout.write(f"dry_run: {summary.get('dry_run') is True}")
         self.stdout.write(f"queue_path: {summary.get('queue_path')}")
+        self.stdout.write(f"canonical_queue_path: {summary.get('canonical_queue_path')}")
+        self.stdout.write(
+            f"queue_path_used_by_processor: {summary.get('queue_path_used_by_processor')}"
+        )
+        self.stdout.write(f"queue_file_missing: {summary.get('queue_file_missing') is True}")
+        self.stdout.write(
+            f"canonical_queue_file_missing: {summary.get('canonical_queue_file_missing') is True}"
+        )
+        self.stdout.write(f"job_count: {summary.get('job_count', 0)}")
         self.stdout.write(f"queued_job_count: {summary.get('queued_job_count', 0)}")
+        self.stdout.write(f"queued_jobs_found: {summary.get('queued_jobs_found', 0)}")
         self.stdout.write(f"selected_job_count: {summary.get('selected_job_count', 0)}")
         self.stdout.write(f"processed_count: {summary.get('processed_count', 0)}")
         self.stdout.write(f"sent_count: {summary.get('sent_count', 0)}")
@@ -58,6 +68,31 @@ class Command(BaseCommand):
         )
         if summary.get("dashboard_snapshot_error"):
             self.stdout.write(f"dashboard_snapshot_error: {summary.get('dashboard_snapshot_error')}")
+
+        self.stdout.write("paths_checked:")
+        for item in summary.get("paths_checked") or []:
+            if isinstance(item, dict):
+                self.stdout.write(
+                    "- "
+                    f"{item.get('path')} "
+                    f"present={item.get('present') is True} "
+                    f"loaded={item.get('loaded') is True} "
+                    f"selected={item.get('selected') is True} "
+                    f"status={item.get('status') or '-'}"
+                )
+            else:
+                self.stdout.write(f"- {item}")
+
+        if summary.get("dry_run") is True:
+            self.stdout.write("recent_jobs:")
+            for job in summary.get("recent_jobs") or []:
+                self.stdout.write(
+                    "- "
+                    f"{job.get('job_id')} "
+                    f"{job.get('order_name')} "
+                    f"{job.get('status')} "
+                    f"{job.get('message') or ''}"
+                )
 
         for job in summary.get("jobs") or []:
             self.stdout.write(

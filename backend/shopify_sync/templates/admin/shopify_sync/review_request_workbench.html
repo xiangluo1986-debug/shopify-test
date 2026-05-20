@@ -640,6 +640,10 @@
             Manual processor:
             <code>{{ dashboard.approval_queue.send_job_manual_process_command }}</code>
         </p>
+        <p class="rrw-muted">
+            Queue file:
+            <code>{{ dashboard.approval_queue.send_job_queue_path }}</code>
+        </p>
         {% if dashboard.approval_queue.send_job_load_error %}
             <div class="rrw-warning">{{ dashboard.approval_queue.send_job_load_error }}</div>
         {% endif %}
@@ -673,7 +677,7 @@
                             </td>
                         </tr>
                     {% empty %}
-                        <tr><td colspan="7" class="rrw-muted">No send jobs queued yet.</td></tr>
+                        <tr><td colspan="7" class="rrw-muted">No queued jobs.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
