@@ -33,6 +33,9 @@ from remote_approval.tasks.shopify_review_request_on_demand_customer_history_loo
 from remote_approval.tasks.shopify_review_request_shopify_scope_verification_task import (
     run_shopify_review_request_shopify_scope_verification_task,
 )
+from remote_approval.tasks.shopify_review_request_shopify_oauth_reauthorization_helper_task import (
+    run_shopify_review_request_shopify_oauth_reauthorization_helper_task,
+)
 from remote_approval.tasks.shopify_review_request_review_send_failure_audit_task import (
     run_shopify_review_request_review_send_failure_audit_task,
 )
@@ -425,6 +428,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_shopify_scope_verification": (
         run_shopify_review_request_shopify_scope_verification_task
     ),
+    "shopify_review_request_shopify_oauth_reauthorization_helper": (
+        run_shopify_review_request_shopify_oauth_reauthorization_helper_task
+    ),
     "shopify_review_request_review_send_failure_audit": (
         run_shopify_review_request_review_send_failure_audit_task
     ),
@@ -813,6 +819,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify access scope endpoint only; no writes, no Gmail, no token output",
         "review_file_path": "logs/codex_runs/shopify_review_request_shopify_scope_verification.json",
+    },
+    "shopify_review_request_shopify_oauth_reauthorization_helper": {
+        "description": "Prepare the manual Shopify OAuth reauthorization helper flow for scope updates such as read_all_orders.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "none; docs/report only, no Shopify API call, no token exchange, no .env write",
+        "review_file_path": "logs/codex_runs/shopify_review_request_shopify_oauth_reauthorization_helper.json",
     },
     "shopify_review_request_review_send_failure_audit": {
         "description": "Diagnose the latest Review & Send failure for #21075 without Gmail, Shopify, or external review writes.",

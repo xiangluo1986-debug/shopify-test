@@ -1315,6 +1315,43 @@ Future tracking design note:
 - [x] No Review Request send is allowed when full Shopify customer history cannot
   be confirmed.
 
+## Phase 5.31E Shopify OAuth Reauthorization Helper
+
+- [x] Added `scripts/shopify_oauth_reauthorize_helper.py` for manual Shopify
+  OAuth scope update flows.
+- [x] Added docs-only runner task
+  `shopify_review_request_shopify_oauth_reauthorization_helper` to check helper
+  presence, `.env.example` placeholders, recommended commands, and safety
+  boundaries without calling Shopify APIs.
+- [x] URL mode prints the shop domain, requested scopes, redirect URI, and
+  authorization URL for manual browser approval.
+- [x] Required scopes include `read_orders` and `read_all_orders`; existing
+  `SHOPIFY_OAUTH_SCOPES` or `SHOPIFY_SCOPES` values are preserved and extended
+  by the helper.
+- [x] Exchange mode accepts a pasted Shopify callback `code` and exchanges it
+  for a token only when manually run. It never prints the token or client
+  secret.
+- [x] Token saving requires the exact local approval flag
+  `SHOPIFY_OAUTH_SAVE_TOKEN=YES_I_APPROVE_UPDATING_SHOPIFY_ACCESS_TOKEN`.
+  Without the flag, exchange mode reports that token exchange succeeded but the
+  token was not saved.
+- [x] If saving to `.env`, the helper creates `.env.backup.YYYYMMDDTHHMMSSZ`,
+  updates only the selected Shopify token key, preserves other lines, and stops
+  when multiple token keys exist unless `SHOPIFY_OAUTH_TOKEN_ENV_KEY` selects
+  one of `SHOPIFY_ACCESS_TOKEN`, `SHOPIFY_ADMIN_API_ACCESS_TOKEN`, or
+  `SHOPIFY_API_PASSWORD`.
+- [x] Verify mode uses the read-only Shopify access-scopes endpoint and reports
+  whether `read_orders` and `read_all_orders` are present without printing any
+  token value.
+- [x] Manual scope update process: run URL mode, approve in Shopify, copy only
+  the callback `code`, run exchange mode with approval flag only when ready to
+  save, restart web, run scope verification, confirm `read_all_orders`, and
+  rerun the `#21687` lookup.
+- [x] Phase 5.31E implementation and runner report perform no Shopify writes,
+  no Shopify mutations, no `translationsRegister`, no Gmail API call, no email
+  send, no token output, no client-secret output, no code output, no staging, no
+  commit, and no push.
+
 ## Phase 5.28J Review Send Failure Audit And Queue Pagination
 
 - [x] Added `shopify_review_request_review_send_failure_audit` to diagnose the

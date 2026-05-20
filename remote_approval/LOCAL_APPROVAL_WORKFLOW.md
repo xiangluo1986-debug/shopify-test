@@ -233,6 +233,57 @@ the expected clean-history signal is a full Shopify customer history count that
 matches Shopify UI, with historical order names listed and Trustpilot
 note/tag evidence reported only as a safe keyword plus order name.
 
+Phase 5.31E adds `shopify_review_request_shopify_oauth_reauthorization_helper`
+as a docs-only runner task and `scripts/shopify_oauth_reauthorize_helper.py` as
+a local manual helper for future Shopify OAuth scope updates such as
+`read_all_orders`. The runner task does not call Shopify APIs, exchange tokens,
+write `.env`, call Gmail, send email, or output token/client-secret/code values.
+
+Run the helper readiness report with:
+
+```powershell
+python remote_approval_runner.py --task shopify_review_request_shopify_oauth_reauthorization_helper --mode dry-run --approval local
+```
+
+Manual Shopify scope update process:
+
+1. Run URL mode:
+
+```powershell
+python scripts/shopify_oauth_reauthorize_helper.py --mode url
+```
+
+2. Open the printed authorization URL and approve the app in Shopify.
+3. Copy only the `code` value from the callback URL.
+4. Run exchange mode only when ready. To save the token to local `.env`, set the
+   exact approval flag first:
+
+```powershell
+$env:SHOPIFY_OAUTH_SAVE_TOKEN="YES_I_APPROVE_UPDATING_SHOPIFY_ACCESS_TOKEN"
+python scripts/shopify_oauth_reauthorize_helper.py --mode exchange --code "PASTE_CODE_HERE"
+Remove-Item Env:\SHOPIFY_OAUTH_SAVE_TOKEN
+```
+
+5. Restart web after a saved local `.env` token update.
+6. Run helper verify mode or the existing scope verification runner:
+
+```powershell
+python scripts/shopify_oauth_reauthorize_helper.py --mode verify
+python remote_approval_runner.py --task shopify_review_request_shopify_scope_verification --mode dry-run --approval local
+```
+
+7. Confirm `read_all_orders` is present.
+8. Rerun the selected `#21687` lookup.
+
+The helper never prints the access token or client secret. Saving requires
+`SHOPIFY_OAUTH_SAVE_TOKEN=YES_I_APPROVE_UPDATING_SHOPIFY_ACCESS_TOKEN`; without
+that flag, exchange mode reports that the token exchange succeeded but the token
+was not saved. When saving to `.env`, the helper creates
+`.env.backup.YYYYMMDDTHHMMSSZ`, updates only the selected Shopify token key, and
+stops if multiple token keys exist unless `SHOPIFY_OAUTH_TOKEN_ENV_KEY` selects
+one of `SHOPIFY_ACCESS_TOKEN`, `SHOPIFY_ADMIN_API_ACCESS_TOKEN`, or
+`SHOPIFY_API_PASSWORD`.
+
 Phase 5.29 makes the admin `Review & Send` POST complete the same one-order
 Shopify tag update automatically after Gmail drafts.send succeeds. The POST
 flow first builds the post-send audit in memory; if it confirms the same
