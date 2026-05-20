@@ -237,9 +237,9 @@ Phase 0.2 automation decision:
 - [x] If the snapshot is stale, the dashboard shows `Data may be stale. Last
   updated X hours ago.` and Review & Send blocks until refresh.
 - [x] Suggested schedule:
-  initial 60-day sync plus snapshot refresh, daily 3-day sync plus snapshot
-  refresh, optional every-4-hours 3-day sync plus snapshot refresh, and daily
-  full candidate refresh.
+  initial/daily 3-day sync plus the container snapshot refresh command,
+  optional every-4-hours 3-day sync plus snapshot refresh, and periodic wider
+  coverage refresh when needed.
 - [x] The snapshot cache remains local report-only: no customer email send, no
   Gmail draft, no Shopify write/tag mutation, no external review API call, no
   raw email output, and no secret output.
@@ -256,6 +256,21 @@ Phase 0.2 automation decision:
   reports written mirrors, failed paths, and page-expected paths.
 - [x] Normal page loads still use only the cached snapshot and do not call
   Shopify APIs, Gmail APIs, external review APIs, or `translationsRegister`.
+
+#### Phase 5.32G Dashboard Snapshot Container Command
+
+- [x] Add Django management command
+  `refresh_review_request_dashboard_snapshot` so the web container can refresh
+  the cached dashboard snapshot without `remote_approval_runner.py`.
+- [x] Recommended initial/daily workflow:
+  `docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --request-delay 1.0 --skip-fulfillment-orders --apply-local`
+  followed by
+  `docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot`.
+- [x] Missing-snapshot page guidance uses the container management command:
+  `docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot`.
+- [x] Snapshot refresh remains local cache generation only: no Shopify API call,
+  no Shopify write/tag mutation, no Gmail API/send/draft, no external review
+  API, no raw email output, and no secret output.
 
 #### Phase 5.32D On-Demand Customer History Cache Reliability
 

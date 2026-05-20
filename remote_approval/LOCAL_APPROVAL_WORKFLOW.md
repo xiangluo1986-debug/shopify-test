@@ -215,18 +215,22 @@ missing, the page shows `Review queue has not been generated yet.` If it is
 stale, the page shows the last-updated warning and Review & Send blocks until a
 fresh snapshot exists.
 
-Initial setup:
-
-```powershell
-docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --request-delay 1.0 --skip-fulfillment-orders --apply-local
-python remote_approval_runner.py --task shopify_review_request_dashboard_snapshot_refresh --approval local
-```
-
-Daily refresh:
+Initial / daily refresh:
 
 ```powershell
 docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 3 --request-delay 1.0 --skip-fulfillment-orders --apply-local
-python remote_approval_runner.py --task shopify_review_request_dashboard_snapshot_refresh --approval local
+docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot
+```
+
+The snapshot refresh runs inside the Django web container, writes the cache where
+the admin page reads it, and does not require `remote_approval_runner.py` inside
+the container.
+
+Optional wider coverage refresh:
+
+```powershell
+docker compose exec -T web python manage.py sync_review_request_shopify_orders --days 60 --request-delay 1.0 --skip-fulfillment-orders --apply-local
+docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot
 ```
 
 Optional schedule: run the 3-day sync and snapshot refresh every 4 hours, and
@@ -236,10 +240,11 @@ Phase 5.32B unifies the dashboard snapshot cache paths between the host runner,
 Docker web container, and admin page. The page checks, in order,
 `REVIEW_REQUEST_DASHBOARD_SNAPSHOT_PATH`, `/app/logs`, `/app/backend/logs`,
 project-root `logs/`, and `backend/logs/`, then loads the newest readable valid
-JSON snapshot. The refresh task writes the main snapshot to the configured path
-or project-root `logs/`, mirrors to available container-readable cache paths,
-and reports `snapshot_main_path`, `snapshot_mirror_paths_written`,
-`snapshot_paths_failed`, and `page_expected_paths`.
+JSON snapshot. The container management command writes the main snapshot to the
+configured path or project-root `logs/`, mirrors to available
+container-readable cache paths, and reports `snapshot_main_path`,
+`snapshot_mirror_paths_written`, `snapshot_paths_failed`, and
+`page_expected_paths`.
 
 Phase 5.32D persists sanitized on-demand customer history lookup results to a
 per-order cache under `logs/codex_runs/`. Candidate scans, dashboard snapshot

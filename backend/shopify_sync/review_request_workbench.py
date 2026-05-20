@@ -1662,10 +1662,7 @@ def _dashboard_snapshot_host_refresh_command():
 
 
 def _dashboard_snapshot_container_refresh_command():
-    return (
-        "docker compose exec -T web python /app/remote_approval_runner.py "
-        f"--task {DASHBOARD_SNAPSHOT_TASK_NAME} --approval local"
-    )
+    return "docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot"
 
 
 def _running_in_docker():
