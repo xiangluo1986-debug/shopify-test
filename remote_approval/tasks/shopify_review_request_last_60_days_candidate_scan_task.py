@@ -181,7 +181,7 @@ CUSTOMER_HISTORY_LOOKUP_TTL_HOURS = 24
 CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS = 300
 LIVE_HISTORY_MISSING_REASON = "Customer history needs live Shopify check before sending."
 LIVE_HISTORY_STALE_REASON = "Customer history check is stale."
-LIVE_HISTORY_INCOMPLETE_REASON = "Customer history could not be fully verified."
+LIVE_HISTORY_INCOMPLETE_REASON = "Live customer history check failed or incomplete."
 
 
 def run_shopify_review_request_last_60_days_candidate_scan_task(mode: str) -> dict:
@@ -612,6 +612,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         1 for row in blocked_rows if row.get("customer_level_trustpilot_note_evidence_found") is True
     )
     second_order_counts = _second_order_rule_counts(eligible_rows, blocked_rows)
+    customer_history_checks = _customer_history_check_summary(eligible_rows, blocked_rows)
     order_data_coverage = {
         "scan_source": "sqlite_report_fallback",
         "coverage_warnings": _dedupe(coverage_warnings),
@@ -727,6 +728,17 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "focus_22530_22562_latest_decision": latest_filter_summary["focus_22530_22562_latest_decision"],
         "eligible_candidate_count": eligible_candidate_count_total,
         "eligible_candidate_count_total": eligible_candidate_count_total,
+        "final_eligible_count": customer_history_checks["final_eligible_count"],
+        "final_eligible_orders": customer_history_checks["final_eligible_orders"],
+        "needs_live_customer_history_check_count": customer_history_checks[
+            "needs_live_customer_history_check_count"
+        ],
+        "live_checks_completed_count": customer_history_checks["live_checks_completed_count"],
+        "live_checks_blocked_count": customer_history_checks["live_checks_blocked_count"],
+        "live_checks_failed_incomplete_count": customer_history_checks[
+            "live_checks_failed_incomplete_count"
+        ],
+        "customer_history_checks": customer_history_checks,
         "already_sent_count": len(already_sent_rows),
         "trustpilot_tagged_orders_excluded_count": sum(
             1 for row in already_sent_rows if row.get("trustpilot_tag_detected") is True
@@ -1758,6 +1770,15 @@ def _customer_history_lookup_gate(lookup: dict, reference_at: str = "") -> dict:
             evidence_found=True,
             full_history_confirmed=full_history_confirmed,
         )
+    if lookup.get("should_block_review_send") is True and not full_history_confirmed:
+        return _customer_history_lookup_gate_result(
+            status="incomplete",
+            reason=LIVE_HISTORY_INCOMPLETE_REASON,
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Full Shopify history",
+            full_history_confirmed=False,
+        )
     if lookup.get("should_block_review_send") is True:
         return _customer_history_lookup_gate_result(
             status="blocked_lookup_cache",
@@ -1841,6 +1862,51 @@ def _customer_history_lookup_is_stale(lookup: dict, reference_at: str = "") -> b
     if reference_dt and lookup_dt + timedelta(seconds=CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS) < reference_dt:
         return True
     return False
+
+
+def _customer_history_check_summary(eligible_rows: list[dict], blocked_rows: list[dict]) -> dict:
+    eligible_rows = list(eligible_rows or [])
+    blocked_rows = list(blocked_rows or [])
+    needs_check_rows = []
+    completed_rows = []
+    blocked_history_rows = []
+    failed_incomplete_rows = []
+    for row in eligible_rows + blocked_rows:
+        status = _safe_text(row.get("customer_history_lookup_block_status"), 80)
+        reason = _safe_text(row.get("block_reason") or row.get("reason"), 500).lower()
+        cached_found = row.get("cached_customer_history_lookup_found") is True
+        full_history_confirmed = row.get("full_history_confirmed") is True
+        if status in {"missing", "stale"} or LIVE_HISTORY_MISSING_REASON.lower() in reason:
+            needs_check_rows.append(row)
+            continue
+        if status in {"blocked_trustpilot_note", "blocked_trustpilot_tag"}:
+            blocked_history_rows.append(row)
+            completed_rows.append(row)
+            continue
+        if status in {"incomplete", "blocked_lookup_cache"} or LIVE_HISTORY_INCOMPLETE_REASON.lower() in reason:
+            failed_incomplete_rows.append(row)
+            continue
+        if status == "ready" or (cached_found and full_history_confirmed):
+            completed_rows.append(row)
+    needs_check_count = len(needs_check_rows)
+    return {
+        "final_eligible_count": len(eligible_rows),
+        "final_eligible_orders": _safe_order_names(row.get("order") for row in eligible_rows),
+        "needs_live_customer_history_check_count": needs_check_count,
+        "live_checks_completed_count": len(completed_rows),
+        "live_checks_blocked_count": len(blocked_history_rows),
+        "live_checks_failed_incomplete_count": len(failed_incomplete_rows),
+        "blocked_by_historical_trustpilot_evidence_orders": _safe_order_names(
+            row.get("order") for row in blocked_history_rows
+        ),
+        "live_lookup_failed_or_incomplete_orders": _safe_order_names(row.get("order") for row in failed_incomplete_rows),
+        "needs_live_customer_history_check_orders": _safe_order_names(row.get("order") for row in needs_check_rows),
+        "message": (
+            f"{needs_check_count} candidates need live customer history check before they can be reviewed."
+            if needs_check_count
+            else ""
+        ),
+    }
 
 
 def _effective_order_tags(local, source):
@@ -2237,6 +2303,20 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "eligible_candidate_count_total": int(
             payload.get("eligible_candidate_count_total") or payload.get("eligible_candidate_count") or 0
         ),
+        "final_eligible_count": int(
+            payload.get("final_eligible_count")
+            or payload.get("eligible_candidate_count_total")
+            or payload.get("eligible_candidate_count")
+            or 0
+        ),
+        "needs_live_customer_history_check_count": int(
+            payload.get("needs_live_customer_history_check_count") or 0
+        ),
+        "live_checks_completed_count": int(payload.get("live_checks_completed_count") or 0),
+        "live_checks_blocked_count": int(payload.get("live_checks_blocked_count") or 0),
+        "live_checks_failed_incomplete_count": int(
+            payload.get("live_checks_failed_incomplete_count") or 0
+        ),
         "review_queue_batch_size": int(payload.get("review_queue_batch_size") or REVIEW_QUEUE_BATCH_SIZE),
         "review_queue_visible_count": int(payload.get("review_queue_visible_count") or 0),
         "review_queue_overflow_count": int(payload.get("review_queue_overflow_count") or 0),
@@ -2293,6 +2373,11 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Scan source: {payload.get('scan_source', 'unknown')}\n"
         f"Scanned orders: {payload.get('scanned_order_count', 0)}\n"
         f"Eligible candidates: {payload.get('eligible_candidate_count', 0)}\n"
+        f"Final eligible after live checks: {payload.get('final_eligible_count', payload.get('eligible_candidate_count', 0))}\n"
+        f"Needs live customer history check: {payload.get('needs_live_customer_history_check_count', 0)}\n"
+        f"Live checks completed: {payload.get('live_checks_completed_count', 0)}\n"
+        f"Live checks blocked: {payload.get('live_checks_blocked_count', 0)}\n"
+        f"Live checks failed/incomplete: {payload.get('live_checks_failed_incomplete_count', 0)}\n"
         f"Eligible before second-order rule: {payload.get('eligible_candidate_count_before_second_order_rule', 0)}\n"
         f"Eligible after second-order rule: {payload.get('eligible_candidate_count_after_second_order_rule', 0)}\n"
         f"Review batch: {payload.get('review_queue_visible_count', 0)} of {payload.get('eligible_candidate_count_total') or payload.get('eligible_candidate_count', 0)} "

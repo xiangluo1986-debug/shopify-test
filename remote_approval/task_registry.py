@@ -30,6 +30,9 @@ from remote_approval.tasks.shopify_review_request_customer_identity_drilldown_au
 from remote_approval.tasks.shopify_review_request_on_demand_customer_history_lookup_task import (
     run_shopify_review_request_on_demand_customer_history_lookup_task,
 )
+from remote_approval.tasks.shopify_review_request_batch_customer_history_lookup_task import (
+    run_shopify_review_request_batch_customer_history_lookup_task,
+)
 from remote_approval.tasks.shopify_review_request_shopify_scope_verification_task import (
     run_shopify_review_request_shopify_scope_verification_task,
 )
@@ -431,6 +434,9 @@ TASK_REGISTRY: Dict[str, TaskCallable] = {
     "shopify_review_request_on_demand_customer_history_lookup": (
         run_shopify_review_request_on_demand_customer_history_lookup_task
     ),
+    "shopify_review_request_batch_customer_history_lookup": (
+        run_shopify_review_request_batch_customer_history_lookup_task
+    ),
     "shopify_review_request_shopify_scope_verification": (
         run_shopify_review_request_shopify_scope_verification_task
     ),
@@ -825,6 +831,12 @@ TASK_METADATA: Dict[str, dict] = {
         "allowed_modes": ["dry-run"],
         "write_risk": "read-only Shopify order/customer history query only; no writes, no Gmail, no raw contact or full note output",
         "review_file_path": "logs/codex_runs/shopify_review_request_on_demand_customer_history_lookup.json",
+    },
+    "shopify_review_request_batch_customer_history_lookup": {
+        "description": "Run read-only batch Shopify customer history lookups for base-eligible review request candidates and cache sanitized results.",
+        "allowed_modes": ["dry-run"],
+        "write_risk": "read-only Shopify order/customer history query only; no writes, no Gmail, no raw contact or full note output",
+        "review_file_path": "logs/codex_runs/shopify_review_request_batch_customer_history_lookup.json",
     },
     "shopify_review_request_shopify_scope_verification": {
         "description": "Verify the active Shopify token has read_orders and read_all_orders for Review Request full-history checks.",

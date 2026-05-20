@@ -17,6 +17,11 @@ SNAPSHOT_ENV_PATH = "REVIEW_REQUEST_DASHBOARD_SNAPSHOT_PATH"
 TIMEOUT_SECONDS = 300
 JSON_BEGIN = "SHOPIFY_REVIEW_REQUEST_DASHBOARD_SNAPSHOT_JSON_BEGIN"
 JSON_END = "SHOPIFY_REVIEW_REQUEST_DASHBOARD_SNAPSHOT_JSON_END"
+LIVE_HISTORY_MISSING_REASON = "Customer history needs live Shopify check before sending."
+LIVE_HISTORY_STALE_REASON = "Customer history check is stale."
+LIVE_HISTORY_INCOMPLETE_REASON = "Live customer history check failed or incomplete."
+TRUSTPILOT_HISTORY_BLOCK_STATUSES = {"blocked_trustpilot_note", "blocked_trustpilot_tag"}
+LIVE_HISTORY_FAILED_INCOMPLETE_STATUSES = {"incomplete", "blocked_lookup_cache"}
 
 EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 SECRET_RE = re.compile(
@@ -144,8 +149,23 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
     )
     blocked_total = _int_value(scan.get("blocked_count") or len(blocked_rows))
     already_sent_total = _int_value(scan.get("already_sent_count") or len(already_sent_rows))
-    approval_queue = _approval_queue_from_scan(scan, review_rows, already_sent_rows, blocked_rows)
-    dashboard = _dashboard_from_scan(scan, coverage, approval_queue, eligible_total, blocked_total, already_sent_total)
+    customer_history_checks = _customer_history_check_summary(scan, review_rows, blocked_rows)
+    approval_queue = _approval_queue_from_scan(
+        scan,
+        review_rows,
+        already_sent_rows,
+        blocked_rows,
+        customer_history_checks,
+    )
+    dashboard = _dashboard_from_scan(
+        scan,
+        coverage,
+        approval_queue,
+        eligible_total,
+        blocked_total,
+        already_sent_total,
+        customer_history_checks,
+    )
     workbench = {
         "operating_dashboard": dashboard,
         "summary": [],
@@ -203,6 +223,17 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 max_length=120,
             ),
             "eligible_total": eligible_total,
+            "final_eligible_count": customer_history_checks["final_eligible_count"],
+            "final_eligible_orders": customer_history_checks["final_eligible_orders"],
+            "needs_live_customer_history_check_count": customer_history_checks[
+                "needs_live_customer_history_check_count"
+            ],
+            "live_checks_completed_count": customer_history_checks["live_checks_completed_count"],
+            "live_checks_blocked_count": customer_history_checks["live_checks_blocked_count"],
+            "live_checks_failed_incomplete_count": customer_history_checks[
+                "live_checks_failed_incomplete_count"
+            ],
+            "customer_history_checks": customer_history_checks,
             "review_queue_candidates": review_rows,
             "already_sent_rows": already_sent_rows,
             "blocked_summary": {
@@ -210,16 +241,16 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 "blocked_visible_count": len(blocked_rows[:50]),
                 "blocked_ebay_order_count": _int_value(scan.get("blocked_ebay_order_count")),
                 "blocked_duplicate_customer_count": _int_value(scan.get("blocked_duplicate_customer_count")),
-            "blocked_merged_group_count": _int_value(scan.get("blocked_merged_group_count")),
-            "blocked_first_order_count": _int_value(scan.get("blocked_first_order_count")),
-            "blocked_not_second_or_later_count": _int_value(
-                scan.get("blocked_not_second_or_later_count")
-            ),
-            "blocked_second_order_not_delivered_count": _int_value(
-                scan.get("blocked_second_order_not_delivered_count")
-            ),
-            "rows": blocked_rows[:50],
-        },
+                "blocked_merged_group_count": _int_value(scan.get("blocked_merged_group_count")),
+                "blocked_first_order_count": _int_value(scan.get("blocked_first_order_count")),
+                "blocked_not_second_or_later_count": _int_value(
+                    scan.get("blocked_not_second_or_later_count")
+                ),
+                "blocked_second_order_not_delivered_count": _int_value(
+                    scan.get("blocked_second_order_not_delivered_count")
+                ),
+                "rows": blocked_rows[:50],
+            },
             "order_21687_customer_history_lookup_validation": {
                 "lookup_cache_found": scan.get("order_21687_lookup_cache_found") is True,
                 "should_block_review_send": scan.get("order_21687_should_block_review_send") is True,
@@ -257,6 +288,15 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 "second_or_later_delivered_candidate_count": _int_value(
                     scan.get("second_or_later_delivered_candidate_count") or eligible_total
                 ),
+                "final_eligible_count": customer_history_checks["final_eligible_count"],
+                "needs_live_customer_history_check_count": customer_history_checks[
+                    "needs_live_customer_history_check_count"
+                ],
+                "live_checks_completed_count": customer_history_checks["live_checks_completed_count"],
+                "live_checks_blocked_count": customer_history_checks["live_checks_blocked_count"],
+                "live_checks_failed_incomplete_count": customer_history_checks[
+                    "live_checks_failed_incomplete_count"
+                ],
             },
             "stale_after_minutes": 240,
             "scan_report_source": _safe_text(scan.get("scan_source") or "sqlite_report_fallback", max_length=120),
@@ -304,7 +344,13 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
     )
 
 
-def _approval_queue_from_scan(scan: dict, review_rows: list[dict], already_sent_rows: list[dict], blocked_rows: list[dict]) -> dict:
+def _approval_queue_from_scan(
+    scan: dict,
+    review_rows: list[dict],
+    already_sent_rows: list[dict],
+    blocked_rows: list[dict],
+    customer_history_checks: dict,
+) -> dict:
     page_size = 25
     visible_review_rows = review_rows[:page_size]
     visible_sent_rows = already_sent_rows[:page_size]
@@ -351,6 +397,14 @@ def _approval_queue_from_scan(scan: dict, review_rows: list[dict], already_sent_
         ),
         "focus_22530_22562_latest_decision": scan.get("focus_22530_22562_latest_decision") or {},
         "eligible_candidate_count_total": eligible_total,
+        "final_eligible_count": customer_history_checks["final_eligible_count"],
+        "needs_live_customer_history_check_count": customer_history_checks[
+            "needs_live_customer_history_check_count"
+        ],
+        "live_checks_completed_count": customer_history_checks["live_checks_completed_count"],
+        "live_checks_blocked_count": customer_history_checks["live_checks_blocked_count"],
+        "live_checks_failed_incomplete_count": customer_history_checks["live_checks_failed_incomplete_count"],
+        "customer_history_checks": customer_history_checks,
         "eligible_candidate_count_before_second_order_rule": _int_value(
             scan.get("eligible_candidate_count_before_second_order_rule") or eligible_total
         ),
@@ -407,6 +461,7 @@ def _dashboard_from_scan(
     eligible_total: int,
     blocked_total: int,
     already_sent_total: int,
+    customer_history_checks: dict,
 ) -> dict:
     order_data_coverage = {
         "incomplete": (scan.get("scan_source") != "full_shopify_orders"),
@@ -428,6 +483,7 @@ def _dashboard_from_scan(
         "blocked_count": blocked_total,
         "sent_trustpilot_count": already_sent_total,
         "approval_queue": approval_queue,
+        "customer_history_checks": customer_history_checks,
         "last_60_days_candidate_scan": _compact_scan_for_snapshot(scan),
         "lookup_cache": {
             "found": scan.get("customer_history_lookup_cache_found") is True,
@@ -504,6 +560,94 @@ def _dashboard_from_scan(
         "recent_activity": [],
         "ali_reviews_message": "Ali Reviews API is not connected yet.",
         "ali_reviews_status_label": "Unavailable",
+    }
+
+
+def _customer_history_check_summary(scan: dict, review_rows: list[dict], blocked_rows: list[dict]) -> dict:
+    existing = scan.get("customer_history_checks") if isinstance(scan.get("customer_history_checks"), dict) else {}
+    if existing:
+        needs_count = _int_value(existing.get("needs_live_customer_history_check_count"))
+        return {
+            "final_eligible_count": _int_value(existing.get("final_eligible_count") or len(review_rows)),
+            "final_eligible_orders": _safe_order_names(
+                existing.get("final_eligible_orders") or (row.get("order") for row in review_rows)
+            ),
+            "needs_live_customer_history_check_count": needs_count,
+            "live_checks_completed_count": _int_value(existing.get("live_checks_completed_count")),
+            "live_checks_blocked_count": _int_value(existing.get("live_checks_blocked_count")),
+            "live_checks_failed_incomplete_count": _int_value(
+                existing.get("live_checks_failed_incomplete_count")
+            ),
+            "blocked_by_historical_trustpilot_evidence_orders": _safe_order_names(
+                existing.get("blocked_by_historical_trustpilot_evidence_orders")
+            ),
+            "live_lookup_failed_or_incomplete_orders": _safe_order_names(
+                existing.get("live_lookup_failed_or_incomplete_orders")
+            ),
+            "needs_live_customer_history_check_orders": _safe_order_names(
+                existing.get("needs_live_customer_history_check_orders")
+            ),
+            "message": _safe_text(
+                existing.get("message")
+                or (
+                    f"{needs_count} candidates need live customer history check before they can be reviewed."
+                    if needs_count
+                    else ""
+                ),
+                max_length=200,
+            ),
+        }
+
+    needs_check_rows = []
+    completed_rows = []
+    blocked_history_rows = []
+    failed_incomplete_rows = []
+    for row in list(review_rows or []) + list(blocked_rows or []):
+        status = _safe_text(row.get("customer_history_lookup_block_status"), max_length=80)
+        reason = _safe_text(row.get("block_reason") or row.get("reason"), max_length=500).lower()
+        cached_found = row.get("cached_customer_history_lookup_found") is True
+        full_history_confirmed = row.get("full_history_confirmed") is True
+        if (
+            status in {"missing", "stale"}
+            or LIVE_HISTORY_MISSING_REASON.lower() in reason
+            or LIVE_HISTORY_STALE_REASON.lower() in reason
+        ):
+            needs_check_rows.append(row)
+            continue
+        if (
+            status in TRUSTPILOT_HISTORY_BLOCK_STATUSES
+            or row.get("customer_level_trustpilot_note_evidence_found") is True
+            or row.get("customer_level_trustpilot_already_sent") is True
+        ):
+            blocked_history_rows.append(row)
+            completed_rows.append(row)
+            continue
+        if status in LIVE_HISTORY_FAILED_INCOMPLETE_STATUSES or LIVE_HISTORY_INCOMPLETE_REASON.lower() in reason:
+            failed_incomplete_rows.append(row)
+            continue
+        if status == "ready" or (cached_found and full_history_confirmed):
+            completed_rows.append(row)
+
+    needs_count = len(needs_check_rows)
+    return {
+        "final_eligible_count": len(review_rows),
+        "final_eligible_orders": _safe_order_names(row.get("order") for row in review_rows),
+        "needs_live_customer_history_check_count": needs_count,
+        "live_checks_completed_count": len(completed_rows),
+        "live_checks_blocked_count": len(blocked_history_rows),
+        "live_checks_failed_incomplete_count": len(failed_incomplete_rows),
+        "blocked_by_historical_trustpilot_evidence_orders": _safe_order_names(
+            row.get("order") for row in blocked_history_rows
+        ),
+        "live_lookup_failed_or_incomplete_orders": _safe_order_names(
+            row.get("order") for row in failed_incomplete_rows
+        ),
+        "needs_live_customer_history_check_orders": _safe_order_names(row.get("order") for row in needs_check_rows),
+        "message": (
+            f"{needs_count} candidates need live customer history check before they can be reviewed."
+            if needs_count
+            else ""
+        ),
     }
 
 
@@ -817,6 +961,21 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "lookup_cache_paths_checked": payload.get("lookup_cache_paths_checked") or [],
         "lookup_cache_selected_path": payload.get("lookup_cache_selected_path", ""),
         "lookup_cache_entries_count": _int_value(payload.get("lookup_cache_entries_count")),
+        "final_eligible_count": _int_value(counters.get("final_eligible_count") or payload.get("final_eligible_count")),
+        "needs_live_customer_history_check_count": _int_value(
+            counters.get("needs_live_customer_history_check_count")
+            or payload.get("needs_live_customer_history_check_count")
+        ),
+        "live_checks_completed_count": _int_value(
+            counters.get("live_checks_completed_count") or payload.get("live_checks_completed_count")
+        ),
+        "live_checks_blocked_count": _int_value(
+            counters.get("live_checks_blocked_count") or payload.get("live_checks_blocked_count")
+        ),
+        "live_checks_failed_incomplete_count": _int_value(
+            counters.get("live_checks_failed_incomplete_count")
+            or payload.get("live_checks_failed_incomplete_count")
+        ),
         "stale_counter_warning": False,
         "shopify_api_call_performed": payload.get("shopify_api_call_performed") is True,
         "shopify_write_performed": payload.get("shopify_write_performed") is True,
@@ -842,6 +1001,11 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Eligible total: {payload.get('eligible_total', 0)}\n"
         f"Eligible before second-order rule: {counters.get('eligible_candidate_count_before_second_order_rule', 0)}\n"
         f"Eligible after second-order rule: {counters.get('eligible_candidate_count_after_second_order_rule', payload.get('eligible_total', 0))}\n"
+        f"Final eligible after live checks: {counters.get('final_eligible_count', payload.get('final_eligible_count', 0))}\n"
+        f"Needs live customer history check: {counters.get('needs_live_customer_history_check_count', payload.get('needs_live_customer_history_check_count', 0))}\n"
+        f"Live checks completed: {counters.get('live_checks_completed_count', payload.get('live_checks_completed_count', 0))}\n"
+        f"Live checks blocked: {counters.get('live_checks_blocked_count', payload.get('live_checks_blocked_count', 0))}\n"
+        f"Live checks failed/incomplete: {counters.get('live_checks_failed_incomplete_count', payload.get('live_checks_failed_incomplete_count', 0))}\n"
         f"Needs review visible count: {counters.get('needs_review_visible_count', 0)}\n"
         f"Already sent total: {counters.get('already_sent_total', 0)}\n"
         f"#21687 lookup cache found: {order_21687.get('lookup_cache_found')}\n"
@@ -914,6 +1078,11 @@ def _render_html(payload: dict) -> str:
       <tr><th>Eligible total</th><td>{escape(str(payload.get('eligible_total', 0)))}</td></tr>
       <tr><th>Eligible before second-order rule</th><td>{escape(str(counters.get('eligible_candidate_count_before_second_order_rule', 0)))}</td></tr>
       <tr><th>Eligible after second-order rule</th><td>{escape(str(counters.get('eligible_candidate_count_after_second_order_rule', payload.get('eligible_total', 0))))}</td></tr>
+      <tr><th>Final eligible after live checks</th><td>{escape(str(counters.get('final_eligible_count', payload.get('final_eligible_count', 0))))}</td></tr>
+      <tr><th>Needs live customer history check</th><td>{escape(str(counters.get('needs_live_customer_history_check_count', payload.get('needs_live_customer_history_check_count', 0))))}</td></tr>
+      <tr><th>Live checks completed</th><td>{escape(str(counters.get('live_checks_completed_count', payload.get('live_checks_completed_count', 0))))}</td></tr>
+      <tr><th>Live checks blocked</th><td>{escape(str(counters.get('live_checks_blocked_count', payload.get('live_checks_blocked_count', 0))))}</td></tr>
+      <tr><th>Live checks failed/incomplete</th><td>{escape(str(counters.get('live_checks_failed_incomplete_count', payload.get('live_checks_failed_incomplete_count', 0))))}</td></tr>
       <tr><th>Needs review visible count</th><td>{escape(str(counters.get('needs_review_visible_count', 0)))}</td></tr>
       <tr><th>Already sent total</th><td>{escape(str(counters.get('already_sent_total', 0)))}</td></tr>
       <tr><th>Blocked total</th><td>{escape(str(blocked.get('blocked_total', 0)))}</td></tr>
@@ -964,6 +1133,22 @@ def _redact_payload_for_privacy(value):
 
 def _safe_rows(value) -> list[dict]:
     return [dict(row) for row in (value or []) if isinstance(row, dict)]
+
+
+def _safe_order_names(values) -> list[str]:
+    result = []
+    seen = set()
+    for value in values or []:
+        text = _safe_text(value, max_length=80).strip()
+        if not text:
+            continue
+        if text.isdigit():
+            text = f"#{text}"
+        if text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _safe_text(value, max_length: int = 1000) -> str:

@@ -165,7 +165,7 @@ CUSTOMER_HISTORY_LOOKUP_TTL_HOURS = 24
 CUSTOMER_HISTORY_LOOKUP_SNAPSHOT_GRACE_SECONDS = 300
 LIVE_HISTORY_MISSING_REASON = "Customer history needs live Shopify check before sending."
 LIVE_HISTORY_STALE_REASON = "Customer history check is stale."
-LIVE_HISTORY_INCOMPLETE_REASON = "Customer history could not be fully verified."
+LIVE_HISTORY_INCOMPLETE_REASON = "Live customer history check failed or incomplete."
 BLOCKED_QUEUE_DISPLAY_LIMIT = 50
 REVIEW_QUEUE_SORT_ORDER = (
     "most_recent_delivered_updated_created_date",
@@ -445,6 +445,12 @@ REPORT_DEFINITIONS = (
         "On-demand customer history lookup",
         ON_DEMAND_CUSTOMER_HISTORY_LOOKUP_REPORT_FILENAME,
         ("lookup_status", "report_status", "status"),
+    ),
+    (
+        "batch_customer_history_lookup",
+        "Batch customer history lookup",
+        "codex_runs/shopify_review_request_batch_customer_history_lookup.json",
+        ("task_status", "report_status", "status"),
     ),
     (
         "on_demand_customer_history_lookup_cache",
@@ -6413,12 +6419,16 @@ def _operating_dashboard(
         sent_page_size=filters["sent_page_size"],
     )
     order_data_coverage = _dashboard_order_data_coverage(last_60_days_scan)
+    customer_history_checks = approval_queue.get("customer_history_checks") or (
+        last_60_days_scan.get("customer_history_checks") or {}
+    )
     return {
         "ready_to_send_count": ready_count,
         "blocked_count": blocked_count,
         "sent_trustpilot_count": sent_count,
         "approval_queue": approval_queue,
         "last_60_days_candidate_scan": last_60_days_scan,
+        "customer_history_checks": customer_history_checks,
         "lookup_cache": _lookup_cache_dashboard_summary(last_60_days_scan),
         "order_data_coverage": order_data_coverage,
         "setup_checklist": setup_checklist,
@@ -6790,6 +6800,13 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "focus_22530_22562_latest_decision": scan["focus_22530_22562_latest_decision"],
         "eligible_candidate_count": scan["eligible_candidate_count"],
         "eligible_candidate_count_total": scan["eligible_candidate_count_total"],
+        "final_eligible_count": scan.get("final_eligible_count", scan["eligible_candidate_count_total"]),
+        "final_eligible_orders": scan.get("final_eligible_orders") or [],
+        "needs_live_customer_history_check_count": scan.get("needs_live_customer_history_check_count", 0),
+        "live_checks_completed_count": scan.get("live_checks_completed_count", 0),
+        "live_checks_blocked_count": scan.get("live_checks_blocked_count", 0),
+        "live_checks_failed_incomplete_count": scan.get("live_checks_failed_incomplete_count", 0),
+        "customer_history_checks": scan.get("customer_history_checks") or {},
         "already_sent_count": scan["already_sent_count"],
         "latest_sent_order": scan["latest_sent_order"],
         "latest_sent_time": scan["latest_sent_time"],
@@ -9157,6 +9174,10 @@ def _approval_queue_from_last_60_days_scan(
     ready_to_send_count = len(needs_review_source_rows) or eligible_total
     coverage_incomplete = scan.get("scan_source") != "full_shopify_orders"
     latest_sent = _latest_already_sent_record(already_sent_source_rows)
+    customer_history_checks = scan.get("customer_history_checks") or _customer_history_check_summary(
+        needs_review_source_rows,
+        blocked_rows,
+    )
     return {
         "needs_review_rows": needs_review_rows,
         "blocked_rows": blocked_visible_rows,
@@ -9168,6 +9189,16 @@ def _approval_queue_from_last_60_days_scan(
         "ready_to_send_count": ready_to_send_count,
         "not_ready_count": len(blocked_rows),
         "blocked_count": len(blocked_rows),
+        "final_eligible_count": customer_history_checks["final_eligible_count"],
+        "needs_live_customer_history_check_count": customer_history_checks[
+            "needs_live_customer_history_check_count"
+        ],
+        "live_checks_completed_count": customer_history_checks["live_checks_completed_count"],
+        "live_checks_blocked_count": customer_history_checks["live_checks_blocked_count"],
+        "live_checks_failed_incomplete_count": customer_history_checks[
+            "live_checks_failed_incomplete_count"
+        ],
+        "customer_history_checks": customer_history_checks,
         "blocked_visible_count": len(blocked_visible_rows),
         "blocked_display_limit": BLOCKED_QUEUE_DISPLAY_LIMIT,
         "blocked_overflow_count": max(len(blocked_rows) - len(blocked_visible_rows), 0),
@@ -9195,7 +9226,8 @@ def _approval_queue_from_last_60_days_scan(
             scan.get("latest_candidate_per_customer_count") or eligible_total
         ),
         "focus_22530_22562_latest_decision": scan.get("focus_22530_22562_latest_decision") or {},
-        "eligible_candidate_count_total": ungated_eligible_total,
+        "eligible_candidate_count_total": eligible_total,
+        "base_eligible_candidate_count_total": ungated_eligible_total,
         "eligible_candidate_count_before_second_order_rule": _int_or_zero(
             scan.get("eligible_candidate_count_before_second_order_rule") or ungated_eligible_total
         ),
@@ -9465,6 +9497,7 @@ def _last_60_days_candidate_scan(
         or order_data_coverage.get("coverage_warnings")
     )
     second_order_counts = _second_order_rule_counts(eligible_rows, blocked_rows)
+    customer_history_checks = _customer_history_check_summary(eligible_rows, blocked_rows)
     return {
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "scan_window_started_at": cutoff.isoformat(),
@@ -9540,6 +9573,17 @@ def _last_60_days_candidate_scan(
         ],
         "eligible_candidate_count": eligible_candidate_count_total,
         "eligible_candidate_count_total": eligible_candidate_count_total,
+        "final_eligible_count": customer_history_checks["final_eligible_count"],
+        "final_eligible_orders": customer_history_checks["final_eligible_orders"],
+        "needs_live_customer_history_check_count": customer_history_checks[
+            "needs_live_customer_history_check_count"
+        ],
+        "live_checks_completed_count": customer_history_checks["live_checks_completed_count"],
+        "live_checks_blocked_count": customer_history_checks["live_checks_blocked_count"],
+        "live_checks_failed_incomplete_count": customer_history_checks[
+            "live_checks_failed_incomplete_count"
+        ],
+        "customer_history_checks": customer_history_checks,
         "already_sent_count": len(already_sent_rows),
         "latest_sent_order": latest_sent.get("order", ""),
         "latest_sent_time": latest_sent.get("sent_at") or latest_sent.get("tag_written_at") or "",
@@ -12015,6 +12059,15 @@ def _customer_history_lookup_gate(lookup, reference_at=""):
             evidence_found=True,
             full_history_confirmed=full_history_confirmed,
         )
+    if (lookup or {}).get("should_block_review_send") is True and not full_history_confirmed:
+        return _customer_history_lookup_gate_result(
+            status="incomplete",
+            reason=LIVE_HISTORY_INCOMPLETE_REASON,
+            label="Needs live check",
+            action_label="Check customer history",
+            missing_requirement="Full Shopify history",
+            full_history_confirmed=False,
+        )
     if (lookup or {}).get("should_block_review_send") is True:
         return _customer_history_lookup_gate_result(
             status="blocked_lookup_cache",
@@ -12101,6 +12154,55 @@ def _customer_history_lookup_is_stale(lookup, reference_at=""):
     ):
         return True
     return False
+
+
+def _customer_history_check_summary(eligible_rows, blocked_rows):
+    eligible_rows = list(eligible_rows or [])
+    blocked_rows = list(blocked_rows or [])
+    needs_check_rows = []
+    completed_rows = []
+    blocked_history_rows = []
+    failed_incomplete_rows = []
+    for row in eligible_rows + blocked_rows:
+        status = _safe_text(row.get("customer_history_lookup_block_status"), max_length=80)
+        reason = _safe_text(row.get("block_reason") or row.get("reason"), max_length=500).lower()
+        cached_found = row.get("cached_customer_history_lookup_found") is True
+        full_history_confirmed = row.get("full_history_confirmed") is True
+        if status in {"missing", "stale"} or LIVE_HISTORY_MISSING_REASON.lower() in reason:
+            needs_check_rows.append(row)
+            continue
+        if status in {"blocked_trustpilot_note", "blocked_trustpilot_tag"}:
+            blocked_history_rows.append(row)
+            completed_rows.append(row)
+            continue
+        if status in {"incomplete", "blocked_lookup_cache"} or LIVE_HISTORY_INCOMPLETE_REASON.lower() in reason:
+            failed_incomplete_rows.append(row)
+            continue
+        if status == "ready" or (cached_found and full_history_confirmed):
+            completed_rows.append(row)
+    needs_check_count = len(needs_check_rows)
+    return {
+        "final_eligible_count": len(eligible_rows),
+        "final_eligible_orders": _dedupe_order_names(row.get("order") for row in eligible_rows),
+        "needs_live_customer_history_check_count": needs_check_count,
+        "live_checks_completed_count": len(completed_rows),
+        "live_checks_blocked_count": len(blocked_history_rows),
+        "live_checks_failed_incomplete_count": len(failed_incomplete_rows),
+        "blocked_by_historical_trustpilot_evidence_orders": _dedupe_order_names(
+            row.get("order") for row in blocked_history_rows
+        ),
+        "live_lookup_failed_or_incomplete_orders": _dedupe_order_names(
+            row.get("order") for row in failed_incomplete_rows
+        ),
+        "needs_live_customer_history_check_orders": _dedupe_order_names(
+            row.get("order") for row in needs_check_rows
+        ),
+        "message": (
+            f"{needs_check_count} candidates need live customer history check before they can be reviewed."
+            if needs_check_count
+            else ""
+        ),
+    }
 
 
 def _apply_cached_customer_history_lookup_to_row(row, lookup):

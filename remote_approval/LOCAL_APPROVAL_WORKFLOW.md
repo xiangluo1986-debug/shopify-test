@@ -71,6 +71,7 @@ python remote_approval_runner.py --task shopify_review_request_trustpilot_tag_ex
 python remote_approval_runner.py --task shopify_review_request_tag_alias_and_candidate_correction_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_customer_history_trustpilot_guard_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_on_demand_customer_history_lookup --mode dry-run --approval local
+python remote_approval_runner.py --task shopify_review_request_batch_customer_history_lookup --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_reuse_gmail_helper_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_review_send_post_send_audit --mode dry-run --approval local
 python remote_approval_runner.py --task shopify_review_request_trustpilot_post_send_tag_write --mode dry-run --approval local
@@ -262,6 +263,32 @@ Trustpilot-positive live lookups block before Gmail and move the row to Blocked
 / Not ready. The main table shows simple labels such as `Needs live check`,
 `Checked: 9 orders`, `Blocked: previous Trustpilot found`, and `Stale check`;
 source/confidence details stay in Advanced technical details.
+
+Phase 5.32H adds `shopify_review_request_batch_customer_history_lookup` to
+automatically process all base-eligible candidates that are blocked only because
+their live customer history check is missing, stale, failed, or incomplete. The
+task de-duplicates by customer identity, performs one read-only Shopify customer
+history lookup per customer group, writes sanitized cache entries for each
+candidate order, refreshes the candidate scan, and reports final eligible orders
+plus history-blocked and failed/incomplete lists.
+
+Batch lookup options:
+
+```powershell
+$env:SHOPIFY_REVIEW_REQUEST_BATCH_LOOKUP_LIMIT="25"
+$env:SHOPIFY_REVIEW_REQUEST_BATCH_LOOKUP_ORDER_FILTER="#22562"
+$env:SHOPIFY_REVIEW_REQUEST_BATCH_LOOKUP_DRY_RUN="false"
+python remote_approval_runner.py --task shopify_review_request_batch_customer_history_lookup --mode dry-run --approval local
+Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_BATCH_LOOKUP_LIMIT
+Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_BATCH_LOOKUP_ORDER_FILTER
+Remove-Item Env:\SHOPIFY_REVIEW_REQUEST_BATCH_LOOKUP_DRY_RUN
+```
+
+The default limit is 25 customer groups with a 1-second request delay. This task
+may call Shopify read-only customer/order history endpoints and write local
+sanitized cache/report files only. It must not call Gmail, send email, write
+Shopify, mutate tags, call Trustpilot/Kudosi/Ali Reviews, call
+`translationsRegister`, expose raw email, or output full note text.
 
 Run the scope verification with:
 

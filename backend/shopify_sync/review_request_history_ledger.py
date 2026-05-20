@@ -116,6 +116,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "status_keys": ("lookup_status", "report_status", "status"),
     },
     {
+        "key": "batch_customer_history_lookup",
+        "label": "Batch customer history lookup",
+        "filename": "codex_runs/shopify_review_request_batch_customer_history_lookup.json",
+        "channel": "trustpilot",
+        "event_type": "duplicate_block",
+        "status_keys": ("task_status", "report_status", "status"),
+    },
+    {
         "key": "on_demand_customer_history_lookup_cache",
         "label": "On-demand customer history lookup cache",
         "filename": CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME,
@@ -772,7 +780,7 @@ def sanitize_customer_history_lookup_result(payload):
                 f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}."
             )
         elif not full_history_confirmed:
-            blocking_reason = "Customer history could not be fully verified."
+            blocking_reason = "Live customer history check failed or incomplete."
         else:
             blocking_reason = "Customer history lookup blocked Review & Send."
     return {

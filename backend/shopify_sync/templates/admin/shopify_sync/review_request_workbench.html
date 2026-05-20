@@ -567,7 +567,7 @@
         </p>
     {% else %}
 
-    {% if dashboard.approval_queue.ready_to_send_count == 0 %}
+    {% if dashboard.approval_queue.ready_to_send_count == 0 and dashboard.customer_history_checks.needs_live_customer_history_check_count == 0 %}
         <div class="rrw-note">{{ dashboard.approval_queue.empty_message }}</div>
     {% endif %}
 
@@ -588,6 +588,43 @@
             <div class="rrw-warning">{{ dashboard.order_data_coverage.stale_counter_warning_message }}</div>
         {% endif %}
         <p>Coverage warnings: {{ dashboard.order_data_coverage.warning_label }}</p>
+    </div>
+
+    <div class="rrw-section">
+        <h2>Customer history checks</h2>
+        {% if dashboard.customer_history_checks.message %}
+            <div class="rrw-warning">{{ dashboard.customer_history_checks.message }}</div>
+        {% endif %}
+        <div class="rrw-grid">
+            <div class="rrw-card">
+                <div class="rrw-card-title">Ready to review</div>
+                <div class="rrw-card-value">{{ dashboard.customer_history_checks.final_eligible_count|default_if_none:"0" }}</div>
+                <div class="rrw-card-note">Final eligible orders after the live history gate.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Need live check</div>
+                <div class="rrw-card-value">{{ dashboard.customer_history_checks.needs_live_customer_history_check_count|default_if_none:"0" }}</div>
+                <div class="rrw-card-note">Run the batch lookup before reviewing these orders.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Blocked by history</div>
+                <div class="rrw-card-value">{{ dashboard.customer_history_checks.live_checks_blocked_count|default_if_none:"0" }}</div>
+                <div class="rrw-card-note">Historical Trustpilot note or tag evidence found.</div>
+            </div>
+            <div class="rrw-card">
+                <div class="rrw-card-title">Failed/incomplete checks</div>
+                <div class="rrw-card-value">{{ dashboard.customer_history_checks.live_checks_failed_incomplete_count|default_if_none:"0" }}</div>
+                <div class="rrw-card-note">Lookup did not confirm full Shopify history.</div>
+            </div>
+        </div>
+        <p class="rrw-muted">
+            Refresh snapshot:
+            <code>docker compose exec -T web python manage.py refresh_review_request_dashboard_snapshot</code>
+        </p>
+        <p class="rrw-muted">
+            Batch live history lookup:
+            <code>python remote_approval_runner.py --task shopify_review_request_batch_customer_history_lookup --approval local</code>
+        </p>
     </div>
 
     <div class="rrw-section">

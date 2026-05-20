@@ -305,6 +305,30 @@ Phase 0.2 automation decision:
   count, local count, evidence order/keyword, Needs-review removal, button
   disabled status, visible rows missing live lookup, and no-write safety flags.
 
+#### Phase 5.32H Batch Live Customer History Lookup
+
+- [x] Added `shopify_review_request_batch_customer_history_lookup` to find
+  base-eligible candidates blocked only by the mandatory live history gate and
+  run sanitized read-only Shopify customer history checks in a batch.
+- [x] The batch task de-duplicates by customer identity, limits work with
+  `SHOPIFY_REVIEW_REQUEST_BATCH_LOOKUP_LIMIT`, supports an optional order
+  filter, waits between requests, stops safely on Shopify 429, and reports
+  checked, clean, history-blocked, failed/incomplete, and duplicate-skipped
+  counts.
+- [x] Clean lookup results are written to the existing customer-history cache
+  format so candidate scans and the dashboard can move orders into the final
+  Needs review list. Trustpilot-positive or incomplete results remain blocked.
+- [x] The dashboard snapshot and page show final eligible count, candidates
+  needing live check, completed live checks, history-blocked checks, and
+  failed/incomplete checks so a missing batch run is visible instead of looking
+  like a true zero eligible queue.
+- [x] Reports include `#22562` lookup performed yes/no, final section, final
+  eligibility, blocker, and Review & Send readiness.
+- [x] The task remains read-only Shopify lookup plus local cache/report writes
+  only: no Gmail API/send/draft, no Shopify write/tag mutation, no
+  Trustpilot/Kudosi/Ali Reviews API, no `translationsRegister`, no raw email,
+  and no full note output.
+
 #### Phase 5.29 Automatic Post-Send Shopify Tag Write
 
 - [x] Admin `Review & Send` now builds an immediate in-memory post-send audit

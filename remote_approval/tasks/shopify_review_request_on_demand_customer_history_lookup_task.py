@@ -196,7 +196,7 @@ def _run_host_sqlite_lookup(selected_order: str, docker_failure: dict) -> dict:
             if lookup.get("active_token_scope_verified") is not True:
                 lookup["lookup_status"] = "blocked_customer_history_lookup_not_available"
                 lookup["failure_type"] = "access_scope_verification_unavailable"
-                lookup["error_sanitized"] = "Shopify token scopes could not be verified. Customer history needs live Shopify check before sending."
+                lookup["error_sanitized"] = "Shopify token scopes could not be verified. Live customer history check failed or incomplete."
                 lookup["reauthorization_required"] = True
                 lookup["next_admin_action"] = "Verify Shopify access scopes from /admin/oauth/access_scopes.json before sending."
                 return lookup
@@ -1300,7 +1300,7 @@ try:
     if result["active_token_scope_verified"] is not True:
         result["lookup_status"] = "blocked_customer_history_lookup_not_available"
         result["failure_type"] = "access_scope_verification_unavailable"
-        result["error_sanitized"] = "Shopify token scopes could not be verified. Customer history needs live Shopify check before sending."
+        result["error_sanitized"] = "Shopify token scopes could not be verified. Live customer history check failed or incomplete."
         result["reauthorization_required"] = True
         result["next_admin_action"] = "Verify Shopify access scopes from /admin/oauth/access_scopes.json before sending."
         print("__JSON_BEGIN__")
@@ -1505,13 +1505,13 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
     elif lookup.get("failure_type") == "read_orders_scope_missing":
         blocking_reason = READ_ORDERS_MISSING_MESSAGE
     elif not completed:
-        blocking_reason = "Customer history needs live Shopify check before sending."
+        blocking_reason = "Live customer history check failed or incomplete."
     elif note_evidence:
         blocking_reason = f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}."
     elif tag_evidence:
         blocking_reason = f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}."
     elif not full_history_confirmed:
-        blocking_reason = "Customer history could not be fully verified."
+        blocking_reason = "Live customer history check failed or incomplete."
     elif customer_count <= 1:
         blocking_reason = "Live Shopify customer history does not confirm a repeat customer."
 
@@ -1551,7 +1551,7 @@ def _build_payload(selected_order: str, lookup: dict, duration_seconds: float) -
         "full_history_confirmed": full_history_confirmed,
         "full_history_unavailable_reason": ""
         if full_history_confirmed
-        else _safe_text(blocking_reason or "Customer history could not be fully verified.", 300),
+        else _safe_text(blocking_reason or "Live customer history check failed or incomplete.", 300),
         "reauthorization_required": lookup.get("reauthorization_required") is True,
         "next_admin_action": _safe_text(lookup.get("next_admin_action"), 400),
         "scope_verification_status": _safe_text(lookup.get("scope_verification_status"), 120),
