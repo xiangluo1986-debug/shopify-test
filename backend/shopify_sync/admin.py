@@ -3767,6 +3767,9 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
     def _can_confirm_merged_group_costs(self, request):
         return self._can_view_merged_groups(request)
 
+    def _can_add_merged_groups_to_batch(self, request):
+        return self.is_super_admin(request) or self.is_finance_user(request)
+
     def has_module_permission(self, request):
         return self._can_view_merged_groups(request)
 
@@ -3790,7 +3793,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         if not self._can_confirm_merged_group_costs(request):
             actions.pop("confirm_merged_group_costs", None)
             actions.pop("withdraw_merged_group_cost_confirmation", None)
-        if not (self.is_super_admin(request) or self.is_finance_user(request)):
+        if not self._can_add_merged_groups_to_batch(request):
             actions.pop("add_merged_groups_to_settlement_batch", None)
         return actions
 
@@ -3806,6 +3809,11 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
                 "<path:object_id>/withdraw-cost-confirmation/",
                 self.admin_site.admin_view(self.withdraw_merged_group_cost_confirmation_view),
                 name="shopify_sync_shenzhenmergedsettlementgroup_withdraw_cost_confirmation",
+            ),
+            path(
+                "<path:object_id>/add-to-settlement-batch/",
+                self.admin_site.admin_view(self.add_merged_group_to_settlement_batch_view),
+                name="shopify_sync_shenzhenmergedsettlementgroup_add_to_settlement_batch",
             ),
         ]
         return custom_urls + urls
@@ -4229,10 +4237,30 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             )
 
         if obj.settlement_status == "cost_confirmed":
+            admin_batch_action = ""
+            if self._can_add_merged_groups_to_batch(request):
+                if cost_completed:
+                    admin_batch_action = format_html(
+                        '<a href="{}" style="{}" onclick="return confirm(\'确认并加入结算批次？系统会创建批次 entry 并覆盖成员订单，但不会修改成员订单状态或批次。\');">'
+                        '确认并加入结算批次</a><br>',
+                        self._merged_group_action_url(
+                            "shopify_sync_shenzhenmergedsettlementgroup_add_to_settlement_batch",
+                            obj,
+                        ),
+                        button_style,
+                    )
+                else:
+                    admin_batch_action = format_html(
+                        '<span style="{}">成本未完整，不能加入结算批次。{}</span><br>',
+                        warning_style,
+                        self._group_completion_text(summary),
+                    )
             return format_html(
+                '{}'
                 '<span style="{}">合并组已提交 Admin 审核，等待 Admin/Finance 加入结算批次。</span><br>'
                 '<a href="{}" style="{}" onclick="return confirm(\'撤回后合并组会回到待深圳仓确认，确定继续？\');">'
                 '撤回确认 / 返回修改成本</a>',
+                admin_batch_action,
                 muted_style,
                 self._merged_group_action_url(
                     "shopify_sync_shenzhenmergedsettlementgroup_withdraw_cost_confirmation",
@@ -4288,7 +4316,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
     merged_group_cost_summary.short_description = "Merged settlement cost summary"
 
     def add_merged_groups_to_settlement_batch(self, request, queryset):
-        if not (self.is_super_admin(request) or self.is_finance_user(request)):
+        if not self._can_add_merged_groups_to_batch(request):
             self.message_user(request, "只有 Admin、Finance 或超级管理员可以把合并组加入结算批次。", level=messages.ERROR)
             return
 
@@ -4332,6 +4360,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             with transaction.atomic():
                 batch = SettlementBatch.objects.create(
                     batch_no=batch_no,
+                    status="pending_payment",
                     created_by=request.user.get_username(),
                     note=f"Created from merged settlement groups: {', '.join(group_labels)}",
                 )
@@ -4489,6 +4518,17 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
             self.message_user(request, "合并结算组不存在。", level=messages.ERROR)
             return HttpResponseRedirect(reverse("admin:shopify_sync_shenzhenmergedsettlementgroup_changelist"))
         self.withdraw_merged_group_cost_confirmation(
+            request,
+            ShenzhenMergedSettlementGroup.objects.filter(pk=obj.pk),
+        )
+        return self._redirect_to_change(obj)
+
+    def add_merged_group_to_settlement_batch_view(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if not obj:
+            self.message_user(request, "合并结算组不存在。", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:shopify_sync_shenzhenmergedsettlementgroup_changelist"))
+        self.add_merged_groups_to_settlement_batch(
             request,
             ShenzhenMergedSettlementGroup.objects.filter(pk=obj.pk),
         )
