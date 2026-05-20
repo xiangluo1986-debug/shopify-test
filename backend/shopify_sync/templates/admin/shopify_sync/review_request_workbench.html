@@ -628,6 +628,52 @@
     </div>
 
     <div class="rrw-section">
+        <h2>Recent send jobs</h2>
+        <p class="rrw-muted">
+            Manual processor:
+            <code>{{ dashboard.approval_queue.send_job_manual_process_command }}</code>
+        </p>
+        {% if dashboard.approval_queue.send_job_load_error %}
+            <div class="rrw-warning">{{ dashboard.approval_queue.send_job_load_error }}</div>
+        {% endif %}
+        <div class="rrw-table-scroll">
+            <table class="rrw-table rrw-table-compact">
+                <thead>
+                    <tr>
+                        <th>Order</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Last update</th>
+                        <th>Gmail</th>
+                        <th>Shopify tag</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in dashboard.approval_queue.recent_send_jobs %}
+                        <tr>
+                            <td class="rrw-order-col">{{ job.order_name }}</td>
+                            <td><span class="rrw-badge {{ job.status_class }}">{{ job.status_label }}</span></td>
+                            <td>{{ job.created_at|default:"-" }}</td>
+                            <td>{{ job.updated_at|default:"-" }}</td>
+                            <td><code>{{ job.gmail_send_status }}</code></td>
+                            <td><code>{{ job.shopify_tag_status }}</code></td>
+                            <td>
+                                {{ job.message|default:"-" }}
+                                {% if job.last_error %}
+                                    <div class="rrw-secondary-line">{{ job.last_error }}</div>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="7" class="rrw-muted">No send jobs queued yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="rrw-section">
         <h2>Needs review email</h2>
         <p class="rrw-note">
             Showing {{ dashboard.approval_queue.review_queue_showing_start }}&ndash;{{ dashboard.approval_queue.review_queue_showing_end }} of
@@ -758,6 +804,11 @@
                             {% if row.review_request_tag_match_detail %}
                                 <div class="rrw-secondary-line">{{ row.review_request_tag_match_detail }}</div>
                             {% endif %}
+                            {% if row.send_job_status_label %}
+                                <div>
+                                    <span class="rrw-pill {{ row.send_job_status_class }}">Job: {{ row.send_job_status_label }}</span>
+                                </div>
+                            {% endif %}
                             {% if row.note_risk_detected %}
                                 <div class="rrw-secondary-line">
                                     Aftersales/ticket note found
@@ -771,17 +822,25 @@
                         </td>
                         <td class="rrw-reason-col">{% firstof row.eligibility_reason_plain row.reason row.block_reason row.hidden_reason "Not ready" %}</td>
                         <td class="rrw-action-cell">
-                            {% if row.can_review_send or row.action_state == "review_send" %}
+                            {% if row.can_review_send %}
                                 <form method="post" class="rrw-action-form">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="review_send">
                                     <input type="hidden" name="candidate_id" value="{{ row.candidate_id }}">
                                     <button type="submit" class="rrw-primary-button">{% firstof row.action_label row.action_status "Review & Send" %}</button>
                                 </form>
+                            {% elif row.review_send_job_blocks_action %}
+                                <span class="rrw-disabled-action">{% firstof row.action_label row.send_job_status_label "Processing" %}</span>
                             {% elif row.action_state == "already_sent" %}
                                 <span class="rrw-ok">{% firstof row.action_label row.action_status "Already sent" %}</span>
                             {% else %}
                                 <span class="rrw-disabled-action">{% firstof row.action_label row.action_status "Not ready" %}</span>
+                            {% endif %}
+                            {% if row.send_job_message %}
+                                <div class="rrw-secondary-line">{{ row.send_job_message }}</div>
+                            {% endif %}
+                            {% if row.send_job_last_error %}
+                                <div class="rrw-secondary-line">{{ row.send_job_last_error }}</div>
                             {% endif %}
                             {% if row.customer_history_lookup_command %}
                                 <details class="rrw-history-check">

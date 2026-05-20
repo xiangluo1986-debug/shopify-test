@@ -182,6 +182,19 @@ DASHBOARD_SNAPSHOT_HTML_FILENAME = "shopify_review_request_dashboard_snapshot.ht
 DASHBOARD_SNAPSHOT_ENV_PATH = "REVIEW_REQUEST_DASHBOARD_SNAPSHOT_PATH"
 DASHBOARD_SNAPSHOT_STALE_AFTER_MINUTES = 240
 MAX_DASHBOARD_SNAPSHOT_BYTES = 12_000_000
+REVIEW_REQUEST_SEND_JOBS_FILENAME = "shopify_review_request_send_jobs.json"
+REVIEW_REQUEST_SEND_JOB_SCHEMA_VERSION = 1
+REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT = 10
+REVIEW_REQUEST_SEND_JOB_MAX_STORED = 200
+REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES = {"queued", "running"}
+REVIEW_REQUEST_SEND_JOB_COMPLETED_STATUSES = {"sent", "tag_written"}
+REVIEW_REQUEST_SEND_JOB_STATUSES = {
+    "queued",
+    "running",
+    "sent",
+    "tag_written",
+    "failed",
+}
 REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
     "orders_review_request_3",
     "orders_review_request_60",
@@ -1550,6 +1563,9 @@ def _build_review_request_workbench_context_from_dashboard_snapshot(params=None)
     dashboard["normal_page_load_shopify_api_call_performed"] = False
     dashboard["normal_page_load_full_scan_performed"] = False
     _paginate_dashboard_snapshot(dashboard, filters)
+    dashboard["review_request_send_jobs"] = _attach_review_request_send_jobs_to_approval_queue(
+        dashboard["approval_queue"]
+    )
     workbench["operating_dashboard"] = dashboard
     workbench["filters"] = filters
     workbench["status_filter_options"] = _selected_options(STATUS_FILTER_OPTIONS, filters["status"])
@@ -1745,12 +1761,14 @@ def _empty_dashboard_snapshot_context(filters, metadata):
 
 def _empty_dashboard_for_missing_snapshot(metadata):
     approval_queue = _empty_dashboard_approval_queue()
+    send_jobs = _attach_review_request_send_jobs_to_approval_queue(approval_queue)
     return {
         "dashboard_snapshot": metadata,
         "ready_to_send_count": 0,
         "blocked_count": 0,
         "sent_trustpilot_count": 0,
         "approval_queue": approval_queue,
+        "review_request_send_jobs": send_jobs,
         "last_60_days_candidate_scan": {},
         "order_data_coverage": {
             "incomplete": True,
@@ -2278,6 +2296,465 @@ def _review_send_dashboard_snapshot_blocker():
     return {"status": "", "detail": "", "snapshot": metadata}
 
 
+def queue_review_request_send_job(order_identifier, admin_username="", params=None, request_context=None):
+    selected_order = _canonical_order_name(order_identifier)
+    request_context = request_context or {}
+    now = datetime.now(timezone.utc).isoformat()
+    result = {
+        "timestamp": now,
+        "execution_status": "blocked_not_started",
+        "success": False,
+        "job_queued": False,
+        "duplicate_job": False,
+        "job_id": "",
+        "selected_order": selected_order,
+        "message": "",
+        "blocking_detail": "",
+        "blocking_conditions": [],
+        "gmail_api_call_performed": False,
+        "gmail_draft_create_attempted": False,
+        "gmail_drafts_send_called": False,
+        "email_sent": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "shopify_tag_write_performed": False,
+        "mutation_performed": False,
+        "tags_add_performed": False,
+        "tags_remove_performed": False,
+        "external_review_api_call_performed": False,
+        "translations_register_called": False,
+    }
+    if not selected_order:
+        result["execution_status"] = "blocked_missing_selected_order"
+        result["blocking_detail"] = "Review send job was not queued. No selected order was provided."
+        return result
+
+    payload = _load_review_request_send_jobs_payload()
+    if payload.get("load_error"):
+        result["execution_status"] = "blocked_send_job_queue_unavailable"
+        result["blocking_detail"] = (
+            "Review send job was not queued because the local send-job queue could not be loaded."
+        )
+        result["blocking_conditions"].append(
+            {"status": result["execution_status"], "detail": payload.get("load_error")}
+        )
+        return result
+
+    existing_job = _find_review_request_send_job(payload.get("jobs"), selected_order)
+    if existing_job:
+        return _review_request_send_job_duplicate_result(result, existing_job)
+
+    state = _build_review_send_state(params)
+    validation = _validate_review_request_send_job_queue_request(
+        selected_order,
+        state,
+        request_context,
+    )
+    if validation.get("blocking_conditions"):
+        blocker = validation["blocking_conditions"][0]
+        result["execution_status"] = blocker.get("status", "blocked_order_not_eligible")
+        result["blocking_detail"] = blocker.get("detail", "Review send job was not queued.")
+        result["blocking_conditions"] = validation["blocking_conditions"]
+        result["message"] = result["blocking_detail"]
+        return result
+
+    payload = _load_review_request_send_jobs_payload()
+    if payload.get("load_error"):
+        result["execution_status"] = "blocked_send_job_queue_unavailable"
+        result["blocking_detail"] = (
+            "Review send job was not queued because the local send-job queue could not be loaded."
+        )
+        result["blocking_conditions"].append(
+            {"status": result["execution_status"], "detail": payload.get("load_error")}
+        )
+        return result
+    existing_job = _find_review_request_send_job(payload.get("jobs"), selected_order)
+    if existing_job:
+        return _review_request_send_job_duplicate_result(result, existing_job)
+
+    job = _build_review_request_send_job(
+        selected_order=selected_order,
+        admin_username=admin_username,
+        created_at=now,
+        candidate=validation.get("candidate") or {},
+        snapshot=(validation.get("snapshot") or {}),
+    )
+    payload["jobs"] = [job] + list(payload.get("jobs") or [])
+    _write_review_request_send_jobs_payload(payload)
+    result.update(
+        {
+            "execution_status": "review_send_job_queued",
+            "success": True,
+            "job_queued": True,
+            "job_id": job["job_id"],
+            "job": _sanitize_review_request_send_job(job),
+            "message": "Review send job queued. Processing will run in the background.",
+        }
+    )
+    return result
+
+
+def _review_request_send_job_duplicate_result(result, existing_job):
+    result.update(
+        {
+            "execution_status": "review_send_job_already_exists",
+            "success": True,
+            "duplicate_job": True,
+            "job_id": existing_job.get("job_id", ""),
+            "job": existing_job,
+            "message": "Review send job already exists. Refresh in a moment.",
+        }
+    )
+    return result
+
+
+def _validate_review_request_send_job_queue_request(selected_order, state, request_context):
+    snapshot_blocker = _review_send_dashboard_snapshot_blocker()
+    if snapshot_blocker["status"]:
+        return {
+            "candidate": {},
+            "snapshot": snapshot_blocker.get("snapshot") or {},
+            "blocking_conditions": [
+                {
+                    "status": snapshot_blocker["status"],
+                    "detail": snapshot_blocker["detail"],
+                }
+            ],
+        }
+
+    selected_rows = _review_send_selected_rows(state["approval_queue"], selected_order)
+    matches = [
+        row
+        for row in state["approval_queue"]["needs_review_rows"]
+        if row.get("candidate_id") == selected_order
+        and row.get("action_state") == "review_send"
+        and row.get("can_review_send") is True
+    ]
+    if len(matches) != 1:
+        return {
+            "candidate": selected_rows[0] if selected_rows else {},
+            "snapshot": snapshot_blocker.get("snapshot") or {},
+            "blocking_conditions": [
+                _review_send_selection_blocker(selected_order, selected_rows)
+            ],
+        }
+
+    candidate = matches[0]
+    base_result = _base_review_and_send_result(
+        selected_order,
+        "",
+        state,
+        request_context,
+    )
+    blocking_conditions = []
+    blocking_conditions.extend(_runtime_review_send_route_blockers(base_result, candidate))
+    blocking_conditions.extend(_runtime_review_send_group_blockers(candidate))
+    blocking_conditions.extend(
+        _runtime_customer_history_live_lookup_blockers(
+            candidate,
+            state["last_60_days_scan"],
+            state["reports"],
+            (snapshot_blocker.get("snapshot") or {}).get("generated_at"),
+        )
+    )
+    blocking_conditions.extend(_runtime_review_send_candidate_safety_blockers(candidate))
+    return {
+        "candidate": candidate,
+        "snapshot": snapshot_blocker.get("snapshot") or {},
+        "blocking_conditions": blocking_conditions,
+    }
+
+
+def _build_review_request_send_job(selected_order, admin_username, created_at, candidate, snapshot):
+    job_id = _new_review_request_send_job_id(selected_order, admin_username, created_at)
+    return {
+        "job_id": job_id,
+        "order_name": selected_order,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "created_by_admin": _safe_text(admin_username, max_length=120),
+        "status": "queued",
+        "last_error": "",
+        "message": "Review send job queued. Processing will run in the background.",
+        "gmail_send_status": "not_started",
+        "shopify_tag_status": "not_started",
+        "attempts": 0,
+        "source": "admin_review_request_workbench",
+        "review_send_report_path": "",
+        "dashboard_snapshot_generated_at": _safe_text(
+            (snapshot or {}).get("generated_at"),
+            max_length=120,
+        ),
+        "selected_masked_customer": _safe_text(
+            (candidate or {}).get("masked_customer_label")
+            or (candidate or {}).get("customer_masked_label"),
+            max_length=120,
+        ),
+    }
+
+
+def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False):
+    requested_max_jobs = max(_int_or_zero(max_jobs), 1)
+    effective_max_jobs = 1
+    selected_order = _canonical_order_name(order_name)
+    payload = _load_review_request_send_jobs_payload()
+    summary = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task": "process_review_request_send_jobs",
+        "dry_run": dry_run is True,
+        "requested_max_jobs": requested_max_jobs,
+        "effective_max_jobs": effective_max_jobs,
+        "max_jobs_capped_to_one": requested_max_jobs > effective_max_jobs,
+        "selected_order": selected_order,
+        "queue_path": _review_request_send_jobs_relative_path(),
+        "queue_load_error": _safe_text(payload.get("load_error"), max_length=300),
+        "queued_job_count": 0,
+        "selected_job_count": 0,
+        "processed_count": 0,
+        "sent_count": 0,
+        "tag_written_count": 0,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "jobs": [],
+        "dashboard_snapshot_refreshed": False,
+        "dashboard_snapshot_error": "",
+        "gmail_api_call_performed": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "translations_register_called": False,
+    }
+    if payload.get("load_error"):
+        summary["status"] = "failed_queue_unavailable"
+        return summary
+
+    queued_jobs = [
+        job
+        for job in payload.get("jobs") or []
+        if job.get("status") == "queued"
+        and (not selected_order or _canonical_order_name(job.get("order_name")) == selected_order)
+    ]
+    queued_jobs.sort(key=lambda job: job.get("created_at") or job.get("updated_at") or job.get("job_id"))
+    selected_jobs = queued_jobs[:effective_max_jobs]
+    summary["queued_job_count"] = len(queued_jobs)
+    summary["selected_job_count"] = len(selected_jobs)
+    if dry_run:
+        summary["status"] = "dry_run_ready" if selected_jobs else "dry_run_no_queued_jobs"
+        summary["jobs"] = [
+            {
+                "job_id": job.get("job_id"),
+                "order_name": job.get("order_name"),
+                "status": job.get("status"),
+                "message": "Would process this one queued job.",
+            }
+            for job in selected_jobs
+        ]
+        return summary
+
+    for job in selected_jobs:
+        job_result = _process_one_review_request_send_job(job)
+        summary["jobs"].append(job_result)
+        if job_result.get("processed"):
+            summary["processed_count"] += 1
+        if job_result.get("skipped"):
+            summary["skipped_count"] += 1
+        if job_result.get("status") == "sent":
+            summary["sent_count"] += 1
+        if job_result.get("status") == "tag_written":
+            summary["tag_written_count"] += 1
+        if job_result.get("status") == "failed":
+            summary["failed_count"] += 1
+        summary["gmail_api_call_performed"] = (
+            summary["gmail_api_call_performed"]
+            or job_result.get("gmail_api_call_performed") is True
+        )
+        summary["shopify_api_call_performed"] = (
+            summary["shopify_api_call_performed"]
+            or job_result.get("shopify_api_call_performed") is True
+        )
+        summary["shopify_write_performed"] = (
+            summary["shopify_write_performed"]
+            or job_result.get("shopify_write_performed") is True
+        )
+
+    if summary["processed_count"]:
+        try:
+            snapshot = build_review_request_dashboard_snapshot_payload(
+                {},
+                generated_by="process_review_request_send_jobs",
+            )
+            write_review_request_dashboard_snapshot_reports(snapshot)
+            summary["dashboard_snapshot_refreshed"] = True
+        except Exception as exc:  # pragma: no cover - snapshot refresh is best effort after send.
+            summary["dashboard_snapshot_error"] = _safe_exception_summary(exc)
+    summary["status"] = "processed" if summary["processed_count"] else "no_queued_jobs"
+    return summary
+
+
+def _process_one_review_request_send_job(job):
+    job_id = _safe_text(job.get("job_id"), max_length=100)
+    order_name = _canonical_order_name(job.get("order_name"))
+    current_payload = _load_review_request_send_jobs_payload()
+    existing_blocker = _find_review_request_send_job(
+        current_payload.get("jobs"),
+        order_name,
+        exclude_job_id=job_id,
+        for_processing=True,
+    )
+    if existing_blocker:
+        blocked = _update_review_request_send_job(
+            job_id,
+            {
+                "status": "failed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "last_error": (
+                    "Duplicate job blocked. Another job for this order is already running, "
+                    "sent, or tag-written."
+                ),
+                "message": "Duplicate send job blocked. Gmail was not resent.",
+            },
+        )
+        return {
+            "job_id": job_id,
+            "order_name": order_name,
+            "status": "failed",
+            "processed": False,
+            "skipped": True,
+            "message": (blocked or {}).get("message") or "Duplicate job blocked.",
+            "gmail_api_call_performed": False,
+            "shopify_api_call_performed": False,
+            "shopify_write_performed": False,
+        }
+
+    running = _update_review_request_send_job(
+        job_id,
+        {
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "attempts": _int_or_zero(job.get("attempts")) + 1,
+            "message": "Review send job is running.",
+        },
+    )
+    try:
+        result = review_request_review_and_send(
+            order_name,
+            admin_username=(running or job).get("created_by_admin") or "process_review_request_send_jobs",
+            params={},
+            request_context={
+                "method": "POST",
+                "is_staff_admin": True,
+                "csrf_protection_enabled": True,
+                "queued_job_id": job_id,
+            },
+        )
+        updates = _review_request_send_job_updates_from_result(result)
+    except Exception as exc:  # pragma: no cover - defensive guard around one real send path.
+        result = {
+            "execution_status": "failed_worker_exception_after_start",
+            "gmail_api_call_performed": False,
+            "shopify_api_call_performed": False,
+            "shopify_write_performed": False,
+        }
+        updates = {
+            "status": "failed",
+            "gmail_send_status": "unknown_after_start",
+            "shopify_tag_status": "unknown_after_start",
+            "last_error": (
+                "Worker failed after the send path started. Do not retry from the web page; "
+                f"review logs first. {_safe_exception_summary(exc)}"
+            ),
+            "message": "Review send job failed after the worker started.",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+    updated = _update_review_request_send_job(job_id, updates)
+    return {
+        "job_id": job_id,
+        "order_name": order_name,
+        "status": (updated or updates).get("status", "failed"),
+        "processed": True,
+        "skipped": False,
+        "message": (updated or updates).get("message", ""),
+        "last_error": (updated or updates).get("last_error", ""),
+        "gmail_api_call_performed": result.get("gmail_api_call_performed") is True,
+        "shopify_api_call_performed": result.get("shopify_api_call_performed") is True,
+        "shopify_write_performed": result.get("shopify_write_performed") is True,
+    }
+
+
+def _update_review_request_send_job(job_id, updates):
+    payload = _load_review_request_send_jobs_payload()
+    jobs = list(payload.get("jobs") or [])
+    updated_job = {}
+    for index, job in enumerate(jobs):
+        if job.get("job_id") != job_id:
+            continue
+        updated_job = dict(job)
+        updated_job.update(updates or {})
+        updated_job["updated_at"] = datetime.now(timezone.utc).isoformat()
+        jobs[index] = updated_job
+        break
+    if not updated_job:
+        return {}
+    payload["jobs"] = jobs
+    _write_review_request_send_jobs_payload(payload)
+    return _sanitize_review_request_send_job(updated_job)
+
+
+def _review_request_send_job_updates_from_result(result):
+    completed_at = datetime.now(timezone.utc).isoformat()
+    email_sent = result.get("email_sent") is True
+    tag_written = (
+        result.get("final_workflow_status") == "completed_email_sent_tag_written"
+        or result.get("shopify_tag_write_confirmed") is True
+        or result.get("auto_tag_write_status") == TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS
+    )
+    if tag_written:
+        return {
+            "status": "tag_written",
+            "completed_at": completed_at,
+            "gmail_send_status": "sent",
+            "shopify_tag_status": "tag_written",
+            "last_error": "",
+            "message": "Trustpilot email sent and Shopify tag written.",
+            "review_send_report_path": f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}",
+        }
+    if email_sent:
+        tag_error = (
+            result.get("auto_tag_write_user_message")
+            or result.get("auto_tag_write_status")
+            or result.get("blocking_detail")
+            or "Shopify tag update did not complete."
+        )
+        return {
+            "status": "sent",
+            "completed_at": completed_at,
+            "gmail_send_status": "sent",
+            "shopify_tag_status": "failed",
+            "last_error": _safe_text(tag_error, max_length=400),
+            "message": "Trustpilot email sent. Shopify tag update needs attention; do not resend Gmail.",
+            "review_send_report_path": f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}",
+        }
+    blocker = (
+        result.get("blocking_detail")
+        or result.get("gmail_error_sanitized")
+        or result.get("execution_status")
+        or "Review send job failed before email send."
+    )
+    gmail_started = bool(
+        result.get("gmail_api_call_performed") is True
+        or result.get("gmail_draft_create_attempted") is True
+        or result.get("gmail_draft_send_attempted") is True
+    )
+    return {
+        "status": "failed",
+        "completed_at": completed_at,
+        "gmail_send_status": "failed" if gmail_started else "not_started",
+        "shopify_tag_status": "not_started",
+        "last_error": _safe_text(blocker, max_length=400),
+        "message": "Review send job failed. No confirmed Gmail send.",
+        "review_send_report_path": f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}",
+    }
+
+
 def review_request_review_and_send(order_identifier, admin_username="", params=None, request_context=None):
     state = _build_review_send_state(params)
     selected_order = _safe_text(order_identifier, max_length=80)
@@ -2507,6 +2984,308 @@ def _project_root():
 
 def _log_dir():
     return _project_root() / "logs"
+
+
+def _review_request_send_jobs_path():
+    return _log_dir() / REVIEW_REQUEST_SEND_JOBS_FILENAME
+
+
+def _review_request_send_jobs_relative_path():
+    return f"logs/{REVIEW_REQUEST_SEND_JOBS_FILENAME}"
+
+
+def _empty_review_request_send_jobs_payload(load_error=""):
+    return {
+        "schema_version": REVIEW_REQUEST_SEND_JOB_SCHEMA_VERSION,
+        "updated_at": "",
+        "jobs": [],
+        "load_error": _safe_text(load_error, max_length=300),
+        "path": str(_review_request_send_jobs_path()),
+        "relative_path": _review_request_send_jobs_relative_path(),
+    }
+
+
+def _load_review_request_send_jobs_payload():
+    path = _review_request_send_jobs_path()
+    payload = _empty_review_request_send_jobs_payload()
+    if not path.exists():
+        return payload
+    try:
+        stat = path.stat()
+        if stat.st_size > MAX_REPORT_BYTES:
+            return _empty_review_request_send_jobs_payload("send_job_queue_too_large")
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return _empty_review_request_send_jobs_payload(
+            f"send_job_queue_unreadable: {_safe_exception_summary(exc)}"
+        )
+    if isinstance(data, list):
+        jobs = data
+        updated_at = ""
+    elif isinstance(data, dict):
+        jobs = data.get("jobs") or []
+        updated_at = _safe_text(data.get("updated_at"), max_length=120)
+    else:
+        return _empty_review_request_send_jobs_payload("send_job_queue_not_object")
+    payload["updated_at"] = updated_at
+    payload["jobs"] = _sanitize_review_request_send_jobs(jobs)
+    return payload
+
+
+def _write_review_request_send_jobs_payload(payload):
+    safe_payload = {
+        "schema_version": REVIEW_REQUEST_SEND_JOB_SCHEMA_VERSION,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "jobs": _sanitize_review_request_send_jobs((payload or {}).get("jobs") or [])[
+            :REVIEW_REQUEST_SEND_JOB_MAX_STORED
+        ],
+    }
+    path = _review_request_send_jobs_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    with temp_path.open("w", encoding="utf-8") as queue_file:
+        json.dump(safe_payload, queue_file, ensure_ascii=False, indent=2)
+        queue_file.write("\n")
+    json.loads(temp_path.read_text(encoding="utf-8"))
+    os.replace(temp_path, path)
+    safe_payload["path"] = str(path)
+    safe_payload["relative_path"] = _review_request_send_jobs_relative_path()
+    return safe_payload
+
+
+def _sanitize_review_request_send_jobs(jobs):
+    sanitized = [
+        _sanitize_review_request_send_job(job)
+        for job in (jobs or [])
+        if isinstance(job, dict)
+    ]
+    sanitized = [job for job in sanitized if job.get("job_id") and job.get("order_name")]
+    sanitized.sort(key=_review_request_send_job_sort_key, reverse=True)
+    return sanitized
+
+
+def _sanitize_review_request_send_job(job):
+    status = _safe_text(job.get("status"), max_length=40)
+    if status not in REVIEW_REQUEST_SEND_JOB_STATUSES:
+        status = "queued"
+    gmail_send_status = _safe_text(job.get("gmail_send_status"), max_length=80)
+    shopify_tag_status = _safe_text(job.get("shopify_tag_status"), max_length=80)
+    sanitized = {
+        "job_id": _safe_text(job.get("job_id"), max_length=100),
+        "order_name": _canonical_order_name(job.get("order_name") or job.get("order")),
+        "created_at": _safe_text(job.get("created_at"), max_length=120),
+        "updated_at": _safe_text(job.get("updated_at"), max_length=120),
+        "started_at": _safe_text(job.get("started_at"), max_length=120),
+        "completed_at": _safe_text(job.get("completed_at"), max_length=120),
+        "created_by_admin": _safe_text(job.get("created_by_admin"), max_length=120),
+        "status": status,
+        "gmail_send_status": gmail_send_status or "not_started",
+        "shopify_tag_status": shopify_tag_status or "not_started",
+        "last_error": _safe_text(job.get("last_error"), max_length=400),
+        "message": _safe_text(job.get("message"), max_length=400),
+        "attempts": _int_or_zero(job.get("attempts")),
+        "source": _safe_text(job.get("source"), max_length=120),
+        "review_send_report_path": _safe_text(job.get("review_send_report_path"), max_length=180),
+        "dashboard_snapshot_generated_at": _safe_text(
+            job.get("dashboard_snapshot_generated_at"),
+            max_length=120,
+        ),
+    }
+    sanitized["status_label"] = _review_request_send_job_status_label(sanitized)
+    sanitized["status_class"] = _review_request_send_job_status_class(sanitized)
+    if not sanitized["message"]:
+        sanitized["message"] = _review_request_send_job_message(sanitized)
+    return sanitized
+
+
+def _review_request_send_job_sort_key(job):
+    return (
+        _safe_text(job.get("updated_at"), max_length=120)
+        or _safe_text(job.get("created_at"), max_length=120)
+        or _safe_text(job.get("job_id"), max_length=100)
+    )
+
+
+def _review_request_send_job_status_label(job):
+    status = _safe_text(job.get("status"), max_length=40)
+    return {
+        "queued": "Queued",
+        "running": "Running",
+        "sent": "Sent",
+        "tag_written": "Tag written",
+        "failed": "Failed",
+    }.get(status, "Queued")
+
+
+def _review_request_send_job_status_class(job):
+    status = _safe_text(job.get("status"), max_length=40)
+    if status == "failed":
+        return "rrw-badge-bad"
+    if status in {"queued", "running"}:
+        return "rrw-badge-warn"
+    if status in {"sent", "tag_written"}:
+        return "rrw-badge-ok"
+    return "rrw-badge-muted"
+
+
+def _review_request_send_job_message(job):
+    status = _safe_text(job.get("status"), max_length=40)
+    if status == "queued":
+        return "Review send job queued. Processing will run in the background."
+    if status == "running":
+        return "Review send job is running."
+    if status == "tag_written":
+        return "Trustpilot email sent and Shopify tag written."
+    if status == "sent":
+        return "Trustpilot email sent. Do not resend Gmail."
+    if status == "failed":
+        return _safe_text(job.get("last_error"), max_length=300) or "Review send job failed."
+    return "Review send job status is available."
+
+
+def load_review_request_send_jobs(limit=REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT):
+    payload = _load_review_request_send_jobs_payload()
+    jobs = list(payload.get("jobs") or [])
+    if limit:
+        jobs = jobs[: max(_int_or_zero(limit), 0)]
+    return jobs
+
+
+def _latest_review_request_send_job_by_order(jobs):
+    latest = {}
+    for job in jobs or []:
+        order_name = _canonical_order_name(job.get("order_name"))
+        if not order_name:
+            continue
+        if order_name not in latest:
+            latest[order_name] = job
+    return latest
+
+
+def _review_request_send_job_prevents_duplicate(job):
+    status = _safe_text(job.get("status"), max_length=40)
+    return bool(
+        status in REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES
+        or status in REVIEW_REQUEST_SEND_JOB_COMPLETED_STATUSES
+        or job.get("gmail_send_status") in {"sent", "unknown_after_start"}
+    )
+
+
+def _review_request_send_job_prevents_processing(job):
+    status = _safe_text(job.get("status"), max_length=40)
+    return bool(
+        status in {"running", "sent", "tag_written"}
+        or job.get("gmail_send_status") in {"sent", "unknown_after_start"}
+    )
+
+
+def _find_review_request_send_job(jobs, order_name, exclude_job_id="", for_processing=False):
+    selected_order = _canonical_order_name(order_name)
+    excluded = _safe_text(exclude_job_id, max_length=100)
+    for job in jobs or []:
+        if _canonical_order_name(job.get("order_name")) != selected_order:
+            continue
+        if excluded and job.get("job_id") == excluded:
+            continue
+        if for_processing:
+            if _review_request_send_job_prevents_processing(job):
+                return job
+        elif _review_request_send_job_prevents_duplicate(job):
+            return job
+    return {}
+
+
+def _new_review_request_send_job_id(order_name, admin_username, created_at):
+    seed = f"{order_name}|{admin_username}|{created_at}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12]
+    timestamp = re.sub(r"[^0-9A-Za-z]", "", created_at)[:15]
+    return f"rrsj_{timestamp}_{digest}"
+
+
+def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
+    payload = _load_review_request_send_jobs_payload()
+    jobs = payload.get("jobs") or []
+    latest_by_order = _latest_review_request_send_job_by_order(jobs)
+    for key in (
+        "all_needs_review_rows",
+        "needs_review_rows",
+        "blocked_rows",
+        "all_already_sent_rows",
+        "already_sent_rows",
+    ):
+        rows = approval_queue.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict):
+                _apply_review_request_send_job_to_queue_row(
+                    row,
+                    latest_by_order.get(_canonical_order_name(row.get("order") or row.get("order_name"))),
+                )
+    visible_rows = approval_queue.get("needs_review_rows") or []
+    approval_queue["review_send_action_enabled_count"] = sum(
+        1 for row in visible_rows if isinstance(row, dict) and row.get("can_review_send") is True
+    )
+    summary = {
+        "storage_relative_path": _review_request_send_jobs_relative_path(),
+        "storage_path": _safe_text(payload.get("path"), max_length=500),
+        "load_error": _safe_text(payload.get("load_error"), max_length=300),
+        "loaded": not bool(payload.get("load_error")),
+        "recent_jobs": jobs[:REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT],
+        "recent_job_count": min(len(jobs), REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT),
+        "total_job_count": len(jobs),
+        "active_job_count": sum(
+            1 for job in jobs if job.get("status") in REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES
+        ),
+        "manual_process_command": (
+            "docker compose exec -T web python manage.py "
+            "process_review_request_send_jobs --max-jobs 1"
+        ),
+        "dry_run_command": (
+            "docker compose exec -T web python manage.py "
+            "process_review_request_send_jobs --max-jobs 1 --dry-run"
+        ),
+    }
+    approval_queue["recent_send_jobs"] = summary["recent_jobs"]
+    approval_queue["send_job_storage_path"] = summary["storage_relative_path"]
+    approval_queue["send_job_load_error"] = summary["load_error"]
+    approval_queue["active_send_job_count"] = summary["active_job_count"]
+    approval_queue["send_job_manual_process_command"] = summary["manual_process_command"]
+    approval_queue["send_job_dry_run_command"] = summary["dry_run_command"]
+    return summary
+
+
+def _apply_review_request_send_job_to_queue_row(row, job):
+    if not job:
+        row["send_job_status"] = ""
+        row["send_job_status_label"] = ""
+        row["send_job_message"] = ""
+        row["send_job_last_error"] = ""
+        row["review_send_job_blocks_action"] = False
+        return row
+    row["send_job_id"] = _safe_text(job.get("job_id"), max_length=100)
+    row["send_job_status"] = _safe_text(job.get("status"), max_length=40)
+    row["send_job_status_label"] = _review_request_send_job_status_label(job)
+    row["send_job_status_class"] = _review_request_send_job_status_class(job)
+    row["send_job_message"] = _safe_text(job.get("message"), max_length=300)
+    row["send_job_last_error"] = _safe_text(job.get("last_error"), max_length=300)
+    row["send_job_created_at"] = _safe_text(job.get("created_at"), max_length=120)
+    row["send_job_updated_at"] = _safe_text(job.get("updated_at"), max_length=120)
+    row["send_job_gmail_send_status"] = _safe_text(job.get("gmail_send_status"), max_length=80)
+    row["send_job_shopify_tag_status"] = _safe_text(job.get("shopify_tag_status"), max_length=80)
+    blocks_action = _review_request_send_job_prevents_duplicate(job)
+    row["review_send_job_blocks_action"] = blocks_action
+    if blocks_action:
+        row["can_review_send"] = False
+        if row.get("send_job_status") in REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES:
+            row["action_label"] = "Processing"
+            row["action_status"] = "Processing"
+        else:
+            row["action_label"] = row["send_job_status_label"]
+            row["action_status"] = row["send_job_status_label"]
+        row["review_send_post_action"] = ""
+        row["hidden_reason"] = row["send_job_message"] or row["send_job_last_error"]
+    return row
 
 
 def _load_known_reports():
@@ -6418,6 +7197,7 @@ def _operating_dashboard(
         sent_page=filters["sent_page"],
         sent_page_size=filters["sent_page_size"],
     )
+    send_jobs = _attach_review_request_send_jobs_to_approval_queue(approval_queue)
     order_data_coverage = _dashboard_order_data_coverage(last_60_days_scan)
     customer_history_checks = approval_queue.get("customer_history_checks") or (
         last_60_days_scan.get("customer_history_checks") or {}
@@ -6427,6 +7207,7 @@ def _operating_dashboard(
         "blocked_count": blocked_count,
         "sent_trustpilot_count": sent_count,
         "approval_queue": approval_queue,
+        "review_request_send_jobs": send_jobs,
         "last_60_days_candidate_scan": last_60_days_scan,
         "customer_history_checks": customer_history_checks,
         "lookup_cache": _lookup_cache_dashboard_summary(last_60_days_scan),
@@ -15798,7 +16579,7 @@ def _shopify_scope_verification_data(reports):
     return data if isinstance(data, dict) else {}
 
 
-def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
+def _runtime_review_send_candidate_safety_blockers(candidate):
     blockers = []
     tags = _dedupe_text(candidate.get("order_tags_display") or candidate.get("tags") or [])
     delivered = candidate.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags)
@@ -15893,6 +16674,11 @@ def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
                 "detail": "No email was sent. Refund, return, cancel, dispute, chargeback, shipping, or ticket risk found.",
             }
         )
+    return blockers
+
+
+def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
+    blockers = _runtime_review_send_candidate_safety_blockers(candidate)
     gmail_blocker = _review_send_gmail_blocker(gmail_setup)
     if gmail_blocker:
         blockers.append(gmail_blocker)

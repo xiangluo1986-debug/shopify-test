@@ -1565,3 +1565,24 @@ Future tracking design note:
   `logs/codex_runs/` to report `#21225` local tags, Trustpilot tag detection,
   Needs review removal, Already sent display, exclusion count, and no-write /
   no-API safety flags.
+
+## Phase 5.33 Queued Review & Send Jobs
+
+- [x] Admin `Review & Send` now creates one local send job and returns quickly
+  instead of sending Gmail and writing Shopify tags inside the browser POST.
+- [x] The local queue is `logs/shopify_review_request_send_jobs.json`; entries
+  store job id, order name, created/updated times, admin username, status,
+  sanitized message/error, Gmail send status, and Shopify tag status only.
+- [x] The web POST performs no Gmail API call, no Gmail draft/send, no Shopify
+  API call, no Shopify tag write, and no `translationsRegister` call.
+- [x] Duplicate protection blocks active or completed jobs for the same order;
+  if Gmail send is confirmed but tag write fails, later clicks and worker runs
+  must not resend Gmail.
+- [x] `process_review_request_send_jobs --max-jobs 1` processes at most one
+  queued order, revalidates the current queue, sends Gmail through the existing
+  one-order path, performs post-send audit/tag write only after send
+  confirmation, and refreshes the dashboard snapshot afterward.
+- [x] `process_review_request_send_jobs --dry-run` only reports which one job
+  would be processed and must not call Gmail or Shopify.
+- [x] The Review Requests page shows recent jobs and disables the button as
+  `Processing`, `Sent`, or `Tag written` when a blocking job exists.

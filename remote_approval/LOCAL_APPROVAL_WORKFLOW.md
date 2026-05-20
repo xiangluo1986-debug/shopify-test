@@ -387,6 +387,33 @@ fails, no Shopify tag write is attempted. The manual runner above still
 requires the approval environment value and is used for existing Sent / Tag
 pending rows.
 
+Phase 5.33 moves that slow send/tag sequence out of the browser request. The
+admin `Review & Send` POST now validates the selected visible eligible order,
+creates one local job in `logs/shopify_review_request_send_jobs.json`, and
+returns with `Review send job queued. Processing will run in the background.`
+It must not call Gmail, create/send drafts, call Shopify, write tags, call
+external review APIs, or call `translationsRegister`.
+
+After a job is queued, process exactly one job manually or by a future
+scheduler:
+
+```powershell
+docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1
+```
+
+For a no-send/no-write check, use:
+
+```powershell
+docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1 --dry-run
+```
+
+The worker revalidates the selected order, performs the existing one-order
+Gmail send flow, runs post-send audit/tag write only after Gmail send is
+confirmed, and refreshes the dashboard snapshot afterward. It caps processing
+to one job even if a larger `--max-jobs` is passed. Active/completed jobs for
+the same order block duplicate queueing; a job with confirmed Gmail send but
+failed Shopify tag write must never resend Gmail.
+
 Phase 5.29B fixes the manual post-send tag-write runner shell payload. The
 runner passes source audit data into Django shell as a JSON string and parses it
 with `json.loads(...)`, so generated Python code does not contain raw JSON
@@ -847,6 +874,19 @@ memory and calls the shared one-order Shopify tag-write helper. If the audit or
 tag write fails, Gmail is not retried and the order remains Sent / Tag pending
 for the manual runner. If Gmail send fails, the Shopify tag-write helper is not
 called.
+
+Phase 5.33 changes the operator flow to avoid Cloudflare/origin timeouts. The
+admin POST queues a local one-order send job and returns immediately; the slow
+Gmail send, post-send audit, Shopify tag write, review-request tag removal, and
+dashboard snapshot refresh run from:
+
+```powershell
+docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1
+```
+
+Use `--dry-run` to inspect the next queued job without Gmail or Shopify calls.
+The Review Requests page shows recent job status and disables duplicate clicks
+for queued/running/sent/tag-written jobs.
 
 Phase 5.29D adds a manual repair runner path for exactly one sent/tag-pending
 order, currently locked to `#21284`. It requires

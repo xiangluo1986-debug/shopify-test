@@ -35,7 +35,7 @@ from django.utils.safestring import mark_safe
 from .models import ShopifyInstallation, ShopifyOrder, ShopifyProduct, ShopifyOrderItem, ShopifySyncState
 from .review_request_workbench import (
     build_review_request_workbench_context,
-    review_request_review_and_send,
+    queue_review_request_send_job,
     run_trustpilot_auto_queue_refresh_after_shopify_order_sync,
 )
 from .sync_helpers import (
@@ -1311,7 +1311,7 @@ def review_request_workbench(request):
         action = (request.POST.get("action") or "").strip()
         if action != "review_send":
             return HttpResponseBadRequest("Unknown Review Request action.")
-        result = review_request_review_and_send(
+        result = queue_review_request_send_job(
             request.POST.get("candidate_id"),
             admin_username=request.user.get_username(),
             params=request.GET,
@@ -1321,19 +1321,21 @@ def review_request_workbench(request):
                 "csrf_protection_enabled": True,
             },
         )
-        if result.get("email_sent") is True:
-            if result.get("final_workflow_status") == "completed_email_sent_tag_written":
-                messages.success(request, "Trustpilot email sent. Shopify tag updated.")
-            else:
-                messages.warning(
-                    request,
-                    "Trustpilot email sent, but Shopify tag update failed. Run post-send tag write.",
-                )
+        if result.get("job_queued") is True:
+            messages.success(
+                request,
+                "Review send job queued. Processing will run in the background.",
+            )
+        elif result.get("duplicate_job") is True:
+            messages.warning(
+                request,
+                "Review send job already exists. Refresh in a moment.",
+            )
         else:
             messages.warning(
                 request,
                 result.get("blocking_detail")
-                or "No email was sent. This order is not eligible.",
+                or "Review send job was not queued. This order is not eligible.",
             )
         return HttpResponseRedirect(request.get_full_path())
     if request.method not in {"GET", "HEAD"}:
