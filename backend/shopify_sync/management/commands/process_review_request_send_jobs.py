@@ -26,12 +26,21 @@ class Command(BaseCommand):
             action="store_true",
             help="Show the next queued job without calling Gmail or Shopify.",
         )
+        parser.add_argument(
+            "--retry-failed",
+            action="store_true",
+            help=(
+                "Retry one eligible failed job only when Gmail send was not confirmed "
+                "and the failure is recoverable."
+            ),
+        )
 
     def handle(self, *args, **options):
         summary = process_review_request_send_jobs(
             max_jobs=options.get("max_jobs") or 1,
             order_name=options.get("order") or "",
             dry_run=options.get("dry_run") is True,
+            retry_failed=options.get("retry_failed") is True,
         )
         status = summary.get("status") or "unknown"
         if status == "failed_queue_unavailable":
@@ -55,6 +64,18 @@ class Command(BaseCommand):
         self.stdout.write(f"job_count: {summary.get('job_count', 0)}")
         self.stdout.write(f"queued_job_count: {summary.get('queued_job_count', 0)}")
         self.stdout.write(f"queued_jobs_found: {summary.get('queued_jobs_found', 0)}")
+        self.stdout.write(f"failed_job_count: {summary.get('failed_job_count', 0)}")
+        self.stdout.write(
+            f"retry_failed_enabled: {summary.get('retry_failed_enabled') is True}"
+        )
+        self.stdout.write(
+            f"retryable_failed_count: {summary.get('retryable_failed_count', 0)}"
+        )
+        self.stdout.write(f"skipped_failed_count: {summary.get('skipped_failed_count', 0)}")
+        self.stdout.write(f"selected_order: {summary.get('selected_order') or ''}")
+        self.stdout.write(f"retry_reason: {summary.get('retry_reason') or ''}")
+        self.stdout.write(f"attempts_before: {summary.get('attempts_before', 0)}")
+        self.stdout.write(f"attempts_after: {summary.get('attempts_after', 0)}")
         self.stdout.write(f"selected_job_count: {summary.get('selected_job_count', 0)}")
         self.stdout.write(f"processed_count: {summary.get('processed_count', 0)}")
         self.stdout.write(f"sent_count: {summary.get('sent_count', 0)}")
@@ -101,6 +122,19 @@ class Command(BaseCommand):
                     f"{item.get('order_name')} "
                     f"{item.get('status')} "
                     f"{item.get('updated_at') or ''}"
+                )
+        else:
+            self.stdout.write("- none")
+
+        self.stdout.write("skipped_failed_reasons:")
+        skipped_failed_reasons = summary.get("skipped_failed_reasons") or []
+        if skipped_failed_reasons:
+            for item in skipped_failed_reasons:
+                self.stdout.write(
+                    "- "
+                    f"{item.get('order_name')} "
+                    f"{item.get('reason')} "
+                    f"{item.get('detail') or ''}"
                 )
         else:
             self.stdout.write("- none")

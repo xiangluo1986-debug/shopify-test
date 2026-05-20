@@ -684,6 +684,10 @@
             <code>{{ dashboard.approval_queue.send_job_manual_process_command }}</code>
         </p>
         <p class="rrw-muted">
+            Failed-job retry:
+            <code>{{ dashboard.approval_queue.send_job_retry_failed_command }}</code>
+        </p>
+        <p class="rrw-muted">
             Queue file:
             <code>{{ dashboard.approval_queue.send_job_queue_path }}</code>
         </p>
@@ -716,6 +720,19 @@
                                 {{ job.message|default:"-" }}
                                 {% if job.last_error %}
                                     <div class="rrw-secondary-line">{{ job.last_error }}</div>
+                                {% endif %}
+                                {% if job.status == "failed" %}
+                                    <div class="rrw-secondary-line">
+                                        Safe error summary: {{ job.safe_error_summary|default:"Review send job failed." }}
+                                    </div>
+                                    {% if job.retry_available %}
+                                        <div class="rrw-secondary-line">Retry available after Gmail reconnect.</div>
+                                        <div class="rrw-secondary-line"><code>{{ job.retry_command }}</code></div>
+                                    {% else %}
+                                        <div class="rrw-secondary-line">
+                                            Retry blocked: {{ job.non_retryable_reason|default:"This failed job is not safe to retry automatically." }}
+                                        </div>
+                                    {% endif %}
                                 {% endif %}
                             </td>
                         </tr>

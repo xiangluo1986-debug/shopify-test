@@ -1593,3 +1593,14 @@ Future tracking design note:
 - [x] Phase 5.33D: `Review & Send` POST writes the canonical queue file, reads
   it back immediately, and reports an error instead of Queued if the selected
   order cannot be verified in the file.
+- [x] Phase 5.33E: `process_review_request_send_jobs --max-jobs 1
+  --retry-failed` can retry exactly one eligible failed job after Gmail
+  reconnect, without creating a duplicate job id.
+- [x] Phase 5.33E: failed-job retry is blocked when Gmail send is confirmed,
+  `email_sent` is true, `sent_count` is greater than zero, status is
+  sent/tag-written/completed/unknown-after-start, Shopify tag write evidence is
+  present, attempts are already at three, another completed job exists for the
+  same order, or local ShopifyOrder tags already show a Trustpilot sent tag.
+- [x] Phase 5.33E: dry-run retry diagnostics report failed job count,
+  retryable/skipped failed counts, skipped reasons, selected order, retry
+  reason, and attempts before/after without calling Gmail or Shopify.

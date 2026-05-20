@@ -415,6 +415,27 @@ For a no-send/no-write check, use:
 docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1 --dry-run
 ```
 
+Phase 5.33E adds a failed-job retry path for Gmail OAuth/token refresh
+failures only. It is still one job by default and does not create a duplicate
+job:
+
+```powershell
+docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1 --retry-failed
+```
+
+Before any retry, run the no-send/no-write diagnostic:
+
+```powershell
+docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1 --dry-run --retry-failed
+```
+
+The retry path only selects failed jobs where Gmail send was not confirmed,
+`sent_count` is zero, Shopify tag status is still `not_started`, attempts are
+below three, no completed job exists for the same order, and local
+ShopifyOrder tag evidence does not already show a Trustpilot sent tag. Jobs
+with confirmed Gmail send, `unknown_after_start`, sent/tag-written/completed
+status, or any Shopify write evidence must not be retried.
+
 The worker revalidates the selected order, performs the existing one-order
 Gmail send flow, runs post-send audit/tag write only after Gmail send is
 confirmed, and refreshes the dashboard snapshot afterward. It caps processing
