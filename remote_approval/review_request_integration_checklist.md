@@ -1586,3 +1586,10 @@ Future tracking design note:
   would be processed and must not call Gmail or Shopify.
 - [x] The Review Requests page shows recent jobs and disables the button as
   `Processing`, `Sent`, or `Tag written` when a blocking job exists.
+- [x] Phase 5.33D: the page and processor use only the canonical live queue
+  file (`REVIEW_REQUEST_SEND_JOBS_PATH` if configured, otherwise
+  `/app/logs/shopify_review_request_send_jobs.json` in Docker). Cached snapshot
+  queued state is ignored unless the same order exists in that live file.
+- [x] Phase 5.33D: `Review & Send` POST writes the canonical queue file, reads
+  it back immediately, and reports an error instead of Queued if the selected
+  order cannot be verified in the file.

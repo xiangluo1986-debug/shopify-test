@@ -394,6 +394,14 @@ returns with `Review send job queued. Processing will run in the background.`
 It must not call Gmail, create/send drafts, call Shopify, write tags, call
 external review APIs, or call `translationsRegister`.
 
+Phase 5.33D makes the queue display canonical-file only. The Review Requests
+page reads live send jobs from `REVIEW_REQUEST_SEND_JOBS_PATH` when configured,
+otherwise `/app/logs/shopify_review_request_send_jobs.json` in Docker, and it
+ignores stale queued state from cached dashboard snapshots when that live queue
+file is missing. The POST enqueue path writes the canonical queue file, reads it
+back immediately, and only reports Queued after the selected order is verified
+in the file.
+
 After a job is queued, process exactly one job manually or by a future
 scheduler:
 

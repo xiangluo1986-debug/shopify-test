@@ -207,6 +207,9 @@ REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND = (
     "docker compose exec -T web python manage.py "
     "process_review_request_send_jobs --max-jobs 1"
 )
+REVIEW_REQUEST_SEND_JOB_WRITE_FAILURE_MESSAGE = (
+    "Could not create send job. Please refresh and try again."
+)
 REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
     "orders_review_request_3",
     "orders_review_request_60",
@@ -1437,6 +1440,8 @@ def _compact_needs_review_snapshot_row(row):
             "send_job_status_class",
             "send_job_message",
             "send_job_last_error",
+            "send_job_diagnostic",
+            "send_job_stale_status_ignored",
             "review_send_job_blocks_action",
         ),
     )
@@ -2861,9 +2866,12 @@ def queue_review_request_send_job(order_identifier, admin_username="", params=No
         "blocking_detail": "",
         "blocking_conditions": [],
         "processor_command": REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND,
+        "queue_path_used": enqueue_diagnostics["queue_path_used"],
         "queue_path_used_by_post": enqueue_diagnostics["queue_path_used_by_post"],
         "paths_checked": enqueue_diagnostics["paths_checked"],
         "job_count": 0,
+        "job_write_attempted": False,
+        "job_write_verified": False,
         "gmail_api_call_performed": False,
         "gmail_draft_create_attempted": False,
         "gmail_drafts_send_called": False,
@@ -2949,24 +2957,85 @@ def queue_review_request_send_job(order_identifier, admin_username="", params=No
         snapshot=(validation.get("snapshot") or {}),
     )
     payload["jobs"] = [job] + list(payload.get("jobs") or [])
-    written_payload = _write_review_request_send_jobs_payload(payload)
+    result["job_write_attempted"] = True
+    try:
+        written_payload = _write_review_request_send_jobs_payload(payload)
+    except Exception as exc:
+        return _review_request_send_job_write_failure_result(result, job, exc)
+
+    verified_payload = _load_review_request_send_jobs_payload()
+    verified_job = _find_review_request_send_job_by_id_and_order(
+        verified_payload.get("jobs"),
+        job["job_id"],
+        selected_order,
+    )
+    if verified_payload.get("load_error") or not verified_job:
+        verify_error = verified_payload.get("load_error") or "send_job_write_not_verified"
+        result["job_count"] = len(written_payload.get("jobs") or [])
+        return _review_request_send_job_write_failure_result(result, job, verify_error)
+
     result.update(
         {
             "execution_status": "review_send_job_queued",
             "success": True,
             "job_queued": True,
             "job_created": True,
+            "job_write_verified": True,
             "job_id": job["job_id"],
-            "job": _sanitize_review_request_send_job(job),
-            "message": "Review send job queued. Run the processor to send it.",
-            "job_count": len(written_payload.get("jobs") or []),
+            "job": verified_job,
+            "message": "Review send job queued. Processing will run in the background.",
+            "job_count": len(verified_payload.get("jobs") or []),
         }
     )
     result["enqueue_diagnostics"] = _review_send_enqueue_diagnostics(
         selected_order,
         job_created=True,
+        job_id=job["job_id"],
+        job_write_attempted=True,
+        job_write_verified=True,
         job_count=result["job_count"],
     )
+    result["queue_path_used"] = result["enqueue_diagnostics"]["queue_path_used"]
+    result["queue_path_used_by_post"] = result["enqueue_diagnostics"]["queue_path_used_by_post"]
+    result["paths_checked"] = result["enqueue_diagnostics"]["paths_checked"]
+    return result
+
+
+def _review_request_send_job_write_failure_result(result, job, error=""):
+    safe_error = (
+        _safe_exception_summary(error)
+        if isinstance(error, Exception)
+        else _safe_text(error, max_length=300)
+    )
+    result.update(
+        {
+            "execution_status": "failed_send_job_write_verification",
+            "success": False,
+            "job_queued": False,
+            "job_created": False,
+            "job_write_attempted": True,
+            "job_write_verified": False,
+            "job_id": (job or {}).get("job_id", ""),
+            "message": REVIEW_REQUEST_SEND_JOB_WRITE_FAILURE_MESSAGE,
+            "blocking_detail": REVIEW_REQUEST_SEND_JOB_WRITE_FAILURE_MESSAGE,
+        }
+    )
+    if safe_error:
+        result["blocking_conditions"].append(
+            {
+                "status": "failed_send_job_write_verification",
+                "detail": safe_error,
+            }
+        )
+    result["enqueue_diagnostics"] = _review_send_enqueue_diagnostics(
+        result.get("selected_order", ""),
+        job_id=(job or {}).get("job_id", ""),
+        job_write_attempted=True,
+        job_write_verified=False,
+        job_count=result.get("job_count"),
+        write_error=safe_error,
+    )
+    result["queue_path_used"] = result["enqueue_diagnostics"]["queue_path_used"]
     result["queue_path_used_by_post"] = result["enqueue_diagnostics"]["queue_path_used_by_post"]
     result["paths_checked"] = result["enqueue_diagnostics"]["paths_checked"]
     return result
@@ -2980,6 +3049,8 @@ def _review_request_send_job_duplicate_result(result, existing_job, job_count=No
             "success": True,
             "duplicate_job": True,
             "duplicate_job_detected": True,
+            "job_write_attempted": False,
+            "job_write_verified": False,
             "job_id": existing_job.get("job_id", ""),
             "job": existing_job,
             "existing_job_status": existing_status,
@@ -2992,8 +3063,12 @@ def _review_request_send_job_duplicate_result(result, existing_job, job_count=No
     result["enqueue_diagnostics"] = _review_send_enqueue_diagnostics(
         result.get("selected_order", ""),
         duplicate_job_detected=True,
+        job_id=existing_job.get("job_id", ""),
+        job_write_attempted=False,
+        job_write_verified=False,
         job_count=job_count,
     )
+    result["queue_path_used"] = result["enqueue_diagnostics"]["queue_path_used"]
     result["queue_path_used_by_post"] = result["enqueue_diagnostics"]["queue_path_used_by_post"]
     result["paths_checked"] = result["enqueue_diagnostics"]["paths_checked"]
     if job_count is not None:
@@ -3006,6 +3081,10 @@ def _review_send_enqueue_diagnostics(
     job_created=False,
     duplicate_job_detected=False,
     job_count=None,
+    job_id="",
+    job_write_attempted=False,
+    job_write_verified=False,
+    write_error="",
 ):
     path_report = _review_request_send_jobs_path_report()
     diagnostics = {
@@ -3013,11 +3092,16 @@ def _review_send_enqueue_diagnostics(
         "order_name": _canonical_order_name(order_name),
         "job_created": job_created is True,
         "duplicate_job_detected": duplicate_job_detected is True,
+        "job_id": _safe_text(job_id, max_length=100),
         "queue_path": path_report["canonical_queue_path"],
+        "queue_path_used": path_report["canonical_queue_path"],
         "queue_path_used_by_post": path_report["canonical_queue_path"],
         "paths_checked": path_report["paths_checked"],
         "queue_file_missing": False,
         "canonical_queue_file_missing": False,
+        "job_write_attempted": job_write_attempted is True,
+        "job_write_verified": job_write_verified is True,
+        "job_write_error": _safe_text(write_error, max_length=300),
         "gmail_api_call_performed": False,
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
@@ -3208,6 +3292,7 @@ def _build_review_request_send_job(selected_order, admin_username, created_at, c
         "snapshot_refresh_performed": False,
         "processor_command": REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND,
         "queue_path": path_report["canonical_queue_path"],
+        "queue_path_used": path_report["canonical_queue_path"],
         "queue_path_used_by_post": path_report["canonical_queue_path"],
         "review_send_report_path": "",
         "dashboard_snapshot_generated_at": _safe_text(
@@ -3239,6 +3324,15 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False):
         }
         for job in (payload.get("jobs") or [])[:REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT]
     ]
+    recent_completed_orders = [
+        {
+            "order_name": job.get("order_name"),
+            "status": job.get("status"),
+            "updated_at": job.get("completed_at") or job.get("updated_at") or "",
+        }
+        for job in payload.get("jobs") or []
+        if job.get("status") in REVIEW_REQUEST_SEND_JOB_COMPLETED_STATUSES
+    ][:REVIEW_REQUEST_SEND_JOB_VISIBLE_LIMIT]
     summary = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "task": "process_review_request_send_jobs",
@@ -3252,9 +3346,12 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False):
         "queue_path_used_by_processor": queue_path_report["canonical_queue_path"],
         "paths_checked": payload.get("paths_checked") or queue_path_report["paths_checked"],
         "queue_file_missing": payload.get("file_missing") is True,
+        "queue_file_exists": payload.get("canonical_file_present") is True,
         "canonical_queue_file_missing": payload.get("canonical_file_missing") is True,
         "job_count": len(payload.get("jobs") or []),
         "recent_jobs": recent_jobs,
+        "queued_orders": [],
+        "recent_completed_orders": recent_completed_orders,
         "queue_load_error": _safe_text(payload.get("load_error"), max_length=300),
         "queued_job_count": 0,
         "queued_jobs_found": 0,
@@ -3286,6 +3383,7 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False):
     selected_jobs = queued_jobs[:effective_max_jobs]
     summary["queued_job_count"] = len(queued_jobs)
     summary["queued_jobs_found"] = len(queued_jobs)
+    summary["queued_orders"] = _dedupe_order_names(job.get("order_name") for job in queued_jobs)
     summary["selected_job_count"] = len(selected_jobs)
     if dry_run:
         summary["status"] = "dry_run_ready" if selected_jobs else "dry_run_no_queued_jobs"
@@ -3810,6 +3908,9 @@ def _empty_review_request_send_jobs_payload(load_error=""):
         "selected_path_exists": False,
         "file_missing": True,
         "canonical_file_missing": True,
+        "canonical_file_present": False,
+        "ignored_noncanonical_queue_file_count": 0,
+        "stale_queue_status_ignored_message": "",
         "job_count": 0,
     }
 
@@ -3823,37 +3924,38 @@ def _load_review_request_send_jobs_payload():
         (item for item in checked if _path_identity(Path(item.get("path", ""))) == canonical_identity),
         {},
     )
-    loaded_candidates = [item for item in checked if item.get("loaded")]
-    selected = next(
-        (item for item in loaded_candidates if _path_identity(Path(item.get("path", ""))) == canonical_identity),
-        None,
-    )
-    if selected is None and loaded_candidates:
-        selected = max(loaded_candidates, key=lambda item: item.get("mtime") or 0)
+    selected = canonical_check if canonical_check.get("loaded") else None
     payload["paths_checked"] = [
         _review_request_send_jobs_public_path_check(item, selected.get("path", "") if selected else "")
         for item in checked
     ]
-    payload["file_missing"] = not any(item.get("present") for item in checked)
+    payload["file_missing"] = canonical_check.get("present") is not True
     payload["canonical_file_missing"] = canonical_check.get("present") is not True
+    payload["canonical_file_present"] = canonical_check.get("present") is True
+    payload["ignored_noncanonical_queue_file_count"] = sum(
+        1
+        for item in checked
+        if item.get("present")
+        and _path_identity(Path(item.get("path", ""))) != canonical_identity
+    )
+    if canonical_check.get("present") is not True:
+        if payload["ignored_noncanonical_queue_file_count"]:
+            payload["stale_queue_status_ignored_message"] = (
+                "Stale queued status ignored because live queue file is missing."
+            )
+        return payload
+
     if not selected:
-        if any(item.get("present") for item in checked):
+        if canonical_check.get("present"):
             payload["load_error"] = _safe_text(
-                next((item.get("error") for item in checked if item.get("error")), "")
+                canonical_check.get("error")
                 or "send_job_queue_unreadable",
                 max_length=300,
             )
         return payload
 
-    ordered_candidates = [selected] + [
-        item for item in sorted(loaded_candidates, key=lambda item: item.get("mtime") or 0, reverse=True)
-        if item.get("path") != selected.get("path")
-    ]
-    merged_jobs = []
-    for item in ordered_candidates:
-        merged_jobs.extend(item.get("jobs") or [])
     payload["updated_at"] = _safe_text(selected.get("updated_at"), max_length=120)
-    payload["jobs"] = _dedupe_review_request_send_jobs(merged_jobs)
+    payload["jobs"] = _dedupe_review_request_send_jobs(selected.get("jobs") or [])
     payload["selected_path"] = selected.get("path", "")
     payload["selected_path_exists"] = True
     payload["file_missing"] = False
@@ -4008,6 +4110,7 @@ def _sanitize_review_request_send_job(job):
         "snapshot_refresh_performed": job.get("snapshot_refresh_performed") is True,
         "processor_command": _safe_text(job.get("processor_command"), max_length=300),
         "queue_path": _safe_text(job.get("queue_path"), max_length=500),
+        "queue_path_used": _safe_text(job.get("queue_path_used"), max_length=500),
         "queue_path_used_by_post": _safe_text(job.get("queue_path_used_by_post"), max_length=500),
         "queue_path_used_by_processor": _safe_text(
             job.get("queue_path_used_by_processor"),
@@ -4133,6 +4236,20 @@ def _find_review_request_send_job(jobs, order_name, exclude_job_id="", for_proce
     return {}
 
 
+def _find_review_request_send_job_by_id_and_order(jobs, job_id, order_name):
+    selected_order = _canonical_order_name(order_name)
+    selected_job_id = _safe_text(job_id, max_length=100)
+    if not selected_order or not selected_job_id:
+        return {}
+    for job in jobs or []:
+        if job.get("job_id") != selected_job_id:
+            continue
+        if _canonical_order_name(job.get("order_name")) != selected_order:
+            continue
+        return job
+    return {}
+
+
 def _new_review_request_send_job_id(order_name, admin_username, created_at):
     seed = f"{order_name}|{admin_username}|{created_at}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12]
@@ -4145,6 +4262,7 @@ def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
     path_report = _review_request_send_jobs_path_report()
     jobs = payload.get("jobs") or []
     latest_by_order = _latest_review_request_send_job_by_order(jobs)
+    queue_file_missing = payload.get("file_missing") is True
     for key in (
         "all_needs_review_rows",
         "needs_review_rows",
@@ -4160,6 +4278,7 @@ def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
                 _apply_review_request_send_job_to_queue_row(
                     row,
                     latest_by_order.get(_canonical_order_name(row.get("order") or row.get("order_name"))),
+                    queue_file_missing=queue_file_missing,
                 )
     visible_rows = approval_queue.get("needs_review_rows") or []
     approval_queue["review_send_action_enabled_count"] = sum(
@@ -4181,6 +4300,15 @@ def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
         "active_job_count": sum(
             1 for job in jobs if job.get("status") in REVIEW_REQUEST_SEND_JOB_ACTIVE_STATUSES
         ),
+        "stale_status_ignored_count": sum(
+            1
+            for row in (approval_queue.get("all_needs_review_rows") or [])
+            if isinstance(row, dict) and row.get("send_job_stale_status_ignored") is True
+        ),
+        "stale_status_ignored_message": _safe_text(
+            payload.get("stale_queue_status_ignored_message"),
+            max_length=180,
+        ),
         "manual_process_command": REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND,
         "dry_run_command": f"{REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND} --dry-run",
     }
@@ -4191,18 +4319,54 @@ def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
     approval_queue["send_job_queue_file_missing"] = summary["queue_file_missing"]
     approval_queue["send_job_load_error"] = summary["load_error"]
     approval_queue["active_send_job_count"] = summary["active_job_count"]
+    approval_queue["send_job_stale_status_ignored_count"] = summary[
+        "stale_status_ignored_count"
+    ]
+    approval_queue["send_job_stale_status_ignored_message"] = summary[
+        "stale_status_ignored_message"
+    ]
+    approval_queue["send_job_ignored_noncanonical_queue_file_count"] = _int_or_zero(
+        payload.get("ignored_noncanonical_queue_file_count")
+    )
     approval_queue["send_job_manual_process_command"] = summary["manual_process_command"]
     approval_queue["send_job_dry_run_command"] = summary["dry_run_command"]
     return summary
 
 
-def _apply_review_request_send_job_to_queue_row(row, job):
+def _apply_review_request_send_job_to_queue_row(row, job, queue_file_missing=False):
     if not job:
+        stale_job_status = bool(
+            row.get("send_job_id")
+            or row.get("send_job_status")
+            or row.get("send_job_status_label")
+            or row.get("send_job_message")
+            or row.get("send_job_last_error")
+            or row.get("review_send_job_blocks_action") is True
+        )
+        stale_message = (
+            "Stale queued status ignored because live queue file is missing."
+            if queue_file_missing
+            else "Stale queued status ignored because no live queue job exists for this order."
+        )
+        row["send_job_id"] = ""
         row["send_job_status"] = ""
         row["send_job_status_label"] = ""
+        row["send_job_status_class"] = ""
         row["send_job_message"] = ""
         row["send_job_last_error"] = ""
+        row["send_job_created_at"] = ""
+        row["send_job_updated_at"] = ""
+        row["send_job_gmail_send_status"] = ""
+        row["send_job_shopify_tag_status"] = ""
         row["review_send_job_blocks_action"] = False
+        row["send_job_stale_status_ignored"] = stale_job_status
+        row["send_job_diagnostic"] = stale_message if stale_job_status else ""
+        if row.get("action_state") == "review_send":
+            row["can_review_send"] = True
+            row["review_send_post_action"] = "review_send"
+            row["action_label"] = _queue_action_status("review_send")
+            row["action_status"] = _queue_action_status("review_send")
+            row["hidden_reason"] = ""
         return row
     row["send_job_id"] = _safe_text(job.get("job_id"), max_length=100)
     row["send_job_status"] = _safe_text(job.get("status"), max_length=40)
@@ -4214,6 +4378,8 @@ def _apply_review_request_send_job_to_queue_row(row, job):
     row["send_job_updated_at"] = _safe_text(job.get("updated_at"), max_length=120)
     row["send_job_gmail_send_status"] = _safe_text(job.get("gmail_send_status"), max_length=80)
     row["send_job_shopify_tag_status"] = _safe_text(job.get("shopify_tag_status"), max_length=80)
+    row["send_job_stale_status_ignored"] = False
+    row["send_job_diagnostic"] = ""
     blocks_action = _review_request_send_job_prevents_duplicate(job)
     row["review_send_job_blocks_action"] = blocks_action
     if blocks_action:

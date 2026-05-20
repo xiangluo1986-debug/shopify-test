@@ -47,6 +47,7 @@ class Command(BaseCommand):
         self.stdout.write(
             f"queue_path_used_by_processor: {summary.get('queue_path_used_by_processor')}"
         )
+        self.stdout.write(f"queue_file_exists: {summary.get('queue_file_exists') is True}")
         self.stdout.write(f"queue_file_missing: {summary.get('queue_file_missing') is True}")
         self.stdout.write(
             f"canonical_queue_file_missing: {summary.get('canonical_queue_file_missing') is True}"
@@ -82,6 +83,27 @@ class Command(BaseCommand):
                 )
             else:
                 self.stdout.write(f"- {item}")
+
+        self.stdout.write("queued_orders:")
+        queued_orders = summary.get("queued_orders") or []
+        if queued_orders:
+            for order_name in queued_orders:
+                self.stdout.write(f"- {order_name}")
+        else:
+            self.stdout.write("- none")
+
+        self.stdout.write("recent_completed_orders:")
+        recent_completed_orders = summary.get("recent_completed_orders") or []
+        if recent_completed_orders:
+            for item in recent_completed_orders:
+                self.stdout.write(
+                    "- "
+                    f"{item.get('order_name')} "
+                    f"{item.get('status')} "
+                    f"{item.get('updated_at') or ''}"
+                )
+        else:
+            self.stdout.write("- none")
 
         if summary.get("dry_run") is True:
             self.stdout.write("recent_jobs:")

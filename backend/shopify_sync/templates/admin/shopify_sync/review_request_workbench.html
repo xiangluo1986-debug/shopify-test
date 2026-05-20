@@ -516,6 +516,49 @@
                     {% endfor %}
                 </tbody>
             </table>
+            <h2>Send job queue diagnostics</h2>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>Canonical queue path</th><td><code>{{ dashboard.approval_queue.send_job_queue_path|default:"-" }}</code></td></tr>
+                    <tr><th>Queue file missing</th><td>{{ dashboard.approval_queue.send_job_queue_file_missing|yesno:"true,false" }}</td></tr>
+                    <tr><th>Active live jobs</th><td>{{ dashboard.approval_queue.active_send_job_count|default:"0" }}</td></tr>
+                    <tr><th>Ignored non-canonical queue files</th><td>{{ dashboard.approval_queue.send_job_ignored_noncanonical_queue_file_count|default:"0" }}</td></tr>
+                    <tr><th>Stale row statuses ignored</th><td>{{ dashboard.approval_queue.send_job_stale_status_ignored_count|default:"0" }}</td></tr>
+                    {% if dashboard.approval_queue.send_job_stale_status_ignored_message %}
+                        <tr><th>Stale status note</th><td>{{ dashboard.approval_queue.send_job_stale_status_ignored_message }}</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+            <table class="rrw-table">
+                <thead>
+                    <tr>
+                        <th>Queue path checked</th>
+                        <th>Present</th>
+                        <th>Loaded</th>
+                        <th>Selected</th>
+                        <th>Status</th>
+                        <th>Modified</th>
+                        <th>Size</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for path in dashboard.approval_queue.send_job_paths_checked %}
+                        <tr>
+                            <td><code>{{ path.path }}</code></td>
+                            <td>{{ path.present|yesno:"true,false" }}</td>
+                            <td>{{ path.loaded|yesno:"true,false" }}</td>
+                            <td>{{ path.selected|yesno:"true,false" }}</td>
+                            <td><code>{{ path.status }}</code></td>
+                            <td>{{ path.modified_at|default:"-" }}</td>
+                            <td>{{ path.size_bytes }} bytes</td>
+                            <td>{{ path.error|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8" class="rrw-muted">No send-job queue paths were checked.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
             <h2>Customer history lookup cache diagnostics</h2>
             <table class="rrw-table">
                 <tbody>
@@ -819,6 +862,9 @@
                                 <div>
                                     <span class="rrw-pill {{ row.send_job_status_class }}">Job: {{ row.send_job_status_label }}</span>
                                 </div>
+                            {% endif %}
+                            {% if row.send_job_diagnostic %}
+                                <div class="rrw-secondary-line">{{ row.send_job_diagnostic }}</div>
                             {% endif %}
                             {% if row.note_risk_detected %}
                                 <div class="rrw-secondary-line">

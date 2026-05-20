@@ -1325,9 +1325,14 @@ def review_request_workbench(request):
             messages.success(
                 request,
                 (
-                    "Review send job queued. Run the processor to send it. "
+                    "Review send job queued. Processing will run in the background. "
                     f"{result.get('processor_command') or ''}"
                 ).strip(),
+            )
+        elif result.get("job_write_attempted") is True and result.get("job_write_verified") is not True:
+            messages.error(
+                request,
+                result.get("message") or "Could not create send job. Please refresh and try again.",
             )
         elif result.get("duplicate_job") is True:
             messages.warning(
