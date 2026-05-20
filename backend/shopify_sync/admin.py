@@ -955,6 +955,10 @@ class ShopifyRoleAdminMixin:
 class SettlementStatusCountFilter(admin.SimpleListFilter):
     title = "settlement status"
     parameter_name = "settlement_status"
+    excluded_statuses = ("admin_confirmed",)
+
+    def get_status_choices(self, request, model_admin):
+        return ShopifyOrder.SETTLEMENT_STATUS_CHOICES
 
     def _base_queryset_for_counts(self, request, model_admin):
         queryset = model_admin.get_queryset(request)
@@ -992,14 +996,21 @@ class SettlementStatusCountFilter(admin.SimpleListFilter):
         }
         return [
             (status, f"{settlement_status_admin_label(status)} ({counts.get(status, 0)})")
-            for status, _label in ShopifyOrder.SETTLEMENT_STATUS_CHOICES
-            if status != "admin_confirmed"
+            for status, _label in self.get_status_choices(request, model_admin)
+            if status not in self.excluded_statuses
         ]
 
     def queryset(self, request, queryset):
         if self.value():
             return queryset.filter(settlement_status=self.value())
         return queryset
+
+
+class MergedSettlementStatusCountFilter(SettlementStatusCountFilter):
+    excluded_statuses = ()
+
+    def get_status_choices(self, request, model_admin):
+        return model_admin.model._meta.get_field(self.parameter_name).choices
 
 
 class ShopifyOrderPackageInline(admin.TabularInline):
@@ -3664,7 +3675,7 @@ class ShenzhenMergedSettlementGroupAdmin(ShopifyRoleAdminMixin, admin.ModelAdmin
         "merged_ordering_cost_rmb",
         "created_at",
     )
-    list_filter = ("status", "settlement_status", "shipping_country", "created_at")
+    list_filter = ("status", MergedSettlementStatusCountFilter, "shipping_country", "created_at")
     search_fields = (
         "group_no",
         "shipping_name",
