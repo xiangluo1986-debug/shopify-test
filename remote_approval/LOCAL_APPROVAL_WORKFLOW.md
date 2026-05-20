@@ -231,6 +231,15 @@ python remote_approval_runner.py --task shopify_review_request_dashboard_snapsho
 Optional schedule: run the 3-day sync and snapshot refresh every 4 hours, and
 keep a daily full 60-day sync/candidate refresh for wider coverage.
 
+Phase 5.32B unifies the dashboard snapshot cache paths between the host runner,
+Docker web container, and admin page. The page checks, in order,
+`REVIEW_REQUEST_DASHBOARD_SNAPSHOT_PATH`, `/app/logs`, `/app/backend/logs`,
+project-root `logs/`, and `backend/logs/`, then loads the newest readable valid
+JSON snapshot. The refresh task writes the main snapshot to the configured path
+or project-root `logs/`, mirrors to available container-readable cache paths,
+and reports `snapshot_main_path`, `snapshot_mirror_paths_written`,
+`snapshot_paths_failed`, and `page_expected_paths`.
+
 Run the scope verification with:
 
 ```powershell

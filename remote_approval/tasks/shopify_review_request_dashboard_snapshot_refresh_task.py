@@ -13,6 +13,7 @@ TASK_NAME = "shopify_review_request_dashboard_snapshot_refresh"
 COMMAND_LABEL = "shopify_review_request_dashboard_snapshot_refresh_local_snapshot"
 REPORT_JSON_PATH = LOG_DIR / "shopify_review_request_dashboard_snapshot.json"
 REPORT_HTML_PATH = LOG_DIR / "shopify_review_request_dashboard_snapshot.html"
+SNAPSHOT_ENV_PATH = "REVIEW_REQUEST_DASHBOARD_SNAPSHOT_PATH"
 TIMEOUT_SECONDS = 300
 JSON_BEGIN = "SHOPIFY_REVIEW_REQUEST_DASHBOARD_SNAPSHOT_JSON_BEGIN"
 JSON_END = "SHOPIFY_REVIEW_REQUEST_DASHBOARD_SNAPSHOT_JSON_END"
@@ -55,9 +56,8 @@ def run_shopify_review_request_dashboard_snapshot_refresh_task(mode: str) -> dic
         payload["success"] = False
         payload["detected_issue_summary"] = "Dashboard snapshot privacy scan failed."
 
-    json_path = _write_json(payload)
-    html_path = _write_html(payload)
-    return _task_result(payload, json_path, html_path)
+    write_result = _write_reports(payload)
+    return _task_result(payload, write_result["json_path"], write_result["html_path"])
 
 
 def _run_django_snapshot_builder() -> dict:
@@ -526,18 +526,154 @@ def _failure_payload(result: dict, duration_seconds: float) -> dict:
     }
 
 
-def _write_json(payload: dict) -> Path:
-    REPORT_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with REPORT_JSON_PATH.open("w", encoding="utf-8") as report_file:
+def _write_reports(payload: dict) -> dict:
+    json_main_path, json_mirror_paths = _snapshot_write_paths(REPORT_JSON_PATH.name)
+    html_main_path, html_mirror_paths = _snapshot_write_paths(REPORT_HTML_PATH.name)
+    payload["snapshot_main_path"] = str(json_main_path)
+    payload["snapshot_mirror_paths_written"] = []
+    payload["snapshot_paths_failed"] = []
+    payload["snapshot_html_main_path"] = str(html_main_path)
+    payload["snapshot_html_mirror_paths_written"] = []
+    payload["snapshot_html_paths_failed"] = []
+    payload["page_expected_paths"] = [
+        _display_path(path) for path in _snapshot_read_candidate_paths(REPORT_JSON_PATH.name)
+    ]
+
+    json_result = _write_json_to_paths(payload, json_main_path, json_mirror_paths)
+    html_result = _write_html_to_paths(payload, html_main_path, html_mirror_paths)
+    payload["snapshot_mirror_paths_written"] = [str(path) for path in json_result["mirror_paths_written"]]
+    payload["snapshot_paths_failed"] = json_result["paths_failed"]
+    payload["snapshot_html_mirror_paths_written"] = [
+        str(path) for path in html_result["mirror_paths_written"]
+    ]
+    payload["snapshot_html_paths_failed"] = html_result["paths_failed"]
+    json_result = _write_json_to_paths(payload, json_main_path, json_mirror_paths)
+    payload["snapshot_mirror_paths_written"] = [str(path) for path in json_result["mirror_paths_written"]]
+    payload["snapshot_paths_failed"] = json_result["paths_failed"]
+    return {"json_path": json_main_path, "html_path": html_main_path}
+
+
+def _snapshot_read_candidate_paths(filename: str) -> list[Path]:
+    paths = []
+    env_path = _snapshot_env_path(filename)
+    if env_path:
+        paths.append(env_path)
+    paths.extend(
+        [
+            Path("/app/logs") / filename,
+            Path("/app/backend/logs") / filename,
+            PROJECT_ROOT / "logs" / filename,
+            PROJECT_ROOT / "backend" / "logs" / filename,
+        ]
+    )
+    return _dedupe_paths(paths)
+
+
+def _snapshot_write_paths(filename: str) -> tuple[Path, list[Path]]:
+    main_path = _snapshot_env_path(filename) or (PROJECT_ROOT / "logs" / filename)
+    mirror_candidates = [
+        PROJECT_ROOT / "logs" / filename,
+        Path("/app/logs") / filename,
+        Path("/app/backend/logs") / filename,
+        PROJECT_ROOT / "backend" / "logs" / filename,
+    ]
+    mirrors = []
+    for path in _dedupe_paths(mirror_candidates):
+        if _path_identity(path) == _path_identity(main_path):
+            continue
+        if path.parent.exists():
+            mirrors.append(path)
+    return main_path, mirrors
+
+
+def _snapshot_env_path(filename: str) -> Path | None:
+    raw_path = os.environ.get(SNAPSHOT_ENV_PATH, "").strip()
+    if not raw_path:
+        return None
+    path = Path(raw_path).expanduser()
+    if _path_looks_like_directory(path, raw_path):
+        return path / filename
+    if filename == REPORT_HTML_PATH.name and path.suffix:
+        return path.with_suffix(".html")
+    return path
+
+
+def _path_looks_like_directory(path: Path, raw_path: str) -> bool:
+    if raw_path.endswith(("/", "\\")):
+        return True
+    try:
+        if path.exists() and path.is_dir():
+            return True
+    except OSError:
+        return False
+    return not path.suffix
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen = set()
+    deduped = []
+    for path in paths:
+        identity = _path_identity(path)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(path)
+    return deduped
+
+
+def _path_identity(path: Path) -> str:
+    try:
+        resolved = path.expanduser().resolve(strict=False)
+    except OSError:
+        resolved = path
+    text = str(resolved)
+    return text.lower() if os.name == "nt" else text
+
+
+def _display_path(path: Path) -> str:
+    text = str(path)
+    normalized = text.replace("\\", "/")
+    if normalized.startswith("/app/") or normalized.startswith("/logs/"):
+        return normalized
+    return text
+
+
+def _write_json_to_paths(payload: dict, main_path: Path, mirror_paths: list[Path]) -> dict:
+    main_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_file(main_path, payload)
+    paths_failed = []
+    written_mirrors = []
+    for path in mirror_paths:
+        try:
+            _write_json_file(path, payload)
+        except OSError as exc:
+            paths_failed.append({"path": str(path), "error": _safe_text(str(exc), max_length=300)})
+            continue
+        written_mirrors.append(path)
+    return {"mirror_paths_written": written_mirrors, "paths_failed": paths_failed}
+
+
+def _write_json_file(path: Path, payload: dict) -> None:
+    with path.open("w", encoding="utf-8") as report_file:
         json.dump(payload, report_file, ensure_ascii=False, indent=2)
         report_file.write("\n")
-    json.loads(REPORT_JSON_PATH.read_text(encoding="utf-8"))
-    return REPORT_JSON_PATH
+    json.loads(path.read_text(encoding="utf-8"))
 
 
-def _write_html(payload: dict) -> Path:
-    REPORT_HTML_PATH.write_text(_render_html(payload), encoding="utf-8")
-    return REPORT_HTML_PATH
+def _write_html_to_paths(payload: dict, main_path: Path, mirror_paths: list[Path]) -> dict:
+    html = _render_html(payload)
+    main_path.parent.mkdir(parents=True, exist_ok=True)
+    main_path.write_text(html, encoding="utf-8")
+    paths_failed = []
+    written_mirrors = []
+    for path in mirror_paths:
+        try:
+            path.write_text(html, encoding="utf-8")
+        except OSError as exc:
+            paths_failed.append({"path": str(path), "error": _safe_text(str(exc), max_length=300)})
+            continue
+        written_mirrors.append(path)
+    return {"mirror_paths_written": written_mirrors, "paths_failed": paths_failed}
 
 
 def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
@@ -552,6 +688,13 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "review_file_path": str(json_path),
         "json_report_path": str(json_path),
         "html_report_path": str(html_path),
+        "snapshot_main_path": payload.get("snapshot_main_path") or str(json_path),
+        "snapshot_mirror_paths_written": payload.get("snapshot_mirror_paths_written") or [],
+        "snapshot_paths_failed": payload.get("snapshot_paths_failed") or [],
+        "snapshot_html_main_path": payload.get("snapshot_html_main_path") or str(html_path),
+        "snapshot_html_mirror_paths_written": payload.get("snapshot_html_mirror_paths_written") or [],
+        "snapshot_html_paths_failed": payload.get("snapshot_html_paths_failed") or [],
+        "page_expected_paths": payload.get("page_expected_paths") or [],
         "eligible_total": _int_value(payload.get("eligible_total")),
         "needs_review_visible_count": _int_value(counters.get("needs_review_visible_count")),
         "already_sent_total": _int_value(counters.get("already_sent_total")),
@@ -568,6 +711,8 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     counters = payload.get("dashboard_counters") if isinstance(payload.get("dashboard_counters"), dict) else {}
+    mirror_paths = payload.get("snapshot_mirror_paths_written") or []
+    page_paths = payload.get("page_expected_paths") or []
     return (
         "Review Request dashboard snapshot refresh complete.\n\n"
         f"Status: {payload.get('snapshot_status')}\n"
@@ -579,7 +724,9 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         "Safety: no Shopify API call, no Shopify write, no Gmail API call, no email send, "
         "no Trustpilot/Kudosi/Ali Reviews API call, no translationsRegister.\n\n"
         f"JSON snapshot: {json_path}\n"
-        f"HTML snapshot: {html_path}\n\n"
+        f"HTML snapshot: {html_path}\n"
+        f"JSON mirrors written: {', '.join(mirror_paths) if mirror_paths else 'None'}\n"
+        f"Page expected paths: {', '.join(page_paths) if page_paths else 'None'}\n\n"
         "Choose Y/1 to keep the snapshot report, or N/0 to stop."
     )
 

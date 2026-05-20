@@ -471,6 +471,52 @@
         </div>
     </div>
 
+    <details class="rrw-advanced">
+        <summary>Advanced technical details</summary>
+        <div class="rrw-advanced-section">
+            <h2>Snapshot cache diagnostics</h2>
+            <table class="rrw-table">
+                <tbody>
+                    <tr><th>Selected path</th><td><code>{{ dashboard.dashboard_snapshot.selected_path|default:"-" }}</code></td></tr>
+                    <tr><th>File modified</th><td>{{ dashboard.dashboard_snapshot.selected_mtime|default:"-" }}</td></tr>
+                    <tr><th>File size</th><td>{{ dashboard.dashboard_snapshot.selected_size_bytes|default:"0" }} bytes</td></tr>
+                    <tr><th>Host refresh command</th><td><code>{{ dashboard.dashboard_snapshot.host_refresh_command }}</code></td></tr>
+                    <tr><th>Container refresh command</th><td><code>{{ dashboard.dashboard_snapshot.container_refresh_command }}</code></td></tr>
+                </tbody>
+            </table>
+            <table class="rrw-table">
+                <thead>
+                    <tr>
+                        <th>Path checked</th>
+                        <th>Present</th>
+                        <th>Loaded</th>
+                        <th>Selected</th>
+                        <th>Status</th>
+                        <th>Modified</th>
+                        <th>Size</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for path in dashboard.dashboard_snapshot.paths_checked %}
+                        <tr>
+                            <td><code>{{ path.path }}</code></td>
+                            <td>{{ path.present|yesno:"true,false" }}</td>
+                            <td>{{ path.loaded|yesno:"true,false" }}</td>
+                            <td>{{ path.selected|yesno:"true,false" }}</td>
+                            <td><code>{{ path.status }}</code></td>
+                            <td>{{ path.modified_at|default:"-" }}</td>
+                            <td>{{ path.size_bytes }} bytes</td>
+                            <td>{{ path.error|default:"-" }}</td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8" class="rrw-muted">No snapshot paths were checked.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </details>
+
     {% if dashboard.dashboard_snapshot.missing %}
         <div class="rrw-warning">Review queue has not been generated yet.</div>
         <p class="rrw-muted">

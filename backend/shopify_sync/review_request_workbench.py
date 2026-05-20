@@ -169,6 +169,7 @@ LAST_60_DAY_SCAN_TASK_NAME = "shopify_review_request_last_60_days_candidate_scan
 DASHBOARD_SNAPSHOT_TASK_NAME = "shopify_review_request_dashboard_snapshot_refresh"
 DASHBOARD_SNAPSHOT_REPORT_FILENAME = "shopify_review_request_dashboard_snapshot.json"
 DASHBOARD_SNAPSHOT_HTML_FILENAME = "shopify_review_request_dashboard_snapshot.html"
+DASHBOARD_SNAPSHOT_ENV_PATH = "REVIEW_REQUEST_DASHBOARD_SNAPSHOT_PATH"
 DASHBOARD_SNAPSHOT_STALE_AFTER_MINUTES = 240
 MAX_DASHBOARD_SNAPSHOT_BYTES = 12_000_000
 REVIEW_REQUEST_ORDER_SYNC_TASK_NAMES = (
@@ -1210,21 +1211,177 @@ def _compact_last_scan_for_dashboard_snapshot(last_scan):
     return compact
 
 
+def get_review_request_dashboard_snapshot_read_paths(filename=DASHBOARD_SNAPSHOT_REPORT_FILENAME):
+    paths = []
+    env_path = _dashboard_snapshot_env_path(filename)
+    if env_path:
+        paths.append(env_path)
+    paths.extend(
+        [
+            Path("/app/logs") / filename,
+            Path("/app/backend/logs") / filename,
+            _project_root() / "logs" / filename,
+            _project_root() / "backend" / "logs" / filename,
+            Path(settings.BASE_DIR).resolve() / "logs" / filename,
+        ]
+    )
+    return _dedupe_paths(paths)
+
+
+def _dashboard_snapshot_write_paths(filename):
+    main_path = _dashboard_snapshot_env_path(filename) or (_project_root() / "logs" / filename)
+    mirror_candidates = [
+        _project_root() / "logs" / filename,
+        Path("/app/logs") / filename,
+        Path("/app/backend/logs") / filename,
+        _project_root() / "backend" / "logs" / filename,
+        Path(settings.BASE_DIR).resolve() / "logs" / filename,
+    ]
+    mirror_paths = []
+    for path in _dedupe_paths(mirror_candidates):
+        if _path_identity(path) == _path_identity(main_path):
+            continue
+        if path.parent.exists():
+            mirror_paths.append(path)
+    return main_path, mirror_paths
+
+
+def _dashboard_snapshot_env_path(filename):
+    raw_path = os.getenv(DASHBOARD_SNAPSHOT_ENV_PATH, "").strip()
+    if not raw_path:
+        return None
+    path = Path(raw_path).expanduser()
+    if _path_looks_like_directory(path, raw_path):
+        return path / filename
+    if filename == DASHBOARD_SNAPSHOT_HTML_FILENAME and path.suffix:
+        return path.with_suffix(".html")
+    return path
+
+
+def _path_looks_like_directory(path, raw_path):
+    if raw_path.endswith(("/", "\\")):
+        return True
+    try:
+        if path.exists() and path.is_dir():
+            return True
+    except OSError:
+        return False
+    return not path.suffix
+
+
+def _dedupe_paths(paths):
+    seen = set()
+    deduped = []
+    for path in paths:
+        if not path:
+            continue
+        identity = _path_identity(path)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(path)
+    return deduped
+
+
+def _path_identity(path):
+    try:
+        resolved = path.expanduser().resolve(strict=False)
+    except OSError:
+        resolved = path
+    text = str(resolved)
+    return text.lower() if os.name == "nt" else text
+
+
+def _write_dashboard_snapshot_json(payload):
+    main_path, mirror_paths = _dashboard_snapshot_write_paths(DASHBOARD_SNAPSHOT_REPORT_FILENAME)
+    paths_failed = []
+    main_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_dashboard_snapshot_json_file(main_path, payload)
+    written_mirrors = []
+    for path in mirror_paths:
+        try:
+            _write_dashboard_snapshot_json_file(path, payload)
+        except OSError as exc:
+            paths_failed.append(
+                {
+                    "path": str(path),
+                    "error": _sanitize_text(str(exc), max_length=300),
+                }
+            )
+            continue
+        written_mirrors.append(path)
+    return {
+        "main_path": main_path,
+        "mirror_paths_written": written_mirrors,
+        "paths_failed": paths_failed,
+    }
+
+
+def _write_dashboard_snapshot_json_file(path, payload):
+    with path.open("w", encoding="utf-8") as report_file:
+        json.dump(payload, report_file, ensure_ascii=False, indent=2)
+        report_file.write("\n")
+    json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_dashboard_snapshot_html(payload):
+    main_path, mirror_paths = _dashboard_snapshot_write_paths(DASHBOARD_SNAPSHOT_HTML_FILENAME)
+    paths_failed = []
+    html = _render_dashboard_snapshot_report_html(payload)
+    main_path.parent.mkdir(parents=True, exist_ok=True)
+    main_path.write_text(html, encoding="utf-8")
+    written_mirrors = []
+    for path in mirror_paths:
+        try:
+            path.write_text(html, encoding="utf-8")
+        except OSError as exc:
+            paths_failed.append(
+                {
+                    "path": str(path),
+                    "error": _sanitize_text(str(exc), max_length=300),
+                }
+            )
+            continue
+        written_mirrors.append(path)
+    return {
+        "main_path": main_path,
+        "mirror_paths_written": written_mirrors,
+        "paths_failed": paths_failed,
+    }
+
+
 def write_review_request_dashboard_snapshot_reports(payload):
     safe_payload = _sanitize_dashboard_snapshot_payload(payload or {})
-    json_path = _log_dir() / DASHBOARD_SNAPSHOT_REPORT_FILENAME
-    html_path = _log_dir() / DASHBOARD_SNAPSHOT_HTML_FILENAME
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    with json_path.open("w", encoding="utf-8") as report_file:
-        json.dump(safe_payload, report_file, ensure_ascii=False, indent=2)
-        report_file.write("\n")
-    json.loads(json_path.read_text(encoding="utf-8"))
-    html_path.write_text(_render_dashboard_snapshot_report_html(safe_payload), encoding="utf-8")
+    json_write = _write_dashboard_snapshot_json(safe_payload)
+    safe_payload["snapshot_main_path"] = str(json_write["main_path"])
+    safe_payload["snapshot_mirror_paths_written"] = [
+        str(path) for path in json_write["mirror_paths_written"]
+    ]
+    safe_payload["snapshot_paths_failed"] = json_write["paths_failed"]
+    safe_payload["page_expected_paths"] = [
+        str(path) for path in get_review_request_dashboard_snapshot_read_paths()
+    ]
+    html_write = _write_dashboard_snapshot_html(safe_payload)
+    safe_payload["snapshot_html_main_path"] = str(html_write["main_path"])
+    safe_payload["snapshot_html_mirror_paths_written"] = [
+        str(path) for path in html_write["mirror_paths_written"]
+    ]
+    safe_payload["snapshot_html_paths_failed"] = html_write["paths_failed"]
+    _write_dashboard_snapshot_json(safe_payload)
+    json_path = json_write["main_path"]
+    html_path = html_write["main_path"]
     return {
         "json_path": str(json_path),
         "html_path": str(html_path),
         "relative_json_path": f"logs/{DASHBOARD_SNAPSHOT_REPORT_FILENAME}",
         "relative_html_path": f"logs/{DASHBOARD_SNAPSHOT_HTML_FILENAME}",
+        "snapshot_main_path": str(json_write["main_path"]),
+        "snapshot_mirror_paths_written": [str(path) for path in json_write["mirror_paths_written"]],
+        "snapshot_paths_failed": json_write["paths_failed"],
+        "snapshot_html_main_path": str(html_write["main_path"]),
+        "snapshot_html_mirror_paths_written": [str(path) for path in html_write["mirror_paths_written"]],
+        "snapshot_html_paths_failed": html_write["paths_failed"],
+        "page_expected_paths": [str(path) for path in get_review_request_dashboard_snapshot_read_paths()],
     }
 
 
@@ -1314,7 +1471,12 @@ def _build_review_request_workbench_context_from_dashboard_snapshot(params=None)
 
 
 def _load_dashboard_snapshot_report():
-    path = _log_dir() / DASHBOARD_SNAPSHOT_REPORT_FILENAME
+    paths = get_review_request_dashboard_snapshot_read_paths()
+    checked = [_read_dashboard_snapshot_candidate(path) for path in paths]
+    loaded_reports = [item for item in checked if item.get("loaded")]
+    selected = None
+    if loaded_reports:
+        selected = max(loaded_reports, key=lambda item: item.get("mtime") or 0)
     report = {
         "relative_path": f"logs/{DASHBOARD_SNAPSHOT_REPORT_FILENAME}",
         "present": False,
@@ -1324,32 +1486,106 @@ def _load_dashboard_snapshot_report():
         "modified_at": "",
         "error": "",
         "data": {},
+        "paths_checked": [_dashboard_snapshot_public_path_check(item) for item in checked],
+        "selected_path": "",
+        "selected_path_exists": False,
+        "page_expected_paths": [str(path) for path in paths],
     }
-    if not path.exists():
+    if not selected:
+        report["present"] = any(item.get("present") for item in checked)
+        report["status"] = "present_but_unusable" if report["present"] else "missing"
+        report["error"] = next((item.get("error") for item in checked if item.get("error")), "")
         return report
+
+    data = selected["data"]
+    for item in report["paths_checked"]:
+        item["selected"] = item.get("path") == selected.get("path")
     report["present"] = True
-    try:
-        stat = path.stat()
-        report["modified_at"] = _safe_text(_format_file_time(stat.st_mtime))
-        report["size_bytes"] = stat.st_size
-        if stat.st_size > MAX_DASHBOARD_SNAPSHOT_BYTES:
-            report["status"] = "present_but_too_large_for_dashboard"
-            report["error"] = "dashboard_snapshot_too_large"
-            return report
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        report["status"] = "present_but_unreadable"
-        report["error"] = _sanitize_text(str(exc), max_length=300)
-        return report
-    if not isinstance(data, dict):
-        report["status"] = "present_but_not_object"
-        report["error"] = "top_level_json_is_not_object"
-        return report
     report["loaded"] = True
     report["data"] = data
     report["status"] = _safe_text(data.get("snapshot_status") or data.get("report_status") or "loaded", max_length=120)
     report["timestamp"] = _safe_text(data.get("generated_at") or data.get("timestamp"), max_length=120)
+    report["modified_at"] = selected.get("modified_at", "")
+    report["size_bytes"] = selected.get("size_bytes", 0)
+    report["selected_path"] = selected.get("path", "")
+    report["selected_path_exists"] = True
+    report["relative_path"] = selected.get("path", report["relative_path"])
     return report
+
+
+def _read_dashboard_snapshot_candidate(path):
+    result = {
+        "path": str(path),
+        "present": False,
+        "loaded": False,
+        "status": "missing",
+        "timestamp": "",
+        "modified_at": "",
+        "mtime": 0,
+        "size_bytes": 0,
+        "error": "",
+        "data": {},
+    }
+    try:
+        if not path.exists():
+            return result
+        stat = path.stat()
+        result["present"] = True
+        result["modified_at"] = _safe_text(_format_file_time(stat.st_mtime))
+        result["mtime"] = stat.st_mtime
+        result["size_bytes"] = stat.st_size
+        if stat.st_size > MAX_DASHBOARD_SNAPSHOT_BYTES:
+            result["status"] = "present_but_too_large_for_dashboard"
+            result["error"] = "dashboard_snapshot_too_large"
+            return result
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        result["status"] = "present_but_unreadable"
+        result["error"] = _sanitize_text(str(exc), max_length=300)
+        return result
+    if not isinstance(data, dict):
+        result["status"] = "present_but_not_object"
+        result["error"] = "top_level_json_is_not_object"
+        return result
+    result["loaded"] = True
+    result["data"] = data
+    result["status"] = _safe_text(data.get("snapshot_status") or data.get("report_status") or "loaded", max_length=120)
+    result["timestamp"] = _safe_text(data.get("generated_at") or data.get("timestamp"), max_length=120)
+    return result
+
+
+def _dashboard_snapshot_public_path_check(item):
+    return {
+        "path": item.get("path", ""),
+        "present": item.get("present") is True,
+        "loaded": item.get("loaded") is True,
+        "selected": False,
+        "status": _safe_text(item.get("status"), max_length=120),
+        "modified_at": _safe_text(item.get("modified_at"), max_length=120),
+        "size_bytes": item.get("size_bytes") or 0,
+        "error": _safe_text(item.get("error"), max_length=300),
+    }
+
+
+def _dashboard_snapshot_refresh_command():
+    if _running_in_docker():
+        return _dashboard_snapshot_container_refresh_command()
+    return _dashboard_snapshot_host_refresh_command()
+
+
+def _dashboard_snapshot_host_refresh_command():
+    return f"python remote_approval_runner.py --task {DASHBOARD_SNAPSHOT_TASK_NAME} --approval local"
+
+
+def _dashboard_snapshot_container_refresh_command():
+    return (
+        "docker compose exec -T web python /app/remote_approval_runner.py "
+        f"--task {DASHBOARD_SNAPSHOT_TASK_NAME} --approval local"
+    )
+
+
+def _running_in_docker():
+    return Path("/.dockerenv").exists()
 
 
 def _dashboard_snapshot_metadata(report, data=None):
@@ -1392,9 +1628,14 @@ def _dashboard_snapshot_metadata(report, data=None):
         "last_shopify_sync_at": _safe_text(data.get("last_shopify_sync_at"), max_length=120),
         "last_candidate_scan_at": _safe_text(data.get("last_candidate_scan_at"), max_length=120),
         "data_source_label": "Cached snapshot",
-        "refresh_command": (
-            f"python remote_approval_runner.py --task {DASHBOARD_SNAPSHOT_TASK_NAME} --approval local"
-        ),
+        "refresh_command": _dashboard_snapshot_refresh_command(),
+        "host_refresh_command": _dashboard_snapshot_host_refresh_command(),
+        "container_refresh_command": _dashboard_snapshot_container_refresh_command(),
+        "selected_path": _safe_text(report.get("selected_path"), max_length=500),
+        "selected_mtime": _safe_text(report.get("modified_at"), max_length=120),
+        "selected_size_bytes": report.get("size_bytes") or 0,
+        "paths_checked": report.get("paths_checked") or [],
+        "page_expected_paths": report.get("page_expected_paths") or [],
         "error": _safe_text(report.get("error"), max_length=300),
     }
 

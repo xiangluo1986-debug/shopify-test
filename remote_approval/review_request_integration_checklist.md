@@ -244,6 +244,19 @@ Phase 0.2 automation decision:
   Gmail draft, no Shopify write/tag mutation, no external review API call, no
   raw email output, and no secret output.
 
+#### Phase 5.32B Dashboard Snapshot Path Reliability
+
+- [x] Dashboard snapshot reads check `REVIEW_REQUEST_DASHBOARD_SNAPSHOT_PATH`,
+  `/app/logs`, `/app/backend/logs`, project-root `logs/`, and `backend/logs/`.
+- [x] The admin page selects the newest readable valid JSON snapshot and shows
+  paths checked, selected path, file modified time, and file size in advanced
+  technical details.
+- [x] Snapshot refresh writes the main snapshot to the configured path or
+  project-root `logs/`, mirrors to available container-readable paths, and
+  reports written mirrors, failed paths, and page-expected paths.
+- [x] Normal page loads still use only the cached snapshot and do not call
+  Shopify APIs, Gmail APIs, external review APIs, or `translationsRegister`.
+
 #### Phase 5.29 Automatic Post-Send Shopify Tag Write
 
 - [x] Admin `Review & Send` now builds an immediate in-memory post-send audit
