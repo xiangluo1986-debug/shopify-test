@@ -631,27 +631,29 @@
                     <tr>
                         <td class="rrw-order-col">{{ row.order }}</td>
                         <td class="rrw-customer-col">
-                            {{ row.customer_display_name }}
-                            {% if row.masked_customer_label %}
-                                <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
+                            {% firstof row.customer_display_name row.customer row.customer_masked_label "Customer not loaded" %}
+                            {% if row.masked_customer_label or row.customer_masked_label %}
+                                <div class="rrw-secondary-line">{% firstof row.masked_customer_label row.customer_masked_label %}</div>
                             {% endif %}
                         </td>
                         <td>
-                            {{ row.customer_orders_display }}
+                            {% firstof row.customer_orders_display row.customer_order_summary "Customer history not confirmed" %}
                             {% if row.merged_order_group %}
                                 <div><span class="rrw-pill rrw-badge-info">Merged order group</span></div>
                             {% endif %}
-                            <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
-                            <div class="rrw-secondary-line">{{ row.customer_history_match_label }}</div>
-                            <div class="rrw-secondary-line">{{ row.customer_history_lookup_status }}</div>
+                            <div class="rrw-secondary-line">{% firstof row.customer_order_sequence_label "Customer history not confirmed" %}</div>
+                            <div class="rrw-secondary-line">{% firstof row.customer_history_match_label "History not confirmed" %}</div>
+                            <div class="rrw-secondary-line">{% firstof row.customer_history_lookup_status "Customer history not confirmed" %}</div>
                         </td>
                         <td class="rrw-tags-col">
                             {% for chip in row.tag_chips %}
                                 <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
+                            {% empty %}
+                                <span class="rrw-pill rrw-badge-muted">Tag data not loaded</span>
                             {% endfor %}
                         </td>
                         <td>
-                            {{ row.trustpilot_history_label }}
+                            {% firstof row.trustpilot_history_label row.trustpilot_history "History not confirmed" %}
                             {% if row.customer_level_trustpilot_note_evidence_found %}
                                 <div class="rrw-secondary-line">
                                     Safe keyword: {{ row.customer_level_trustpilot_note_safe_keyword|default:"trustpilot" }};
@@ -663,11 +665,19 @@
                             {% endif %}
                         </td>
                         <td class="rrw-status-col">
-                            <span class="rrw-badge {{ row.status_class }}">{{ row.status }}</span>
-                            <div>
-                                <span class="rrw-pill {{ row.delivered_status_class }}">{{ row.delivered_status_label }}</span>
-                                <span class="rrw-pill {{ row.review_request_tag_status_class }}">{{ row.review_request_tag_status_label }}</span>
-                            </div>
+                            <span class="rrw-badge {{ row.status_class|default:'rrw-badge-warn' }}">{% firstof row.status row.status_label "Not ready" %}</span>
+                            {% if row.status_chips %}
+                                <div>
+                                    {% for chip in row.status_chips %}
+                                        <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <div>
+                                    <span class="rrw-pill {{ row.delivered_status_class|default:'rrw-badge-muted' }}">{% firstof row.delivered_status_label row.delivered_status "Not ready" %}</span>
+                                    <span class="rrw-pill {{ row.review_request_tag_status_class|default:'rrw-badge-muted' }}">{% firstof row.review_request_tag_status_label "Tag data not loaded" %}</span>
+                                </div>
+                            {% endif %}
                             {% if row.review_request_tag_match_detail %}
                                 <div class="rrw-secondary-line">{{ row.review_request_tag_match_detail }}</div>
                             {% endif %}
@@ -682,24 +692,26 @@
                                 <div class="rrw-secondary-line">{{ row.tag_data_missing_source }}</div>
                             {% endif %}
                         </td>
-                        <td class="rrw-reason-col">{{ row.eligibility_reason_plain }}</td>
+                        <td class="rrw-reason-col">{% firstof row.eligibility_reason_plain row.reason row.block_reason row.hidden_reason "Not ready" %}</td>
                         <td class="rrw-action-cell">
-                            {% if row.action_state == "review_send" %}
+                            {% if row.can_review_send or row.action_state == "review_send" %}
                                 <form method="post" class="rrw-action-form">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="review_send">
                                     <input type="hidden" name="candidate_id" value="{{ row.candidate_id }}">
-                                    <button type="submit" class="rrw-primary-button">Review &amp; Send</button>
+                                    <button type="submit" class="rrw-primary-button">{% firstof row.action_label row.action_status "Review & Send" %}</button>
                                 </form>
                             {% elif row.action_state == "already_sent" %}
-                                <span class="rrw-ok">{{ row.action_status }}</span>
+                                <span class="rrw-ok">{% firstof row.action_label row.action_status "Already sent" %}</span>
                             {% else %}
-                                <span class="rrw-disabled-action">{{ row.action_status }}</span>
+                                <span class="rrw-disabled-action">{% firstof row.action_label row.action_status "Not ready" %}</span>
                             {% endif %}
-                            <details class="rrw-history-check">
-                                <summary>{{ row.customer_history_lookup_action_label }}</summary>
-                                <code class="rrw-history-command">{{ row.customer_history_lookup_command }}</code>
-                            </details>
+                            {% if row.customer_history_lookup_command %}
+                                <details class="rrw-history-check">
+                                    <summary>{% firstof row.customer_history_lookup_action_label "Check customer history" %}</summary>
+                                    <code class="rrw-history-command">{{ row.customer_history_lookup_command }}</code>
+                                </details>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}
@@ -855,24 +867,26 @@
                             {% endif %}
                         </td>
                         <td>
-                            {{ row.customer_display_name }}
-                            {% if row.masked_customer_label %}
-                                <div class="rrw-secondary-line">{{ row.masked_customer_label }}</div>
+                            {% firstof row.customer_display_name row.customer row.customer_masked_label "Customer not loaded" %}
+                            {% if row.masked_customer_label or row.customer_masked_label %}
+                                <div class="rrw-secondary-line">{% firstof row.masked_customer_label row.customer_masked_label %}</div>
                             {% endif %}
                         </td>
                         <td>
-                            {{ row.customer_orders_display }}
-                            <div class="rrw-secondary-line">{{ row.customer_order_sequence_label }}</div>
-                            <div class="rrw-secondary-line">{{ row.customer_history_match_label }}</div>
-                            <div class="rrw-secondary-line">{{ row.customer_history_lookup_status }}</div>
+                            {% firstof row.customer_orders_display row.customer_order_summary "Customer history not confirmed" %}
+                            <div class="rrw-secondary-line">{% firstof row.customer_order_sequence_label "Customer history not confirmed" %}</div>
+                            <div class="rrw-secondary-line">{% firstof row.customer_history_match_label "History not confirmed" %}</div>
+                            <div class="rrw-secondary-line">{% firstof row.customer_history_lookup_status "Customer history not confirmed" %}</div>
                         </td>
                         <td>
                             {% for chip in row.tag_chips %}
                                 <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
+                            {% empty %}
+                                <span class="rrw-pill rrw-badge-muted">Tag data not loaded</span>
                             {% endfor %}
                         </td>
                         <td>
-                            {{ row.trustpilot_history_label }}
+                            {% firstof row.trustpilot_history_label row.trustpilot_history "History not confirmed" %}
                             {% if row.customer_level_trustpilot_note_evidence_found %}
                                 <div class="rrw-secondary-line">
                                     Safe keyword: {{ row.customer_level_trustpilot_note_safe_keyword|default:"trustpilot" }};
@@ -883,10 +897,16 @@
                                 <div class="rrw-secondary-line">{{ row.previous_trustpilot_tag_values|join:", " }}</div>
                             {% endif %}
                         </td>
-                        <td>{{ row.eligibility_reason_plain }}</td>
+                        <td>{% firstof row.eligibility_reason_plain row.reason row.block_reason "Not ready" %}</td>
                         <td>
-                            <span class="rrw-pill {{ row.delivered_status_class }}">{{ row.delivered_status_label }}</span>
-                            <span class="rrw-pill {{ row.review_request_tag_status_class }}">{{ row.review_request_tag_status_label }}</span>
+                            {% if row.status_chips %}
+                                {% for chip in row.status_chips %}
+                                    <span class="rrw-pill {{ chip.css_class }}">{{ chip.label }}</span>
+                                {% endfor %}
+                            {% else %}
+                                <span class="rrw-pill {{ row.delivered_status_class|default:'rrw-badge-muted' }}">{% firstof row.delivered_status_label row.delivered_status "Not ready" %}</span>
+                                <span class="rrw-pill {{ row.review_request_tag_status_class|default:'rrw-badge-muted' }}">{% firstof row.review_request_tag_status_label "Tag data not loaded" %}</span>
+                            {% endif %}
                             {% if row.review_request_tag_match_detail %}
                                 <div class="rrw-secondary-line">{{ row.review_request_tag_match_detail }}</div>
                             {% endif %}
@@ -905,14 +925,16 @@
                             {% endif %}
                         </td>
                         <td>
-                            {{ row.evidence }}
+                            {% firstof row.evidence row.reason row.block_reason "Not ready" %}
                             {% if row.scan_date_note %}
                                 <div class="rrw-secondary-line">{{ row.scan_date_note }}</div>
                             {% endif %}
-                            <details class="rrw-history-check">
-                                <summary>{{ row.customer_history_lookup_action_label }}</summary>
-                                <code class="rrw-history-command">{{ row.customer_history_lookup_command }}</code>
-                            </details>
+                            {% if row.customer_history_lookup_command %}
+                                <details class="rrw-history-check">
+                                    <summary>{% firstof row.customer_history_lookup_action_label "Check customer history" %}</summary>
+                                    <code class="rrw-history-command">{{ row.customer_history_lookup_command }}</code>
+                                </details>
+                            {% endif %}
                         </td>
                     </tr>
                 {% empty %}

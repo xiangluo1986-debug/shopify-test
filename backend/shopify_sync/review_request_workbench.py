@@ -201,6 +201,12 @@ SHOPIFY_ORDER_TAGS_EMPTY_SOURCE = "Shopify response had no order tags"
 SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION = (
     "Run the Review Request Shopify order sync after applying the shopify_tags migration."
 )
+SECOND_ORDER_FIRST_ORDER_REASON = "First order — wait until the customer’s second delivered order."
+SECOND_ORDER_CURRENT_FIRST_REASON = (
+    "This is the customer's first order. Trustpilot starts from the second delivered order."
+)
+SECOND_ORDER_WAIT_FOR_DELIVERY_REASON = "Wait until this order is delivered."
+SECOND_ORDER_HISTORY_NOT_CONFIRMED_REASON = "Customer history not confirmed."
 MERGED_ORDER_REFERENCE_RE = re.compile(r"#?\d{3,}")
 NOTE_RISK_FIELDS = (
     "shopify_note",
@@ -985,19 +991,28 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
     last_scan = dict(dashboard.get("last_60_days_candidate_scan") or {})
     coverage = dict(dashboard.get("order_data_coverage") or {})
     scan_coverage = dict(last_scan.get("order_data_coverage") or {})
-    review_rows = _snapshot_dict_rows(
+    candidate_review_rows = _snapshot_dict_rows(
         approval_queue.get("all_needs_review_rows")
         or approval_queue.get("needs_review_rows")
         or last_scan.get("review_queue_rows")
-        or last_scan.get("eligible_queue_rows")
+        or last_scan.get("eligible_queue_rows"),
+        default_action_state="review_send",
     )
+    review_rows = [
+        row for row in candidate_review_rows if row.get("action_state") == "review_send"
+    ]
+    demoted_review_rows = [
+        row for row in candidate_review_rows if row.get("action_state") != "review_send"
+    ]
     already_sent_rows = _snapshot_dict_rows(
         approval_queue.get("all_already_sent_rows")
         or approval_queue.get("already_sent_rows")
-        or last_scan.get("already_sent_queue_rows")
+        or last_scan.get("already_sent_queue_rows"),
+        default_action_state="already_sent",
     )
-    blocked_rows = _snapshot_dict_rows(
-        approval_queue.get("blocked_rows") or last_scan.get("blocked_queue_rows")
+    blocked_rows = demoted_review_rows + _snapshot_dict_rows(
+        approval_queue.get("blocked_rows") or last_scan.get("blocked_queue_rows"),
+        default_action_state="not_ready",
     )
     blocked_visible_rows = blocked_rows[:BLOCKED_QUEUE_DISPLAY_LIMIT]
     eligible_total = _int_or_zero(
@@ -1006,6 +1021,8 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
         or last_scan.get("eligible_candidate_count")
         or len(review_rows)
     )
+    if candidate_review_rows:
+        eligible_total = len(review_rows)
     blocked_total = _int_or_zero(
         approval_queue.get("blocked_count")
         or last_scan.get("blocked_count")
@@ -1062,6 +1079,13 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
                 approval_queue.get("merged_group_count")
                 or last_scan.get("blocked_merged_group_count")
             ),
+            "blocked_first_order_count": _int_or_zero(last_scan.get("blocked_first_order_count")),
+            "blocked_not_second_or_later_count": _int_or_zero(
+                last_scan.get("blocked_not_second_or_later_count")
+            ),
+            "blocked_second_order_not_delivered_count": _int_or_zero(
+                last_scan.get("blocked_second_order_not_delivered_count")
+            ),
             "rows": blocked_visible_rows,
         },
         "dashboard_counters": {
@@ -1076,6 +1100,15 @@ def build_review_request_dashboard_snapshot_payload(params=None, generated_by="m
             "latest_sent_order": _safe_text(approval_queue.get("latest_sent_order"), max_length=80),
             "latest_sent_time": _safe_text(approval_queue.get("latest_sent_time"), max_length=120),
             "latest_tag_write_time": _safe_text(approval_queue.get("latest_tag_write_time"), max_length=120),
+            "eligible_candidate_count_before_second_order_rule": _int_or_zero(
+                last_scan.get("eligible_candidate_count_before_second_order_rule") or eligible_total
+            ),
+            "eligible_candidate_count_after_second_order_rule": _int_or_zero(
+                last_scan.get("eligible_candidate_count_after_second_order_rule") or eligible_total
+            ),
+            "second_or_later_delivered_candidate_count": _int_or_zero(
+                last_scan.get("second_or_later_delivered_candidate_count") or eligible_total
+            ),
         },
         "stale_after_minutes": DASHBOARD_SNAPSHOT_STALE_AFTER_MINUTES,
         "scan_report_source": _safe_text(
@@ -1743,13 +1776,25 @@ def _empty_dashboard_approval_queue():
 
 def _paginate_dashboard_snapshot(dashboard, filters):
     approval_queue = dict(dashboard.get("approval_queue") or {})
-    all_needs_review_rows = _snapshot_dict_rows(
+    candidate_review_rows = _snapshot_dict_rows(
         approval_queue.get("all_needs_review_rows")
-        or approval_queue.get("needs_review_rows")
+        or approval_queue.get("needs_review_rows"),
+        default_action_state="review_send",
     )
+    all_needs_review_rows = [
+        row for row in candidate_review_rows if row.get("action_state") == "review_send"
+    ]
+    demoted_review_rows = [
+        row for row in candidate_review_rows if row.get("action_state") != "review_send"
+    ]
     all_already_sent_rows = _snapshot_dict_rows(
         approval_queue.get("all_already_sent_rows")
-        or approval_queue.get("already_sent_rows")
+        or approval_queue.get("already_sent_rows"),
+        default_action_state="already_sent",
+    )
+    blocked_rows = demoted_review_rows + _snapshot_dict_rows(
+        approval_queue.get("blocked_rows"),
+        default_action_state="not_ready",
     )
     pagination = _approval_queue_pagination(
         total_count=len(all_needs_review_rows),
@@ -1777,16 +1822,31 @@ def _paginate_dashboard_snapshot(dashboard, filters):
     approval_queue["needs_review_rows"] = visible_review_rows
     approval_queue["all_already_sent_rows"] = all_already_sent_rows
     approval_queue["already_sent_rows"] = visible_sent_rows
+    approval_queue["blocked_rows"] = blocked_rows[:BLOCKED_QUEUE_DISPLAY_LIMIT]
+    approval_queue["blocked_visible_count"] = min(len(blocked_rows), BLOCKED_QUEUE_DISPLAY_LIMIT)
+    approval_queue["blocked_count"] = max(
+        _int_or_zero(approval_queue.get("blocked_count")),
+        len(blocked_rows),
+    )
+    approval_queue["blocked_overflow_count"] = max(
+        len(blocked_rows) - BLOCKED_QUEUE_DISPLAY_LIMIT,
+        0,
+    )
     approval_queue["needs_review_count"] = _int_or_zero(
         approval_queue.get("needs_review_count") or len(all_needs_review_rows)
     )
     approval_queue["ready_to_send_count"] = _int_or_zero(
         approval_queue.get("ready_to_send_count") or len(all_needs_review_rows)
     )
+    if candidate_review_rows:
+        approval_queue["needs_review_count"] = len(all_needs_review_rows)
+        approval_queue["ready_to_send_count"] = len(all_needs_review_rows)
     approval_queue["already_sent_count"] = len(all_already_sent_rows)
     approval_queue["eligible_candidate_count_total"] = _int_or_zero(
         approval_queue.get("eligible_candidate_count_total") or len(all_needs_review_rows)
     )
+    if candidate_review_rows:
+        approval_queue["eligible_candidate_count_total"] = len(all_needs_review_rows)
     approval_queue["review_send_action_enabled_count"] = len(visible_review_rows)
     approval_queue["review_queue_batch_size"] = pagination["page_size"]
     approval_queue["review_queue_page_size"] = pagination["page_size"]
@@ -1818,8 +1878,275 @@ def _paginate_dashboard_snapshot(dashboard, filters):
     dashboard["approval_queue"] = approval_queue
 
 
-def _snapshot_dict_rows(value):
-    return [dict(row) for row in (value or []) if isinstance(row, dict)]
+def _snapshot_dict_rows(value, default_action_state=""):
+    return [
+        _normalize_dashboard_snapshot_row(dict(row), default_action_state=default_action_state)
+        for row in (value or [])
+        if isinstance(row, dict)
+    ]
+
+
+def _normalize_dashboard_snapshot_row(row, default_action_state=""):
+    order_name = _safe_text(row.get("order_name") or row.get("order"), max_length=80)
+    action_state = _snapshot_action_state(row, default_action_state)
+    tags = _dedupe_text(
+        row.get("order_tags_display")
+        or row.get("tags")
+        or row.get("local_shopify_tags")
+        or []
+    )
+    delivered = _snapshot_delivered_value(row, tags)
+    review_request_present = _snapshot_review_request_value(row, tags)
+    tag_data_loaded = (
+        row.get("tag_data_available") is True
+        or row.get("review_request_tag_data_loaded") is True
+        or bool(tags)
+    )
+    trustpilot_sent = bool(
+        action_state == "already_sent"
+        or row.get("trustpilot_already_sent_to_customer") is True
+        or row.get("customer_level_trustpilot_already_sent") is True
+        or row.get("trustpilot_tag_detected") is True
+        or row.get("local_review_send_success") is True
+        or row.get("previous_trustpilot_order_names")
+        or has_trustpilot_sent_tag(tags)
+    )
+    history_count = _int_or_zero(
+        row.get("customer_history_order_count") or row.get("customer_order_count")
+    )
+    sequence = _int_or_zero(row.get("customer_order_sequence_number"))
+    history_confirmed = row.get("customer_history_confirmed") is True or bool(history_count and sequence)
+    second_order_state = _second_order_rule_state(
+        history_confirmed=history_confirmed,
+        history_count=history_count,
+        sequence=sequence,
+        delivered=delivered,
+    )
+    reason = _safe_text(
+        row.get("eligibility_reason_plain")
+        or row.get("reason")
+        or row.get("block_reason")
+        or row.get("missing_requirement"),
+        max_length=500,
+    )
+    if action_state == "review_send" and second_order_state["passed"] is not True:
+        action_state = "not_ready"
+        reason = second_order_state["reason"]
+    if not reason:
+        reason = (
+            "Delivered, tagged, and no duplicate or risk found."
+            if action_state == "review_send"
+            else second_order_state["reason"] or "Not ready"
+        )
+
+    status = _safe_text(row.get("status") or row.get("status_label"), max_length=120)
+    if not status:
+        status = _queue_eligibility_status_label(action_state)
+    if action_state == "not_ready":
+        status = "Not ready"
+    elif action_state == "review_send":
+        status = "Ready"
+    customer_display_name = (
+        _safe_customer_display_name(row.get("customer_display_name"))
+        or _safe_customer_display_name(row.get("customer"))
+        or "Customer not loaded"
+    )
+    masked_customer = _safe_text(
+        row.get("masked_customer_label")
+        or row.get("customer_masked_label")
+        or row.get("masked_customer"),
+        max_length=120,
+    )
+    sequence_label = _safe_text(row.get("customer_order_sequence_label"), max_length=120)
+    if not sequence_label:
+        sequence_label = _customer_order_sequence_label(
+            history_count,
+            sequence,
+            repeat_detected=history_count > 1,
+            history_confirmed=history_confirmed,
+        )
+    customer_history_match_label = _safe_text(row.get("customer_history_match_label"), max_length=160)
+    if not customer_history_match_label:
+        customer_history_match_label = _customer_history_match_label(
+            row.get("customer_history_source"),
+            row.get("customer_history_confidence"),
+        )
+    trustpilot_history_label = _safe_text(
+        row.get("trustpilot_history_label") or row.get("trustpilot_history"),
+        max_length=300,
+    )
+    if not trustpilot_history_label:
+        trustpilot_history_label = (
+            "Already sent to this customer"
+            if trustpilot_sent
+            else "History not confirmed"
+            if not history_confirmed
+            else "No previous Trustpilot email found"
+        )
+    matched_review_request_tag = _safe_text(
+        row.get("matched_review_request_tag_value"),
+        max_length=120,
+    )
+    if not matched_review_request_tag:
+        matched_tags = _matched_review_request_tags(tags)
+        matched_review_request_tag = matched_tags[0] if matched_tags else ""
+    delivered_label = _queue_delivered_status_label(delivered)
+    review_request_label = (
+        "Review request tag found"
+        if review_request_present is True
+        else (
+            f"Missing {CANONICAL_REVIEW_REQUEST_TAG}"
+            if review_request_present is False
+            else "Tag data not loaded"
+        )
+    )
+    status_chips = row.get("status_chips") if isinstance(row.get("status_chips"), list) else []
+    if not status_chips:
+        status_chips = [
+            {"label": delivered_label, "css_class": _queue_status_css_class(delivered)},
+            {"label": review_request_label, "css_class": _queue_status_css_class(review_request_present)},
+        ]
+    can_review_send = action_state == "review_send"
+    customer_orders_display = _safe_text(
+        row.get("customer_orders_display") or row.get("customer_order_summary"),
+        max_length=180,
+    ) or _customer_orders_display(
+        history_count,
+        sequence_label,
+        row.get("related_order_names") or row.get("group_order_names") or [],
+        history_confirmed=history_confirmed,
+    )
+
+    row.update(
+        {
+            "order": order_name,
+            "order_name": order_name,
+            "candidate_id": _safe_text(row.get("candidate_id") or order_name, max_length=80),
+            "customer_display_name": customer_display_name,
+            "customer_masked_label": masked_customer,
+            "masked_customer_label": masked_customer,
+            "customer_order_count": history_count,
+            "customer_history_order_count": history_count,
+            "customer_order_sequence_number": sequence,
+            "customer_order_sequence_label": sequence_label,
+            "customer_order_summary": customer_orders_display,
+            "customer_orders_display": customer_orders_display,
+            "customer_history_confirmed": history_confirmed,
+            "customer_history_match_label": customer_history_match_label,
+            "customer_history_lookup_status": _safe_text(
+                row.get("customer_history_lookup_status"),
+                max_length=120,
+            )
+            or ("Customer history checked" if history_confirmed else "Customer history not confirmed"),
+            "customer_history_lookup_action_label": _safe_text(
+                row.get("customer_history_lookup_action_label"),
+                max_length=120,
+            )
+            or ("Customer history checked" if history_confirmed else "Check customer history"),
+            "customer_history_lookup_command": _safe_text(
+                row.get("customer_history_lookup_command"),
+                max_length=500,
+            )
+            or _customer_history_lookup_command(order_name),
+            "tags": tags,
+            "order_tags_display": tags,
+            "tag_chips": row.get("tag_chips")
+            if isinstance(row.get("tag_chips"), list) and row.get("tag_chips")
+            else _queue_tag_chips(
+                tags,
+                delivered=delivered,
+                review_request_present=review_request_present,
+                trustpilot_sent=trustpilot_sent,
+                action_state=action_state,
+                tag_data_loaded=tag_data_loaded,
+            ),
+            "trustpilot_history_label": trustpilot_history_label,
+            "trustpilot_history_evidence": _safe_text(
+                row.get("trustpilot_history_evidence") or row.get("evidence"),
+                max_length=500,
+            ),
+            "status": status,
+            "status_label": status,
+            "status_class": _safe_text(row.get("status_class"), max_length=80)
+            or ("rrw-badge-ok" if action_state in {"review_send", "already_sent"} else "rrw-badge-warn"),
+            "status_chips": status_chips,
+            "reason": reason,
+            "eligibility_reason_plain": reason,
+            "action_state": action_state,
+            "action_label": _queue_action_status(action_state),
+            "action_status": _queue_action_status(action_state),
+            "can_review_send": can_review_send,
+            "review_send_url": _safe_text(row.get("review_send_url"), max_length=240),
+            "review_send_post_action": "review_send" if can_review_send else "",
+            "hidden_reason": _safe_text(row.get("hidden_reason"), max_length=120)
+            or ("" if can_review_send else reason),
+            "blocked_reason": "" if can_review_send else reason,
+            "delivered_status_label": delivered_label,
+            "delivered_status_class": _queue_status_css_class(delivered),
+            "review_request_tag_present": review_request_present is True,
+            "review_request_tag_data_loaded": tag_data_loaded,
+            "review_request_tag_status_label": review_request_label,
+            "review_request_tag_status_class": _queue_status_css_class(review_request_present),
+            "matched_review_request_tag_value": matched_review_request_tag,
+            "review_request_tag_match_detail": _review_request_tag_match_detail(matched_review_request_tag),
+            "second_or_later_order": second_order_state["second_or_later_order"],
+            "current_order_delivered": second_order_state["current_order_delivered"],
+            "second_order_rule_passed": second_order_state["passed"],
+            "second_order_rule_blocker": second_order_state["blocker"],
+            "second_order_rule_reason": second_order_state["reason"],
+        }
+    )
+    return row
+
+
+def _snapshot_action_state(row, default_action_state=""):
+    state = _safe_text(row.get("action_state"), max_length=80)
+    if state in {"review_send", "already_sent", "not_ready"}:
+        return state
+    text = " ".join(
+        _safe_text(row.get(key), max_length=120).lower()
+        for key in ("action", "action_label", "action_status", "status", "status_label")
+    )
+    if "already sent" in text:
+        return "already_sent"
+    if "not ready" in text:
+        return "not_ready"
+    if "review & send" in text or re.search(r"\bready\b", text):
+        return "review_send"
+    if default_action_state:
+        return default_action_state
+    return "not_ready"
+
+
+def _snapshot_delivered_value(row, tags):
+    if row.get("current_order_delivered") is True or row.get("delivered_confirmed") is True:
+        return True
+    if row.get("current_order_delivered") is False or row.get("delivered_confirmed") is False:
+        return False
+    if has_delivered_tag(tags):
+        return True
+    text = _safe_text(
+        row.get("delivered_status_label") or row.get("delivered_status"),
+        max_length=120,
+    ).lower()
+    if text == "delivered":
+        return True
+    if "not delivered" in text or "wait until this order is delivered" in text:
+        return False
+    return None
+
+
+def _snapshot_review_request_value(row, tags):
+    if row.get("review_request_tag_present") is True or row.get("canonical_review_request_tag_present") is True:
+        return True
+    if has_review_request_tag(tags):
+        return True
+    if row.get("review_request_tag_present") is False or row.get("canonical_review_request_tag_present") is False:
+        return False
+    text = _safe_text(row.get("review_request_tag_status_label"), max_length=160).lower()
+    if text.startswith("missing"):
+        return False
+    return None
 
 
 def _parse_snapshot_datetime(value):
@@ -6377,6 +6704,16 @@ def build_review_request_last_60_days_candidate_scan_report(params=None):
         "blocked_ebay_order_count": scan["blocked_ebay_order_count"],
         "blocked_note_risk_count": scan["blocked_note_risk_count"],
         "first_order_blocked_count": scan["first_order_blocked_count"],
+        "blocked_first_order_count": scan["blocked_first_order_count"],
+        "blocked_not_second_or_later_count": scan["blocked_not_second_or_later_count"],
+        "blocked_second_order_not_delivered_count": scan["blocked_second_order_not_delivered_count"],
+        "second_or_later_delivered_candidate_count": scan["second_or_later_delivered_candidate_count"],
+        "eligible_candidate_count_before_second_order_rule": scan[
+            "eligible_candidate_count_before_second_order_rule"
+        ],
+        "eligible_candidate_count_after_second_order_rule": scan[
+            "eligible_candidate_count_after_second_order_rule"
+        ],
         "prior_trustpilot_customer_blocked_count": scan["prior_trustpilot_customer_blocked_count"],
         "customer_history_unknown_count": scan["customer_history_unknown_count"],
         "customer_history_low_confidence_count": scan["customer_history_low_confidence_count"],
@@ -8735,6 +9072,12 @@ def _approval_queue_from_last_60_days_scan(
         "blocked_overflow_count": max(len(blocked_rows) - len(blocked_visible_rows), 0),
         "duplicate_block_count": scan.get("blocked_duplicate_customer_count", 0),
         "blocked_ebay_order_count": scan.get("blocked_ebay_order_count", 0),
+        "blocked_first_order_count": scan.get("blocked_first_order_count", 0),
+        "blocked_not_second_or_later_count": scan.get("blocked_not_second_or_later_count", 0),
+        "blocked_second_order_not_delivered_count": scan.get(
+            "blocked_second_order_not_delivered_count",
+            0,
+        ),
         "review_send_action_enabled_count": len(needs_review_rows),
         "email_sent_count": scan.get("already_sent_count", 0),
         "merged_group_count": scan.get("blocked_merged_group_count", 0),
@@ -8752,6 +9095,15 @@ def _approval_queue_from_last_60_days_scan(
         ),
         "focus_22530_22562_latest_decision": scan.get("focus_22530_22562_latest_decision") or {},
         "eligible_candidate_count_total": ungated_eligible_total,
+        "eligible_candidate_count_before_second_order_rule": _int_or_zero(
+            scan.get("eligible_candidate_count_before_second_order_rule") or ungated_eligible_total
+        ),
+        "eligible_candidate_count_after_second_order_rule": _int_or_zero(
+            scan.get("eligible_candidate_count_after_second_order_rule") or eligible_total
+        ),
+        "second_or_later_delivered_candidate_count": _int_or_zero(
+            scan.get("second_or_later_delivered_candidate_count") or eligible_total
+        ),
         "review_queue_batch_size": pagination["page_size"],
         "review_queue_page_size": pagination["page_size"],
         "review_queue_page": pagination["page"],
@@ -8809,6 +9161,12 @@ def _approval_queue_from_last_60_days_scan(
             "hidden_older_eligible_count": _int_or_zero(scan.get("hidden_older_eligible_count")),
             "blocked_count": scan.get("blocked_count", 0),
             "blocked_ebay_order_count": scan.get("blocked_ebay_order_count", 0),
+            "blocked_first_order_count": scan.get("blocked_first_order_count", 0),
+            "blocked_not_second_or_later_count": scan.get("blocked_not_second_or_later_count", 0),
+            "blocked_second_order_not_delivered_count": scan.get(
+                "blocked_second_order_not_delivered_count",
+                0,
+            ),
             "already_sent_count": len(already_sent_source_rows),
             "latest_sent_order": scan.get("latest_sent_order") or latest_sent.get("order", ""),
             "latest_sent_time": (
@@ -8992,6 +9350,7 @@ def _last_60_days_candidate_scan(
         order_data_coverage["scan_source"] != "full_shopify_orders"
         or order_data_coverage.get("coverage_warnings")
     )
+    second_order_counts = _second_order_rule_counts(eligible_rows, blocked_rows)
     return {
         "window_days": LAST_60_DAY_SCAN_WINDOW_DAYS,
         "scan_window_started_at": cutoff.isoformat(),
@@ -9056,6 +9415,7 @@ def _last_60_days_candidate_scan(
         "blocked_ebay_order_count": sum(1 for row in blocked_rows if _row_blocked_by_ebay(row)),
         "blocked_note_risk_count": sum(1 for row in blocked_rows if _row_blocked_by_note_risk(row)),
         "first_order_blocked_count": sum(1 for row in blocked_rows if _row_blocked_by_first_order(row)),
+        **second_order_counts,
         "prior_trustpilot_customer_blocked_count": sum(
             1 for row in blocked_rows if _row_blocked_by_prior_trustpilot_history(row)
         ),
@@ -10399,6 +10759,8 @@ def _review_queue_policy_hidden_reason(row):
         return "customer_history_not_confirmed"
     if _int_or_zero(row.get("customer_history_order_count") or row.get("customer_order_count")) <= 1:
         return "first_order_customer"
+    if _int_or_zero(row.get("customer_order_sequence_number")) <= 1:
+        return "not_second_or_later_order"
     if row.get("customer_level_trustpilot_already_sent") is True:
         return "prior_trustpilot_customer_history"
     if not (row.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags)):
@@ -10539,6 +10901,32 @@ def _row_blocked_by_not_delivered(row):
     return row.get("delivered_status_label") == "Not delivered" or "not delivered" in text or "missing delivered" in text
 
 
+def _second_order_rule_counts(eligible_rows, blocked_rows):
+    rows = list(eligible_rows or []) + list(blocked_rows or [])
+    blocked_first = sum(1 for row in blocked_rows or [] if row.get("second_order_rule_blocker") == "first_order")
+    blocked_not_second = sum(
+        1 for row in blocked_rows or [] if row.get("second_order_rule_blocker") == "not_second_or_later"
+    )
+    blocked_not_delivered = sum(
+        1 for row in blocked_rows or [] if row.get("second_order_rule_blocker") == "second_order_not_delivered"
+    )
+    after_count = len(eligible_rows or [])
+    return {
+        "blocked_first_order_count": blocked_first,
+        "blocked_not_second_or_later_count": blocked_not_second,
+        "blocked_second_order_not_delivered_count": blocked_not_delivered,
+        "second_or_later_delivered_candidate_count": sum(
+            1
+            for row in rows
+            if row.get("second_or_later_order") is True and row.get("current_order_delivered") is True
+        ),
+        "eligible_candidate_count_before_second_order_rule": (
+            after_count + blocked_first + blocked_not_second + blocked_not_delivered
+        ),
+        "eligible_candidate_count_after_second_order_rule": after_count,
+    }
+
+
 def _row_block_text(row):
     return " ".join(
         _safe_text(row.get(key), max_length=500).lower()
@@ -10558,9 +10946,14 @@ def _queue_candidate_summary(row):
     visible = row.get("visible_in_review_batch") is True
     return {
         "order": _safe_text(row.get("order"), max_length=80),
+        "order_name": _safe_text(row.get("order_name") or row.get("order"), max_length=80),
         "customer": _safe_text(row.get("customer_display_name"), max_length=120)
         or "Masked in reports",
+        "customer_display_name": _safe_text(row.get("customer_display_name"), max_length=120)
+        or "Customer not loaded",
         "masked_customer": _safe_text(row.get("masked_customer_label"), max_length=120),
+        "customer_masked_label": _safe_text(row.get("masked_customer_label"), max_length=120),
+        "masked_customer_label": _safe_text(row.get("masked_customer_label"), max_length=120),
         "customer_order_count": _int_or_zero(row.get("customer_order_count")),
         "customer_history_order_count": _int_or_zero(row.get("customer_history_order_count")),
         "customer_history_order_count_before_precision": _int_or_zero(
@@ -10568,7 +10961,15 @@ def _queue_candidate_summary(row):
         ),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
+        "customer_order_summary": _safe_text(row.get("customer_orders_display"), max_length=180),
+        "customer_orders_display": _safe_text(row.get("customer_orders_display"), max_length=180),
         "customer_history_match_label": _safe_text(row.get("customer_history_match_label"), max_length=160),
+        "customer_history_lookup_status": _safe_text(row.get("customer_history_lookup_status"), max_length=120),
+        "customer_history_lookup_action_label": _safe_text(
+            row.get("customer_history_lookup_action_label"),
+            max_length=120,
+        ),
+        "customer_history_lookup_command": _safe_text(row.get("customer_history_lookup_command"), max_length=500),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
         "customer_history_matched_order_names": _dedupe_order_names(
             row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
@@ -10585,6 +10986,7 @@ def _queue_candidate_summary(row):
         "previous_trustpilot_tag_values": _dedupe_text(row.get("previous_trustpilot_tag_values") or []),
         "customer_history_source": _safe_text(row.get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
+        "customer_history_confirmed": row.get("customer_history_confirmed") is True,
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
         "customer_level_trustpilot_note_evidence_found": (
             row.get("customer_level_trustpilot_note_evidence_found") is True
@@ -10604,6 +11006,7 @@ def _queue_candidate_summary(row):
         "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
         "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "tag_chips": row.get("tag_chips") or [],
         "local_shopify_tags": _dedupe_text(row.get("local_shopify_tags") or []),
         "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
         "trustpilot_tag_source": _safe_text(row.get("trustpilot_tag_source"), max_length=120),
@@ -10617,9 +11020,29 @@ def _queue_candidate_summary(row):
         "matched_review_request_tag_value": _safe_text(row.get("matched_review_request_tag_value"), max_length=120),
         "review_request_tag_match_detail": _safe_text(row.get("review_request_tag_match_detail"), max_length=180),
         "delivered_status": _safe_text(row.get("delivered_status_label"), max_length=80),
+        "delivered_status_label": _safe_text(row.get("delivered_status_label"), max_length=80),
+        "delivered_status_class": _safe_text(row.get("delivered_status_class"), max_length=80),
         "trustpilot_history": _safe_text(row.get("trustpilot_history_label"), max_length=300),
+        "trustpilot_history_label": _safe_text(row.get("trustpilot_history_label"), max_length=300),
+        "trustpilot_history_evidence": _safe_text(row.get("evidence"), max_length=500),
+        "status": _safe_text(row.get("status"), max_length=120),
+        "status_label": _safe_text(row.get("status"), max_length=120),
+        "status_class": _safe_text(row.get("status_class"), max_length=80),
+        "status_chips": row.get("status_chips") or [],
         "reason": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
+        "eligibility_reason_plain": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
+        "action_state": _safe_text(row.get("action_state"), max_length=80),
+        "action_label": _safe_text(row.get("action_status"), max_length=120),
+        "action_status": _safe_text(row.get("action_status"), max_length=120),
+        "can_review_send": row.get("action_state") == "review_send",
+        "review_send_url": "",
+        "hidden_block_reason": _safe_text(row.get("hidden_reason"), max_length=120),
         "action": "Review & Send" if visible else "Queued for later review",
+        "second_or_later_order": row.get("second_or_later_order") is True,
+        "current_order_delivered": row.get("current_order_delivered") is True,
+        "second_order_rule_passed": row.get("second_order_rule_passed") is True,
+        "second_order_rule_blocker": _safe_text(row.get("second_order_rule_blocker"), max_length=80),
+        "second_order_rule_reason": _safe_text(row.get("second_order_rule_reason"), max_length=160),
         "review_queue_rank": _int_or_zero(row.get("review_queue_rank")),
         "visible_in_review_batch": visible,
         "hidden_reason": _safe_text(row.get("hidden_reason"), max_length=120),
@@ -10637,16 +11060,29 @@ def _blocked_candidate_summary(row):
             else _safe_text(row.get("order"), max_length=80)
         ),
         "order": _safe_text(row.get("order"), max_length=80),
+        "order_name": _safe_text(row.get("order_name") or row.get("order"), max_length=80),
         "group_order_names": row.get("group_order_names") or [],
         "customer": _safe_text(row.get("customer_display_name"), max_length=120)
         or "Masked in reports",
+        "customer_display_name": _safe_text(row.get("customer_display_name"), max_length=120)
+        or "Customer not loaded",
+        "customer_masked_label": _safe_text(row.get("masked_customer_label"), max_length=120),
+        "masked_customer_label": _safe_text(row.get("masked_customer_label"), max_length=120),
         "customer_history_order_count": _int_or_zero(row.get("customer_history_order_count")),
         "customer_history_order_count_before_precision": _int_or_zero(
             row.get("customer_history_order_count_before_precision")
         ),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
+        "customer_order_summary": _safe_text(row.get("customer_orders_display"), max_length=180),
+        "customer_orders_display": _safe_text(row.get("customer_orders_display"), max_length=180),
         "customer_history_match_label": _safe_text(row.get("customer_history_match_label"), max_length=160),
+        "customer_history_lookup_status": _safe_text(row.get("customer_history_lookup_status"), max_length=120),
+        "customer_history_lookup_action_label": _safe_text(
+            row.get("customer_history_lookup_action_label"),
+            max_length=120,
+        ),
+        "customer_history_lookup_command": _safe_text(row.get("customer_history_lookup_command"), max_length=500),
         "historical_order_names": _dedupe_order_names(row.get("historical_order_names") or []),
         "customer_history_matched_order_names": _dedupe_order_names(
             row.get("customer_history_matched_order_names") or row.get("historical_order_names") or []
@@ -10663,6 +11099,7 @@ def _blocked_candidate_summary(row):
         "previous_trustpilot_tag_values": _dedupe_text(row.get("previous_trustpilot_tag_values") or []),
         "customer_history_source": _safe_text(row.get("customer_history_source"), max_length=80),
         "customer_history_confidence": _safe_text(row.get("customer_history_confidence"), max_length=80),
+        "customer_history_confirmed": row.get("customer_history_confirmed") is True,
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
         "customer_level_trustpilot_note_evidence_found": (
             row.get("customer_level_trustpilot_note_evidence_found") is True
@@ -10682,6 +11119,7 @@ def _blocked_candidate_summary(row):
         "note_risk_keywords": _dedupe_text(row.get("note_risk_keywords") or []),
         "note_risk_reason": _safe_text(row.get("note_risk_reason"), max_length=120),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "tag_chips": row.get("tag_chips") or [],
         "local_shopify_tags": _dedupe_text(row.get("local_shopify_tags") or []),
         "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
         "trustpilot_tag_source": _safe_text(row.get("trustpilot_tag_source"), max_length=120),
@@ -10697,10 +11135,30 @@ def _blocked_candidate_summary(row):
         "matched_review_request_tag_value": _safe_text(row.get("matched_review_request_tag_value"), max_length=120),
         "review_request_tag_match_detail": _safe_text(row.get("review_request_tag_match_detail"), max_length=180),
         "delivered_status": _safe_text(row.get("delivered_status_label"), max_length=80),
+        "delivered_status_label": _safe_text(row.get("delivered_status_label"), max_length=80),
+        "delivered_status_class": _safe_text(row.get("delivered_status_class"), max_length=80),
         "merged_group_evidence_source": _safe_text(row.get("merged_group_evidence_source"), max_length=160),
         "block_reason": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
+        "reason": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
+        "eligibility_reason_plain": _safe_text(row.get("eligibility_reason_plain"), max_length=500),
         "missing_requirement": _blocked_missing_requirement(row),
         "evidence": _safe_text(row.get("evidence") or row.get("reason"), max_length=500),
+        "trustpilot_history_label": _safe_text(row.get("trustpilot_history_label"), max_length=300),
+        "trustpilot_history_evidence": _safe_text(row.get("evidence"), max_length=500),
+        "status": _safe_text(row.get("status"), max_length=120) or "Not ready",
+        "status_label": _safe_text(row.get("status"), max_length=120) or "Not ready",
+        "status_class": _safe_text(row.get("status_class"), max_length=80) or "rrw-badge-warn",
+        "status_chips": row.get("status_chips") or [],
+        "action_state": _safe_text(row.get("action_state"), max_length=80) or "not_ready",
+        "action_label": _safe_text(row.get("action_status"), max_length=120) or "Not ready",
+        "action_status": _safe_text(row.get("action_status"), max_length=120) or "Not ready",
+        "can_review_send": False,
+        "review_send_url": "",
+        "second_or_later_order": row.get("second_or_later_order") is True,
+        "current_order_delivered": row.get("current_order_delivered") is True,
+        "second_order_rule_passed": row.get("second_order_rule_passed") is True,
+        "second_order_rule_blocker": _safe_text(row.get("second_order_rule_blocker"), max_length=80),
+        "second_order_rule_reason": _safe_text(row.get("second_order_rule_reason"), max_length=160),
         "scan_date": _safe_text(row.get("scan_date"), max_length=80),
         "scan_date_basis": _safe_text(row.get("scan_date_basis"), max_length=80),
         "scan_date_fallback_used": row.get("scan_date_fallback_used") is True,
@@ -10710,11 +11168,18 @@ def _blocked_candidate_summary(row):
 def _already_sent_summary(row):
     return {
         "order": _safe_text(row.get("order"), max_length=80),
+        "order_name": _safe_text(row.get("order_name") or row.get("order"), max_length=80),
         "customer": _safe_text(row.get("customer_display_name"), max_length=120)
         or "Masked in reports",
+        "customer_display_name": _safe_text(row.get("customer_display_name"), max_length=120)
+        or "Customer not loaded",
+        "customer_masked_label": _safe_text(row.get("masked_customer_label"), max_length=120),
+        "masked_customer_label": _safe_text(row.get("masked_customer_label"), max_length=120),
         "customer_history_order_count": _int_or_zero(row.get("customer_history_order_count")),
         "customer_order_sequence_number": _int_or_zero(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": _safe_text(row.get("customer_order_sequence_label"), max_length=120),
+        "customer_order_summary": _safe_text(row.get("customer_orders_display"), max_length=180),
+        "customer_orders_display": _safe_text(row.get("customer_orders_display"), max_length=180),
         "customer_history_match_label": _safe_text(row.get("customer_history_match_label"), max_length=160),
         "previous_trustpilot_order_names": _dedupe_order_names(row.get("previous_trustpilot_order_names") or []),
         "previous_trustpilot_tag_values": _dedupe_text(row.get("previous_trustpilot_tag_values") or []),
@@ -10726,6 +11191,8 @@ def _already_sent_summary(row):
         "tag_written_time_label": _safe_text(row.get("tag_written_time_label"), max_length=120)
         or TIME_NOT_RECORDED_LABEL,
         "trustpilot_email_status": _safe_text(row.get("trustpilot_email_status"), max_length=120),
+        "trustpilot_history_label": _safe_text(row.get("trustpilot_history_label"), max_length=300),
+        "trustpilot_history_evidence": _safe_text(row.get("evidence"), max_length=500),
         "shopify_tag_pending": row.get("shopify_tag_pending") is True,
         "shopify_tag_written": row.get("shopify_tag_written") is True,
         "shopify_tag_already_existed": row.get("shopify_tag_already_existed") is True,
@@ -10734,6 +11201,7 @@ def _already_sent_summary(row):
         "shopify_tag_status_class": _safe_text(row.get("shopify_tag_status_class"), max_length=80),
         "evidence": _safe_text(row.get("evidence"), max_length=500),
         "tags": _dedupe_text(row.get("order_tags_display") or []),
+        "tag_chips": row.get("tag_chips") or [],
         "local_shopify_tags": _dedupe_text(row.get("local_shopify_tags") or []),
         "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
         "trustpilot_tag_source": _safe_text(row.get("trustpilot_tag_source"), max_length=120),
@@ -10746,6 +11214,20 @@ def _already_sent_summary(row):
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
         "matched_review_request_tag_value": _safe_text(row.get("matched_review_request_tag_value"), max_length=120),
         "delivered_status": _safe_text(row.get("delivered_status_label"), max_length=80),
+        "status": _safe_text(row.get("status"), max_length=120) or "Already sent",
+        "status_label": _safe_text(row.get("status"), max_length=120) or "Already sent",
+        "status_class": _safe_text(row.get("status_class"), max_length=80) or "rrw-badge-ok",
+        "status_chips": row.get("status_chips") or [],
+        "reason": _safe_text(row.get("reason") or row.get("evidence"), max_length=500),
+        "eligibility_reason_plain": _safe_text(row.get("reason") or row.get("evidence"), max_length=500),
+        "action_state": _safe_text(row.get("action_state"), max_length=80) or "already_sent",
+        "action_label": _safe_text(row.get("action_status"), max_length=120) or "Already sent",
+        "action_status": _safe_text(row.get("action_status"), max_length=120) or "Already sent",
+        "can_review_send": False,
+        "review_send_url": "",
+        "second_or_later_order": row.get("second_or_later_order") is True,
+        "current_order_delivered": row.get("current_order_delivered") is True,
+        "second_order_rule_passed": row.get("second_order_rule_passed") is True,
     }
 
 
@@ -10763,6 +11245,10 @@ def _blocked_missing_requirement(row):
         missing.append("No prior Trustpilot send")
     if _row_blocked_by_first_order(row):
         missing.append("Repeat customer")
+    if row.get("second_order_rule_blocker") == "not_second_or_later":
+        missing.append("Second-or-later order")
+    if row.get("second_order_rule_blocker") == "second_order_not_delivered":
+        missing.append("Delivered second-or-later order")
     if _row_blocked_by_customer_history_unknown(row):
         missing.append("Confirmed customer history")
     text = _row_block_text(row)
@@ -11767,6 +12253,19 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
         or _int_or_zero(row.get("customer_history_order_count"))
         or _int_or_zero(row.get("customer_order_count"))
     )
+    sequence = (
+        _int_or_zero(local_context.get("customer_order_sequence_number"))
+        or _int_or_zero(local_context.get("customer_order_sequence"))
+        or _int_or_zero(row.get("customer_order_sequence_number"))
+        or _int_or_zero(row.get("customer_order_sequence"))
+    )
+    delivered = _queue_delivered_status(row, tags, row.get("reason", ""))
+    second_order_state = _second_order_rule_state(
+        history_confirmed=history_confirmed,
+        history_count=history_count,
+        sequence=sequence,
+        delivered=delivered,
+    )
     previous_trustpilot_order_names = _dedupe_order_names(
         local_context.get("previous_trustpilot_order_names")
         or row.get("previous_trustpilot_order_names")
@@ -11776,10 +12275,8 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
         _trustpilot_note_evidence_from_sources(local_context, row) if history_confirmed else _empty_trustpilot_note_evidence()
     )
     note_risk = _note_risk_from_sources(local_context, row)
-    if not history_confirmed:
-        blockers.append("Customer history not confirmed.")
-    elif history_count <= 1:
-        blockers.append("First-order customer; Trustpilot is for repeat customers.")
+    if second_order_state["passed"] is not True:
+        blockers.append(second_order_state["reason"])
     if note_risk["note_risk_detected"]:
         blockers.append(NOTE_RISK_REASON)
     if trustpilot_note_evidence.get("evidence_found") is True:
@@ -11790,8 +12287,8 @@ def _candidate_send_blockers(row, already_sent_orders, already_sent_customers, g
         )
     if row.get("trustpilot_invitation_present") is True:
         blockers.append("Already sent to this order.")
-    if row.get("delivered_tag_present") is not True:
-        blockers.append("Not delivered yet.")
+    if delivered is not True and second_order_state["blocker"] != "second_order_not_delivered":
+        blockers.append(SECOND_ORDER_WAIT_FOR_DELIVERY_REASON)
     review_request_tag_status = row.get("canonical_review_request_tag_present")
     if review_request_tag_status is None and row.get("review_request_tag_data_loaded") is not True:
         blockers.append("Shopify tag data not loaded, cannot confirm review request tag.")
@@ -13466,6 +13963,12 @@ def _apply_queue_row_context(
         or local_context.get("review_request_tag_data_loaded") is True
         or _tag_data_loaded(source_row, tags)
     )
+    second_order_state = _second_order_rule_state(
+        history_confirmed=history_confirmed,
+        history_count=customer_order_count,
+        sequence=sequence,
+        delivered=delivered,
+    )
     prior_order_name = (
         _safe_text(row.get("prior_trustpilot_order_name"), max_length=80)
         or _safe_text(source_row.get("prior_trustpilot_order_name"), max_length=80)
@@ -13651,6 +14154,11 @@ def _apply_queue_row_context(
             "review_request_tag_data_loaded": review_request_tag_data_loaded,
             "matched_review_request_tag_value": matched_review_request_tag_value,
             "review_request_tag_match_detail": _review_request_tag_match_detail(matched_review_request_tag_value),
+            "second_or_later_order": second_order_state["second_or_later_order"],
+            "current_order_delivered": second_order_state["current_order_delivered"],
+            "second_order_rule_passed": second_order_state["passed"],
+            "second_order_rule_blocker": second_order_state["blocker"],
+            "second_order_rule_reason": second_order_state["reason"],
             "ebay_tag_detected": ebay_tag_detected,
             "matched_ebay_tag_value": matched_ebay_tags[0] if matched_ebay_tags else "",
             "trustpilot_tag_detected": trustpilot_state["trustpilot_tag_detected"],
@@ -13673,6 +14181,25 @@ def _apply_queue_row_context(
             "review_request_tag_status_class": (
                 _queue_status_css_class(review_request_present)
             ),
+            "status_label": _safe_text(row.get("status"), max_length=120),
+            "status_chips": [
+                {
+                    "label": _queue_delivered_status_label(delivered),
+                    "css_class": _queue_status_css_class(delivered),
+                },
+                {
+                    "label": (
+                        "Review request tag found"
+                        if review_request_present is True
+                        else (
+                            f"Missing {CANONICAL_REVIEW_REQUEST_TAG}"
+                            if review_request_present is False
+                            else "Shopify tag data not loaded"
+                        )
+                    ),
+                    "css_class": _queue_status_css_class(review_request_present),
+                },
+            ],
             "trustpilot_already_sent_to_customer": trustpilot_sent,
             "prior_trustpilot_order_name": prior_order_name,
             "trustpilot_history_label": history_label,
@@ -13707,7 +14234,10 @@ def _apply_queue_row_context(
             "eligibility_status": _queue_eligibility_status(action_state),
             "eligibility_status_label": _queue_eligibility_status_label(action_state),
             "eligibility_reason_plain": _safe_text(row.get("reason"), max_length=500),
+            "action_label": _queue_action_status(action_state),
             "action_status": _queue_action_status(action_state),
+            "can_review_send": action_state == "review_send",
+            "review_send_url": "",
         }
     )
     row["evidence"] = _safe_text(row.get("evidence") or row.get("reason"), max_length=500)
@@ -13727,12 +14257,60 @@ def _customer_order_sequence_label(order_count, sequence, repeat_detected=False,
     count = _int_or_zero(order_count)
     seq = _int_or_zero(sequence)
     if count > 1 or repeat_detected:
+        if seq > 0:
+            return f"{_ordinal(seq)} order of {count}"
         return "Repeat customer"
     if count == 1:
         return "First order - not for Trustpilot"
     if seq > 0:
         return f"{_ordinal(seq)} order"
     return "Order count unknown"
+
+
+def _second_order_rule_state(history_confirmed, history_count, sequence, delivered):
+    count = _int_or_zero(history_count)
+    seq = _int_or_zero(sequence)
+    current_order_delivered = delivered is True
+    second_or_later = bool(history_confirmed and count >= 2 and seq >= 2)
+    if not history_confirmed or count <= 0 or seq <= 0:
+        return {
+            "passed": False,
+            "blocker": "history_not_confirmed",
+            "reason": SECOND_ORDER_HISTORY_NOT_CONFIRMED_REASON,
+            "second_or_later_order": False,
+            "current_order_delivered": current_order_delivered,
+        }
+    if count <= 1:
+        return {
+            "passed": False,
+            "blocker": "first_order",
+            "reason": SECOND_ORDER_FIRST_ORDER_REASON,
+            "second_or_later_order": False,
+            "current_order_delivered": current_order_delivered,
+        }
+    if seq <= 1:
+        return {
+            "passed": False,
+            "blocker": "not_second_or_later",
+            "reason": SECOND_ORDER_CURRENT_FIRST_REASON,
+            "second_or_later_order": False,
+            "current_order_delivered": current_order_delivered,
+        }
+    if delivered is not True:
+        return {
+            "passed": False,
+            "blocker": "second_order_not_delivered",
+            "reason": SECOND_ORDER_WAIT_FOR_DELIVERY_REASON,
+            "second_or_later_order": second_or_later,
+            "current_order_delivered": False,
+        }
+    return {
+        "passed": True,
+        "blocker": "",
+        "reason": "",
+        "second_or_later_order": second_or_later,
+        "current_order_delivered": True,
+    }
 
 
 def _customer_orders_display(order_count, sequence_label, related_order_names, history_confirmed=True):
@@ -14678,6 +15256,15 @@ def _shopify_scope_verification_data(reports):
 def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
     blockers = []
     tags = _dedupe_text(candidate.get("order_tags_display") or candidate.get("tags") or [])
+    delivered = candidate.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags)
+    second_order_state = _second_order_rule_state(
+        history_confirmed=candidate.get("customer_history_confirmed") is True,
+        history_count=_int_or_zero(
+            candidate.get("customer_history_order_count") or candidate.get("customer_order_count")
+        ),
+        sequence=_int_or_zero(candidate.get("customer_order_sequence_number")),
+        delivered=delivered,
+    )
     if candidate.get("ebay_tag_detected") is True or has_ebay_tag(tags):
         blockers.append(
             {
@@ -14699,11 +15286,11 @@ def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
                 "detail": "No email was sent. Simulator candidates cannot send real email.",
             }
         )
-    if not (candidate.get("delivered_status_label") == "Delivered" or has_delivered_tag(tags)):
+    if not delivered:
         blockers.append(
             {
                 "status": "blocked_missing_delivered_tag",
-                "detail": "No email was sent. Delivered tag is missing.",
+                "detail": f"No email was sent. {SECOND_ORDER_WAIT_FOR_DELIVERY_REASON}",
             }
         )
     if not (candidate.get("review_request_tag_present") is True or has_review_request_tag(tags)):
@@ -14713,18 +15300,17 @@ def _runtime_review_send_blockers(candidate, gmail_setup, diagnosis=None):
                 "detail": "No email was sent. Review request tag alias is missing.",
             }
         )
-    if candidate.get("customer_history_confirmed") is not True:
+    if second_order_state["passed"] is not True:
+        status = {
+            "history_not_confirmed": "blocked_customer_history_not_confirmed",
+            "first_order": "blocked_first_order_customer",
+            "not_second_or_later": "blocked_not_second_or_later_order",
+            "second_order_not_delivered": "blocked_second_order_not_delivered",
+        }.get(second_order_state["blocker"], "blocked_second_order_rule")
         blockers.append(
             {
-                "status": "blocked_customer_history_not_confirmed",
-                "detail": "No email was sent. Customer history not confirmed.",
-            }
-        )
-    elif _int_or_zero(candidate.get("customer_history_order_count") or candidate.get("customer_order_count")) <= 1:
-        blockers.append(
-            {
-                "status": "blocked_first_order_customer",
-                "detail": "No email was sent. First-order customer; Trustpilot is for repeat customers.",
+                "status": status,
+                "detail": f"No email was sent. {second_order_state['reason']}",
             }
         )
     previous_trustpilot_order_names = _dedupe_order_names(

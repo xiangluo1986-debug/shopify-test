@@ -47,6 +47,12 @@ SHOPIFY_ORDER_TAGS_EMPTY_SOURCE = "Shopify response had no order tags"
 SHOPIFY_ORDER_TAGS_RECOMMENDED_ACTION = (
     "Run the Review Request Shopify order sync after applying the shopify_tags migration."
 )
+SECOND_ORDER_FIRST_ORDER_REASON = "First order — wait until the customer’s second delivered order."
+SECOND_ORDER_CURRENT_FIRST_REASON = (
+    "This is the customer's first order. Trustpilot starts from the second delivered order."
+)
+SECOND_ORDER_WAIT_FOR_DELIVERY_REASON = "Wait until this order is delivered."
+SECOND_ORDER_HISTORY_NOT_CONFIRMED_REASON = "Customer history not confirmed."
 TRUSTPILOT_TAG_ALIASES = {
     "1: trustpilot",
     "1: trustpoilt",
@@ -593,6 +599,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     historical_note_blocked_count = sum(
         1 for row in blocked_rows if row.get("customer_level_trustpilot_note_evidence_found") is True
     )
+    second_order_counts = _second_order_rule_counts(eligible_rows, blocked_rows)
     order_data_coverage = {
         "scan_source": "sqlite_report_fallback",
         "coverage_warnings": _dedupe(coverage_warnings),
@@ -690,6 +697,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "blocked_ebay_order_count": sum(1 for row in blocked_rows if row.get("ebay_tag_detected") is True),
         "blocked_note_risk_count": sum(1 for row in blocked_rows if row.get("note_risk_detected") is True),
         "first_order_blocked_count": sum(1 for row in blocked_rows if "first-order customer" in row.get("block_reason", "").lower() or "first order" in row.get("block_reason", "").lower()),
+        **second_order_counts,
         "prior_trustpilot_customer_blocked_count": sum(1 for row in blocked_rows if row.get("customer_level_trustpilot_already_sent") is True),
         "customer_history_unknown_count": sum(1 for row in blocked_rows if "customer history not confirmed" in row.get("block_reason", "").lower()),
         "customer_history_low_confidence_count": sum(1 for row in blocked_rows if row.get("customer_history_confidence") == "low"),
@@ -1166,6 +1174,52 @@ def _sqlite_customer_order_sequence_label(count, confirmed):
     return "Repeat customer"
 
 
+def _second_order_rule_state(history_confirmed, history_count, sequence, delivered):
+    count = _int_value(history_count)
+    seq = _int_value(sequence)
+    current_order_delivered = delivered is True
+    second_or_later = bool(history_confirmed and count >= 2 and seq >= 2)
+    if not history_confirmed or count <= 0 or seq <= 0:
+        return {
+            "passed": False,
+            "blocker": "history_not_confirmed",
+            "reason": SECOND_ORDER_HISTORY_NOT_CONFIRMED_REASON,
+            "second_or_later_order": False,
+            "current_order_delivered": current_order_delivered,
+        }
+    if count <= 1:
+        return {
+            "passed": False,
+            "blocker": "first_order",
+            "reason": SECOND_ORDER_FIRST_ORDER_REASON,
+            "second_or_later_order": False,
+            "current_order_delivered": current_order_delivered,
+        }
+    if seq <= 1:
+        return {
+            "passed": False,
+            "blocker": "not_second_or_later",
+            "reason": SECOND_ORDER_CURRENT_FIRST_REASON,
+            "second_or_later_order": False,
+            "current_order_delivered": current_order_delivered,
+        }
+    if delivered is not True:
+        return {
+            "passed": False,
+            "blocker": "second_order_not_delivered",
+            "reason": SECOND_ORDER_WAIT_FOR_DELIVERY_REASON,
+            "second_or_later_order": second_or_later,
+            "current_order_delivered": False,
+        }
+    return {
+        "passed": True,
+        "blocker": "",
+        "reason": "",
+        "second_or_later_order": second_or_later,
+        "current_order_delivered": True,
+    }
+
+
 def _join_order_names(names):
     return " / ".join(_dedupe(_canonical_order_name(name) for name in names or [] if _canonical_order_name(name)))
 
@@ -1191,6 +1245,13 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
     prior_order = _canonical_order_name(source.get("prior_trustpilot_order_name"))
     history_confirmed = history.get("customer_history_confirmed") is True
     history_count = _int_value(history.get("customer_history_order_count"))
+    sequence_number = _int_value(history.get("customer_order_sequence_number"))
+    second_order_state = _second_order_rule_state(
+        history_confirmed=history_confirmed,
+        history_count=history_count,
+        sequence=sequence_number,
+        delivered=delivered,
+    )
     previous_trustpilot_order_names = _dedupe(
         _canonical_order_name(item)
         for item in history.get("previous_trustpilot_order_names", [])
@@ -1216,10 +1277,8 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
     blockers = []
     if ebay_blocked:
         blockers.append(EBAY_BLOCK_REASON)
-    if not history_confirmed:
-        blockers.append("Customer history not confirmed.")
-    elif history_count <= 1:
-        blockers.append("First-order customer; Trustpilot is for repeat customers.")
+    if second_order_state["passed"] is not True:
+        blockers.append(second_order_state["reason"])
     if note_risk["note_risk_detected"]:
         blockers.append(NOTE_RISK_REASON)
     if trustpilot_note_evidence_found:
@@ -1235,8 +1294,8 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
             blockers.append(
                 f"Already sent to this customer via {prior_order or _join_order_names(previous_trustpilot_order_names) or order_name}."
             )
-    if not delivered:
-        blockers.append("Not delivered.")
+    if not delivered and second_order_state["blocker"] != "second_order_not_delivered":
+        blockers.append(SECOND_ORDER_WAIT_FOR_DELIVERY_REASON)
     if canonical_tag is None:
         blockers.append("Shopify tag data not loaded, cannot confirm review request tag.")
     elif not canonical_tag:
@@ -1318,8 +1377,13 @@ def _evaluate_sqlite_order(order_name, local, source, already_sent_orders, alrea
             history.get("customer_history_order_count_before_precision")
         ),
         "customer_order_count": history_count,
-        "customer_order_sequence_number": _int_value(history.get("customer_order_sequence_number")),
+        "customer_order_sequence_number": sequence_number,
         "customer_order_sequence_label": history.get("customer_order_sequence_label", ""),
+        "second_or_later_order": second_order_state["second_or_later_order"],
+        "current_order_delivered": second_order_state["current_order_delivered"],
+        "second_order_rule_passed": second_order_state["passed"],
+        "second_order_rule_blocker": second_order_state["blocker"],
+        "second_order_rule_reason": second_order_state["reason"],
         "historical_order_names": history.get("historical_order_names", []),
         "customer_history_order_names": history.get("customer_history_order_names", []),
         "customer_history_window": history.get("customer_history_window", "lifetime_local_orders"),
@@ -1920,6 +1984,20 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
             payload.get("blocked_missing_review_request_tag_count") or 0
         ),
         "blocked_not_delivered_count": int(payload.get("blocked_not_delivered_count") or 0),
+        "blocked_first_order_count": int(payload.get("blocked_first_order_count") or 0),
+        "blocked_not_second_or_later_count": int(payload.get("blocked_not_second_or_later_count") or 0),
+        "blocked_second_order_not_delivered_count": int(
+            payload.get("blocked_second_order_not_delivered_count") or 0
+        ),
+        "second_or_later_delivered_candidate_count": int(
+            payload.get("second_or_later_delivered_candidate_count") or 0
+        ),
+        "eligible_candidate_count_before_second_order_rule": int(
+            payload.get("eligible_candidate_count_before_second_order_rule") or 0
+        ),
+        "eligible_candidate_count_after_second_order_rule": int(
+            payload.get("eligible_candidate_count_after_second_order_rule") or 0
+        ),
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "gmail_api_call_performed": False,
@@ -1940,6 +2018,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Scan source: {payload.get('scan_source', 'unknown')}\n"
         f"Scanned orders: {payload.get('scanned_order_count', 0)}\n"
         f"Eligible candidates: {payload.get('eligible_candidate_count', 0)}\n"
+        f"Eligible before second-order rule: {payload.get('eligible_candidate_count_before_second_order_rule', 0)}\n"
+        f"Eligible after second-order rule: {payload.get('eligible_candidate_count_after_second_order_rule', 0)}\n"
         f"Review batch: {payload.get('review_queue_visible_count', 0)} of {payload.get('eligible_candidate_count_total') or payload.get('eligible_candidate_count', 0)} "
         f"(batch size {payload.get('review_queue_batch_size', REVIEW_QUEUE_BATCH_SIZE)}, overflow {payload.get('review_queue_overflow_count', 0)})\n"
         f"Already sent: {payload.get('already_sent_count', 0)}\n"
@@ -1979,6 +2059,12 @@ def _render_html(payload: dict) -> str:
     <tr><th>Delivered order count</th><td>{escape(str(payload.get("delivered_order_count", 0)))}</td></tr>
     <tr><th>Eligible before latest filter</th><td>{escape(str(payload.get("eligible_candidate_count_before_latest_filter", 0)))}</td></tr>
     <tr><th>Eligible after latest filter</th><td>{escape(str(payload.get("eligible_candidate_count_after_latest_filter", payload.get("eligible_candidate_count", 0))))}</td></tr>
+    <tr><th>Eligible before second-order rule</th><td>{escape(str(payload.get("eligible_candidate_count_before_second_order_rule", 0)))}</td></tr>
+    <tr><th>Eligible after second-order rule</th><td>{escape(str(payload.get("eligible_candidate_count_after_second_order_rule", payload.get("eligible_candidate_count", 0))))}</td></tr>
+    <tr><th>Blocked first-order count</th><td>{escape(str(payload.get("blocked_first_order_count", 0)))}</td></tr>
+    <tr><th>Blocked not second-or-later count</th><td>{escape(str(payload.get("blocked_not_second_or_later_count", 0)))}</td></tr>
+    <tr><th>Blocked second-order not delivered count</th><td>{escape(str(payload.get("blocked_second_order_not_delivered_count", 0)))}</td></tr>
+    <tr><th>Second-or-later delivered candidates</th><td>{escape(str(payload.get("second_or_later_delivered_candidate_count", 0)))}</td></tr>
     <tr><th>Hidden older eligible</th><td>{escape(str(payload.get("hidden_older_eligible_count", 0)))}</td></tr>
     <tr><th>Eligible candidate count</th><td>{escape(str(payload.get("eligible_candidate_count", 0)))}</td></tr>
     <tr><th>Review queue batch size</th><td>{escape(str(payload.get("review_queue_batch_size", REVIEW_QUEUE_BATCH_SIZE)))}</td></tr>
@@ -2251,18 +2337,114 @@ def _order_number_value(value) -> int:
     return int(match.group(1)) if match else 0
 
 
+def _customer_order_summary_text(row: dict) -> str:
+    count = _int_value(row.get("customer_history_order_count"))
+    sequence_label = _safe_text(row.get("customer_order_sequence_label"), 120)
+    if count > 0:
+        noun = "order" if count == 1 else "orders"
+        return f"{count} {noun}; {sequence_label or 'Order sequence unknown'}"
+    return sequence_label or SECOND_ORDER_HISTORY_NOT_CONFIRMED_REASON
+
+
+def _summary_tag_chips(row: dict) -> list[dict]:
+    tags = row.get("tags") or []
+    chips = [{"label": _safe_text(tag, 120), "css_class": _summary_tag_css_class(tag)} for tag in tags]
+    tag_data_loaded = row.get("tag_data_available") is True or row.get("review_request_tag_data_loaded") is True
+    if not chips:
+        chips.append(
+            {
+                "label": SHOPIFY_ORDER_TAGS_EMPTY_SOURCE if tag_data_loaded else "Tag data not loaded",
+                "css_class": "rrw-badge-muted",
+            }
+        )
+    if row.get("current_order_delivered") is True or row.get("delivered_confirmed") is True:
+        chips.append({"label": "Delivered", "css_class": "rrw-badge-ok"})
+    elif row.get("candidate_status") != "already_sent":
+        chips.append({"label": "Missing Delivered", "css_class": "rrw-badge-warn"})
+    if row.get("canonical_review_request_tag_present") is True or has_review_request_tag(tags):
+        chips.append({"label": "Review request tag found", "css_class": "rrw-badge-ok"})
+    elif row.get("candidate_status") != "already_sent":
+        chips.append({"label": f"Missing {CANONICAL_REVIEW_REQUEST_TAG}", "css_class": "rrw-badge-warn"})
+    if row.get("trustpilot_tag_detected") is True or has_trustpilot_sent_tag(tags):
+        chips.append({"label": "Trustpilot sent", "css_class": "rrw-badge-info"})
+    if row.get("ebay_tag_detected") is True:
+        chips.append({"label": "eBay blocked", "css_class": "rrw-badge-bad"})
+    return _dedupe_chip_rows(chips)
+
+
+def _summary_status_chips(row: dict) -> list[dict]:
+    delivered = row.get("current_order_delivered") is True or row.get("delivered_confirmed") is True
+    tags = row.get("tags") or []
+    review_request_present = row.get("canonical_review_request_tag_present") is True or has_review_request_tag(tags)
+    return [
+        {
+            "label": "Delivered" if delivered else "Not delivered",
+            "css_class": "rrw-badge-ok" if delivered else "rrw-badge-warn",
+        },
+        {
+            "label": "Review request tag found" if review_request_present else f"Missing {CANONICAL_REVIEW_REQUEST_TAG}",
+            "css_class": "rrw-badge-ok" if review_request_present else "rrw-badge-warn",
+        },
+    ]
+
+
+def _summary_tag_css_class(tag) -> str:
+    normalized = _normalize_tag(tag)
+    if normalized in {_normalize_tag(alias) for alias in DELIVERED_TAG_ALIASES}:
+        return "rrw-badge-ok"
+    if normalized in {_normalize_tag(alias) for alias in REVIEW_REQUEST_TAG_ALIASES}:
+        return "rrw-badge-ok"
+    if normalized in {_normalize_tag(alias) for alias in TRUSTPILOT_TAG_ALIASES}:
+        return "rrw-badge-info"
+    if "ebay" in normalized:
+        return "rrw-badge-bad"
+    return "rrw-badge-muted"
+
+
+def _dedupe_chip_rows(chips: list[dict]) -> list[dict]:
+    result = []
+    seen = set()
+    for chip in chips:
+        marker = (chip.get("label"), chip.get("css_class"))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        result.append(chip)
+    return result
+
+
 def _eligible_summary(row: dict) -> dict:
     visible = row.get("visible_in_review_batch") is True
+    tags = row.get("tags", [])
+    delivered = row.get("current_order_delivered") is True or row.get("delivered_confirmed") is True
+    review_request_present = row.get("canonical_review_request_tag_present") is True or has_review_request_tag(tags)
+    action_label = "Review & Send"
     return {
         "order": row["order"],
+        "order_name": row["order"],
         "customer": row.get("customer") or "Masked in reports",
+        "customer_display_name": row.get("customer") or "Customer not loaded",
         "masked_customer": row.get("masked_customer", ""),
+        "customer_masked_label": row.get("masked_customer", ""),
+        "masked_customer_label": row.get("masked_customer", ""),
         "customer_history_order_count": _int_value(row.get("customer_history_order_count")),
         "customer_history_order_count_before_precision": _int_value(
             row.get("customer_history_order_count_before_precision")
         ),
         "customer_order_sequence_number": _int_value(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": row.get("customer_order_sequence_label", ""),
+        "customer_order_summary": _customer_order_summary_text(row),
+        "customer_orders_display": _customer_order_summary_text(row),
+        "customer_history_lookup_status": (
+            "Customer history checked"
+            if row.get("customer_history_confirmed") is True
+            else "Customer history not confirmed"
+        ),
+        "customer_history_lookup_action_label": (
+            "Customer history checked"
+            if row.get("customer_history_confirmed") is True
+            else "Check customer history"
+        ),
         "historical_order_names": row.get("historical_order_names", []),
         "customer_history_order_names": row.get("customer_history_order_names", []),
         "customer_history_window": row.get("customer_history_window", ""),
@@ -2275,6 +2457,7 @@ def _eligible_summary(row: dict) -> dict:
         "previous_trustpilot_tag_values": row.get("previous_trustpilot_tag_values", []),
         "customer_history_source": row.get("customer_history_source", ""),
         "customer_history_confidence": row.get("customer_history_confidence", ""),
+        "customer_history_confirmed": row.get("customer_history_confirmed") is True,
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
         "customer_level_trustpilot_note_evidence_found": (
             row.get("customer_level_trustpilot_note_evidence_found") is True
@@ -2289,7 +2472,8 @@ def _eligible_summary(row: dict) -> dict:
         "note_risk_fields": row.get("note_risk_fields", []),
         "note_risk_keywords": row.get("note_risk_keywords", []),
         "note_risk_reason": row.get("note_risk_reason", ""),
-        "tags": row.get("tags", []),
+        "tags": tags,
+        "tag_chips": _summary_tag_chips(row),
         "local_shopify_tags": row.get("local_shopify_tags", []),
         "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
         "trustpilot_tag_source": row.get("trustpilot_tag_source", ""),
@@ -2301,10 +2485,34 @@ def _eligible_summary(row: dict) -> dict:
         "review_request_tag_present": row.get("canonical_review_request_tag_present") is True,
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
         "matched_review_request_tag_value": row.get("matched_review_request_tag_value", ""),
-        "delivered_status": "Delivered" if row.get("delivered_confirmed") else "Not delivered",
+        "delivered_status": "Delivered" if delivered else "Not delivered",
+        "delivered_status_label": "Delivered" if delivered else "Not delivered",
+        "delivered_status_class": "rrw-badge-ok" if delivered else "rrw-badge-warn",
+        "review_request_tag_status_label": (
+            "Review request tag found" if review_request_present else f"Missing {CANONICAL_REVIEW_REQUEST_TAG}"
+        ),
+        "review_request_tag_status_class": "rrw-badge-ok" if review_request_present else "rrw-badge-warn",
         "trustpilot_history": row.get("trustpilot_history", ""),
+        "trustpilot_history_label": row.get("trustpilot_history", "") or "No previous Trustpilot email found",
+        "trustpilot_history_evidence": row.get("evidence", ""),
+        "status": "Ready",
+        "status_label": "Ready",
+        "status_class": "rrw-badge-ok",
+        "status_chips": _summary_status_chips(row),
         "reason": row.get("block_reason", ""),
-        "action": "Review & Send" if visible else "Queued for later review",
+        "eligibility_reason_plain": row.get("block_reason", ""),
+        "action_state": "review_send",
+        "action_label": action_label,
+        "action_status": action_label,
+        "can_review_send": True,
+        "review_send_url": "",
+        "hidden_block_reason": _safe_text(row.get("hidden_reason"), 120),
+        "action": action_label,
+        "second_or_later_order": row.get("second_or_later_order") is True,
+        "current_order_delivered": delivered,
+        "second_order_rule_passed": row.get("second_order_rule_passed") is True,
+        "second_order_rule_blocker": row.get("second_order_rule_blocker", ""),
+        "second_order_rule_reason": row.get("second_order_rule_reason", ""),
         "review_queue_rank": int(row.get("review_queue_rank") or 0),
         "visible_in_review_batch": visible,
         "hidden_reason": _safe_text(row.get("hidden_reason"), 120),
@@ -2315,17 +2523,36 @@ def _eligible_summary(row: dict) -> dict:
 
 
 def _blocked_summary(row: dict) -> dict:
+    tags = row.get("tags", [])
+    delivered = row.get("current_order_delivered") is True or row.get("delivered_confirmed") is True
+    review_request_present = row.get("canonical_review_request_tag_present") is True or has_review_request_tag(tags)
     return {
         "order_or_group": "/".join(row.get("group_order_names") or [row["order"]]),
         "order": row["order"],
+        "order_name": row["order"],
         "group_order_names": row.get("group_order_names", []),
         "customer": row.get("customer") or "Masked in reports",
+        "customer_display_name": row.get("customer") or "Customer not loaded",
+        "customer_masked_label": row.get("masked_customer", ""),
+        "masked_customer_label": row.get("masked_customer", ""),
         "customer_history_order_count": _int_value(row.get("customer_history_order_count")),
         "customer_history_order_count_before_precision": _int_value(
             row.get("customer_history_order_count_before_precision")
         ),
         "customer_order_sequence_number": _int_value(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": row.get("customer_order_sequence_label", ""),
+        "customer_order_summary": _customer_order_summary_text(row),
+        "customer_orders_display": _customer_order_summary_text(row),
+        "customer_history_lookup_status": (
+            "Customer history checked"
+            if row.get("customer_history_confirmed") is True
+            else "Customer history not confirmed"
+        ),
+        "customer_history_lookup_action_label": (
+            "Customer history checked"
+            if row.get("customer_history_confirmed") is True
+            else "Check customer history"
+        ),
         "historical_order_names": row.get("historical_order_names", []),
         "customer_history_order_names": row.get("customer_history_order_names", []),
         "customer_history_window": row.get("customer_history_window", ""),
@@ -2338,6 +2565,7 @@ def _blocked_summary(row: dict) -> dict:
         "previous_trustpilot_tag_values": row.get("previous_trustpilot_tag_values", []),
         "customer_history_source": row.get("customer_history_source", ""),
         "customer_history_confidence": row.get("customer_history_confidence", ""),
+        "customer_history_confirmed": row.get("customer_history_confirmed") is True,
         "customer_level_trustpilot_already_sent": row.get("customer_level_trustpilot_already_sent") is True,
         "customer_level_trustpilot_note_evidence_found": (
             row.get("customer_level_trustpilot_note_evidence_found") is True
@@ -2352,7 +2580,8 @@ def _blocked_summary(row: dict) -> dict:
         "note_risk_fields": row.get("note_risk_fields", []),
         "note_risk_keywords": row.get("note_risk_keywords", []),
         "note_risk_reason": row.get("note_risk_reason", ""),
-        "tags": row.get("tags", []),
+        "tags": tags,
+        "tag_chips": _summary_tag_chips(row),
         "local_shopify_tags": row.get("local_shopify_tags", []),
         "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
         "trustpilot_tag_source": row.get("trustpilot_tag_source", ""),
@@ -2366,10 +2595,34 @@ def _blocked_summary(row: dict) -> dict:
         "review_request_tag_present": row.get("canonical_review_request_tag_present") is True,
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
         "matched_review_request_tag_value": row.get("matched_review_request_tag_value", ""),
-        "delivered_status": "Delivered" if row.get("delivered_confirmed") else "Not delivered",
+        "delivered_status": "Delivered" if delivered else "Not delivered",
+        "delivered_status_label": "Delivered" if delivered else "Not delivered",
+        "delivered_status_class": "rrw-badge-ok" if delivered else "rrw-badge-warn",
+        "review_request_tag_status_label": (
+            "Review request tag found" if review_request_present else f"Missing {CANONICAL_REVIEW_REQUEST_TAG}"
+        ),
+        "review_request_tag_status_class": "rrw-badge-ok" if review_request_present else "rrw-badge-warn",
         "block_reason": row.get("block_reason", ""),
+        "reason": row.get("block_reason", ""),
+        "eligibility_reason_plain": row.get("block_reason", ""),
         "missing_requirement": row.get("missing_requirement", ""),
         "evidence": row.get("evidence", ""),
+        "trustpilot_history_label": row.get("trustpilot_history", "") or "History not confirmed",
+        "trustpilot_history_evidence": row.get("evidence", ""),
+        "status": "Not ready",
+        "status_label": "Not ready",
+        "status_class": "rrw-badge-warn",
+        "status_chips": _summary_status_chips(row),
+        "action_state": "not_ready",
+        "action_label": "Not ready",
+        "action_status": "Not ready",
+        "can_review_send": False,
+        "review_send_url": "",
+        "second_or_later_order": row.get("second_or_later_order") is True,
+        "current_order_delivered": delivered,
+        "second_order_rule_passed": row.get("second_order_rule_passed") is True,
+        "second_order_rule_blocker": row.get("second_order_rule_blocker", ""),
+        "second_order_rule_reason": row.get("second_order_rule_reason", ""),
         "scan_date": row.get("scan_date", ""),
         "scan_date_basis": row.get("scan_date_basis", ""),
         "scan_date_fallback_used": row.get("scan_date_fallback_used") is True,
@@ -2377,21 +2630,33 @@ def _blocked_summary(row: dict) -> dict:
 
 
 def _already_sent_public_summary(row: dict) -> dict:
+    tags = row.get("tags", [])
+    delivered = row.get("current_order_delivered") is True or row.get("delivered_confirmed") is True
     return {
         "order": row["order"],
+        "order_name": row["order"],
         "customer": row.get("customer") or "Masked in reports",
+        "customer_display_name": row.get("customer") or "Customer not loaded",
         "masked_customer": row.get("masked_customer", ""),
+        "customer_masked_label": row.get("masked_customer", ""),
+        "masked_customer_label": row.get("masked_customer", ""),
         "customer_history_order_count": _int_value(row.get("customer_history_order_count")),
         "customer_order_sequence_number": _int_value(row.get("customer_order_sequence_number")),
         "customer_order_sequence_label": row.get("customer_order_sequence_label", ""),
+        "customer_order_summary": _customer_order_summary_text(row),
+        "customer_orders_display": _customer_order_summary_text(row),
         "previous_trustpilot_order_names": row.get("previous_trustpilot_order_names", []),
         "previous_trustpilot_tag_values": row.get("previous_trustpilot_tag_values", []),
+        "customer_history_confirmed": row.get("customer_history_confirmed") is True,
         "trustpilot_email_status": row.get("trustpilot_email_status", "Already sent"),
+        "trustpilot_history_label": row.get("trustpilot_history", "") or "Already sent",
+        "trustpilot_history_evidence": row.get("evidence", ""),
         "shopify_tag_pending": row.get("shopify_tag_pending") is True,
         "shopify_tag_status_label": row.get("shopify_tag_status_label", ""),
         "evidence": row.get("evidence", ""),
         "tags": row.get("tags", []),
         "local_shopify_tags": row.get("local_shopify_tags", []),
+        "tag_chips": _summary_tag_chips(row),
         "trustpilot_tag_detected": row.get("trustpilot_tag_detected") is True,
         "trustpilot_tag_source": row.get("trustpilot_tag_source", ""),
         "matched_trustpilot_tag_values": row.get("matched_trustpilot_tag_values", []),
@@ -2402,7 +2667,21 @@ def _already_sent_public_summary(row: dict) -> dict:
         "review_request_tag_present": row.get("canonical_review_request_tag_present") is True,
         "review_request_tag_data_loaded": row.get("review_request_tag_data_loaded") is True,
         "matched_review_request_tag_value": row.get("matched_review_request_tag_value", ""),
-        "delivered_status": "Delivered" if row.get("delivered_confirmed") else "Not delivered",
+        "delivered_status": "Delivered" if delivered else "Not delivered",
+        "status": "Already sent",
+        "status_label": "Already sent",
+        "status_class": "rrw-badge-ok",
+        "status_chips": _summary_status_chips(row),
+        "reason": row.get("evidence", ""),
+        "eligibility_reason_plain": row.get("evidence", ""),
+        "action_state": "already_sent",
+        "action_label": "Already sent",
+        "action_status": "Already sent",
+        "can_review_send": False,
+        "review_send_url": "",
+        "second_or_later_order": row.get("second_or_later_order") is True,
+        "current_order_delivered": delivered,
+        "second_order_rule_passed": row.get("second_order_rule_passed") is True,
     }
 
 
@@ -2677,6 +2956,8 @@ def _missing_requirement(delivered: bool, canonical_tag: bool, trustpilot_sent: 
     text = " ".join(blockers).lower()
     if "first-order customer" in text or "first order" in text:
         missing.append("Repeat customer")
+    if "second-or-later" in text or "second delivered order" in text:
+        missing.append("Second-or-later delivered order")
     if "customer history not confirmed" in text:
         missing.append("Confirmed customer history")
     if "aftersales/ticket note found" in text:
@@ -2688,6 +2969,32 @@ def _missing_requirement(delivered: bool, canonical_tag: bool, trustpilot_sent: 
     if "risk" in text or "ticket" in text or "refund" in text or "dispute" in text:
         missing.append("No ticket/refund/risk")
     return ", ".join(_dedupe(missing)) or "None"
+
+
+def _second_order_rule_counts(eligible_rows: list[dict], blocked_rows: list[dict]) -> dict:
+    rows = list(eligible_rows or []) + list(blocked_rows or [])
+    blocked_first = sum(1 for row in blocked_rows or [] if row.get("second_order_rule_blocker") == "first_order")
+    blocked_not_second = sum(
+        1 for row in blocked_rows or [] if row.get("second_order_rule_blocker") == "not_second_or_later"
+    )
+    blocked_not_delivered = sum(
+        1 for row in blocked_rows or [] if row.get("second_order_rule_blocker") == "second_order_not_delivered"
+    )
+    after_count = len(eligible_rows or [])
+    return {
+        "blocked_first_order_count": blocked_first,
+        "blocked_not_second_or_later_count": blocked_not_second,
+        "blocked_second_order_not_delivered_count": blocked_not_delivered,
+        "second_or_later_delivered_candidate_count": sum(
+            1
+            for row in rows
+            if row.get("second_or_later_order") is True and row.get("current_order_delivered") is True
+        ),
+        "eligible_candidate_count_before_second_order_rule": (
+            after_count + blocked_first + blocked_not_second + blocked_not_delivered
+        ),
+        "eligible_candidate_count_after_second_order_rule": after_count,
+    }
 
 
 def _blocked_only_by_precision_fix(row: dict) -> bool:

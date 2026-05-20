@@ -210,9 +210,16 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 "blocked_visible_count": len(blocked_rows[:50]),
                 "blocked_ebay_order_count": _int_value(scan.get("blocked_ebay_order_count")),
                 "blocked_duplicate_customer_count": _int_value(scan.get("blocked_duplicate_customer_count")),
-                "blocked_merged_group_count": _int_value(scan.get("blocked_merged_group_count")),
-                "rows": blocked_rows[:50],
-            },
+            "blocked_merged_group_count": _int_value(scan.get("blocked_merged_group_count")),
+            "blocked_first_order_count": _int_value(scan.get("blocked_first_order_count")),
+            "blocked_not_second_or_later_count": _int_value(
+                scan.get("blocked_not_second_or_later_count")
+            ),
+            "blocked_second_order_not_delivered_count": _int_value(
+                scan.get("blocked_second_order_not_delivered_count")
+            ),
+            "rows": blocked_rows[:50],
+        },
             "dashboard_counters": {
                 "ready_to_send_count": eligible_total,
                 "eligible_total": eligible_total,
@@ -223,6 +230,15 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
                 "latest_sent_order": _safe_text(scan.get("latest_sent_order"), max_length=80),
                 "latest_sent_time": _safe_text(scan.get("latest_sent_time"), max_length=120),
                 "latest_tag_write_time": _safe_text(scan.get("latest_tag_write_time"), max_length=120),
+                "eligible_candidate_count_before_second_order_rule": _int_value(
+                    scan.get("eligible_candidate_count_before_second_order_rule") or eligible_total
+                ),
+                "eligible_candidate_count_after_second_order_rule": _int_value(
+                    scan.get("eligible_candidate_count_after_second_order_rule") or eligible_total
+                ),
+                "second_or_later_delivered_candidate_count": _int_value(
+                    scan.get("second_or_later_delivered_candidate_count") or eligible_total
+                ),
             },
             "stale_after_minutes": 240,
             "scan_report_source": _safe_text(scan.get("scan_source") or "sqlite_report_fallback", max_length=120),
@@ -295,6 +311,11 @@ def _approval_queue_from_scan(scan: dict, review_rows: list[dict], already_sent_
         "blocked_overflow_count": max(len(blocked_rows) - 50, 0),
         "duplicate_block_count": _int_value(scan.get("blocked_duplicate_customer_count")),
         "blocked_ebay_order_count": _int_value(scan.get("blocked_ebay_order_count")),
+        "blocked_first_order_count": _int_value(scan.get("blocked_first_order_count")),
+        "blocked_not_second_or_later_count": _int_value(scan.get("blocked_not_second_or_later_count")),
+        "blocked_second_order_not_delivered_count": _int_value(
+            scan.get("blocked_second_order_not_delivered_count")
+        ),
         "review_send_action_enabled_count": len(visible_review_rows),
         "email_sent_count": _int_value(scan.get("already_sent_count") or len(already_sent_rows)),
         "merged_group_count": _int_value(scan.get("blocked_merged_group_count")),
@@ -312,6 +333,15 @@ def _approval_queue_from_scan(scan: dict, review_rows: list[dict], already_sent_
         ),
         "focus_22530_22562_latest_decision": scan.get("focus_22530_22562_latest_decision") or {},
         "eligible_candidate_count_total": eligible_total,
+        "eligible_candidate_count_before_second_order_rule": _int_value(
+            scan.get("eligible_candidate_count_before_second_order_rule") or eligible_total
+        ),
+        "eligible_candidate_count_after_second_order_rule": _int_value(
+            scan.get("eligible_candidate_count_after_second_order_rule") or eligible_total
+        ),
+        "second_or_later_delivered_candidate_count": _int_value(
+            scan.get("second_or_later_delivered_candidate_count") or eligible_total
+        ),
         "review_queue_batch_size": page_size,
         "review_queue_page_size": page_size,
         "review_queue_page": 1,
@@ -380,7 +410,7 @@ def _dashboard_from_scan(
         "blocked_count": blocked_total,
         "sent_trustpilot_count": already_sent_total,
         "approval_queue": approval_queue,
-        "last_60_days_candidate_scan": scan,
+        "last_60_days_candidate_scan": _compact_scan_for_snapshot(scan),
         "order_data_coverage": order_data_coverage,
         "setup_checklist": {"items": []},
         "current_state_label": "Ready for final review" if eligible_total else "Waiting for eligible orders",
@@ -435,6 +465,28 @@ def _dashboard_from_scan(
         "ali_reviews_message": "Ali Reviews API is not connected yet.",
         "ali_reviews_status_label": "Unavailable",
     }
+
+
+def _compact_scan_for_snapshot(scan: dict) -> dict:
+    row_keys = {
+        "eligible_queue_rows",
+        "review_queue_rows",
+        "blocked_queue_rows",
+        "already_sent_queue_rows",
+        "review_queue_candidates",
+        "eligible_candidates_summary",
+        "blocked_candidates_summary",
+        "already_sent_summary",
+    }
+    compact = {}
+    for key, value in (scan or {}).items():
+        if key in row_keys:
+            continue
+        if isinstance(value, list) and len(value) > 50:
+            compact[key] = value[:50]
+            continue
+        compact[key] = value
+    return compact
 
 
 def _snapshot_safety_confirmations() -> list[dict]:
@@ -696,9 +748,20 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "snapshot_html_paths_failed": payload.get("snapshot_html_paths_failed") or [],
         "page_expected_paths": payload.get("page_expected_paths") or [],
         "eligible_total": _int_value(payload.get("eligible_total")),
+        "eligible_candidate_count_before_second_order_rule": _int_value(
+            counters.get("eligible_candidate_count_before_second_order_rule")
+        ),
+        "eligible_candidate_count_after_second_order_rule": _int_value(
+            counters.get("eligible_candidate_count_after_second_order_rule")
+        ),
         "needs_review_visible_count": _int_value(counters.get("needs_review_visible_count")),
         "already_sent_total": _int_value(counters.get("already_sent_total")),
         "blocked_total": _int_value(blocked.get("blocked_total")),
+        "blocked_first_order_count": _int_value(blocked.get("blocked_first_order_count")),
+        "blocked_not_second_or_later_count": _int_value(blocked.get("blocked_not_second_or_later_count")),
+        "blocked_second_order_not_delivered_count": _int_value(
+            blocked.get("blocked_second_order_not_delivered_count")
+        ),
         "stale_counter_warning": False,
         "shopify_api_call_performed": payload.get("shopify_api_call_performed") is True,
         "shopify_write_performed": payload.get("shopify_write_performed") is True,
@@ -717,6 +780,8 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         "Review Request dashboard snapshot refresh complete.\n\n"
         f"Status: {payload.get('snapshot_status')}\n"
         f"Eligible total: {payload.get('eligible_total', 0)}\n"
+        f"Eligible before second-order rule: {counters.get('eligible_candidate_count_before_second_order_rule', 0)}\n"
+        f"Eligible after second-order rule: {counters.get('eligible_candidate_count_after_second_order_rule', payload.get('eligible_total', 0))}\n"
         f"Needs review visible count: {counters.get('needs_review_visible_count', 0)}\n"
         f"Already sent total: {counters.get('already_sent_total', 0)}\n"
         f"Last Shopify sync: {payload.get('last_shopify_sync_at') or 'Unknown'}\n"
@@ -773,9 +838,14 @@ def _render_html(payload: dict) -> str:
       <tr><th>Last Shopify sync</th><td>{escape(str(payload.get('last_shopify_sync_at', '')))}</td></tr>
       <tr><th>Last candidate scan</th><td>{escape(str(payload.get('last_candidate_scan_at', '')))}</td></tr>
       <tr><th>Eligible total</th><td>{escape(str(payload.get('eligible_total', 0)))}</td></tr>
+      <tr><th>Eligible before second-order rule</th><td>{escape(str(counters.get('eligible_candidate_count_before_second_order_rule', 0)))}</td></tr>
+      <tr><th>Eligible after second-order rule</th><td>{escape(str(counters.get('eligible_candidate_count_after_second_order_rule', payload.get('eligible_total', 0))))}</td></tr>
       <tr><th>Needs review visible count</th><td>{escape(str(counters.get('needs_review_visible_count', 0)))}</td></tr>
       <tr><th>Already sent total</th><td>{escape(str(counters.get('already_sent_total', 0)))}</td></tr>
       <tr><th>Blocked total</th><td>{escape(str(blocked.get('blocked_total', 0)))}</td></tr>
+      <tr><th>Blocked first-order count</th><td>{escape(str(blocked.get('blocked_first_order_count', 0)))}</td></tr>
+      <tr><th>Blocked not second-or-later count</th><td>{escape(str(blocked.get('blocked_not_second_or_later_count', 0)))}</td></tr>
+      <tr><th>Blocked second-order not delivered count</th><td>{escape(str(blocked.get('blocked_second_order_not_delivered_count', 0)))}</td></tr>
       <tr><th>Stale after minutes</th><td>{escape(str(payload.get('stale_after_minutes', '')))}</td></tr>
     </tbody>
   </table>
