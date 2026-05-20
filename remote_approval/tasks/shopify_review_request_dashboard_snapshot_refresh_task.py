@@ -220,6 +220,21 @@ def _snapshot_payload_from_scan(scan: dict, django_result: dict) -> dict:
             ),
             "rows": blocked_rows[:50],
         },
+            "order_21687_customer_history_lookup_validation": {
+                "lookup_cache_found": scan.get("order_21687_lookup_cache_found") is True,
+                "should_block_review_send": scan.get("order_21687_should_block_review_send") is True,
+                "evidence_order_name": _safe_text(scan.get("order_21687_evidence_order_name"), max_length=80),
+                "safe_detected_keyword": _safe_text(scan.get("order_21687_safe_detected_keyword"), max_length=80),
+                "blocking_reason": _safe_text(scan.get("order_21687_blocking_reason"), max_length=300),
+                "removed_from_needs_review": scan.get("order_21687_removed_from_needs_review") is True,
+                "present_in_blocked_or_already_sent": scan.get(
+                    "order_21687_present_in_blocked_or_already_sent"
+                )
+                is True,
+                "review_send_button_disabled": scan.get("order_21687_review_send_button_disabled") is True,
+                "gmail_api_call_performed": False,
+                "shopify_write_performed": False,
+            },
             "dashboard_counters": {
                 "ready_to_send_count": eligible_total,
                 "eligible_total": eligible_total,
@@ -731,6 +746,11 @@ def _write_html_to_paths(payload: dict, main_path: Path, mirror_paths: list[Path
 def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
     counters = payload.get("dashboard_counters") if isinstance(payload.get("dashboard_counters"), dict) else {}
     blocked = payload.get("blocked_summary") if isinstance(payload.get("blocked_summary"), dict) else {}
+    order_21687 = (
+        payload.get("order_21687_customer_history_lookup_validation")
+        if isinstance(payload.get("order_21687_customer_history_lookup_validation"), dict)
+        else {}
+    )
     return {
         "task_type": TASK_NAME,
         "success": payload.get("success") is True,
@@ -762,6 +782,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "blocked_second_order_not_delivered_count": _int_value(
             blocked.get("blocked_second_order_not_delivered_count")
         ),
+        "order_21687_lookup_cache_found": order_21687.get("lookup_cache_found") is True,
+        "order_21687_should_block_review_send": order_21687.get("should_block_review_send") is True,
+        "order_21687_removed_from_needs_review": order_21687.get("removed_from_needs_review") is True,
+        "order_21687_review_send_button_disabled": order_21687.get("review_send_button_disabled") is True,
+        "order_21687_blocking_reason": order_21687.get("blocking_reason", ""),
         "stale_counter_warning": False,
         "shopify_api_call_performed": payload.get("shopify_api_call_performed") is True,
         "shopify_write_performed": payload.get("shopify_write_performed") is True,
@@ -774,6 +799,11 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
 
 def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
     counters = payload.get("dashboard_counters") if isinstance(payload.get("dashboard_counters"), dict) else {}
+    order_21687 = (
+        payload.get("order_21687_customer_history_lookup_validation")
+        if isinstance(payload.get("order_21687_customer_history_lookup_validation"), dict)
+        else {}
+    )
     mirror_paths = payload.get("snapshot_mirror_paths_written") or []
     page_paths = payload.get("page_expected_paths") or []
     return (
@@ -784,6 +814,11 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Eligible after second-order rule: {counters.get('eligible_candidate_count_after_second_order_rule', payload.get('eligible_total', 0))}\n"
         f"Needs review visible count: {counters.get('needs_review_visible_count', 0)}\n"
         f"Already sent total: {counters.get('already_sent_total', 0)}\n"
+        f"#21687 lookup cache found: {order_21687.get('lookup_cache_found')}\n"
+        f"#21687 should block Review & Send: {order_21687.get('should_block_review_send')}\n"
+        f"#21687 removed from Needs review: {order_21687.get('removed_from_needs_review')}\n"
+        f"#21687 Review & Send disabled: {order_21687.get('review_send_button_disabled')}\n"
+        f"#21687 blocking reason: {order_21687.get('blocking_reason') or '-'}\n"
         f"Last Shopify sync: {payload.get('last_shopify_sync_at') or 'Unknown'}\n"
         f"Last candidate scan: {payload.get('last_candidate_scan_at') or 'Unknown'}\n\n"
         "Safety: no Shopify API call, no Shopify write, no Gmail API call, no email send, "

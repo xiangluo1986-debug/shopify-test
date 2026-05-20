@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 
+from backend.shopify_sync.review_request_history_ledger import load_customer_history_lookup_cache
 from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 
@@ -501,6 +502,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=60)
     source_by_order = _apply_manual_confirmed_order_evidence(source_by_order)
+    lookup_cache = load_customer_history_lookup_cache(LOG_DIR)
     local_by_order = {}
     for order in local_orders:
         order_name = _canonical_order_name(order.get("order_name") or order.get("order_number"))
@@ -535,6 +537,7 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
             cutoff,
             customer_history_by_order.get(order_name, {}),
         )
+        row = _apply_cached_customer_history_lookup_block(row, lookup_cache)
         if row["candidate_status"] == "already_sent":
             already_sent_rows.append(row)
             already_sent_orders.add(row["order"])
@@ -593,6 +596,10 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
     order_21102_diagnosis = _sqlite_focus_order_diagnosis("#21102", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     order_21225_diagnosis = _sqlite_focus_order_diagnosis("#21225", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     order_21687_diagnosis = _sqlite_focus_order_diagnosis("#21687", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
+    order_21687_lookup = _lookup_cache_order(lookup_cache, "#21687")
+    order_21687_review_queue_orders = {row.get("order") for row in review_queue_rows}
+    order_21687_eligible_orders = {row.get("order") for row in eligible_rows}
+    order_21687_blocked_orders = {row.get("order") for row in blocked_rows}
     order_21778_diagnosis = _sqlite_focus_order_diagnosis("#21778", local_by_order, eligible_rows, blocked_rows, already_sent_rows)
     eligible_candidate_count_total = len(eligible_rows)
     review_queue_visible_count = len(review_queue_rows)
@@ -665,6 +672,21 @@ def _build_sqlite_scan_payload(local_orders: list[dict], source_by_order: dict) 
         "#21687_customer_history_confidence": _safe_text(
             order_21687_diagnosis.get("customer_history_confidence"), 80
         ),
+        "order_21687_lookup_cache_found": bool(order_21687_lookup),
+        "order_21687_should_block_review_send": order_21687_lookup.get("should_block_review_send") is True,
+        "order_21687_evidence_order_name": _safe_text(order_21687_lookup.get("evidence_order_name"), 80),
+        "order_21687_safe_detected_keyword": _safe_text(order_21687_lookup.get("safe_detected_keyword"), 80),
+        "order_21687_blocking_reason": _safe_text(order_21687_lookup.get("blocking_reason"), 300),
+        "order_21687_removed_from_needs_review": "#21687" not in order_21687_review_queue_orders
+        and "#21687" not in order_21687_eligible_orders,
+        "order_21687_present_in_blocked_or_already_sent": "#21687" in order_21687_blocked_orders
+        or order_21687_diagnosis.get("candidate_section") == "already_sent",
+        "order_21687_review_send_button_disabled": "#21687" not in order_21687_review_queue_orders
+        and "#21687" not in order_21687_eligible_orders,
+        "order_21687_gmail_shopify_write_performed": False,
+        "customer_history_lookup_cache_found": lookup_cache.get("present") is True,
+        "customer_history_lookup_cache_loaded": lookup_cache.get("loaded") is True,
+        "customer_history_lookup_cache_path": lookup_cache.get("relative_path", ""),
         "order_21778_diagnosis": order_21778_diagnosis,
         "order_21778_trustpilot_tag_detection": {
             "order_name": "#21778",
@@ -1578,6 +1600,84 @@ def _trustpilot_note_history_label(evidence):
     return f"Previous Trustpilot note found via {order_name}"
 
 
+def _lookup_cache_order(lookup_cache: dict, order_name: str) -> dict:
+    selected = _canonical_order_name(order_name)
+    if not selected:
+        return {}
+    return (lookup_cache.get("orders") or {}).get(selected, {})
+
+
+def _apply_cached_customer_history_lookup_block(row: dict, lookup_cache: dict) -> dict:
+    lookup = _lookup_cache_order(lookup_cache, row.get("order"))
+    if not lookup:
+        return row
+    history_names = _safe_order_names(lookup.get("historical_order_names") or [])
+    history_count = _int_value(lookup.get("shopify_customer_history_count")) or len(history_names)
+    evidence_order = _canonical_order_name(lookup.get("evidence_order_name"))
+    safe_keyword = _safe_text(lookup.get("safe_detected_keyword"), 80)
+    reason = _safe_text(lookup.get("blocking_reason"), 300)
+    note_evidence = lookup.get("trustpilot_note_evidence_found") is True
+    tag_evidence = lookup.get("trustpilot_tag_evidence_found") is True
+    if not reason and note_evidence:
+        reason = f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}."
+    elif not reason and tag_evidence:
+        reason = f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}."
+    history_label = _cached_customer_history_lookup_label(lookup)
+    row.update(
+        {
+            "cached_customer_history_lookup_found": True,
+            "cached_customer_history_lookup_generated_at": _safe_text(lookup.get("generated_at"), 120),
+            "cached_customer_history_lookup_should_block_review_send": lookup.get("should_block_review_send") is True,
+            "cached_customer_history_lookup_blocking_reason": reason,
+            "customer_history_lookup_status": "Customer history checked",
+            "customer_history_lookup_action_label": "Customer history checked",
+            "shopify_customer_history_count": history_count,
+            "customer_history_order_count": history_count or _int_value(row.get("customer_history_order_count")),
+            "customer_order_count": history_count or _int_value(row.get("customer_order_count")),
+            "historical_order_names": history_names or row.get("historical_order_names", []),
+            "customer_history_order_names": history_names or row.get("customer_history_order_names", []),
+            "customer_history_matched_order_names": history_names
+            or row.get("customer_history_matched_order_names", []),
+            "customer_history_window": "shopify_lifetime_on_demand_lookup",
+            "customer_history_source": "on_demand_shopify_customer_history_lookup",
+            "customer_history_confidence": "high",
+            "customer_history_confirmed": True,
+            "customer_level_trustpilot_note_evidence_found": note_evidence,
+            "customer_level_trustpilot_note_evidence_order_name": evidence_order,
+            "customer_level_trustpilot_note_safe_keyword": safe_keyword,
+            "trustpilot_note_evidence_found": note_evidence,
+            "trustpilot_note_evidence_order_name": evidence_order,
+            "trustpilot_note_safe_keyword": safe_keyword,
+            "trustpilot_history": history_label or row.get("trustpilot_history", ""),
+            "trustpilot_history_label": history_label or row.get("trustpilot_history_label", ""),
+        }
+    )
+    if lookup.get("should_block_review_send") is True:
+        row.update(
+            {
+                "candidate_status": "blocked",
+                "trustpilot_email_status": "Already sent",
+                "customer_level_trustpilot_already_sent": note_evidence or tag_evidence,
+                "already_sent_reason": reason,
+                "block_reason": reason,
+                "missing_requirement": "No prior Trustpilot send",
+                "evidence": reason,
+            }
+        )
+    return row
+
+
+def _cached_customer_history_lookup_label(lookup: dict) -> str:
+    evidence_order = _canonical_order_name((lookup or {}).get("evidence_order_name"))
+    if (lookup or {}).get("trustpilot_note_evidence_found") is True:
+        return f"Previous Trustpilot note found via {evidence_order or 'another order'}"
+    if (lookup or {}).get("trustpilot_tag_evidence_found") is True:
+        return f"Previous Trustpilot tag found via {evidence_order or 'another order'}"
+    if (lookup or {}).get("should_block_review_send") is True:
+        return _safe_text((lookup or {}).get("blocking_reason"), 300)
+    return ""
+
+
 def _effective_order_tags(local, source):
     if _shopify_tags_loaded_from_order(local):
         tags = _shopify_tags_from_order(local)
@@ -1998,6 +2098,13 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "eligible_candidate_count_after_second_order_rule": int(
             payload.get("eligible_candidate_count_after_second_order_rule") or 0
         ),
+        "order_21687_lookup_cache_found": payload.get("order_21687_lookup_cache_found") is True,
+        "order_21687_should_block_review_send": payload.get("order_21687_should_block_review_send") is True,
+        "order_21687_evidence_order_name": payload.get("order_21687_evidence_order_name", ""),
+        "order_21687_safe_detected_keyword": payload.get("order_21687_safe_detected_keyword", ""),
+        "order_21687_removed_from_needs_review": payload.get("order_21687_removed_from_needs_review") is True,
+        "order_21687_review_send_button_disabled": payload.get("order_21687_review_send_button_disabled") is True,
+        "order_21687_blocking_reason": payload.get("order_21687_blocking_reason", ""),
         "shopify_api_call_performed": False,
         "shopify_write_performed": False,
         "gmail_api_call_performed": False,
@@ -2025,6 +2132,11 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Already sent: {payload.get('already_sent_count', 0)}\n"
         f"Blocked / not ready: {payload.get('blocked_count', 0)}\n"
         f"Blocked eBay orders: {payload.get('blocked_ebay_order_count', 0)}\n"
+        f"#21687 lookup cache found: {payload.get('order_21687_lookup_cache_found')}\n"
+        f"#21687 should block Review & Send: {payload.get('order_21687_should_block_review_send')}\n"
+        f"#21687 removed from Needs review: {payload.get('order_21687_removed_from_needs_review')}\n"
+        f"#21687 Review & Send disabled: {payload.get('order_21687_review_send_button_disabled')}\n"
+        f"#21687 blocking reason: {payload.get('order_21687_blocking_reason') or '-'}\n"
         f"Coverage warnings: {', '.join(payload.get('coverage_warnings') or []) or 'none'}\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"
@@ -3039,6 +3151,10 @@ def _canonical_order_name(value) -> str:
         return ""
     match = re.fullmatch(r"#?(\d{3,})", text)
     return f"#{match.group(1)}" if match else text
+
+
+def _safe_order_names(values) -> list[str]:
+    return _dedupe(_canonical_order_name(value) for value in values or [] if _canonical_order_name(value))
 
 
 def _is_simulator_order_name(value) -> bool:

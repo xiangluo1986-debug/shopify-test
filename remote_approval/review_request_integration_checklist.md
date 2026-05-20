@@ -257,6 +257,24 @@ Phase 0.2 automation decision:
 - [x] Normal page loads still use only the cached snapshot and do not call
   Shopify APIs, Gmail APIs, external review APIs, or `translationsRegister`.
 
+#### Phase 5.32D On-Demand Customer History Cache Reliability
+
+- [x] On-demand customer history lookup writes a sanitized per-order cache under
+  `logs/codex_runs/` with no raw email, phone, address, full note, token, or
+  secret values.
+- [x] Last-60-days candidate scans consume the cache before emitting eligible
+  rows. If a cached lookup says `should_block_review_send=true`, the order is
+  moved out of Needs review and shown as blocked/not ready with the cached
+  blocking reason.
+- [x] Dashboard snapshot refresh and normal cached page loads apply the same
+  cache so stale Review & Send buttons are demoted before display.
+- [x] Admin `Review & Send` revalidates the cached lookup before Gmail logic; a
+  cached block returns `No email was sent. ...` and performs no Gmail API call
+  and no Shopify write/tag mutation.
+- [x] Reports include the `#21687` cache-found, block, evidence-order,
+  safe-keyword, Needs-review removal, button-disabled, and no-write safety
+  diagnostics.
+
 #### Phase 5.29 Automatic Post-Send Shopify Tag Write
 
 - [x] Admin `Review & Send` now builds an immediate in-memory post-send audit

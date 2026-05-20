@@ -10,6 +10,8 @@ HISTORY_LIMIT_OPTIONS = (25, 50, 100)
 MAX_REPORT_BYTES = 4_000_000
 MAX_EVENTS = 700
 TRUSTPILOT_TAG_WRITE_SUCCESS_STATUS = "trustpilot_tag_written_and_review_request_removed"
+CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME = "codex_runs/shopify_review_request_customer_history_lookup_cache.json"
+CUSTOMER_HISTORY_LOOKUP_CACHE_VERSION = 1
 
 HISTORY_REPORT_DEFINITIONS = (
     {
@@ -107,6 +109,14 @@ HISTORY_REPORT_DEFINITIONS = (
         "channel": "trustpilot",
         "event_type": "duplicate_block",
         "status_keys": ("lookup_status", "report_status", "status"),
+    },
+    {
+        "key": "on_demand_customer_history_lookup_cache",
+        "label": "On-demand customer history lookup cache",
+        "filename": CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME,
+        "channel": "trustpilot",
+        "event_type": "duplicate_block",
+        "status_keys": ("cache_status", "report_status", "status"),
     },
     {
         "key": "shopify_scope_verification",
@@ -482,6 +492,142 @@ def normalize_history_filters(params=None):
 def load_history_source_reports(log_dir):
     log_path = Path(log_dir)
     return [_load_report(log_path, definition) for definition in HISTORY_REPORT_DEFINITIONS]
+
+
+def customer_history_lookup_cache_path(log_dir):
+    return Path(log_dir) / CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME
+
+
+def sanitize_customer_history_lookup_result(payload):
+    if not isinstance(payload, dict):
+        return {}
+    selected_order = _canonical_order_name(
+        payload.get("selected_order") or payload.get("order_name") or payload.get("order")
+    )
+    if not selected_order:
+        return {}
+    note_evidence_found = payload.get("trustpilot_note_evidence_found") is True
+    tag_evidence_found = payload.get("trustpilot_tag_evidence_found") is True
+    evidence_order = _canonical_order_name(payload.get("evidence_order_name"))
+    should_block = (
+        payload.get("should_block_review_send") is True
+        or note_evidence_found
+        or tag_evidence_found
+    )
+    blocking_reason = _safe_text(payload.get("blocking_reason"), max_length=300)
+    if should_block and not blocking_reason:
+        if note_evidence_found:
+            blocking_reason = (
+                f"Previous Trustpilot note found on historical order {evidence_order or 'another order'}."
+            )
+        elif tag_evidence_found:
+            blocking_reason = (
+                f"Previous Trustpilot tag found on historical order {evidence_order or 'another order'}."
+            )
+        else:
+            blocking_reason = "Customer history lookup blocked Review & Send."
+    return {
+        "selected_order": selected_order,
+        "generated_at": _safe_text(
+            payload.get("generated_at") or payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+            max_length=120,
+        ),
+        "shopify_customer_history_count": _int_value(payload.get("shopify_customer_history_count")),
+        "historical_order_names": _safe_order_names(
+            payload.get("historical_order_names")
+            or payload.get("shopify_history_order_names")
+            or payload.get("customer_history_order_names")
+            or []
+        ),
+        "trustpilot_note_evidence_found": note_evidence_found,
+        "trustpilot_tag_evidence_found": tag_evidence_found,
+        "evidence_order_name": evidence_order,
+        "safe_detected_keyword": _safe_text(payload.get("safe_detected_keyword"), max_length=80),
+        "should_block_review_send": should_block,
+        "blocking_reason": blocking_reason,
+        "lookup_status": _safe_text(payload.get("lookup_status"), max_length=120),
+        "final_recommendation": _safe_text(payload.get("final_recommendation"), max_length=120),
+        "full_note_output": False,
+        "raw_email_output": False,
+    }
+
+
+def load_customer_history_lookup_cache(log_dir):
+    path = customer_history_lookup_cache_path(log_dir)
+    result = {
+        "present": False,
+        "loaded": False,
+        "path": str(path),
+        "relative_path": f"logs/{CUSTOMER_HISTORY_LOOKUP_CACHE_FILENAME}",
+        "orders": {},
+        "error": "",
+    }
+    if not path.exists():
+        return result
+    result["present"] = True
+    try:
+        stat = path.stat()
+        if stat.st_size > MAX_REPORT_BYTES:
+            result["error"] = "cache_too_large"
+            return result
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        result["error"] = _safe_text(str(exc), max_length=300)
+        return result
+    if not isinstance(data, dict):
+        result["error"] = "top_level_json_is_not_object"
+        return result
+    orders = {}
+    for value in (data.get("orders") or {}).values():
+        sanitized = sanitize_customer_history_lookup_result(value)
+        if sanitized:
+            orders[sanitized["selected_order"]] = sanitized
+    result["loaded"] = True
+    result["orders"] = orders
+    return result
+
+
+def lookup_cached_customer_history_result(log_dir, order_name):
+    selected_order = _canonical_order_name(order_name)
+    if not selected_order:
+        return {}
+    return (load_customer_history_lookup_cache(log_dir).get("orders") or {}).get(selected_order, {})
+
+
+def write_customer_history_lookup_cache(log_dir, lookup_payload):
+    sanitized = sanitize_customer_history_lookup_result(lookup_payload)
+    if not sanitized:
+        return None
+    path = customer_history_lookup_cache_path(log_dir)
+    cache = load_customer_history_lookup_cache(log_dir)
+    orders = dict(cache.get("orders") or {})
+    orders[sanitized["selected_order"]] = sanitized
+    payload = {
+        "cache_status": "customer_history_lookup_cache_ready",
+        "report_status": "customer_history_lookup_cache_ready",
+        "success": True,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cache_version": CUSTOMER_HISTORY_LOOKUP_CACHE_VERSION,
+        "order_count": len(orders),
+        "orders": orders,
+        "full_note_output": False,
+        "raw_email_output": False,
+        "gmail_api_call_performed": False,
+        "gmail_send_performed": False,
+        "email_sent": False,
+        "shopify_write_performed": False,
+        "mutation_performed": False,
+        "translations_register_called": False,
+        "external_review_api_call_performed": False,
+    }
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    if EMAIL_RE.search(text) or SECRET_VALUE_RE.search(text):
+        raise ValueError("Sanitized customer history lookup cache failed privacy scan.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as cache_file:
+        json.dump(payload, cache_file, ensure_ascii=False, indent=2, sort_keys=True)
+        cache_file.write("\n")
+    return path
 
 
 def _load_report(log_dir, definition):
@@ -1284,6 +1430,28 @@ def _dedupe_text(values):
             seen.add(text)
             result.append(text)
     return result
+
+
+def _safe_order_names(values):
+    return _dedupe_text(_canonical_order_name(value) for value in values or [])
+
+
+def _canonical_order_name(value):
+    text = _safe_text(value, max_length=80)
+    if not text:
+        return ""
+    if text.startswith("#"):
+        return text
+    if text.isdigit():
+        return f"#{text}"
+    return text
+
+
+def _int_value(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _dedupe_events(events):

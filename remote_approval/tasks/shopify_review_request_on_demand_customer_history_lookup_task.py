@@ -10,6 +10,7 @@ from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from backend.shopify_sync.review_request_history_ledger import write_customer_history_lookup_cache
 from remote_approval.utils import LOG_DIR, PROJECT_ROOT, utc_now_iso
 
 
@@ -75,6 +76,7 @@ def run_shopify_review_request_on_demand_customer_history_lookup_task(mode: str)
         duration_seconds=round(time.time() - started, 3),
     )
     payload = _apply_self_privacy_assertion(payload)
+    payload = _persist_lookup_cache(payload)
     json_path = _write_json_report(payload)
     html_path = _write_html_report(payload)
     return _task_result(payload, json_path, html_path)
@@ -1639,6 +1641,9 @@ def _task_result(payload: dict, json_path: Path, html_path: Path) -> dict:
         "final_recommendation": payload["final_recommendation"],
         "should_block_review_send": payload["should_block_review_send"],
         "blocking_reason": payload["blocking_reason"],
+        "lookup_cache_saved": payload.get("lookup_cache_saved") is True,
+        "lookup_cache_path": payload.get("lookup_cache_path", ""),
+        "lookup_cache_write_error_sanitized": payload.get("lookup_cache_write_error_sanitized", ""),
         "shopify_write_performed": False,
         "mutation_performed": False,
         "tags_add_performed": False,
@@ -1666,6 +1671,20 @@ def _write_html_report(payload: dict) -> Path:
     return REPORT_HTML_PATH
 
 
+def _persist_lookup_cache(payload: dict) -> dict:
+    try:
+        cache_path = write_customer_history_lookup_cache(LOG_DIR, payload)
+    except (OSError, ValueError) as exc:
+        payload["lookup_cache_saved"] = False
+        payload["lookup_cache_path"] = ""
+        payload["lookup_cache_write_error_sanitized"] = _safe_text(exc, 300)
+        return payload
+    payload["lookup_cache_saved"] = cache_path is not None
+    payload["lookup_cache_path"] = str(cache_path) if cache_path else ""
+    payload["lookup_cache_write_error_sanitized"] = ""
+    return payload
+
+
 def _render_html_report(payload: dict) -> str:
     history_names = ", ".join(payload["shopify_history_order_names"]) or "-"
     local_names = ", ".join(payload["local_customer_history_order_names"]) or "-"
@@ -1682,6 +1701,7 @@ def _render_html_report(payload: dict) -> str:
             "email_sent",
             "raw_email_output",
             "full_note_output",
+            "lookup_cache_saved",
             "all_new_actions_no_write_confirmed",
         )
     )
@@ -1749,6 +1769,7 @@ def _approval_message(payload: dict, json_path: Path, html_path: Path) -> str:
         f"Final recommendation: {payload.get('final_recommendation')}\n"
         f"Should block Review & Send: {payload.get('should_block_review_send')}\n"
         f"Blocking reason: {payload.get('blocking_reason') or '-'}\n"
+        f"Lookup cache saved: {payload.get('lookup_cache_saved')}\n"
         "Safety: no Shopify write, no tag mutation, no Gmail API/send, no raw email, no full note output.\n"
         f"JSON report: {json_path}\n"
         f"HTML report: {html_path}\n\n"

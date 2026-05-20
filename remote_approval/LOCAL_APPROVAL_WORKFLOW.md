@@ -240,6 +240,16 @@ or project-root `logs/`, mirrors to available container-readable cache paths,
 and reports `snapshot_main_path`, `snapshot_mirror_paths_written`,
 `snapshot_paths_failed`, and `page_expected_paths`.
 
+Phase 5.32D persists sanitized on-demand customer history lookup results to a
+per-order cache under `logs/codex_runs/`. Candidate scans, dashboard snapshot
+refresh, cached page normalization, and admin `Review & Send` must all apply a
+cached `should_block_review_send=true` result before any Gmail path. For
+`#21687`, cached Trustpilot note evidence should remove the order from Needs
+review, show `Previous Trustpilot note found on historical order #15733.`, and
+disable Review & Send. This phase remains cache/UI/revalidation only: no Gmail
+API call, no email send, no Shopify write/tag mutation, no external review API,
+no raw email output, and no full note output.
+
 Run the scope verification with:
 
 ```powershell
