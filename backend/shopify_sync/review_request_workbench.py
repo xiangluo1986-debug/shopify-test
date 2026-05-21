@@ -221,6 +221,15 @@ REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND = (
     "process_review_request_send_jobs --max-jobs 1"
 )
 REVIEW_REQUEST_SEND_JOB_RETRY_COMMAND = f"{REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND} --retry-failed"
+REVIEW_REQUEST_SEND_JOB_STALE_PREFLIGHT_RETRY_COMMAND = (
+    f"{REVIEW_REQUEST_SEND_JOB_RETRY_COMMAND} --retry-stale-preflight"
+)
+REVIEW_REQUEST_SEND_JOB_STALE_PREFLIGHT_MARKERS = (
+    "review queue is stale",
+    "blocked_dashboard_snapshot_missing",
+    "blocked_dashboard_snapshot_stale",
+    "dashboard snapshot",
+)
 REVIEW_REQUEST_SEND_JOB_WRITE_FAILURE_MESSAGE = (
     "Could not create send job. Please refresh and try again."
 )
@@ -3299,6 +3308,9 @@ def _build_review_request_send_job(selected_order, admin_username, created_at, c
         "gmail_send_status": "not_started",
         "shopify_tag_status": "not_started",
         "attempts": 0,
+        "send_attempts": 0,
+        "preflight_attempts": 0,
+        "last_preflight_error": "",
         "source": "admin_review_request_workbench",
         "route_mode": "enqueue_only",
         "job_created": True,
@@ -3317,6 +3329,15 @@ def _build_review_request_send_job(selected_order, admin_username, created_at, c
             (snapshot or {}).get("generated_at"),
             max_length=120,
         ),
+        "current_snapshot_generated_at": _safe_text(
+            (snapshot or {}).get("generated_at"),
+            max_length=120,
+        ),
+        "snapshot_stale_check_source": "latest_dashboard_snapshot",
+        "preflight_failed": False,
+        "gmail_call_attempted": False,
+        "retry_allowed_despite_attempts": False,
+        "retry_allowed_reason": "",
         "selected_masked_customer": _safe_text(
             (candidate or {}).get("masked_customer_label")
             or (candidate or {}).get("customer_masked_label"),
@@ -3325,7 +3346,118 @@ def _build_review_request_send_job(selected_order, admin_username, created_at, c
     }
 
 
-def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, retry_failed=False):
+def _review_request_send_job_processor_preflight(job):
+    order_name = _canonical_order_name((job or {}).get("order_name"))
+    snapshot_blocker = _review_send_dashboard_snapshot_blocker()
+    snapshot = snapshot_blocker.get("snapshot") or {}
+    result = {
+        "current_snapshot_generated_at": _safe_text(snapshot.get("generated_at"), max_length=120),
+        "job_snapshot_generated_at": _safe_text(
+            (job or {}).get("dashboard_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "snapshot_stale_check_source": "latest_dashboard_snapshot",
+        "preflight_failed": False,
+        "preflight_status": "",
+        "preflight_detail": "",
+        "candidate_currently_eligible": False,
+        "gmail_call_attempted": False,
+    }
+    if not order_name:
+        result.update(
+            {
+                "preflight_failed": True,
+                "preflight_status": "blocked_order_not_selected",
+                "preflight_detail": "No email was sent. No order was selected.",
+            }
+        )
+        return result
+    if snapshot_blocker["status"]:
+        result.update(
+            {
+                "preflight_failed": True,
+                "preflight_status": snapshot_blocker["status"],
+                "preflight_detail": snapshot_blocker["detail"],
+            }
+        )
+        return result
+
+    snapshot_state = _build_review_send_enqueue_snapshot_state(snapshot)
+    blocking_conditions = snapshot_state.get("blocking_conditions") or []
+    if blocking_conditions:
+        first_blocker = blocking_conditions[0]
+        result.update(
+            {
+                "preflight_failed": True,
+                "preflight_status": _safe_text(first_blocker.get("status"), max_length=120),
+                "preflight_detail": _safe_text(first_blocker.get("detail"), max_length=400),
+            }
+        )
+        return result
+
+    approval_queue = snapshot_state.get("approval_queue") or {}
+    selected_rows = _review_send_selected_rows(approval_queue, order_name)
+    matches = [
+        row
+        for row in approval_queue.get("all_needs_review_rows") or []
+        if row.get("candidate_id") == order_name
+        and row.get("action_state") == "review_send"
+        and row.get("can_review_send") is True
+    ]
+    if len(matches) != 1:
+        blocker = _review_send_selection_blocker(order_name, selected_rows)
+        result.update(
+            {
+                "preflight_failed": True,
+                "preflight_status": blocker["status"],
+                "preflight_detail": blocker["detail"],
+            }
+        )
+        return result
+
+    result["candidate_currently_eligible"] = True
+    return result
+
+
+def _review_request_send_job_diagnostic_summary(job, preflight=None, retry_state=None):
+    preflight = preflight or {}
+    retry_state = retry_state or {}
+    return {
+        "current_snapshot_generated_at": _safe_text(
+            preflight.get("current_snapshot_generated_at")
+            or (job or {}).get("current_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "job_snapshot_generated_at": _safe_text(
+            preflight.get("job_snapshot_generated_at")
+            or (job or {}).get("dashboard_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "snapshot_stale_check_source": _safe_text(
+            preflight.get("snapshot_stale_check_source")
+            or (job or {}).get("snapshot_stale_check_source")
+            or "latest_dashboard_snapshot",
+            max_length=120,
+        ),
+        "preflight_failed": preflight.get("preflight_failed") is True,
+        "preflight_attempts": _int_or_zero((job or {}).get("preflight_attempts")),
+        "send_attempts": _int_or_zero((job or {}).get("send_attempts")),
+        "gmail_call_attempted": False,
+        "retry_allowed_despite_attempts": retry_state.get("retry_allowed_despite_attempts") is True,
+        "retry_allowed_reason": _safe_text(
+            retry_state.get("retry_allowed_reason"),
+            max_length=300,
+        ),
+    }
+
+
+def process_review_request_send_jobs(
+    max_jobs=1,
+    order_name="",
+    dry_run=False,
+    retry_failed=False,
+    retry_stale_preflight=False,
+):
     requested_max_jobs = max(_int_or_zero(max_jobs), 1)
     effective_max_jobs = 1
     selected_order_filter = _canonical_order_name(order_name)
@@ -3356,6 +3488,7 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
         "task": "process_review_request_send_jobs",
         "dry_run": dry_run is True,
         "retry_failed_enabled": retry_failed is True,
+        "retry_stale_preflight_enabled": retry_stale_preflight is True,
         "requested_max_jobs": requested_max_jobs,
         "effective_max_jobs": effective_max_jobs,
         "max_jobs_capped_to_one": requested_max_jobs > effective_max_jobs,
@@ -3364,6 +3497,15 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
         "retry_reason": "",
         "attempts_before": 0,
         "attempts_after": 0,
+        "current_snapshot_generated_at": "",
+        "job_snapshot_generated_at": "",
+        "snapshot_stale_check_source": "latest_dashboard_snapshot",
+        "preflight_failed": False,
+        "preflight_attempts": 0,
+        "send_attempts": 0,
+        "gmail_call_attempted": False,
+        "retry_allowed_despite_attempts": False,
+        "retry_allowed_reason": "",
         "queue_path": queue_path_report["canonical_queue_path"],
         "canonical_queue_path": queue_path_report["canonical_queue_path"],
         "queue_path_used_by_processor": queue_path_report["canonical_queue_path"],
@@ -3418,7 +3560,11 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
     skipped_failed_reasons = []
     if retry_failed:
         for job in failed_jobs:
-            retry_state = _review_request_send_job_retry_eligibility(job, all_jobs)
+            retry_state = _review_request_send_job_retry_eligibility(
+                job,
+                all_jobs,
+                retry_stale_preflight=retry_stale_preflight,
+            )
             retry_state_by_job_id[job.get("job_id")] = retry_state
             if retry_state["retryable"]:
                 retryable_failed_jobs.append(job)
@@ -3432,15 +3578,31 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
     )
     selected_jobs = (queued_jobs + retryable_failed_jobs)[:effective_max_jobs]
     selected_job = selected_jobs[0] if selected_jobs else {}
+    selected_preflight = {}
+    selected_retry_state = {}
     if selected_job:
         summary["selected_order"] = _canonical_order_name(selected_job.get("order_name"))
         summary["attempts_before"] = _int_or_zero(selected_job.get("attempts"))
-        summary["attempts_after"] = summary["attempts_before"] + 1
+        summary["attempts_after"] = summary["attempts_before"]
+        selected_preflight = _review_request_send_job_processor_preflight(selected_job)
         if selected_job.get("status") == "failed":
-            retry_state = retry_state_by_job_id.get(selected_job.get("job_id")) or (
-                _review_request_send_job_retry_eligibility(selected_job, all_jobs)
+            selected_retry_state = retry_state_by_job_id.get(selected_job.get("job_id")) or (
+                _review_request_send_job_retry_eligibility(
+                    selected_job,
+                    all_jobs,
+                    retry_stale_preflight=retry_stale_preflight,
+                )
             )
-            summary["retry_reason"] = retry_state.get("retry_reason", "")
+            summary["retry_reason"] = selected_retry_state.get("retry_reason", "")
+        summary.update(
+            _review_request_send_job_diagnostic_summary(
+                selected_job,
+                selected_preflight,
+                selected_retry_state,
+            )
+        )
+        if selected_preflight.get("preflight_failed") is not True:
+            summary["attempts_after"] = summary["attempts_before"] + 1
     summary["queued_job_count"] = len(queued_jobs)
     summary["queued_jobs_found"] = len(queued_jobs)
     summary["queued_orders"] = _dedupe_order_names(job.get("order_name") for job in queued_jobs)
@@ -3450,7 +3612,10 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
     summary["skipped_failed_reasons"] = skipped_failed_reasons
     summary["selected_job_count"] = len(selected_jobs)
     if dry_run:
-        if selected_jobs:
+        summary["attempts_after"] = summary["attempts_before"]
+        if selected_jobs and selected_preflight.get("preflight_failed") is True:
+            summary["status"] = "dry_run_preflight_blocked"
+        elif selected_jobs:
             summary["status"] = "dry_run_ready"
         elif retry_failed and failed_jobs:
             summary["status"] = "dry_run_no_retryable_failed_jobs"
@@ -3462,7 +3627,9 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
                 "order_name": job.get("order_name"),
                 "status": job.get("status"),
                 "message": (
-                    "Would retry this one failed job after Gmail reconnect."
+                    selected_preflight.get("preflight_detail")
+                    if selected_preflight.get("preflight_failed") is True
+                    else "Would retry this one failed job after latest snapshot preflight."
                     if job.get("status") == "failed"
                     else "Would process this one queued job."
                 ),
@@ -3472,7 +3639,12 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
                     else ""
                 ),
                 "attempts_before": _int_or_zero(job.get("attempts")),
-                "attempts_after": _int_or_zero(job.get("attempts")) + 1,
+                "attempts_after": _int_or_zero(job.get("attempts")),
+                **_review_request_send_job_diagnostic_summary(
+                    job,
+                    selected_preflight if job == selected_job else {},
+                    selected_retry_state if job == selected_job else {},
+                ),
             }
             for job in selected_jobs
         ]
@@ -3482,8 +3654,24 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
         job_result = _process_one_review_request_send_job(
             job,
             retry_failed=job.get("status") == "failed",
+            retry_stale_preflight=retry_stale_preflight,
         )
         summary["jobs"].append(job_result)
+        for key in (
+            "current_snapshot_generated_at",
+            "job_snapshot_generated_at",
+            "snapshot_stale_check_source",
+            "preflight_failed",
+            "preflight_attempts",
+            "send_attempts",
+            "gmail_call_attempted",
+            "retry_allowed_despite_attempts",
+            "retry_allowed_reason",
+        ):
+            if key in job_result:
+                summary[key] = job_result[key]
+        if "attempts_after" in job_result:
+            summary["attempts_after"] = job_result["attempts_after"]
         if job_result.get("processed"):
             summary["processed_count"] += 1
         if job_result.get("skipped"):
@@ -3507,7 +3695,7 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
             or job_result.get("shopify_write_performed") is True
         )
 
-    if summary["processed_count"]:
+    if summary["sent_count"] or summary["tag_written_count"]:
         try:
             snapshot = build_review_request_dashboard_snapshot_payload(
                 {},
@@ -3521,7 +3709,7 @@ def process_review_request_send_jobs(max_jobs=1, order_name="", dry_run=False, r
     return summary
 
 
-def _process_one_review_request_send_job(job, retry_failed=False):
+def _process_one_review_request_send_job(job, retry_failed=False, retry_stale_preflight=False):
     job_id = _safe_text(job.get("job_id"), max_length=100)
     order_name = _canonical_order_name(job.get("order_name"))
     current_payload = _load_review_request_send_jobs_payload()
@@ -3543,10 +3731,12 @@ def _process_one_review_request_send_job(job, retry_failed=False):
             "shopify_api_call_performed": False,
             "shopify_write_performed": False,
         }
+    retry_state = {}
     if retry_failed:
         retry_state = _review_request_send_job_retry_eligibility(
             job_for_processing,
             current_payload.get("jobs") or [],
+            retry_stale_preflight=retry_stale_preflight,
         )
         if not retry_state["retryable"]:
             return {
@@ -3558,6 +3748,8 @@ def _process_one_review_request_send_job(job, retry_failed=False):
                 "message": retry_state["non_retryable_reason"],
                 "retry_blocked": True,
                 "retry_blocking_reasons": retry_state["blocking_reasons"],
+                "retry_allowed_despite_attempts": retry_state.get("retry_allowed_despite_attempts") is True,
+                "retry_allowed_reason": retry_state.get("retry_allowed_reason", ""),
                 "gmail_api_call_performed": False,
                 "shopify_api_call_performed": False,
                 "shopify_write_performed": False,
@@ -3609,15 +3801,53 @@ def _process_one_review_request_send_job(job, retry_failed=False):
         }
 
     attempts_before = _int_or_zero(job_for_processing.get("attempts"))
+    preflight = _review_request_send_job_processor_preflight(job_for_processing)
+    if preflight.get("preflight_failed") is True:
+        updates = _review_request_send_job_preflight_failure_updates(
+            job_for_processing,
+            preflight,
+            retry_state,
+        )
+        updated = _update_review_request_send_job(job_id, updates)
+        return {
+            "job_id": job_id,
+            "order_name": order_name,
+            "status": (updated or updates).get("status", "failed"),
+            "processed": True,
+            "skipped": False,
+            "message": (updated or updates).get("message", ""),
+            "last_error": (updated or updates).get("last_error", ""),
+            "retry_reason": (updated or updates).get("retry_reason", ""),
+            "attempts_before": attempts_before,
+            "attempts_after": _int_or_zero((updated or updates).get("attempts")),
+            "current_snapshot_generated_at": preflight.get("current_snapshot_generated_at", ""),
+            "job_snapshot_generated_at": preflight.get("job_snapshot_generated_at", ""),
+            "snapshot_stale_check_source": preflight.get("snapshot_stale_check_source", ""),
+            "preflight_failed": True,
+            "preflight_attempts": _int_or_zero((updated or updates).get("preflight_attempts")),
+            "send_attempts": _int_or_zero((updated or updates).get("send_attempts")),
+            "gmail_call_attempted": False,
+            "retry_allowed_despite_attempts": retry_state.get("retry_allowed_despite_attempts") is True,
+            "retry_allowed_reason": retry_state.get("retry_allowed_reason", ""),
+            "gmail_api_call_performed": False,
+            "shopify_api_call_performed": False,
+            "shopify_write_performed": False,
+        }
     running_updates = {
         "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
-        "attempts": attempts_before + 1,
+        "attempts": attempts_before,
         "message": (
             "Retrying failed Review send job after Gmail reconnect."
             if retry_failed
             else "Review send job is running."
         ),
+        "current_snapshot_generated_at": preflight.get("current_snapshot_generated_at", ""),
+        "job_snapshot_generated_at": preflight.get("job_snapshot_generated_at", ""),
+        "snapshot_stale_check_source": preflight.get("snapshot_stale_check_source", ""),
+        "preflight_failed": False,
+        "last_preflight_error": "",
+        "gmail_call_attempted": False,
         "queue_path_used_by_processor": _review_request_send_jobs_path_report()[
             "canonical_queue_path"
         ],
@@ -3667,7 +3897,16 @@ def _process_one_review_request_send_job(job, retry_failed=False):
             "message": "Review send job failed after the worker started.",
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }
+    updates.update(
+        _review_request_send_job_attempt_updates(
+            job_for_processing,
+            result,
+            updates,
+            preflight,
+        )
+    )
     updated = _update_review_request_send_job(job_id, updates)
+    gmail_call_attempted = _review_request_send_job_gmail_call_attempted(result)
     return {
         "job_id": job_id,
         "order_name": order_name,
@@ -3678,23 +3917,172 @@ def _process_one_review_request_send_job(job, retry_failed=False):
         "last_error": (updated or updates).get("last_error", ""),
         "retry_reason": (updated or updates).get("retry_reason", ""),
         "attempts_before": attempts_before,
-        "attempts_after": _int_or_zero((updated or updates).get("attempts")) or attempts_before + 1,
+        "attempts_after": _int_or_zero((updated or updates).get("attempts")),
+        "current_snapshot_generated_at": (updated or updates).get("current_snapshot_generated_at", ""),
+        "job_snapshot_generated_at": (updated or updates).get("job_snapshot_generated_at", ""),
+        "snapshot_stale_check_source": (updated or updates).get("snapshot_stale_check_source", ""),
+        "preflight_failed": (updated or updates).get("preflight_failed") is True,
+        "preflight_attempts": _int_or_zero((updated or updates).get("preflight_attempts")),
+        "send_attempts": _int_or_zero((updated or updates).get("send_attempts")),
+        "gmail_call_attempted": gmail_call_attempted,
+        "retry_allowed_despite_attempts": retry_state.get("retry_allowed_despite_attempts") is True,
+        "retry_allowed_reason": retry_state.get("retry_allowed_reason", ""),
         "gmail_api_call_performed": result.get("gmail_api_call_performed") is True,
         "shopify_api_call_performed": result.get("shopify_api_call_performed") is True,
         "shopify_write_performed": result.get("shopify_write_performed") is True,
     }
 
 
+def _review_request_send_job_gmail_call_attempted(result):
+    return bool(
+        (result or {}).get("gmail_api_call_performed") is True
+        or (result or {}).get("gmail_draft_create_attempted") is True
+        or (result or {}).get("gmail_draft_send_attempted") is True
+        or (result or {}).get("gmail_drafts_create_called") is True
+        or (result or {}).get("gmail_drafts_send_called") is True
+        or (result or {}).get("gmail_messages_send_called") is True
+        or (result or {}).get("gmail_send_performed") is True
+        or (result or {}).get("email_sent") is True
+    )
+
+
+def _review_request_send_job_preflight_failure_updates(job, preflight, retry_state=None):
+    detail = _safe_text(
+        (preflight or {}).get("preflight_detail")
+        or "Review send job failed preflight. Gmail was not called.",
+        max_length=400,
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "status": "failed",
+        "completed_at": now,
+        "gmail_send_status": _safe_text((job or {}).get("gmail_send_status"), max_length=80)
+        or "not_started",
+        "shopify_tag_status": _safe_text((job or {}).get("shopify_tag_status"), max_length=80)
+        or "not_started",
+        "email_sent": False,
+        "email_sent_confirmed": False,
+        "sent_count": 0,
+        "gmail_api_call_performed": False,
+        "shopify_api_call_performed": False,
+        "shopify_write_performed": False,
+        "tag_write_performed": False,
+        "shopify_tag_write_confirmed": False,
+        "attempts": _int_or_zero((job or {}).get("attempts")),
+        "send_attempts": _int_or_zero((job or {}).get("send_attempts")),
+        "preflight_attempts": _int_or_zero((job or {}).get("preflight_attempts")) + 1,
+        "last_preflight_error": detail,
+        "last_error": detail,
+        "message": "Review send job failed preflight. Gmail was not called.",
+        "current_snapshot_generated_at": _safe_text(
+            (preflight or {}).get("current_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "job_snapshot_generated_at": _safe_text(
+            (preflight or {}).get("job_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "snapshot_stale_check_source": _safe_text(
+            (preflight or {}).get("snapshot_stale_check_source") or "latest_dashboard_snapshot",
+            max_length=120,
+        ),
+        "preflight_failed": True,
+        "gmail_call_attempted": False,
+        "retry_reason": _safe_text((retry_state or {}).get("retry_reason"), max_length=160),
+        "retry_allowed_despite_attempts": (retry_state or {}).get("retry_allowed_despite_attempts") is True,
+        "retry_allowed_reason": _safe_text(
+            (retry_state or {}).get("retry_allowed_reason"),
+            max_length=300,
+        ),
+        "review_send_report_path": f"logs/{REVIEW_AND_SEND_REPORT_FILENAME}",
+    }
+
+
+def _review_request_send_job_attempt_updates(job, result, updates, preflight=None):
+    gmail_call_attempted = _review_request_send_job_gmail_call_attempted(result)
+    attempts_before = _int_or_zero((job or {}).get("attempts"))
+    send_attempts_before = _int_or_zero((job or {}).get("send_attempts"))
+    preflight_attempts_before = _int_or_zero((job or {}).get("preflight_attempts"))
+    blocker = _safe_text(
+        (updates or {}).get("last_error")
+        or (updates or {}).get("message")
+        or (result or {}).get("blocking_detail")
+        or (result or {}).get("execution_status"),
+        max_length=400,
+    )
+    attempt_updates = {
+        "current_snapshot_generated_at": _safe_text(
+            ((result or {}).get("dashboard_snapshot") or {}).get("generated_at")
+            or (preflight or {}).get("current_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "job_snapshot_generated_at": _safe_text(
+            (preflight or {}).get("job_snapshot_generated_at")
+            or (job or {}).get("dashboard_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "snapshot_stale_check_source": _safe_text(
+            (preflight or {}).get("snapshot_stale_check_source") or "latest_dashboard_snapshot",
+            max_length=120,
+        ),
+        "gmail_call_attempted": gmail_call_attempted,
+    }
+    if gmail_call_attempted:
+        attempt_updates.update(
+            {
+                "attempts": attempts_before + 1,
+                "send_attempts": send_attempts_before + 1,
+                "preflight_attempts": preflight_attempts_before,
+                "preflight_failed": False,
+                "last_preflight_error": "",
+            }
+        )
+        return attempt_updates
+
+    attempt_updates.update(
+        {
+            "attempts": attempts_before,
+            "send_attempts": send_attempts_before,
+            "preflight_attempts": preflight_attempts_before + 1,
+            "preflight_failed": True,
+            "last_preflight_error": blocker,
+        }
+    )
+    return attempt_updates
+
+
 def _review_request_send_job_retry_eligibility(
     job,
     jobs,
     max_attempts=REVIEW_REQUEST_SEND_JOB_MAX_RETRY_ATTEMPTS,
+    retry_stale_preflight=False,
 ):
     blocking_reasons = []
     status = _safe_text(job.get("status"), max_length=40)
     gmail_status = _safe_text(job.get("gmail_send_status"), max_length=80) or "not_started"
     shopify_tag_status = _safe_text(job.get("shopify_tag_status"), max_length=80) or "not_started"
     attempts = _int_or_zero(job.get("attempts"))
+    send_attempts = _int_or_zero(job.get("send_attempts"))
+    send_attempts_missing = job.get("send_attempts_missing") is True
+    latest_error_is_stale_preflight = _review_request_send_job_latest_error_is_stale_preflight(job)
+    stale_preflight_retry_requested = bool(
+        retry_stale_preflight and latest_error_is_stale_preflight
+    )
+    attempts_for_retry_cap = (
+        send_attempts
+        if (not send_attempts_missing or stale_preflight_retry_requested)
+        else attempts
+    )
+    retry_allowed_despite_attempts = bool(
+        stale_preflight_retry_requested
+        and attempts >= max_attempts
+        and attempts_for_retry_cap < max_attempts
+    )
+    retry_allowed_reason = (
+        "latest failure was stale snapshot preflight and Gmail was not confirmed"
+        if retry_allowed_despite_attempts
+        else ""
+    )
 
     if status != "failed":
         blocking_reasons.append(
@@ -3738,11 +4126,14 @@ def _review_request_send_job_retry_eligibility(
                 "detail": "Shopify tag write is already confirmed or a Shopify write was recorded.",
             }
         )
-    if attempts >= max_attempts:
+    if attempts_for_retry_cap >= max_attempts:
         blocking_reasons.append(
             {
                 "reason": "max_retry_attempts_reached",
-                "detail": f"Retry blocked because attempts is {attempts}; max is {max_attempts}.",
+                "detail": (
+                    f"Retry blocked because send_attempts is {attempts_for_retry_cap}; "
+                    f"max is {max_attempts}."
+                ),
             }
         )
 
@@ -3767,11 +4158,16 @@ def _review_request_send_job_retry_eligibility(
         )
 
     retry_reason = _review_request_send_job_recoverable_retry_reason(job)
+    if stale_preflight_retry_requested and not retry_reason:
+        retry_reason = "stale_snapshot_preflight_after_refresh"
     if not retry_reason:
         blocking_reasons.append(
             {
                 "reason": "failure_reason_not_recoverable",
-                "detail": "Failed job does not show a recoverable Gmail OAuth/token refresh error.",
+                "detail": (
+                    "Failed job does not show a recoverable Gmail OAuth/token refresh "
+                    "or stale snapshot preflight error."
+                ),
             }
         )
 
@@ -3785,6 +4181,12 @@ def _review_request_send_job_retry_eligibility(
         "blocking_reasons": blocking_reasons,
         "attempts_before": attempts,
         "attempts_after": attempts + 1,
+        "send_attempts_before": send_attempts,
+        "send_attempts_after": send_attempts + (1 if retryable else 0),
+        "preflight_attempts": _int_or_zero(job.get("preflight_attempts")),
+        "retry_allowed_despite_attempts": retry_allowed_despite_attempts and retryable,
+        "retry_allowed_reason": retry_allowed_reason if retryable else "",
+        "latest_error_is_stale_preflight": latest_error_is_stale_preflight,
         "max_attempts": max_attempts,
         "local_trustpilot_tag_check": local_tag_check,
     }
@@ -3853,6 +4255,16 @@ def _review_request_send_job_recoverable_retry_reason(job):
         if marker in text:
             return "recoverable_gmail_oauth_refresh_error"
     return ""
+
+
+def _review_request_send_job_latest_error_is_stale_preflight(job):
+    text = " ".join(
+        _safe_text(job.get(key), max_length=400).lower()
+        for key in ("last_error", "last_preflight_error", "message", "retry_reason")
+    )
+    if not text:
+        return False
+    return any(marker in text for marker in REVIEW_REQUEST_SEND_JOB_STALE_PREFLIGHT_MARKERS)
 
 
 def _review_request_send_job_local_trustpilot_tag_check(order_name):
@@ -4508,6 +4920,10 @@ def _sanitize_review_request_send_job(job):
         "last_error": _safe_text(job.get("last_error"), max_length=400),
         "message": _safe_text(job.get("message"), max_length=400),
         "attempts": _int_or_zero(job.get("attempts")),
+        "send_attempts": _int_or_zero(job.get("send_attempts")),
+        "send_attempts_missing": "send_attempts" not in job,
+        "preflight_attempts": _int_or_zero(job.get("preflight_attempts")),
+        "last_preflight_error": _safe_text(job.get("last_preflight_error"), max_length=400),
         "sent_count": _int_or_zero(job.get("sent_count")),
         "email_sent": job.get("email_sent") is True,
         "email_sent_confirmed": job.get("email_sent_confirmed") is True,
@@ -4539,6 +4955,22 @@ def _sanitize_review_request_send_job(job):
             job.get("dashboard_snapshot_generated_at"),
             max_length=120,
         ),
+        "current_snapshot_generated_at": _safe_text(
+            job.get("current_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "job_snapshot_generated_at": _safe_text(
+            job.get("job_snapshot_generated_at"),
+            max_length=120,
+        ),
+        "snapshot_stale_check_source": _safe_text(
+            job.get("snapshot_stale_check_source") or "latest_dashboard_snapshot",
+            max_length=120,
+        ),
+        "preflight_failed": job.get("preflight_failed") is True,
+        "gmail_call_attempted": job.get("gmail_call_attempted") is True,
+        "retry_allowed_despite_attempts": job.get("retry_allowed_despite_attempts") is True,
+        "retry_allowed_reason": _safe_text(job.get("retry_allowed_reason"), max_length=300),
         "selected_masked_customer": _safe_text(job.get("selected_masked_customer"), max_length=120),
     }
     sanitized["status_label"] = _review_request_send_job_status_label(sanitized)
@@ -4647,17 +5079,35 @@ def _annotate_review_request_send_jobs_retry_state(jobs):
         row["safe_error_summary"] = _review_request_send_job_safe_error_summary(row)
         row["retry_available"] = False
         row["retry_command"] = ""
+        row["stale_preflight_failure"] = _review_request_send_job_latest_error_is_stale_preflight(row)
+        row["stale_preflight_retry_command"] = REVIEW_REQUEST_SEND_JOB_STALE_PREFLIGHT_RETRY_COMMAND
         row["retry_display_message"] = ""
         row["non_retryable_reason"] = ""
         row["retry_blocking_reasons"] = []
         if row.get("status") == "failed":
-            retry_state = _review_request_send_job_retry_eligibility(row, all_jobs)
+            retry_state = _review_request_send_job_retry_eligibility(
+                row,
+                all_jobs,
+                retry_stale_preflight=row["stale_preflight_failure"],
+            )
             row["retry_available"] = retry_state["retryable"]
             row["retry_reason"] = retry_state.get("retry_reason", "")
             row["retry_blocking_reasons"] = retry_state.get("blocking_reasons") or []
+            row["retry_allowed_despite_attempts"] = (
+                retry_state.get("retry_allowed_despite_attempts") is True
+            )
+            row["retry_allowed_reason"] = retry_state.get("retry_allowed_reason", "")
             if retry_state["retryable"]:
-                row["retry_command"] = REVIEW_REQUEST_SEND_JOB_RETRY_COMMAND
-                row["retry_display_message"] = "Retry available after Gmail reconnect."
+                row["retry_command"] = (
+                    REVIEW_REQUEST_SEND_JOB_STALE_PREFLIGHT_RETRY_COMMAND
+                    if row["stale_preflight_failure"]
+                    else REVIEW_REQUEST_SEND_JOB_RETRY_COMMAND
+                )
+                row["retry_display_message"] = (
+                    "Snapshot was stale. Refresh queue, then retry failed job."
+                    if row["stale_preflight_failure"]
+                    else "Retry available after Gmail reconnect."
+                )
             else:
                 row["non_retryable_reason"] = retry_state.get("non_retryable_reason", "")
                 row["retry_display_message"] = row["non_retryable_reason"]
@@ -4794,6 +5244,7 @@ def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
         "manual_process_command": REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND,
         "dry_run_command": f"{REVIEW_REQUEST_SEND_JOB_PROCESS_COMMAND} --dry-run",
         "retry_failed_command": REVIEW_REQUEST_SEND_JOB_RETRY_COMMAND,
+        "retry_stale_preflight_command": REVIEW_REQUEST_SEND_JOB_STALE_PREFLIGHT_RETRY_COMMAND,
     }
     approval_queue["recent_send_jobs"] = summary["recent_jobs"]
     approval_queue["send_job_storage_path"] = summary["storage_relative_path"]
@@ -4814,6 +5265,9 @@ def _attach_review_request_send_jobs_to_approval_queue(approval_queue):
     approval_queue["send_job_manual_process_command"] = summary["manual_process_command"]
     approval_queue["send_job_dry_run_command"] = summary["dry_run_command"]
     approval_queue["send_job_retry_failed_command"] = summary["retry_failed_command"]
+    approval_queue["send_job_retry_stale_preflight_command"] = summary[
+        "retry_stale_preflight_command"
+    ]
     return summary
 
 

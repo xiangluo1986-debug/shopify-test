@@ -688,6 +688,10 @@
             <code>{{ dashboard.approval_queue.send_job_retry_failed_command }}</code>
         </p>
         <p class="rrw-muted">
+            Stale snapshot retry:
+            <code>{{ dashboard.approval_queue.send_job_retry_stale_preflight_command }}</code>
+        </p>
+        <p class="rrw-muted">
             Queue file:
             <code>{{ dashboard.approval_queue.send_job_queue_path }}</code>
         </p>
@@ -725,10 +729,16 @@
                                     <div class="rrw-secondary-line">
                                         Safe error summary: {{ job.safe_error_summary|default:"Review send job failed." }}
                                     </div>
-                                    {% if job.retry_available %}
-                                        <div class="rrw-secondary-line">Retry available after Gmail reconnect.</div>
+                                    {% if job.stale_preflight_failure %}
+                                        <div class="rrw-secondary-line">
+                                            Snapshot was stale. Refresh queue, then retry failed job.
+                                        </div>
+                                        <div class="rrw-secondary-line"><code>{{ job.stale_preflight_retry_command }}</code></div>
+                                    {% endif %}
+                                    {% if job.retry_available and not job.stale_preflight_failure %}
+                                        <div class="rrw-secondary-line">{{ job.retry_display_message }}</div>
                                         <div class="rrw-secondary-line"><code>{{ job.retry_command }}</code></div>
-                                    {% else %}
+                                    {% elif not job.retry_available %}
                                         <div class="rrw-secondary-line">
                                             Retry blocked: {{ job.non_retryable_reason|default:"This failed job is not safe to retry automatically." }}
                                         </div>

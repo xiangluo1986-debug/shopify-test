@@ -34,6 +34,14 @@ class Command(BaseCommand):
                 "and the failure is recoverable."
             ),
         )
+        parser.add_argument(
+            "--retry-stale-preflight",
+            action="store_true",
+            help=(
+                "Allow a failed job whose latest failure was stale dashboard snapshot "
+                "preflight to be retried after the queue snapshot is refreshed."
+            ),
+        )
 
     def handle(self, *args, **options):
         summary = process_review_request_send_jobs(
@@ -41,6 +49,7 @@ class Command(BaseCommand):
             order_name=options.get("order") or "",
             dry_run=options.get("dry_run") is True,
             retry_failed=options.get("retry_failed") is True,
+            retry_stale_preflight=options.get("retry_stale_preflight") is True,
         )
         status = summary.get("status") or "unknown"
         if status == "failed_queue_unavailable":
@@ -69,6 +78,9 @@ class Command(BaseCommand):
             f"retry_failed_enabled: {summary.get('retry_failed_enabled') is True}"
         )
         self.stdout.write(
+            f"retry_stale_preflight_enabled: {summary.get('retry_stale_preflight_enabled') is True}"
+        )
+        self.stdout.write(
             f"retryable_failed_count: {summary.get('retryable_failed_count', 0)}"
         )
         self.stdout.write(f"skipped_failed_count: {summary.get('skipped_failed_count', 0)}")
@@ -76,6 +88,28 @@ class Command(BaseCommand):
         self.stdout.write(f"retry_reason: {summary.get('retry_reason') or ''}")
         self.stdout.write(f"attempts_before: {summary.get('attempts_before', 0)}")
         self.stdout.write(f"attempts_after: {summary.get('attempts_after', 0)}")
+        self.stdout.write(
+            f"current_snapshot_generated_at: {summary.get('current_snapshot_generated_at') or ''}"
+        )
+        self.stdout.write(
+            f"job_snapshot_generated_at: {summary.get('job_snapshot_generated_at') or ''}"
+        )
+        self.stdout.write(
+            f"snapshot_stale_check_source: {summary.get('snapshot_stale_check_source') or ''}"
+        )
+        self.stdout.write(f"preflight_failed: {summary.get('preflight_failed') is True}")
+        self.stdout.write(f"preflight_attempts: {summary.get('preflight_attempts', 0)}")
+        self.stdout.write(f"send_attempts: {summary.get('send_attempts', 0)}")
+        self.stdout.write(
+            f"gmail_call_attempted: {summary.get('gmail_call_attempted') is True}"
+        )
+        self.stdout.write(
+            "retry_allowed_despite_attempts: "
+            f"{summary.get('retry_allowed_despite_attempts') is True}"
+        )
+        self.stdout.write(
+            f"retry_allowed_reason: {summary.get('retry_allowed_reason') or ''}"
+        )
         self.stdout.write(f"selected_job_count: {summary.get('selected_job_count', 0)}")
         self.stdout.write(f"processed_count: {summary.get('processed_count', 0)}")
         self.stdout.write(f"sent_count: {summary.get('sent_count', 0)}")

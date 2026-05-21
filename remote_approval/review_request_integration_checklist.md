@@ -1604,3 +1604,12 @@ Future tracking design note:
 - [x] Phase 5.33E: dry-run retry diagnostics report failed job count,
   retryable/skipped failed counts, skipped reasons, selected order, retry
   reason, and attempts before/after without calling Gmail or Shopify.
+- [x] Phase 5.33F: processor retry preflight uses the latest dashboard
+  snapshot generated at processing time, records current/job snapshot
+  timestamps, and does not rely only on the job's original snapshot timestamp.
+- [x] Phase 5.33F: stale/missing/not-eligible snapshot preflight failures
+  increment `preflight_attempts` and `last_preflight_error`; `send_attempts`
+  increments only when the Gmail path is actually attempted.
+- [x] Phase 5.33F: stale-snapshot failed jobs with no confirmed email and no
+  Shopify tag write can be dry-run checked with `--retry-failed
+  --retry-stale-preflight` after refreshing the dashboard snapshot.

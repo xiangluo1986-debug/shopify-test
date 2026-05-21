@@ -436,6 +436,25 @@ ShopifyOrder tag evidence does not already show a Trustpilot sent tag. Jobs
 with confirmed Gmail send, `unknown_after_start`, sent/tag-written/completed
 status, or any Shopify write evidence must not be retried.
 
+Phase 5.33F separates preflight failures from Gmail send attempts. The
+processor checks the latest dashboard snapshot at processing time instead of
+trusting the job's original snapshot timestamp. Missing, stale, or not-eligible
+snapshot preflight failures increment `preflight_attempts` and
+`last_preflight_error`; `send_attempts` increments only when the Gmail path is
+actually attempted. A stale-snapshot failed job with no confirmed email or
+Shopify tag write can be checked with:
+
+```powershell
+docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1 --dry-run --retry-failed --retry-stale-preflight
+```
+
+After refreshing the snapshot and reviewing the dry-run output, the real retry
+command is:
+
+```powershell
+docker compose exec -T web python manage.py process_review_request_send_jobs --max-jobs 1 --retry-failed --retry-stale-preflight
+```
+
 The worker revalidates the selected order, performs the existing one-order
 Gmail send flow, runs post-send audit/tag write only after Gmail send is
 confirmed, and refreshes the dashboard snapshot afterward. It caps processing
