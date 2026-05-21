@@ -61,6 +61,9 @@ The long-term operations document is documented at
 [BLUE_GREEN_LONG_TERM_OPERATIONS.md](BLUE_GREEN_LONG_TERM_OPERATIONS.md).
 The blue-green formalization plan is documented at
 [BLUE_GREEN_FORMALIZATION_PLAN.md](BLUE_GREEN_FORMALIZATION_PLAN.md).
+The blue-green runtime autoreload diagnosis and no-apply fix plan is
+documented at
+[BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md](BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md).
 The final runtime approval design is documented at
 [BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md](BLUE_GREEN_FINAL_RUNTIME_APPROVAL.md).
 These documents are READY after review; production implementation is NOT
@@ -616,6 +619,10 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
 ## Runtime Stability No-Apply Plan
+
+Detailed diagnosis and controlled apply planning for the Django autoreload
+issue is documented in
+[BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md](BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md).
 
 Current repo evidence:
 

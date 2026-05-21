@@ -74,6 +74,8 @@ Weekly read-only checks:
   separate implementation task.
 - Review the formalization plan before any service rename, restart policy
   change, proxy reload, active-color state write, or real apply task.
+- Review the autoreload stabilization plan before any runtime command change
+  for `web_blue` or `web_green`.
 
 ## Safe Status Commands
 
@@ -172,6 +174,7 @@ Interpretation:
 - [BLUE_GREEN_POST_CUTOVER_OBSERVATION.md](BLUE_GREEN_POST_CUTOVER_OBSERVATION.md)
 - [BLUE_GREEN_HARDENING_PLAN.md](BLUE_GREEN_HARDENING_PLAN.md)
 - [BLUE_GREEN_FORMALIZATION_PLAN.md](BLUE_GREEN_FORMALIZATION_PLAN.md)
+- [BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md](BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md)
 - [BLUE_GREEN_ROLLBACK_RUNBOOK.md](BLUE_GREEN_ROLLBACK_RUNBOOK.md)
 - [SAFE_DEPLOY.md](SAFE_DEPLOY.md)
 - [BLUE_GREEN_DEPLOY_PLAN.md](BLUE_GREEN_DEPLOY_PLAN.md)

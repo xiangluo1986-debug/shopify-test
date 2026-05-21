@@ -22,6 +22,9 @@ or send email.
   cutover.
 - Future issue triage should start with `18000 /healthz/`, `8000 /healthz/`,
   and candidate service status.
+- The Django autoreload stabilization diagnosis and no-apply plan is
+  documented in
+  [BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md](BLUE_GREEN_RUNTIME_AUTO_RELOAD_FIX_PLAN.md).
 
 ## Hardening Goals
 
@@ -31,6 +34,9 @@ or send email.
 - Make health and error detection visible without exposing secrets.
 - Integrate future deploys into a locked blue-green flow.
 - Avoid ad hoc restart, rebuild, route edit, or cleanup steps.
+- Disable development-server autoreload on the blue-green production path in a
+  separately approved runtime task, then replace `runserver` with a reviewed
+  WSGI/ASGI server in the long-term runtime.
 
 ## Formal Production Proxy Service
 
