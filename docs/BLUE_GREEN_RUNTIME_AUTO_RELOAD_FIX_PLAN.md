@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This is a no-runtime-change diagnosis and apply plan for disabling Django
-autoreload on the aftersales blue-green runtime path.
+This is a no-runtime-change diagnosis, source/config update record, and apply
+plan for disabling Django autoreload on the aftersales runtime paths.
 
 This document does not deploy, restart, rebuild, reload proxy configuration,
 switch traffic, change Cloudflare routes, run migrations, run collectstatic,
@@ -61,27 +61,25 @@ Observed runtime evidence from the task:
 
 Read-only repo inspection:
 
-- `docker-compose.yml` defines `web` without a command override, so the image
-  default from `backend/Dockerfile` applies to the `8000` rollback path.
-- `backend/Dockerfile` currently defines:
+- `docker-compose.yml` now defines an explicit `web` command override for the
+  `8000` rollback path:
 
 ```text
-python manage.py migrate && python manage.py runserver 0.0.0.0:8000
+python manage.py migrate && python manage.py runserver 0.0.0.0:8000 --noreload
 ```
 
 - `docker-compose.bluegreen.proxy-candidate.example.yml` defines the shared
   `web_blue` / `web_green` candidate command as:
 
 ```text
-python manage.py runserver 0.0.0.0:8000
+python manage.py runserver 0.0.0.0:8000 --noreload
 ```
 
 - `web_blue` and `web_green` inherit that shared command in the
   production-candidate example.
 - `docker-compose.bluegreen.local-test.example.yml` and
-  `docker-compose.bluegreen.proxy-validation.example.yml` also use plain
-  `runserver` for local validation services.
-- No inspected Compose or Dockerfile runtime command uses `--noreload`.
+  `docker-compose.bluegreen.proxy-validation.example.yml` are separate local
+  validation examples and are outside this apply scope.
 - No inspected Compose or Dockerfile runtime command uses `gunicorn`,
   `daphne`, or `uvicorn`.
 
@@ -116,8 +114,8 @@ reported to the public Cloudflare path as a `502`.
 
 ## Short-Term Fix
 
-In a separate approved runtime-changing task, add `--noreload` to the
-blue-green production path only:
+The source/config step adds `--noreload` to the old `8000` rollback path and
+the blue-green production-candidate path:
 
 ```text
 python manage.py runserver 0.0.0.0:8000 --noreload
@@ -125,11 +123,17 @@ python manage.py runserver 0.0.0.0:8000 --noreload
 
 Scope for the short-term fix:
 
-- Target only the `web_blue` / `web_green` production-candidate runtime path.
-- Keep the old `http://127.0.0.1:8000` rollback path unchanged.
+- Target only the `web` old `8000` rollback path and the shared `web_blue` /
+  `web_green` production-candidate command.
+- Keep the old `http://127.0.0.1:8000` rollback path available.
 - Do not change Cloudflare routes in the same step.
-- Do not run migrations or collectstatic as part of the command-only fix.
+- Do not run separate migration or collectstatic commands as part of the
+  command-only fix; recreating active `web` preserves its existing
+  `python manage.py migrate` prelude and is therefore a migration-risk runtime
+  action.
 - Do not stop or remove the old `8000` path.
+- Running containers still need a separate controlled no-build recreation
+  before runtime behavior changes.
 
 This is still not a production-grade runtime. It is only a stabilization step
 to prevent file-edit autoreload gaps while the blue-green path remains on
@@ -173,11 +177,14 @@ Checklist:
 - Confirm `http://127.0.0.1:8000` is still available as rollback.
 - Confirm `bluegreen_proxy_candidate`, `web_blue`, and `web_green` are
   running before making changes.
-- Prepare the exact runtime command diff for review.
-- Change only the approved blue-green production command path.
+- Review the exact runtime command diff for `web`, `web_blue`, and
+  `web_green`.
+- Recreate only the approved affected web services with no build.
 - Do not change Cloudflare routes in the same task.
 - Do not switch traffic in the same task.
-- Do not run migrations or collectstatic for the `--noreload` change.
+- Do not run separate migration or collectstatic commands for the `--noreload`
+  change; account for the existing active `web` migrate prelude during any
+  approved recreation.
 - Restart only the minimum approved blue-green runtime services after the
   command change.
 - Validate direct color health where available.
@@ -248,8 +255,10 @@ Also not approved by this plan:
 ## Review Status
 
 - Diagnosis package: ready for ChatGPT review.
-- Runtime behavior changed by this document: no.
-- Short-term `--noreload` apply: not approved by this document.
+- Source/config `--noreload` change: prepared for controlled apply.
+- Runtime behavior changed by this document/config update: no; running
+  containers still need a separate approved recreation.
+- Short-term `--noreload` runtime apply: not performed by this document.
 - Long-term WSGI/ASGI replacement: not approved by this document.
 - Production apply remains NO-GO until a separate runtime-changing task is
   explicitly approved.

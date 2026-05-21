@@ -37,6 +37,11 @@ Services that must remain running:
 The old `8000` path must remain available until a separate cleanup task is
 reviewed and explicitly approved.
 
+The source/config `--noreload` command change is ready in Compose files for
+`web`, `web_blue`, and `web_green`, but running containers keep their current
+processes until a separate approved no-build recreation is performed under the
+deployment lock.
+
 ## Daily Checks
 
 Daily read-only checks during the observation period:
@@ -74,8 +79,8 @@ Weekly read-only checks:
   separate implementation task.
 - Review the formalization plan before any service rename, restart policy
   change, proxy reload, active-color state write, or real apply task.
-- Review the autoreload stabilization plan before any runtime command change
-  for `web_blue` or `web_green`.
+- Review the autoreload stabilization plan before any runtime command apply
+  for `web`, `web_blue`, or `web_green`.
 
 ## Safe Status Commands
 

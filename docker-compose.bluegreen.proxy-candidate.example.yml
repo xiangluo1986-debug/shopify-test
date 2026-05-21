@@ -45,7 +45,7 @@ x-candidate-django-web: &candidate-django-web
     - bluegreen_candidate_net
   # Active web's image default also runs migrations. This candidate command is
   # intentionally limited to runserver for /healthz/ validation only.
-  command: bash -lc "python manage.py runserver 0.0.0.0:8000"
+  command: bash -lc "python manage.py runserver 0.0.0.0:8000 --noreload"
   healthcheck:
     test:
       - CMD-SHELL

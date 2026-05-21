@@ -2,17 +2,18 @@
 
 ## Purpose
 
-Prepare a controlled future apply package to disable Django development-server
-autoreload for the aftersales runtime by adding `--noreload` to the relevant
-`runserver` commands.
+Prepare and record the controlled source/config change to disable Django
+development-server autoreload for the aftersales runtime by adding
+`--noreload` to the relevant `runserver` commands.
 
-This task does not apply changes and does not restart containers.
+This task updates source/config definitions only. It does not recreate or
+restart running containers, so currently running runtime behavior is unchanged
+until a separate controlled apply is performed.
 
-This package is documentation only. It does not edit runtime files, build
-images, restart containers, run Docker Compose apply commands, run migrations,
-run collectstatic, reload proxy configuration, switch traffic, change
-Cloudflare routes, call Shopify APIs, call Gmail APIs, call
-`translationsRegister`, send email, stage files, commit, or push.
+This package does not build images, restart containers, run Docker Compose
+apply commands, run migrations, run collectstatic, reload proxy configuration,
+switch traffic, change Cloudflare routes, call Shopify APIs, call Gmail APIs,
+call `translationsRegister`, send email, stage files, commit, or push.
 
 ## Current Runtime Scope
 
@@ -31,19 +32,20 @@ Rollback target:
 http://127.0.0.1:8000
 ```
 
-Runtime paths that must be covered by the future `--noreload` apply:
+Runtime paths covered by the source/config `--noreload` change and requiring
+future controlled container recreation:
 
 - `aftersales-web-1` / old host `8000` rollback path.
 - `web_blue`.
 - `web_green`.
 
-## Read-Only Inspection Result
+## Inspection And Config Change Result
 
-The active `docker-compose.yml` `web` service does not define a command
-override. It publishes host port `8000` and therefore uses the image default
-from `backend/Dockerfile` for the old rollback path.
+Before this task, the active `docker-compose.yml` `web` service did not define
+a command override. It published host port `8000` and therefore used the image
+default from `backend/Dockerfile` for the old rollback path.
 
-Current command source for `aftersales-web-1`:
+Previous command source for `aftersales-web-1`:
 
 ```text
 backend/Dockerfile
@@ -55,6 +57,16 @@ Current command:
 CMD ["bash", "-lc", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
 ```
 
+Because `backend/Dockerfile` is outside the allowed files for this task, the
+prepared config change adds an explicit `web` command override in
+`docker-compose.yml`.
+
+Prepared command for `aftersales-web-1` / old `8000` rollback path:
+
+```text
+command: bash -lc "python manage.py migrate && python manage.py runserver 0.0.0.0:8000 --noreload"
+```
+
 The current production-candidate blue/green services inherit a shared command
 from the `x-candidate-django-web` anchor in:
 
@@ -62,10 +74,16 @@ from the `x-candidate-django-web` anchor in:
 docker-compose.bluegreen.proxy-candidate.example.yml
 ```
 
-Current shared command for `web_blue` and `web_green`:
+Previous shared command for `web_blue` and `web_green`:
 
 ```text
 command: bash -lc "python manage.py runserver 0.0.0.0:8000"
+```
+
+Prepared shared command for `web_blue` and `web_green`:
+
+```text
+command: bash -lc "python manage.py runserver 0.0.0.0:8000 --noreload"
 ```
 
 `web_blue` and `web_green` both inherit that command through:
@@ -78,17 +96,16 @@ web_green:
   <<: *candidate-django-web
 ```
 
-## Exact Future Files To Change
+## Exact Config Files Changed
 
-A separate approved runtime-changing task would need to change only these
-runtime command sources:
+This source/config task changes only these command sources:
 
 ```text
-backend/Dockerfile
+docker-compose.yml
 docker-compose.bluegreen.proxy-candidate.example.yml
 ```
 
-Do not change these files in this documentation-only package.
+No `backend/Dockerfile` change is made in this task.
 
 No `.env`, `.env.*`, token, credential, log, Cloudflare, Shopify, Gmail,
 database, active-color state, or generated runtime output files are part of
@@ -97,18 +114,19 @@ this package.
 ## Exact Proposed Commands
 
 For `aftersales-web-1` / old `8000` rollback path, preserve the existing
-command shape and add only `--noreload` to `runserver`.
+effective command shape and add only `--noreload` to `runserver` through a
+`docker-compose.yml` command override.
 
-Current:
+Previous effective image default:
 
 ```text
 CMD ["bash", "-lc", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
 ```
 
-Proposed:
+Prepared `docker-compose.yml` override:
 
 ```text
-CMD ["bash", "-lc", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000 --noreload"]
+command: bash -lc "python manage.py migrate && python manage.py runserver 0.0.0.0:8000 --noreload"
 ```
 
 Important: this does not add a new migration command, but the existing
@@ -125,7 +143,7 @@ Current:
 command: bash -lc "python manage.py runserver 0.0.0.0:8000"
 ```
 
-Proposed:
+Prepared:
 
 ```text
 command: bash -lc "python manage.py runserver 0.0.0.0:8000 --noreload"
@@ -133,14 +151,15 @@ command: bash -lc "python manage.py runserver 0.0.0.0:8000 --noreload"
 
 ## Minimal Diff Plan
 
-Future approved patch only:
+Prepared patch:
 
 ```diff
---- a/backend/Dockerfile
-+++ b/backend/Dockerfile
+--- a/docker-compose.yml
++++ b/docker-compose.yml
 @@
--CMD ["bash", "-lc", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"]
-+CMD ["bash", "-lc", "python manage.py migrate && python manage.py runserver 0.0.0.0:8000 --noreload"]
+     depends_on:
+       - db
++    command: bash -lc "python manage.py migrate && python manage.py runserver 0.0.0.0:8000 --noreload"
 ```
 
 ```diff
@@ -192,7 +211,7 @@ This sequence is not executed by this package.
 4. Confirm the current rollback target `http://127.0.0.1:8000` is alive.
 5. Confirm `bluegreen_proxy_candidate`, `web_blue`, and `web_green` are
    running before changes.
-6. Apply only the two command diffs listed in this document.
+6. Confirm only the two command diffs listed in this document are present.
 7. Avoid Cloudflare route changes, proxy reloads, traffic switches,
    collectstatic, and unrelated migrations.
 8. Restart or rebuild only the minimum explicitly approved runtime services.
@@ -201,6 +220,32 @@ This sequence is not executed by this package.
 11. Keep the old `8000` rollback path alive throughout observation.
 12. Release the deployment lock only after the apply, validation, or rollback
     path has completed.
+
+## Controlled Apply Commands For Future Approval
+
+This section is documentation only. Do not run these commands unless a future
+runtime-changing task explicitly approves the apply, acquires the deployment
+lock, and confirms the current `18000` candidate path and `8000` rollback path
+are healthy before recreation.
+
+Manual no-build recreation commands for only the affected web services:
+
+```powershell
+docker compose up -d --no-build --no-deps --force-recreate web
+docker compose -f docker-compose.bluegreen.proxy-candidate.example.yml up -d --no-build --no-deps --force-recreate web_blue web_green
+```
+
+Scope:
+
+- Recreates only `web`, `web_blue`, and `web_green`.
+- Does not rebuild images.
+- Does not recreate `db`, `scheduler`, or `bluegreen_proxy_candidate`.
+- Does not change Cloudflare routes, reload the proxy, switch traffic, run
+  collectstatic, call Shopify APIs, call Gmail APIs, call
+  `translationsRegister`, or send email.
+- The active `web` command preserves the existing `python manage.py migrate`
+  prelude, so recreating `web` is still a runtime/migration-risk action and
+  requires explicit approval under the deployment lock.
 
 ## Health Check Sequence For Future Approval
 
@@ -308,10 +353,12 @@ Also do not run:
 
 ## Review Status
 
-- Apply package status: ready for ChatGPT review.
-- Runtime behavior changed by this package: no.
+- Apply package status: source/config change ready for controlled apply.
+- Runtime behavior changed by this package: no; running containers were not
+  recreated or restarted.
 - Docker restart/up/down/build performed by this package: no.
 - Cloudflare route changed by this package: no.
 - Deploy, migration, collectstatic, and proxy reload performed by this
   package: no.
-- Real `--noreload` apply approval: not granted by this package.
+- Controlled container apply: not performed and still requires a separate
+  runtime-changing approval and deployment lock.

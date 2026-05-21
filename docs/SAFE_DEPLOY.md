@@ -591,7 +591,7 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
 - The candidate web services now reference the active `.env` path without
   documenting values, mount `./backend:/app`, set `working_dir: /app`, mount
   workflow logs/media like active web, and keep an explicit no-migration
-  `runserver` command for local candidate validation.
+  `runserver --noreload` command for local candidate validation.
 - Proposed production-candidate local proxy port: `18000`
   (`bluegreen_proxy_candidate`, host `18000` -> container `80`).
 - Candidate validation remains local port `18000` only. Host port `8000`
@@ -618,7 +618,7 @@ This applies to Django projects, Shopify apps, Node/Next.js apps, Docker Compose
 - Future cutover requires manual Cloudflare edit and rollback plan review at
   [BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md](BLUE_GREEN_CLOUDFLARE_CUTOVER_APPROVAL.md).
 
-## Runtime Stability No-Apply Plan
+## Runtime Stability Config-Ready Plan
 
 Detailed diagnosis and controlled apply planning for the Django autoreload
 issue is documented in
@@ -626,13 +626,16 @@ issue is documented in
 
 Current repo evidence:
 
-- Active image default in `backend/Dockerfile` is
-  `python manage.py migrate && python manage.py runserver 0.0.0.0:8000`.
-- Active `docker-compose.yml` does not override the `web` command, so the image
-  default applies to the `8000` rollback path.
-- Blue/green candidate examples use
-  `python manage.py runserver 0.0.0.0:8000` for `web_blue` / `web_green`
-  style services and do not include `--noreload`.
+- Active `docker-compose.yml` now overrides the `web` command with
+  `python manage.py migrate && python manage.py runserver 0.0.0.0:8000 --noreload`
+  for the `8000` rollback path.
+- This preserves the existing active web migration prelude, so recreating
+  `web` remains a runtime/migration-risk action requiring explicit approval.
+- Blue/green candidate examples now use
+  `python manage.py runserver 0.0.0.0:8000 --noreload` for the shared
+  `web_blue` / `web_green` style command.
+- Running containers are not changed until a separate controlled no-build
+  recreation is approved and performed.
 - No active repo runtime command was found for `gunicorn`, `daphne`, or
   `uvicorn`.
 
@@ -644,11 +647,12 @@ Risk:
   `web_blue` / `web_green` behind `bluegreen_proxy_candidate`, which can show
   up as short Cloudflare 502/504 responses through `127.0.0.1:18000`.
 
-No-apply recommendation:
+Config-ready status:
 
-- Option A, temporary stabilization: in a separately approved runtime task,
-  change only the blue/green production path to `runserver --noreload` while
-  leaving the `8000` rollback path unchanged.
+- Option A, temporary stabilization: source/config now adds
+  `runserver --noreload` for the old `8000` path and the blue/green candidate
+  path. Runtime behavior remains unchanged until the affected web services are
+  recreated under the deployment lock.
 - Option B, production hardening: move the production path behind
   `bluegreen_proxy_candidate` to a real WSGI/ASGI server such as Gunicorn or
   Daphne after dependency, static/media, logging, worker count, timeout, and
@@ -659,7 +663,7 @@ Future apply gates:
 - Acquire the deployment lock before any build, restart, runtime command
   change, proxy switch, cleanup, migration, or collectstatic action.
 - Use a low-traffic apply window and explicit human approval for the exact
-  command changes.
+  no-build recreation commands.
 - Keep `http://127.0.0.1:8000` running as the rollback path; do not change
   Cloudflare routing in the same step.
 - Before and after the candidate change, check `/healthz/` through the
